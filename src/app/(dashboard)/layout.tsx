@@ -16,6 +16,17 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Check if user has completed onboarding
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("business_type")
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!business || business.business_type === "general") {
+    redirect("/onboarding");
+  }
+
   return (
     <div className="flex min-h-screen">
       <Sidebar userEmail={user.email ?? ""} />

@@ -5,6 +5,7 @@ const STEP_LABELS = [
   'Business Hours',
   'Services & FAQs',
   'AI Personality',
+  'Phone Number',
   'Review & Launch',
 ];
 

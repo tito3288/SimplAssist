@@ -45,7 +45,8 @@ export default function LoginPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-center mb-6">Log In</h1>
+      <h1 className="text-2xl font-bold text-center text-slate-900 mb-1">Log In</h1>
+      <p className="text-center text-sm text-slate-500 mb-6">Welcome back to SimplAssist</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>

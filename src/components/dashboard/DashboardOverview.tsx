@@ -1,9 +1,11 @@
 'use client';
 
-import { MessageSquare, Users, Zap, Mail, ArrowRight, Settings, CreditCard, Flame } from 'lucide-react';
+import { useState } from 'react';
+import { MessageSquare, Users, Zap, Mail, ArrowRight, Settings, CreditCard, Flame, Phone, X, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import type { Conversation, Contact } from '@/types/database';
+import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 
 interface DashboardStats {
   totalConversations: number;
@@ -21,6 +23,7 @@ interface DashboardOverviewProps {
   stats: DashboardStats;
   recentConversations: RecentConversation[];
   hotLeads: Contact[];
+  phoneNumber: string | null;
 }
 
 const statCards = [
@@ -30,11 +33,39 @@ const statCards = [
   { key: 'messagesThisWeek' as const, label: 'Messages This Week', icon: Mail, color: 'text-orange-600 bg-orange-100' },
 ];
 
-export default function DashboardOverview({ stats, recentConversations, hotLeads }: DashboardOverviewProps) {
+export default function DashboardOverview({ stats, recentConversations, hotLeads, phoneNumber }: DashboardOverviewProps) {
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   return (
     <div className="space-y-6">
+      {/* Phone Number Banner */}
+      {!phoneNumber && !bannerDismissed && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-amber-800">
+              Your AI assistant doesn&apos;t have a phone number yet. Customers can&apos;t text you until you set one up.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowPhoneModal(true)}
+              className="px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700"
+            >
+              Set Up Phone Number
+            </button>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="p-1 text-amber-400 hover:text-amber-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card) => {
@@ -54,6 +85,27 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
           );
         })}
       </div>
+
+      {/* Phone Number Active Card */}
+      {phoneNumber && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg text-green-600 bg-green-100">
+              <Phone className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-gray-500">Your AI Number</p>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  Active
+                </span>
+              </div>
+              <p className="text-lg font-bold text-gray-900">{phoneNumber}</p>
+              <p className="text-xs text-gray-400">Customers can text this number 24/7</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!hasData ? (
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
@@ -161,6 +213,27 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
           </Link>
         </div>
       </div>
+
+      {/* Phone Number Setup Modal */}
+      {showPhoneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Set Up Phone Number</h3>
+              <button
+                onClick={() => setShowPhoneModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Search for an available phone number and set it up for your AI assistant.
+            </p>
+            <PhoneNumberSelector />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

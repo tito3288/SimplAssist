@@ -8,7 +8,9 @@ import BusinessHoursForm from '@/components/onboarding/BusinessHoursForm';
 import ServicesAndFaqsForm from '@/components/onboarding/ServicesAndFaqsForm';
 import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
 import ReviewAndLaunch from '@/components/onboarding/ReviewAndLaunch';
+import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 import type { BusinessType } from '@/types/database';
+import { Phone } from 'lucide-react';
 
 interface BusinessInfoData {
   name: string;
@@ -56,6 +58,7 @@ export default function OnboardingPage() {
   const [hoursData, setHoursData] = useState<HoursData[] | null>(null);
   const [servicesData, setServicesData] = useState<ServicesData | null>(null);
   const [aiData, setAiData] = useState<AIData | null>(null);
+  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string | null>(null);
 
   const fetchBusiness = useCallback(async () => {
     const supabase = createClient();
@@ -87,6 +90,22 @@ export default function OnboardingPage() {
   useEffect(() => {
     fetchBusiness();
   }, [fetchBusiness]);
+
+  // Check if a phone number was purchased when advancing from step 5
+  const handlePhoneStepNext = async () => {
+    const supabase = createClient();
+    const { data: twilioNumber } = await supabase
+      .from('twilio_numbers')
+      .select('phone_number')
+      .eq('business_id', businessId)
+      .eq('is_active', true)
+      .single();
+
+    if (twilioNumber) {
+      setSelectedPhoneNumber(twilioNumber.phone_number);
+    }
+    setStep(6);
+  };
 
   if (loading) {
     return (
@@ -156,7 +175,52 @@ export default function OnboardingPage() {
           />
         )}
 
-        {step === 5 && businessInfo && hoursData && servicesData && aiData && (
+        {step === 5 && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full mb-4">
+                <Phone className="w-6 h-6 text-blue-600" />
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900">Choose a phone number for your AI assistant</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Customers will text this number and your AI will respond automatically
+              </p>
+            </div>
+
+            <PhoneNumberSelector />
+
+            <div className="flex justify-between pt-4">
+              <button
+                type="button"
+                onClick={() => setStep(4)}
+                className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+              >
+                Back
+              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPhoneNumber(null);
+                    setStep(6);
+                  }}
+                  className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePhoneStepNext}
+                  className="py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 6 && businessInfo && hoursData && servicesData && aiData && (
           <ReviewAndLaunch
             data={{
               businessInfo,
@@ -164,9 +228,10 @@ export default function OnboardingPage() {
               servicesCount: servicesData.services.length,
               faqsCount: servicesData.faqs.filter((f) => f.question && f.answer).length,
               aiSettings: aiData,
+              phoneNumber: selectedPhoneNumber,
             }}
             onEditStep={(s) => setStep(s)}
-            onBack={() => setStep(4)}
+            onBack={() => setStep(5)}
           />
         )}
       </div>

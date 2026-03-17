@@ -7,9 +7,19 @@ export default async function HomePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (user) {
-    redirect("/dashboard");
-  } else {
+  if (!user) {
     redirect("/login");
   }
+
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("business_type")
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!business || business.business_type === "general") {
+    redirect("/onboarding");
+  }
+
+  redirect("/dashboard");
 }

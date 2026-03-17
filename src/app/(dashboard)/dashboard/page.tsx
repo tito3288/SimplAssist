@@ -28,6 +28,7 @@ export default async function DashboardPage() {
     { count: messagesThisWeek },
     { data: recentConversationsRaw },
     { data: hotLeads },
+    { data: twilioNumber },
   ] = await Promise.all([
     supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
     supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
@@ -46,6 +47,12 @@ export default async function DashboardPage() {
       .gte('lead_score', 7)
       .order('lead_score', { ascending: false })
       .limit(10),
+    supabase
+      .from('twilio_numbers')
+      .select('phone_number, is_active')
+      .eq('business_id', business.id)
+      .eq('is_active', true)
+      .single(),
   ]);
 
   // Fetch last message for each recent conversation
@@ -80,6 +87,7 @@ export default async function DashboardPage() {
         }}
         recentConversations={recentConversations}
         hotLeads={hotLeads || []}
+        phoneNumber={twilioNumber?.phone_number || null}
       />
     </div>
   );

@@ -32,6 +32,7 @@ interface ReviewData {
     booking_enabled: boolean;
     booking_mode?: string;
   };
+  phoneNumber?: string | null;
 }
 
 interface ReviewAndLaunchProps {
@@ -117,6 +118,18 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
       <Section title="Services & FAQs" onEdit={() => onEditStep(3)}>
         <SummaryRow label="Services" value={`${data.servicesCount} service${data.servicesCount !== 1 ? 's' : ''}`} />
         <SummaryRow label="FAQs" value={`${data.faqsCount} FAQ${data.faqsCount !== 1 ? 's' : ''}`} />
+      </Section>
+
+      {/* Phone Number */}
+      <Section title="Phone Number" onEdit={() => onEditStep(5)}>
+        {data.phoneNumber ? (
+          <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
+        ) : (
+          <div className="text-sm text-gray-500">
+            <p>No phone number selected</p>
+            <p className="text-xs text-gray-400 mt-1">You can add one later from Settings</p>
+          </div>
+        )}
       </Section>
 
       {/* AI Settings */}
