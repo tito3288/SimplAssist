@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { purchaseNumber } from "@/lib/twilio/client";
+import { purchaseNumber, twilioClient } from "@/lib/twilio/client";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -38,6 +38,12 @@ export async function POST(request: NextRequest) {
   try {
     const purchased = await purchaseNumber(phoneNumber);
 
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
+    await twilioClient.incomingPhoneNumbers(purchased.sid).update({
+      smsUrl: `${appUrl}/api/twilio/webhook`,
+      voiceUrl: `${appUrl}/api/twilio/voice`,
+    });
+
     const { data: record, error: insertError } = await supabase
       .from("twilio_numbers")
       .insert({
@@ -45,6 +51,8 @@ export async function POST(request: NextRequest) {
         phone_number: purchased.phoneNumber,
         twilio_sid: purchased.sid,
         is_active: true,
+        sms_webhook_url: `${appUrl}/api/twilio/webhook`,
+        voice_webhook_url: `${appUrl}/api/twilio/voice`,
       })
       .select()
       .single();
