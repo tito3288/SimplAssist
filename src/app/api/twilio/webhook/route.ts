@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
     const aiResponse = await processIncomingMessage(
       businessId,
       from,
+      null,
       messageBody,
       "sms"
     );
