@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Pencil, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import { Pencil, Trash2, Plus, ChevronUp } from 'lucide-react';
 import type { Service } from '@/types/database';
 
 interface ServicesManagerProps {

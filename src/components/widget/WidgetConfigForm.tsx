@@ -9,7 +9,6 @@ import {
   Save,
   Loader2,
   Check,
-  PanelBottomClose,
   RotateCcw,
 } from 'lucide-react';
 
@@ -50,7 +49,6 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
     handleSubmit,
     watch,
     setValue,
-    reset,
   } = useForm<FormValues>({
     defaultValues: {
       brand_color: config.brand_color,
