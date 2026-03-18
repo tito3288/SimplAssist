@@ -15,7 +15,7 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { businessId, message, sessionId, visitorEmail, visitorName } = body;
+    const { businessId, message, sessionId, visitorEmail } = body;
 
     if (!businessId || !message || !sessionId) {
       return NextResponse.json(

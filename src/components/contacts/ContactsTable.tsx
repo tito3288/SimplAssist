@@ -8,7 +8,6 @@ import {
   Flame,
   ArrowUpDown,
 } from "lucide-react";
-import { createBrowserClient } from "@/lib/supabase/client";
 import { formatPhoneNumber } from "@/lib/utils";
 import type { Contact, Conversation } from "@/types/database";
 import ContactDetail from "./ContactDetail";

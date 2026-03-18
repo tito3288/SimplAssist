@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { AITone, BusinessVoice, Language, BookingMode } from '@/types/database';
+import type { AITone, Language } from '@/types/database';
 
 const aiPersonalitySchema = z.object({
   tone: z.enum(['friendly', 'professional', 'balanced'] as const),

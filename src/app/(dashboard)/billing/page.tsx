@@ -1,9 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import {
-  SUBSCRIPTION_PLANS,
-  STRIPE_PRICE_IDS,
-} from "@/lib/stripe/config";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
 
