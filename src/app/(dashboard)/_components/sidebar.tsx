@@ -33,7 +33,7 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/home");
   }
 
   const sidebarContent = (

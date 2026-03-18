@@ -159,7 +159,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
                 }`}
               >
                 <input type="radio" value="we" {...register('business_voice')} className="sr-only" />
-                <p className="font-medium text-sm">&ldquo;We&rdquo;</p>
+                <p className="font-medium text-sm text-gray-900">&ldquo;We&rdquo;</p>
                 <p className="text-xs text-gray-500">We can help you with...</p>
               </label>
               <label
@@ -168,7 +168,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
                 }`}
               >
                 <input type="radio" value="business_name" {...register('business_voice')} className="sr-only" />
-                <p className="font-medium text-sm">&ldquo;{businessName}&rdquo;</p>
+                <p className="font-medium text-sm text-gray-900">&ldquo;{businessName}&rdquo;</p>
                 <p className="text-xs text-gray-500">{businessName} can help...</p>
               </label>
             </div>
@@ -178,7 +178,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
             <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
             <select
               {...register('language')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               {LANGUAGE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -202,7 +202,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
             <textarea
               {...register('sms_greeting')}
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />
             {errors.sms_greeting && <p className="text-sm text-red-600 mt-1">{errors.sms_greeting.message}</p>}
             <button
@@ -222,7 +222,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
             <textarea
               {...register('web_chat_greeting')}
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />
             {errors.web_chat_greeting && <p className="text-sm text-red-600 mt-1">{errors.web_chat_greeting.message}</p>}
             <button
@@ -296,7 +296,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
           {...register('guardrails_text')}
           rows={3}
           placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
