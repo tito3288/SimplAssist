@@ -116,7 +116,7 @@ export default function SignupPage() {
             autoComplete="name"
             {...register("fullName")}
             className={authInputClass}
-            placeholder="Jane Smith"
+            placeholder="Bryan Arambula"
           />
           {errors.fullName && (
             <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">

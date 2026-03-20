@@ -17,6 +17,10 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "SimplAssist",
   description: "AI-powered customer support assistant",
+  icons: {
+    icon: [{ url: "/favicon-2.png", type: "image/png" }],
+    apple: [{ url: "/favicon-2.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({
