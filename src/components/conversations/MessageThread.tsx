@@ -155,20 +155,20 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
       : "Unknown");
 
   return (
-    <div className="flex h-full flex-col bg-white">
+    <div className="flex h-full flex-col bg-white dark:bg-transparent">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/[0.10] px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06]">
             {conversation.channel === "sms" ? (
-              <Phone className="h-5 w-5 text-gray-500" />
+              <Phone className="h-5 w-5 text-slate-500 dark:text-[#bdbdbf]" />
             ) : (
-              <MessageCircle className="h-5 w-5 text-gray-500" />
+              <MessageCircle className="h-5 w-5 text-slate-500 dark:text-[#bdbdbf]" />
             )}
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-gray-900">{contactName}</h2>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-[#f5f5f5]">{contactName}</h2>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#bdbdbf]">
               {conversation.contact?.phone_number && (
                 <span>{formatPhoneNumber(conversation.contact.phone_number)}</span>
               )}
@@ -182,10 +182,10 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
                 className={cn(
                   "rounded-full px-1.5 py-0.5 font-medium",
                   conversation.status === "active"
-                    ? "bg-green-100 text-green-700"
+                    ? "bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300"
                     : conversation.status === "handed_off"
-                    ? "bg-amber-100 text-amber-700"
-                    : "bg-gray-100 text-gray-500"
+                    ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                    : "bg-slate-100 dark:bg-white/[0.06] text-slate-500 dark:text-[#bdbdbf]"
                 )}
               >
                 {conversation.status === "handed_off"
@@ -203,8 +203,8 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
           className={cn(
             "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             isAiHandling
-              ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-              : "bg-purple-100 text-purple-700 hover:bg-purple-200",
+              ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30"
+              : "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-500/30",
             toggling && "opacity-50"
           )}
         >
@@ -216,7 +216,7 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
+          <div className="flex h-full items-center justify-center text-sm text-slate-400 dark:text-[#bdbdbf]">
             No messages in this conversation yet.
           </div>
         ) : (
@@ -237,7 +237,7 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
                     {/* Role label */}
                     <div
                       className={cn(
-                        "mb-1 flex items-center gap-1 text-xs text-gray-400",
+                        "mb-1 flex items-center gap-1 text-xs text-slate-400 dark:text-[#bdbdbf]",
                         isCustomer ? "justify-start" : "justify-end"
                       )}
                     >
@@ -258,10 +258,10 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
                       className={cn(
                         "rounded-2xl px-4 py-2 text-sm",
                         isCustomer
-                          ? "rounded-bl-md bg-gray-100 text-gray-900"
+                          ? "rounded-bl-md bg-slate-100 dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5]"
                           : isHumanAgent
                           ? "rounded-br-md bg-green-500 text-white"
-                          : "rounded-br-md bg-blue-500 text-white"
+                          : "rounded-br-md bg-blue-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white"
                       )}
                     >
                       {msg.content}
@@ -269,7 +269,7 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
                     {/* Timestamp */}
                     <div
                       className={cn(
-                        "mt-1 text-xs text-gray-400",
+                        "mt-1 text-xs text-slate-400 dark:text-[#bdbdbf]",
                         isCustomer ? "text-left" : "text-right"
                       )}
                     >
@@ -285,9 +285,9 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-200 px-4 py-3">
+      <div className="border-t border-slate-200 dark:border-white/[0.10] px-4 py-3">
         {isAiHandling ? (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-purple-50 px-4 py-3 text-sm text-purple-600">
+          <div className="flex items-center justify-center gap-2 rounded-lg bg-purple-50 dark:bg-purple-500/10 px-4 py-3 text-sm text-purple-600 dark:text-purple-300">
             <Bot className="h-4 w-4" />
             AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
           </div>
@@ -304,13 +304,13 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="flex-1 rounded-lg bg-white dark:bg-white/[0.06] border border-gray-300 dark:border-white/[0.12] px-4 py-2 text-sm text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
               disabled={sending}
             />
             <button
               type="submit"
               disabled={!input.trim() || sending}
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white transition-colors hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
             </button>

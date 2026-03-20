@@ -10,11 +10,12 @@ import {
   Bot,
   Globe,
   CreditCard,
-  Menu,
-  X,
   LogOut,
 } from "lucide-react";
+import Image from "next/image";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { StaggeredMenuIcon } from "@/components/icons/staggered-menu-icon";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -37,12 +38,28 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
   }
 
   const sidebarContent = (
-    <div className="flex flex-col h-full">
-      <div className="p-6">
-        <h1 className="text-xl font-bold text-white">SimplAssist</h1>
+    <div className="flex flex-col h-full min-h-0">
+      <div className="p-6 flex items-center gap-2 shrink-0">
+        <Link href="/dashboard">
+          <Image
+            src="/logo-dark.png"
+            alt="SimplAssist"
+            width={140}
+            height={34}
+            className="hidden dark:block h-8 w-auto object-contain"
+          />
+          <Image
+            src="/logo-light.png"
+            alt="SimplAssist"
+            width={140}
+            height={34}
+            className="block dark:hidden h-8 w-auto object-contain"
+          />
+        </Link>
+        <span className="w-2 h-2 rounded-full bg-[#ff914d] shadow-[0_0_12px_rgba(255,145,77,.65)]" />
       </div>
 
-      <nav className="flex-1 px-3 space-y-1">
+      <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -50,10 +67,10 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
               key={item.href}
               href={item.href}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[22px] text-sm font-medium transition-colors ${
                 isActive
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-[rgba(255,145,77,.12)] dark:bg-[rgba(255,145,77,.15)] text-[#ff914d] border border-[rgba(255,145,77,.20)]"
+                  : "text-slate-600 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] hover:text-slate-900 dark:hover:text-white border border-transparent"
               }`}
             >
               <item.icon className="h-5 w-5" />
@@ -63,11 +80,16 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
         })}
       </nav>
 
-      <div className="p-4 border-t border-slate-700">
-        <p className="text-xs text-slate-400 truncate mb-2">{userEmail}</p>
+      <div className="p-4 border-t border-slate-200 dark:border-white/[0.10] shrink-0">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-slate-500 dark:text-[#bdbdbf] truncate">
+            {userEmail}
+          </p>
+          <ThemeToggle />
+        </div>
         <button
           onClick={handleSignOut}
-          className="flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors"
         >
           <LogOut className="h-4 w-4" />
           Log Out
@@ -78,13 +100,36 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
 
   return (
     <>
-      {/* Mobile hamburger */}
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-slate-900 text-white rounded-lg"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
+      {/* Mobile header: logo left, menu right */}
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-3 bg-white/85 dark:bg-[rgba(18,18,20,0.92)] backdrop-blur-[14px] border-b border-slate-200/60 dark:border-white/[0.10]">
+        <Link href="/dashboard" className="flex items-center shrink-0 min-w-0" onClick={() => setMobileOpen(false)}>
+          <Image
+            src="/logo-dark.png"
+            alt="SimplAssist"
+            width={160}
+            height={40}
+            className="hidden dark:block h-9 w-auto max-w-[min(100%,9rem)] object-contain object-left"
+            priority
+          />
+          <Image
+            src="/logo-light.png"
+            alt="SimplAssist"
+            width={160}
+            height={40}
+            className="block dark:hidden h-9 w-auto max-w-[min(100%,9rem)] object-contain object-left"
+            priority
+          />
+        </Link>
+        <button
+          type="button"
+          onClick={() => setMobileOpen((o) => !o)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+          className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[#FF8533] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF8533]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
+        >
+          <StaggeredMenuIcon open={mobileOpen} />
+        </button>
+      </header>
 
       {/* Mobile overlay */}
       {mobileOpen && (
@@ -94,23 +139,27 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
         />
       )}
 
-      {/* Mobile sidebar */}
+      {/* Mobile sidebar — floating panel */}
       <aside
-        className={`lg:hidden fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 transform transition-transform ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`lg:hidden fixed z-50 w-[min(16rem,calc(100vw-1.5rem))] left-3 top-3 bottom-3 flex flex-col
+          bg-white/95 dark:bg-[rgba(18,18,20,0.94)] backdrop-blur-[20px] backdrop-saturate-[1.4]
+          border border-slate-200/80 dark:border-white/[0.12]
+          rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.18)] dark:shadow-[0_24px_64px_rgba(0,0,0,0.55)]
+          transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] overflow-hidden
+          ${mobileOpen ? "translate-x-0" : "-translate-x-[calc(100%+14px)]"}`}
       >
-        <button
-          onClick={() => setMobileOpen(false)}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white"
-        >
-          <X className="h-5 w-5" />
-        </button>
         {sidebarContent}
       </aside>
 
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:block w-64 bg-slate-900 min-h-screen flex-shrink-0">
+      {/* Desktop sidebar — floating, rounded */}
+      <aside
+        className="hidden lg:flex flex-col flex-shrink-0 w-64 h-[calc(100dvh-2.5rem)] max-h-[calc(100dvh-2.5rem)]
+          rounded-[28px] overflow-hidden
+          bg-white/90 dark:bg-[rgba(20,20,24,0.92)] backdrop-blur-[20px] backdrop-saturate-[1.4]
+          border border-slate-200/80 dark:border-white/[0.12]
+          shadow-[0_20px_60px_rgba(0,0,0,0.08)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.55)]
+          lg:sticky lg:top-5 lg:self-start"
+      >
         {sidebarContent}
       </aside>
     </>

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
+import { PulsingDot } from '@/components/ui/pulsing-dot';
 
 const servicesAndFaqsSchema = z.object({
   services: z
@@ -290,9 +291,16 @@ export default function ServicesAndFaqsForm({
         <button
           type="submit"
           disabled={saving}
-          className="py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
         >
-          {saving ? 'Saving...' : 'Next'}
+          {saving ? (
+            <>
+              <PulsingDot inline />
+              Saving…
+            </>
+          ) : (
+            'Next'
+          )}
         </button>
       </div>
     </form>

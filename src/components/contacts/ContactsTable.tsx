@@ -11,6 +11,7 @@ import {
 import { formatPhoneNumber } from "@/lib/utils";
 import type { Contact, Conversation } from "@/types/database";
 import ContactDetail from "./ContactDetail";
+import { glassCard, glassInput, textPrimary, textSecondary } from "@/lib/glass";
 
 type Filter = "all" | "sms" | "web_chat" | "hot";
 type Sort = "recent" | "score" | "name";
@@ -40,13 +41,13 @@ function relativeTime(date: string): string {
 }
 
 function LeadBadge({ score }: { score: number }) {
-  let color = "bg-gray-100 text-gray-700";
+  let color = "bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-[#bdbdbf]";
   let label = "Cold";
   if (score >= 7) {
-    color = "bg-green-100 text-green-700";
+    color = "bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400";
     label = "Hot";
   } else if (score >= 4) {
-    color = "bg-yellow-100 text-yellow-700";
+    color = "bg-yellow-100 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400";
     label = "Warm";
   }
   return (
@@ -151,29 +152,29 @@ export default function ContactsTable({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Search */}
         <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-[#666]" />
           <input
             type="text"
             placeholder="Search contacts..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={`w-full rounded-[22px] py-2 pl-9 pr-3 text-sm focus:outline-none ${glassInput}`}
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Filters */}
-          <div className="flex rounded-lg border border-gray-200 bg-white">
+          <div className="flex rounded-[22px] border border-slate-200 dark:border-white/[0.10] bg-white/70 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.05))] backdrop-blur-[18px] overflow-hidden">
             {filters.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={`px-3 py-1.5 text-xs font-medium transition ${
                   filter === f.key
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-600 hover:bg-gray-50"
-                } ${f.key === "all" ? "rounded-l-lg" : ""} ${
-                  f.key === "hot" ? "rounded-r-lg" : ""
+                    ? "bg-[#ff914d] text-white dark:text-[#111]"
+                    : "text-slate-500 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+                } ${f.key === "all" ? "rounded-l-[22px]" : ""} ${
+                  f.key === "hot" ? "rounded-r-[22px]" : ""
                 }`}
               >
                 {f.label}
@@ -186,7 +187,7 @@ export default function ContactsTable({
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as Sort)}
-              className="appearance-none rounded-lg border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-gray-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className={`appearance-none rounded-[22px] py-1.5 pl-3 pr-8 text-xs font-medium focus:outline-none ${glassInput}`}
             >
               {sorts.map((s) => (
                 <option key={s.key} value={s.key}>
@@ -194,21 +195,22 @@ export default function ContactsTable({
                 </option>
               ))}
             </select>
-            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-[#666]" />
           </div>
         </div>
       </div>
 
       {/* Table */}
-      <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className={`mt-4 overflow-hidden ${glassCard}`}>
         {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-gray-500">
+          <div className={`px-6 py-12 text-center text-sm ${textSecondary}`}>
             No contacts found
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[600px]">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+              <tr className={`border-b border-slate-100 dark:border-white/[0.06] bg-slate-50/50 dark:bg-white/[0.03] text-left text-xs font-medium uppercase tracking-wider ${textSecondary}`}>
                 <th className="px-6 py-3">Name</th>
                 <th className="px-6 py-3 hidden sm:table-cell">Phone</th>
                 <th className="px-6 py-3 hidden md:table-cell">Email</th>
@@ -218,44 +220,45 @@ export default function ContactsTable({
                 <th className="px-6 py-3 hidden lg:table-cell">Last Contact</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-white/[0.06]">
               {filtered.map((contact) => (
                 <tr
                   key={contact.id}
                   onClick={() => setSelectedContact(contact)}
-                  className="cursor-pointer transition hover:bg-blue-50/50"
+                  className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-white/[0.04]"
                 >
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                  <td className={`px-6 py-4 text-sm font-medium ${textPrimary}`}>
                     {contact.name || "Unknown"}
                   </td>
-                  <td className="hidden px-6 py-4 text-sm text-gray-600 sm:table-cell">
+                  <td className={`hidden px-6 py-4 text-sm sm:table-cell ${textSecondary}`}>
                     {contact.phone_number
                       ? formatPhoneNumber(contact.phone_number)
-                      : "—"}
+                      : "\u2014"}
                   </td>
-                  <td className="hidden px-6 py-4 text-sm text-gray-600 md:table-cell">
-                    {contact.email || "—"}
+                  <td className={`hidden px-6 py-4 text-sm md:table-cell ${textSecondary}`}>
+                    {contact.email || "\u2014"}
                   </td>
                   <td className="px-6 py-4">
                     {contact.source_channel === "sms" ? (
-                      <Phone className="h-4 w-4 text-blue-500" />
+                      <Phone className="h-4 w-4 text-[#ff914d]" />
                     ) : (
-                      <MessageCircle className="h-4 w-4 text-violet-500" />
+                      <MessageCircle className="h-4 w-4 text-violet-500 dark:text-violet-400" />
                     )}
                   </td>
                   <td className="px-6 py-4">
                     <LeadBadge score={contact.lead_score} />
                   </td>
-                  <td className="hidden px-6 py-4 text-sm text-gray-600 lg:table-cell">
+                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${textSecondary}`}>
                     {contact.conversation_count}
                   </td>
-                  <td className="hidden px-6 py-4 text-sm text-gray-500 lg:table-cell">
+                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${textSecondary}`}>
                     {relativeTime(contact.last_contacted_at)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

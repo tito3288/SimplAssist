@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessHours } from '@/types/database';
+import { PulsingDot } from '@/components/ui/pulsing-dot';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -66,17 +67,17 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
       {hours.map((day, index) => (
         <div
           key={index}
-          className={`flex items-center gap-4 p-3 rounded-lg border ${
-            day.is_closed ? 'bg-gray-50 border-gray-200' : 'border-gray-300'
+          className={`flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-lg border ${
+            day.is_closed ? 'bg-slate-50 dark:bg-white/[0.03] border-slate-200 dark:border-white/[0.10]' : 'border-slate-300 dark:border-white/[0.14]'
           }`}
         >
-          <span className="w-24 text-sm font-medium text-gray-700">{DAYS[index]}</span>
+          <span className="w-20 sm:w-24 text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">{DAYS[index]}</span>
 
           <button
             type="button"
             onClick={() => updateDay(index, { is_closed: !day.is_closed })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              !day.is_closed ? 'bg-blue-600' : 'bg-gray-300'
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+              !day.is_closed ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
             }`}
           >
             <span
@@ -85,24 +86,24 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
               }`}
             />
           </button>
-          <span className="text-xs text-gray-500 w-12">
+          <span className="text-xs text-slate-500 dark:text-[#bdbdbf] w-12">
             {day.is_closed ? 'Closed' : 'Open'}
           </span>
 
           {!day.is_closed && (
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
               <input
                 type="time"
                 value={day.open_time}
                 onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                className="px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
               />
-              <span className="text-gray-400">to</span>
+              <span className="text-slate-400 dark:text-[#666]">to</span>
               <input
                 type="time"
                 value={day.close_time}
                 onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                className="px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
               />
             </div>
           )}
@@ -114,12 +115,19 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-medium rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
         >
-          {saving ? 'Saving...' : 'Save Hours'}
+          {saving ? (
+            <>
+              <PulsingDot inline />
+              Saving…
+            </>
+          ) : (
+            'Save Hours'
+          )}
         </button>
         {success && (
-          <span className="text-sm text-green-600 font-medium">Hours saved successfully!</span>
+          <span className="text-sm text-green-600 dark:text-green-400 font-medium">Hours saved successfully!</span>
         )}
       </div>
     </div>

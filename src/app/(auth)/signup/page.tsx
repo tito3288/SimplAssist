@@ -5,7 +5,17 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Mail } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  authInputClass,
+  glassCardSubtle,
+  primaryCtaClass,
+  textPrimary,
+  textSecondary,
+} from "@/lib/glass";
+import { PulsingDot } from "@/components/ui/pulsing-dot";
+import { AuthPasswordField } from "@/components/auth/auth-password-field";
 
 const signupSchema = z
   .object({
@@ -20,6 +30,9 @@ const signupSchema = z
   });
 
 type SignupForm = z.infer<typeof signupSchema>;
+
+const labelClass =
+  "mb-1.5 block text-sm font-medium text-slate-700 dark:text-[#d4d4d8]";
 
 export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +70,27 @@ export default function SignupPage() {
   if (success) {
     return (
       <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">Check your email</h1>
-        <p className="text-gray-600">
-          Check your email to confirm your account
+        <div
+          className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${glassCardSubtle}`}
+        >
+          <Mail className="h-7 w-7 text-[#ff914d]" aria-hidden />
+        </div>
+        <h1 className={`text-2xl font-bold tracking-tight ${textPrimary}`}>
+          Check your email
+        </h1>
+        <p className={`mt-2 text-sm leading-relaxed ${textSecondary}`}>
+          We sent you a confirmation link. Open it to activate your account and
+          start using SimplAssist.
+        </p>
+        <p className={`mt-6 text-sm ${textSecondary}`}>
+          Wrong address?{" "}
+          <button
+            type="button"
+            onClick={() => setSuccess(false)}
+            className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
+          >
+            Go back
+          </button>
         </p>
       </div>
     );
@@ -67,96 +98,122 @@ export default function SignupPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-center text-slate-900 mb-1">Create Account</h1>
-      <p className="text-center text-sm text-slate-500 mb-6">Get started with SimplAssist</p>
+      <h1 className={`text-center text-2xl font-bold tracking-tight ${textPrimary}`}>
+        Create your account
+      </h1>
+      <p className={`mt-1 text-center text-sm ${textSecondary}`}>
+        Free to try — no credit card required.
+      </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
-          <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">
-            Full Name
+          <label htmlFor="fullName" className={labelClass}>
+            Full name
           </label>
           <input
             id="fullName"
             type="text"
+            autoComplete="name"
             {...register("fullName")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="John Doe"
+            className={authInputClass}
+            placeholder="Jane Smith"
           />
           {errors.fullName && (
-            <p className="mt-1 text-sm text-red-600">{errors.fullName.message}</p>
+            <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">
+              {errors.fullName.message}
+            </p>
           )}
         </div>
 
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="email" className={labelClass}>
             Email
           </label>
           <input
             id="email"
             type="email"
+            autoComplete="email"
             {...register("email")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className={authInputClass}
             placeholder="you@example.com"
           />
           {errors.email && (
-            <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+            <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">
+              {errors.email.message}
+            </p>
           )}
         </div>
 
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            {...register("password")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="••••••••"
-          />
-          {errors.password && (
-            <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-          )}
-        </div>
+        <AuthPasswordField
+          id="password"
+          label="Password"
+          autoComplete="new-password"
+          placeholder="At least 6 characters"
+          registration={register("password")}
+          error={errors.password?.message}
+        />
 
-        <div>
-          <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-            Confirm Password
-          </label>
-          <input
-            id="confirmPassword"
-            type="password"
-            {...register("confirmPassword")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="••••••••"
-          />
-          {errors.confirmPassword && (
-            <p className="mt-1 text-sm text-red-600">{errors.confirmPassword.message}</p>
-          )}
-        </div>
+        <AuthPasswordField
+          id="confirmPassword"
+          label="Confirm password"
+          autoComplete="new-password"
+          placeholder="••••••••"
+          registration={register("confirmPassword")}
+          error={errors.confirmPassword?.message}
+        />
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-600">{error}</p>
+          <div
+            className="
+              rounded-[22px] border border-red-200/80 bg-red-50/90 px-4 py-3
+              dark:border-red-500/25 dark:bg-red-500/10
+            "
+            role="alert"
+          >
+            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
           </div>
         )}
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className={primaryCtaClass}
         >
-          {isSubmitting ? "Creating account..." : "Create Account"}
+          {isSubmitting ? (
+            <>
+              <PulsingDot inline />
+              Creating account…
+            </>
+          ) : (
+            "Create account"
+          )}
         </button>
       </form>
 
-      <p className="mt-4 text-center text-xs text-slate-400">
-        Free to try. No credit card required.
+      <p className={`mt-6 text-center text-xs ${textSecondary}`}>
+        By signing up you agree to our{" "}
+        <Link
+          href="/terms"
+          className="font-medium text-[#ff914d] hover:text-[#ffb07a] underline-offset-2 hover:underline"
+        >
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link
+          href="/privacy"
+          className="font-medium text-[#ff914d] hover:text-[#ffb07a] underline-offset-2 hover:underline"
+        >
+          Privacy
+        </Link>
+        .
       </p>
 
-      <p className="mt-4 text-center text-sm text-gray-600">
+      <p className={`mt-4 text-center text-sm ${textSecondary}`}>
         Already have an account?{" "}
-        <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium">
+        <Link
+          href="/login"
+          className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
+        >
           Log in
         </Link>
       </p>

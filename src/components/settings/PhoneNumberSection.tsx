@@ -47,23 +47,23 @@ export default function PhoneNumberSection({ phoneNumber, twilioSid, isActive }:
   if (phoneNumber && isActive) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="p-2 rounded-lg bg-green-100">
-            <Phone className="w-5 h-5 text-green-600" />
+        <div className="flex items-center gap-4 p-4 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-lg">
+          <div className="p-2 rounded-lg bg-green-100 dark:bg-green-500/20">
+            <Phone className="w-5 h-5 text-green-600 dark:text-green-400" />
           </div>
           <div className="flex-1">
-            <p className="text-lg font-bold text-gray-900">{phoneNumber}</p>
+            <p className="text-lg font-bold text-slate-900 dark:text-[#f5f5f5]">{phoneNumber}</p>
             <div className="flex items-center gap-2 mt-1">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-300">
                 Active
               </span>
-              <span className="text-xs text-gray-500">Receiving messages 24/7</span>
+              <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">Receiving messages 24/7</span>
             </div>
           </div>
           {!showConfirm ? (
             <button
               onClick={() => setShowConfirm(true)}
-              className="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+              className="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 dark:border-red-500/30 rounded-md hover:bg-red-50 dark:hover:bg-red-500/10"
             >
               Release Number
             </button>
@@ -79,7 +79,7 @@ export default function PhoneNumberSection({ phoneNumber, twilioSid, isActive }:
               </button>
               <button
                 onClick={() => setShowConfirm(false)}
-                className="px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50"
+                className="px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-[#bdbdbf] border border-slate-200 dark:border-white/[0.12] rounded-md hover:bg-slate-50 dark:hover:bg-white/[0.04]"
               >
                 Cancel
               </button>

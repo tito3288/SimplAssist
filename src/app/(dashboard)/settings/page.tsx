@@ -5,6 +5,7 @@ import ServicesManager from '@/components/settings/ServicesManager';
 import FAQManager from '@/components/settings/FAQManager';
 import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
 import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
+import { glassCard } from '@/lib/glass';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -38,14 +39,14 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">AI Settings</h1>
-        <p className="mt-1 text-gray-600">Configure how your AI assistant behaves and communicates.</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">AI Settings</h1>
+        <p className="mt-1 text-slate-500 dark:text-[#bdbdbf]">Configure how your AI assistant behaves and communicates.</p>
       </div>
 
       {/* Phone Number */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Phone Number</h2>
-        <p className="text-sm text-gray-500 mb-4">
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Phone Number</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
           The phone number customers use to text your AI assistant.
         </p>
         <PhoneNumberSection
@@ -56,28 +57,28 @@ export default async function SettingsPage() {
       </div>
 
       {/* AI Settings */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <div className={`p-6 ${glassCard}`}>
         <AISettingsForm settings={aiSettings} businessName={business.name} />
       </div>
 
       {/* Services */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Services</h2>
-        <p className="text-sm text-gray-500 mb-4">Manage the services your business offers. Your AI will use this information when talking to customers.</p>
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Services</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Manage the services your business offers. Your AI will use this information when talking to customers.</p>
         <ServicesManager businessId={business.id} initialServices={services || []} />
       </div>
 
       {/* FAQs */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">FAQs</h2>
-        <p className="text-sm text-gray-500 mb-4">Common questions and answers your AI can use to help customers.</p>
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">FAQs</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Common questions and answers your AI can use to help customers.</p>
         <FAQManager businessId={business.id} initialFaqs={faqs || []} />
       </div>
 
       {/* Business Hours */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Business Hours</h2>
-        <p className="text-sm text-gray-500 mb-4">Set when your business is open. Your AI will inform customers of your hours.</p>
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Business Hours</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Set when your business is open. Your AI will inform customers of your hours.</p>
         <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
       </div>
     </div>

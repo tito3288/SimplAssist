@@ -51,8 +51,8 @@ export default async function ContactsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Contacts</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
           Manage your leads and customer contacts
         </p>
       </div>

@@ -7,10 +7,35 @@
   --foreground: #171717;
 }
 
+/* Aligns with next-themes `class="dark"` on <html> (Tailwind darkMode: class) */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light) {
     --background: #0a0a0a;
     --foreground: #ededed;
+  }
+}
+
+.light {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Clears fixed floating home nav (top-6 + pill) when using #features, #pricing, etc. */
+    scroll-padding-top: 6rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
   }
 }
 
@@ -23,5 +48,56 @@ body {
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+/* Frosted nav + app-wide loading buffer (`.dot`) */
+@layer components {
+  .dot {
+    width: 12px;
+    height: 12px;
+    background: #ff8c42;
+    border-radius: 50%;
+    margin: 0 auto 20px;
+    animation: sa-dot-pulse 1.5s infinite;
+    flex-shrink: 0;
+  }
+
+  .dot.dot--inline {
+    margin: 0;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  @keyframes sa-dot-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.6);
+      opacity: 0.4;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot {
+      animation: none;
+      opacity: 0.9;
+    }
+  }
+}
+
+@layer components {
+  .floating-nav {
+    @apply fixed top-6 left-1/2 z-50 w-[min(1200px,calc(100%-2rem))] max-w-[calc(100vw-2rem)]
+      -translate-x-1/2 rounded-full px-2 py-2 shadow-lg
+      border border-white/10 backdrop-blur-xl;
+    /* 40% theme background + transparent — same idea as bg-background/40 */
+    background: color-mix(in srgb, var(--background) 40%, transparent);
   }
 }

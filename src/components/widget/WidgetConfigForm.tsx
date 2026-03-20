@@ -7,10 +7,10 @@ import type { WidgetConfig, WidgetPosition, LeadCaptureTiming } from '@/types/da
 import { cn } from '@/lib/utils';
 import {
   Save,
-  Loader2,
   Check,
   RotateCcw,
 } from 'lucide-react';
+import { PulsingDot } from '@/components/ui/pulsing-dot';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -102,18 +102,18 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
       {/* Section 1: Appearance */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Appearance</h2>
-        <p className="text-sm text-gray-500 mb-4">Customize how the chat widget looks on your website.</p>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Appearance</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Customize how the chat widget looks on your website.</p>
 
         <div className="space-y-5">
           {/* Brand color */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Brand Color</label>
+            <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Brand Color</label>
             <div className="flex items-center gap-3">
               <input
                 type="color"
                 {...register('brand_color')}
-                className="h-10 w-10 rounded border border-gray-300 cursor-pointer p-0.5"
+                className="h-10 w-10 rounded border border-slate-200 dark:border-white/[0.12] cursor-pointer p-0.5"
               />
               <div className="flex gap-2">
                 {PRESET_COLORS.map((color) => (
@@ -124,7 +124,7 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
                     onClick={() => setValue('brand_color', color.value)}
                     className={cn(
                       'h-8 w-8 rounded-full border-2 transition-transform hover:scale-110',
-                      brandColor === color.value ? 'border-gray-900 scale-110' : 'border-transparent'
+                      brandColor === color.value ? 'border-slate-900 dark:border-[#f5f5f5] scale-110' : 'border-transparent'
                     )}
                     style={{ backgroundColor: color.value }}
                   />
@@ -135,7 +135,7 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
 
           {/* Position */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Widget Position</label>
+            <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Widget Position</label>
             <div className="grid grid-cols-2 gap-3">
               {(['bottom_right', 'bottom_left'] as const).map((pos) => (
                 <button
@@ -145,11 +145,11 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
                   className={cn(
                     'relative flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors',
                     position === pos
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-[#ff914d] bg-orange-50 dark:bg-[#ff914d]/10'
+                      : 'border-slate-200 dark:border-white/[0.10] hover:border-slate-300 dark:hover:border-white/[0.20]'
                   )}
                 >
-                  <div className="h-16 w-24 rounded border border-gray-300 bg-white relative">
+                  <div className="h-16 w-24 rounded border border-slate-200 dark:border-white/[0.10] bg-white dark:bg-white/[0.06] relative">
                     <div
                       className={cn(
                         'absolute bottom-1 h-4 w-4 rounded-full',
@@ -158,7 +158,7 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
                       style={{ backgroundColor: brandColor }}
                     />
                   </div>
-                  <span className="text-sm font-medium text-gray-700">
+                  <span className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
                     {pos === 'bottom_right' ? 'Bottom Right' : 'Bottom Left'}
                   </span>
                 </button>
@@ -168,13 +168,13 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
 
           {/* Show logo toggle */}
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700">Show Logo</label>
+            <label className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">Show Logo</label>
             <button
               type="button"
               onClick={() => setValue('show_logo', !showLogo)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                showLogo ? 'bg-blue-500' : 'bg-gray-200'
+                showLogo ? 'bg-[#ff914d]' : 'bg-gray-200 dark:bg-white/[0.10]'
               )}
             >
               <span
@@ -189,12 +189,12 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
           {/* Logo URL */}
           {showLogo && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
+              <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-1">Logo URL</label>
               <input
                 type="url"
                 {...register('logo_url')}
                 placeholder="https://example.com/logo.png"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none"
               />
             </div>
           )}
@@ -203,44 +203,44 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
 
       {/* Section 2: Welcome Message */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Welcome Message</h2>
-        <p className="text-sm text-gray-500 mb-4">The first message visitors see when they open the chat.</p>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Welcome Message</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">The first message visitors see when they open the chat.</p>
 
         <div className="relative">
           <textarea
             {...register('welcome_message')}
             rows={3}
             maxLength={500}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+            className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none resize-none"
           />
           <div className="flex items-center justify-between mt-1">
             <button
               type="button"
               onClick={() => setValue('welcome_message', DEFAULT_WELCOME_MESSAGE)}
-              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+              className="text-xs text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5] flex items-center gap-1"
             >
               <RotateCcw className="h-3 w-3" />
               Reset to default
             </button>
-            <span className="text-xs text-gray-400">{welcomeMessage.length}/500</span>
+            <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">{welcomeMessage.length}/500</span>
           </div>
         </div>
       </div>
 
       {/* Section 3: Lead Capture */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Lead Capture</h2>
-        <p className="text-sm text-gray-500 mb-4">Collect visitor contact information during conversations.</p>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Lead Capture</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Collect visitor contact information during conversations.</p>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700">Enable Lead Capture</label>
+            <label className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">Enable Lead Capture</label>
             <button
               type="button"
               onClick={() => setValue('lead_capture_enabled', !leadCaptureEnabled)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                leadCaptureEnabled ? 'bg-blue-500' : 'bg-gray-200'
+                leadCaptureEnabled ? 'bg-[#ff914d]' : 'bg-gray-200 dark:bg-white/[0.10]'
               )}
             >
               <span
@@ -261,15 +261,15 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
               ]).map((option) => (
                 <label
                   key={option.value}
-                  className="flex items-center gap-3 cursor-pointer rounded-lg border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  className="flex items-center gap-3 cursor-pointer rounded-lg border border-slate-200 dark:border-white/[0.10] px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors"
                 >
                   <input
                     type="radio"
                     value={option.value}
                     {...register('lead_capture_timing')}
-                    className="h-4 w-4 text-blue-500 border-gray-300 focus:ring-blue-500"
+                    className="h-4 w-4 text-[#ff914d] border-slate-200 dark:border-white/[0.12] focus:ring-[#ff914d] dark:bg-white/[0.06]"
                   />
-                  <span className="text-sm text-gray-700">{option.label}</span>
+                  <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{option.label}</span>
                 </label>
               ))}
             </div>
@@ -279,17 +279,17 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
 
       {/* Section 4: Widget Status */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Widget Status</h2>
-        <p className="text-sm text-gray-500 mb-4">Control whether the widget is visible on your website.</p>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Widget Status</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Control whether the widget is visible on your website.</p>
 
-        <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-white/[0.10] p-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setValue('is_active', !isActive)}
               className={cn(
                 'relative inline-flex h-7 w-14 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                isActive ? 'bg-green-500' : 'bg-gray-200'
+                isActive ? 'bg-green-500' : 'bg-gray-200 dark:bg-white/[0.10]'
               )}
             >
               <span
@@ -303,7 +303,7 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
               <span
                 className={cn(
                   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                  isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                  isActive ? 'bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-white/[0.06] text-slate-500 dark:text-[#bdbdbf]'
                 )}
               >
                 {isActive ? 'Active' : 'Inactive'}
@@ -326,12 +326,12 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
           className={cn(
             'inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white transition-colors',
             saving
-              ? 'bg-blue-400 cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-700'
+              ? 'bg-orange-400 dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:opacity-60 cursor-not-allowed'
+              : 'bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600'
           )}
         >
           {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <PulsingDot inline />
           ) : saved ? (
             <Check className="h-4 w-4" />
           ) : (

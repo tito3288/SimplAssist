@@ -107,13 +107,13 @@ export default function PhoneNumberSelector() {
             setAreaCode(e.target.value.replace(/\D/g, "").slice(0, 3))
           }
           placeholder="Area code (e.g. 415)"
-          className="w-40 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-40 rounded-md border border-gray-300 dark:border-white/[0.12] px-3 py-2 text-sm dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
           maxLength={3}
         />
         <button
           onClick={handleSearch}
           disabled={searching || areaCode.length !== 3}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {searching ? "Searching..." : "Search"}
         </button>
@@ -124,15 +124,15 @@ export default function PhoneNumberSelector() {
       )}
 
       {numbers.length > 0 && (
-        <ul className="divide-y divide-gray-200 rounded-md border border-gray-200">
+        <ul className="divide-y divide-gray-200 dark:divide-white/[0.10] rounded-md border border-gray-200 dark:border-white/[0.10]">
           {numbers.map((n) => (
             <li
               key={n.phoneNumber}
-              className="flex items-center justify-between px-4 py-3"
+              className="flex items-center justify-between px-4 py-3 dark:hover:bg-white/[0.04]"
             >
               <div>
-                <p className="font-medium text-gray-900">{n.phoneNumber}</p>
-                <p className="text-sm text-gray-500">{n.friendlyName}</p>
+                <p className="font-medium text-slate-900 dark:text-[#f5f5f5]">{n.phoneNumber}</p>
+                <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">{n.friendlyName}</p>
               </div>
               <button
                 onClick={() => handlePurchase(n.phoneNumber)}

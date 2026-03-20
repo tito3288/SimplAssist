@@ -2,6 +2,7 @@
 
 import { Users, UserPlus, Flame, Phone, MessageCircle } from "lucide-react";
 import type { Contact } from "@/types/database";
+import { glassCard, orangeAccentIcon, textPrimary, textSecondary } from "@/lib/glass";
 
 interface ContactStatsProps {
   contacts: Contact[];
@@ -28,30 +29,26 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       label: "Total Contacts",
       value: total,
       icon: Users,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
+      color: "text-[#ff914d]",
     },
     {
       label: "New This Week",
       value: newThisWeek,
       icon: UserPlus,
-      color: "text-emerald-600",
-      bg: "bg-emerald-50",
+      color: "text-[#ff914d]",
     },
     {
       label: "Hot Leads",
       value: hotLeads,
       icon: Flame,
-      color: "text-orange-600",
-      bg: "bg-orange-50",
+      color: "text-[#ff914d]",
     },
     {
       label: "SMS / Web Chat",
       value: `${smsCount} / ${webChatCount}`,
       icon: Phone,
       secondIcon: MessageCircle,
-      color: "text-violet-600",
-      bg: "bg-violet-50",
+      color: "text-[#ff914d]",
     },
   ];
 
@@ -60,15 +57,15 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       {stats.map((stat) => (
         <div
           key={stat.label}
-          className="rounded-xl border border-gray-200 bg-white p-5"
+          className={`p-5 ${glassCard}`}
         >
           <div className="flex items-center gap-3">
-            <div className={`rounded-lg ${stat.bg} p-2.5`}>
+            <div className={`p-2.5 ${orangeAccentIcon}`}>
               <stat.icon className={`h-5 w-5 ${stat.color}`} />
             </div>
             <div>
-              <p className="text-sm text-gray-500">{stat.label}</p>
-              <p className="text-2xl font-semibold text-gray-900">
+              <p className={`text-sm ${textSecondary}`}>{stat.label}</p>
+              <p className={`text-2xl font-semibold ${textPrimary}`}>
                 {stat.value}
               </p>
             </div>

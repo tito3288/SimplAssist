@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Pencil, Trash2, Plus, ChevronUp } from 'lucide-react';
 import type { Service } from '@/types/database';
+import { PulsingDot } from '@/components/ui/pulsing-dot';
 
 interface ServicesManagerProps {
   businessId: string;
@@ -116,18 +117,18 @@ export default function ServicesManager({ businessId, initialServices }: Service
   return (
     <div className="space-y-4">
       {services.length === 0 && !showAddForm && (
-        <p className="text-sm text-gray-500 text-center py-4">No services yet. Add your first service below.</p>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] text-center py-4">No services yet. Add your first service below.</p>
       )}
 
       <div className="space-y-2">
         {services.map((service) => (
-          <div key={service.id} className="border border-gray-200 rounded-lg">
+          <div key={service.id} className="border border-slate-200 dark:border-white/[0.12] rounded-lg">
             <div className="flex items-center gap-3 p-3">
               <button
                 type="button"
                 onClick={() => handleToggleActive(service.id, service.is_active)}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                  service.is_active ? 'bg-blue-600' : 'bg-gray-300'
+                  service.is_active ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
                 }`}
               >
                 <span
@@ -138,22 +139,22 @@ export default function ServicesManager({ businessId, initialServices }: Service
               </button>
 
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${service.is_active ? 'text-gray-900' : 'text-gray-400'}`}>
+                <p className={`text-sm font-medium ${service.is_active ? 'text-slate-900 dark:text-[#f5f5f5]' : 'text-slate-400 dark:text-[#666]'}`}>
                   {service.name}
                 </p>
                 {service.description && (
-                  <p className="text-xs text-gray-500 truncate">{service.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-[#bdbdbf] truncate">{service.description}</p>
                 )}
               </div>
 
               {service.price && (
-                <span className="text-sm text-gray-600 shrink-0">{service.price}</span>
+                <span className="text-sm text-slate-600 dark:text-[#bdbdbf] shrink-0">{service.price}</span>
               )}
 
               <button
                 type="button"
                 onClick={() => (expandedId === service.id ? setExpandedId(null) : startEdit(service))}
-                className="text-gray-400 hover:text-blue-600 p-1"
+                className="text-slate-400 dark:text-[#bdbdbf] hover:text-[#ff914d] p-1"
               >
                 {expandedId === service.id ? <ChevronUp className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
               </button>
@@ -171,7 +172,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmId(null)}
-                    className="text-xs text-gray-500 hover:text-gray-700"
+                    className="text-xs text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5]"
                   >
                     Cancel
                   </button>
@@ -180,7 +181,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
                 <button
                   type="button"
                   onClick={() => setDeleteConfirmId(service.id)}
-                  className="text-gray-400 hover:text-red-500 p-1"
+                  className="text-slate-400 dark:text-[#bdbdbf] hover:text-red-500 p-1"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -188,30 +189,30 @@ export default function ServicesManager({ businessId, initialServices }: Service
             </div>
 
             {expandedId === service.id && (
-              <div className="border-t border-gray-200 p-3 space-y-2 bg-gray-50">
+              <div className="border-t border-slate-200 dark:border-white/[0.10] p-3 space-y-2 bg-slate-50 dark:bg-white/[0.03]">
                 <input
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   placeholder="Service name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
                 />
                 <input
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   placeholder="Description (optional)"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
                 />
                 <input
                   value={editPrice}
                   onChange={(e) => setEditPrice(e.target.value)}
                   placeholder="Price (optional)"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
                 />
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setExpandedId(null)}
-                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                    className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
                   >
                     Cancel
                   </button>
@@ -219,9 +220,16 @@ export default function ServicesManager({ businessId, initialServices }: Service
                     type="button"
                     onClick={() => handleEdit(service.id)}
                     disabled={saving === service.id || !editName.trim()}
-                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
                   >
-                    {saving === service.id ? 'Saving...' : 'Save'}
+                    {saving === service.id ? (
+                      <>
+                        <PulsingDot inline />
+                        Saving…
+                      </>
+                    ) : (
+                      'Save'
+                    )}
                   </button>
                 </div>
               </div>
@@ -231,30 +239,30 @@ export default function ServicesManager({ businessId, initialServices }: Service
       </div>
 
       {showAddForm ? (
-        <div className="border border-blue-200 rounded-lg p-3 space-y-2 bg-blue-50">
+        <div className="border border-[#ff914d]/40 dark:border-[#ff914d]/30 rounded-lg p-3 space-y-2 bg-orange-50 dark:bg-white/[0.04]">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Service name *"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
           />
           <input
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
             placeholder="Description (optional)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
           />
           <input
             value={newPrice}
             onChange={(e) => setNewPrice(e.target.value)}
             placeholder="Price (optional)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
           />
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => { setShowAddForm(false); setNewName(''); setNewDescription(''); setNewPrice(''); }}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+              className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
             >
               Cancel
             </button>
@@ -262,9 +270,16 @@ export default function ServicesManager({ businessId, initialServices }: Service
               type="button"
               onClick={handleAdd}
               disabled={saving === 'add' || !newName.trim()}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
             >
-              {saving === 'add' ? 'Adding...' : 'Add Service'}
+              {saving === 'add' ? (
+                <>
+                  <PulsingDot inline />
+                  Adding…
+                </>
+              ) : (
+                'Add Service'
+              )}
             </button>
           </div>
         </div>
@@ -272,7 +287,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
         <button
           type="button"
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="flex items-center gap-1 text-sm text-[#ff914d] hover:text-[#e07a3a] font-medium"
         >
           <Plus className="w-4 h-4" /> Add Service
         </button>

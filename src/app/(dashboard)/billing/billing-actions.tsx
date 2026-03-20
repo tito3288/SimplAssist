@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SubscriptionPlan } from "@/types/database";
+import { PulsingDot } from "@/components/ui/pulsing-dot";
 
 export function BillingActions({
   mode,
@@ -53,7 +54,7 @@ export function BillingActions({
       <button
         onClick={handlePortal}
         disabled={loading}
-        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+        className="rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:opacity-90 disabled:opacity-50"
       >
         {loading ? "Loading..." : "Manage Subscription"}
       </button>
@@ -64,13 +65,16 @@ export function BillingActions({
     <button
       onClick={handleCheckout}
       disabled={loading}
-      className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 ${
-        plan === "sms_and_chat"
-          ? "bg-blue-600 hover:bg-blue-700"
-          : "bg-gray-900 hover:bg-gray-800"
-      }`}
+      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2.5 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:opacity-90 disabled:opacity-50"
     >
-      {loading ? "Loading..." : "Subscribe"}
+      {loading ? (
+        <>
+          <PulsingDot inline />
+          Loading…
+        </>
+      ) : (
+        "Subscribe"
+      )}
     </button>
   );
 }

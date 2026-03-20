@@ -1,6 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { PulsingDot } from "@/components/ui/pulsing-dot";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "danger" | "ghost";
@@ -10,10 +10,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500",
-  secondary: "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-500",
-  danger: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500",
-  ghost: "text-slate-700 hover:bg-slate-100 focus:ring-slate-500",
+  primary:
+    "bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] hover:bg-orange-600 dark:hover:brightness-110 shadow-[0_14px_34px_rgba(255,145,77,.26)] focus:ring-[#ff914d]",
+  secondary:
+    "bg-white dark:bg-transparent dark:bg-white/[0.08] text-slate-700 dark:text-white border border-slate-300 dark:border-white/[0.10] hover:bg-slate-50 dark:hover:bg-white/[0.12] focus:ring-[#ff914d]",
+  danger: "bg-red-600 dark:bg-red-600/90 text-white hover:bg-red-700 focus:ring-red-500",
+  ghost:
+    "text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] focus:ring-[#ff914d]",
 };
 
 const sizeStyles = {
@@ -49,7 +52,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         {...props}
       >
-        {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+        {loading && <PulsingDot inline className="mr-2" />}
         {children}
       </button>
     );

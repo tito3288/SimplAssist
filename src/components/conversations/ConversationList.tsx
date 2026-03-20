@@ -63,23 +63,23 @@ export function ConversationList({
   ];
 
   return (
-    <div className="flex h-full flex-col border-r border-gray-200 bg-white">
+    <div className="flex h-full flex-col border-r border-slate-200 dark:border-white/[0.10] bg-white dark:bg-transparent">
       {/* Search */}
-      <div className="border-b border-gray-200 p-3">
+      <div className="border-b border-slate-200 dark:border-white/[0.10] p-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-[#666]" />
           <input
             type="text"
             placeholder="Search conversations..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg bg-white dark:bg-white/[0.06] border border-gray-300 dark:border-white/[0.12] py-2 pl-9 pr-3 text-sm text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
           />
         </div>
       </div>
 
       {/* Filter tabs */}
-      <div className="flex border-b border-gray-200">
+      <div className="flex border-b border-slate-200 dark:border-white/[0.10]">
         {tabs.map((tab) => (
           <button
             key={tab.value}
@@ -87,8 +87,8 @@ export function ConversationList({
             className={cn(
               "flex-1 px-3 py-2 text-sm font-medium transition-colors",
               filter === tab.value
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
+                ? "border-b-2 border-[#ff914d] text-[#ff914d]"
+                : "text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5]"
             )}
           >
             {tab.label}
@@ -99,7 +99,7 @@ export function ConversationList({
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="p-6 text-center text-sm text-gray-500">
+          <div className="p-6 text-center text-sm text-slate-500 dark:text-[#bdbdbf]">
             {conversations.length === 0
               ? "No conversations yet. Once customers start texting or chatting, they'll appear here."
               : "No conversations match your search."}
@@ -122,30 +122,30 @@ export function ConversationList({
                 key={conv.id}
                 onClick={() => onSelect(conv)}
                 className={cn(
-                  "flex w-full items-start gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors hover:bg-gray-50",
-                  activeId === conv.id && "bg-blue-50 hover:bg-blue-50"
+                  "flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
+                  activeId === conv.id && "bg-orange-50 dark:bg-[rgba(255,145,77,.08)] hover:bg-orange-50 dark:hover:bg-[rgba(255,145,77,.08)]"
                 )}
               >
                 {/* Channel icon */}
                 <div className="mt-0.5 flex-shrink-0">
                   {conv.channel === "sms" ? (
-                    <Phone className="h-5 w-5 text-gray-400" />
+                    <Phone className="h-5 w-5 text-slate-400 dark:text-[#bdbdbf]" />
                   ) : (
-                    <MessageCircle className="h-5 w-5 text-gray-400" />
+                    <MessageCircle className="h-5 w-5 text-slate-400 dark:text-[#bdbdbf]" />
                   )}
                 </div>
 
                 {/* Content */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium text-gray-900">
+                    <span className="truncate text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
                       {contactName}
                     </span>
-                    <span className="flex-shrink-0 text-xs text-gray-500">
+                    <span className="flex-shrink-0 text-xs text-slate-500 dark:text-[#bdbdbf]">
                       {timeAgo(conv.last_message_at)}
                     </span>
                   </div>
-                  <p className="mt-0.5 truncate text-sm text-gray-500">
+                  <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-[#bdbdbf]">
                     {preview}
                   </p>
                   <div className="mt-1 flex items-center gap-2">
@@ -154,8 +154,8 @@ export function ConversationList({
                       className={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
                         conv.is_ai_handling
-                          ? "bg-purple-100 text-purple-700"
-                          : "bg-amber-100 text-amber-700"
+                          ? "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300"
+                          : "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
                       )}
                     >
                       {conv.is_ai_handling ? (
@@ -170,7 +170,7 @@ export function ConversationList({
                     </span>
                     {/* Status badge */}
                     {conv.status === "closed" && (
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+                      <span className="rounded-full bg-slate-100 dark:bg-white/[0.06] px-2 py-0.5 text-xs text-slate-500 dark:text-[#bdbdbf]">
                         Closed
                       </span>
                     )}
@@ -179,7 +179,7 @@ export function ConversationList({
 
                 {/* Unread indicator */}
                 {conv.status === "active" && !conv.is_ai_handling && (
-                  <div className="mt-2 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-blue-500" />
+                  <div className="mt-2 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#ff914d]" />
                 )}
               </button>
             );

@@ -71,11 +71,8 @@ export async function GET() {
     '.sa-widget-input:focus{border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,0.15);}',
     '.sa-widget-send{width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;}',
     '.sa-widget-send:disabled{opacity:0.5;cursor:default;}',
-    '.sa-widget-dots{display:flex;gap:4px;padding:10px 14px;align-self:flex-start;}',
-    '.sa-widget-dots span{width:8px;height:8px;border-radius:50%;background:#9ca3af;animation:sa-bounce 1.4s infinite;}',
-    '.sa-widget-dots span:nth-child(2){animation-delay:0.2s;}',
-    '.sa-widget-dots span:nth-child(3){animation-delay:0.4s;}',
-    '@keyframes sa-bounce{0%,80%,100%{transform:translateY(0);}40%{transform:translateY(-6px);}}',
+    '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:#ff8c42;flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
+    '@keyframes sa-widget-dot-pulse{0%{transform:scale(1);opacity:1;}50%{transform:scale(1.6);opacity:0.4;}100%{transform:scale(1);opacity:1;}}',
     '.sa-widget-lead-form{padding:20px 16px;display:flex;flex-direction:column;gap:12px;}',
     '.sa-widget-lead-form p{margin:0;font-size:14px;color:#4a5568;text-align:center;}',
     '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit;}',
@@ -178,9 +175,7 @@ export async function GET() {
 
   function showLoading() {
     isLoading = true;
-    var dots = el('div', { class: 'sa-widget-dots', id: 'sa-loading' }, [
-      el('span'), el('span'), el('span')
-    ]);
+    var dots = el('div', { class: 'sa-widget-loading-dot', id: 'sa-loading' });
     messagesArea.appendChild(dots);
     scrollToBottom();
   }

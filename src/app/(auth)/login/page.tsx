@@ -7,6 +7,14 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  authInputClass,
+  primaryCtaClass,
+  textPrimary,
+  textSecondary,
+} from "@/lib/glass";
+import { PulsingDot } from "@/components/ui/pulsing-dot";
+import { AuthPasswordField } from "@/components/auth/auth-password-field";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -14,6 +22,9 @@ const loginSchema = z.object({
 });
 
 type LoginForm = z.infer<typeof loginSchema>;
+
+const labelClass =
+  "mb-1.5 block text-sm font-medium text-slate-700 dark:text-[#d4d4d8]";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,61 +56,77 @@ export default function LoginPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-center text-slate-900 mb-1">Log In</h1>
-      <p className="text-center text-sm text-slate-500 mb-6">Welcome back to SimplAssist</p>
+      <h1 className={`text-center text-2xl font-bold tracking-tight ${textPrimary}`}>
+        Log in
+      </h1>
+      <p className={`mt-1 text-center text-sm ${textSecondary}`}>
+        Welcome back — pick up where you left off.
+      </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="email" className={labelClass}>
             Email
           </label>
           <input
             id="email"
             type="email"
+            autoComplete="email"
             {...register("email")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className={authInputClass}
             placeholder="you@example.com"
           />
           {errors.email && (
-            <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+            <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">
+              {errors.email.message}
+            </p>
           )}
         </div>
 
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            {...register("password")}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="••••••••"
-          />
-          {errors.password && (
-            <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-          )}
-        </div>
+        <AuthPasswordField
+          id="password"
+          label="Password"
+          autoComplete="current-password"
+          placeholder="••••••••"
+          registration={register("password")}
+          error={errors.password?.message}
+        />
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-600">{error}</p>
+          <div
+            className="
+              rounded-[22px] border border-red-200/80 bg-red-50/90 px-4 py-3
+              dark:border-red-500/25 dark:bg-red-500/10
+            "
+            role="alert"
+          >
+            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
           </div>
         )}
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className={primaryCtaClass}
         >
-          {isSubmitting ? "Logging in..." : "Log In"}
+          {isSubmitting ? (
+            <>
+              <PulsingDot inline />
+              Signing in…
+            </>
+          ) : (
+            "Sign in"
+          )}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray-600">
+      <p className={`mt-8 text-center text-sm ${textSecondary}`}>
         Don&apos;t have an account?{" "}
-        <Link href="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
-          Sign up
+        <Link
+          href="/signup"
+          className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
+        >
+          Create one
         </Link>
       </p>
     </div>

@@ -40,17 +40,17 @@ export function Modal({ open, onClose, title, description, children }: ModalProp
       />
 
       {/* Card */}
-      <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-fade-in">
+      <div className="relative bg-white dark:bg-[rgba(18,18,20,0.92)] dark:backdrop-blur-[20px] dark:border dark:border-white/[0.14] rounded-[28px] shadow-xl dark:shadow-[0_30px_80px_rgba(0,0,0,0.6)] max-w-lg w-full max-h-[90vh] overflow-y-auto animate-fade-in">
         <div className="flex items-start justify-between p-6 pb-0">
           <div>
-            {title && <h2 className="text-lg font-semibold text-slate-900">{title}</h2>}
+            {title && <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5]">{title}</h2>}
             {description && (
-              <p className="text-sm text-slate-600 mt-1">{description}</p>
+              <p className="text-sm text-slate-600 dark:text-[#bdbdbf] mt-1">{description}</p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
+            className="text-slate-400 dark:text-[#bdbdbf] hover:text-slate-600 dark:hover:text-white transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
