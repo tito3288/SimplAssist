@@ -8,9 +8,10 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state");
   const error = searchParams.get("error");
 
-  // Use the request origin so redirect goes back to the same host
+  // Use NEXT_PUBLIC_APP_URL for production, fall back to request origin for local dev
   const origin = new URL(request.url).origin;
-  const appUrl = origin;
+  const isLocalhost = origin.includes("localhost:3000");
+  const appUrl = isLocalhost ? origin : (process.env.NEXT_PUBLIC_APP_URL || origin);
 
   if (error || !code || !state) {
     return NextResponse.redirect(
