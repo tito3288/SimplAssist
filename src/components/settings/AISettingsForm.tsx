@@ -39,12 +39,11 @@ const LANGUAGE_OPTIONS = [
 interface AISettingsFormProps {
   settings: AISettings;
   businessName: string;
-  calendarConnected?: boolean;
   calendarEmail?: string | null;
   businessId?: string;
 }
 
-export default function AISettingsForm({ settings, businessName, calendarConnected = false, calendarEmail = null, businessId }: AISettingsFormProps) {
+export default function AISettingsForm({ settings, businessName, calendarEmail = null, businessId }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);

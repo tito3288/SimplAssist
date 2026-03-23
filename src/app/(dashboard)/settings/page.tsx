@@ -73,7 +73,6 @@ export default async function SettingsPage() {
         <AISettingsForm
           settings={aiSettings}
           businessName={business.name}
-          calendarConnected={!!calendarToken}
           calendarEmail={calendarToken?.google_email ?? null}
           businessId={business.id}
         />

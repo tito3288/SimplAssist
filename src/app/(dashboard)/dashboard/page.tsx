@@ -31,7 +31,7 @@ export default async function DashboardPage() {
     { data: recentConversationsRaw },
     { data: hotLeads },
     { data: twilioNumber },
-    { data: aiSettings },
+    ,
     { data: calendarToken },
   ] = await Promise.all([
     supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
