@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact, incrementLeadScore } from "./contacts";
 import { getOrCreateConversation, addMessage, getConversationHistory } from "./conversations";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
+import { calendarTools, shouldIncludeCalendarTools } from "./tools";
+import { checkAvailability, createBooking } from "@/lib/google/calendar";
 import type {
   Business,
   AISettings,
@@ -11,6 +13,7 @@ import type {
   BusinessHours,
   Channel,
 } from "@/types/database";
+import type Anthropic from "@anthropic-ai/sdk";
 
 const FALLBACK_MESSAGE =
   "Thanks for reaching out! We're having a brief technical issue. Please try again in a moment or call us directly.";
@@ -24,6 +27,49 @@ function scoreMessage(message: string): number {
   if (/\b(service|offer|provide|do you do)\b/.test(lower)) score += 1;
 
   return score;
+}
+
+async function executeCalendarTool(
+  businessId: string,
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  timezone: string,
+  contactPhone: string | null
+): Promise<string> {
+  try {
+    if (toolName === "check_availability") {
+      const date = toolInput.date as string;
+      const slots = await checkAvailability(businessId, date, timezone);
+
+      if (slots.length === 0) {
+        return "No available slots on that date. The business may be closed or fully booked.";
+      }
+
+      return `Available times on ${date}: ${slots.join(", ")}`;
+    }
+
+    if (toolName === "create_booking") {
+      const result = await createBooking(
+        businessId,
+        {
+          customerName: toolInput.customer_name as string,
+          customerPhone: (toolInput.customer_phone as string) || contactPhone || undefined,
+          customerEmail: (toolInput.customer_email as string) || undefined,
+          serviceName: toolInput.service_name as string,
+          startTime: toolInput.start_time as string,
+          durationMinutes: (toolInput.duration_minutes as number) || 30,
+        },
+        timezone
+      );
+
+      return `Appointment booked successfully! ${result.summary} at ${result.startTime}. Event ID: ${result.eventId}`;
+    }
+
+    return "Unknown tool.";
+  } catch (error) {
+    console.error(`[calendar-tool] Error executing ${toolName}:`, error);
+    return "Calendar is temporarily unavailable. Please collect the customer's booking details instead and let them know someone will confirm.";
+  }
 }
 
 export async function processIncomingMessage(
@@ -55,6 +101,7 @@ export async function processIncomingMessage(
       { data: services },
       { data: faqs },
       { data: businessHours },
+      { data: calendarToken },
     ] = await Promise.all([
       supabaseAdmin
         .from("businesses")
@@ -80,35 +127,92 @@ export async function processIncomingMessage(
         .from("business_hours")
         .select("*")
         .eq("business_id", businessId),
+      supabaseAdmin
+        .from("google_calendar_tokens")
+        .select("id")
+        .eq("business_id", businessId)
+        .single(),
     ]);
 
     if (!business || !aiSettings) {
       return FALLBACK_MESSAGE;
     }
 
+    const hasCalendar = !!calendarToken;
+    const useTools = shouldIncludeCalendarTools(
+      aiSettings as AISettings,
+      hasCalendar
+    );
+
     const systemPrompt = buildSystemPrompt(
       business as Business,
       aiSettings as AISettings,
       (services ?? []) as Service[],
       (faqs ?? []) as FAQ[],
-      (businessHours ?? []) as BusinessHours[]
+      (businessHours ?? []) as BusinessHours[],
+      hasCalendar
     );
 
     const history = await getConversationHistory(conversation.id);
 
-    const messages = buildConversationMessages(history, message);
+    const messages: Anthropic.MessageParam[] = buildConversationMessages(
+      history,
+      message
+    );
 
-    const response = await anthropic.messages.create({
+    // Build API params
+    const apiParams: Anthropic.MessageCreateParamsNonStreaming = {
       model: "claude-haiku-4-20250404",
-      max_tokens: 300,
+      max_tokens: useTools ? 500 : 300,
       system: systemPrompt,
       messages,
-    });
+      ...(useTools ? { tools: calendarTools } : {}),
+    };
 
-    const responseText =
-      response.content[0].type === "text"
-        ? response.content[0].text
-        : FALLBACK_MESSAGE;
+    let response = await anthropic.messages.create(apiParams);
+    let loopCount = 0;
+    const maxLoops = 3;
+
+    // Tool-calling loop
+    while (response.stop_reason === "tool_use" && loopCount < maxLoops) {
+      const toolUseBlock = response.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+      );
+
+      if (!toolUseBlock) break;
+
+      const toolResult = await executeCalendarTool(
+        businessId,
+        toolUseBlock.name,
+        toolUseBlock.input as Record<string, unknown>,
+        (business as Business).timezone,
+        contactPhone
+      );
+
+      // Add assistant's response (with tool use) and tool result to messages
+      messages.push({ role: "assistant", content: response.content });
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseBlock.id,
+            content: toolResult,
+          },
+        ],
+      });
+
+      // Update apiParams with the extended messages
+      apiParams.messages = messages;
+      response = await anthropic.messages.create(apiParams);
+      loopCount++;
+    }
+
+    // Extract the final text response
+    const textBlock = response.content.find(
+      (block): block is Anthropic.TextBlock => block.type === "text"
+    );
+    const responseText = textBlock?.text || FALLBACK_MESSAGE;
 
     await addMessage(
       conversation.id,

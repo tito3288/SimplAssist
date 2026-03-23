@@ -39,7 +39,7 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
 
   const sidebarContent = (
     <div className="flex flex-col h-full min-h-0">
-      <div className="p-6 flex items-center gap-2 shrink-0">
+      <div className="p-6 shrink-0">
         <Link href="/dashboard">
           <Image
             src="/logo-dark.png"
@@ -56,7 +56,6 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
             className="block dark:hidden h-8 w-auto object-contain"
           />
         </Link>
-        <span className="w-2 h-2 rounded-full bg-[#ff914d] shadow-[0_0_12px_rgba(255,145,77,.65)]" />
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">

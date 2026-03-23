@@ -5,6 +5,7 @@ import ServicesManager from '@/components/settings/ServicesManager';
 import FAQManager from '@/components/settings/FAQManager';
 import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
 import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
+import BusinessEmailForm from '@/components/settings/BusinessEmailForm';
 import { glassCard } from '@/lib/glass';
 
 export default async function SettingsPage() {
@@ -26,12 +27,14 @@ export default async function SettingsPage() {
     { data: faqs },
     { data: businessHours },
     { data: twilioNumber },
+    { data: calendarToken },
   ] = await Promise.all([
     supabase.from('ai_settings').select('*').eq('business_id', business.id).single(),
     supabase.from('services').select('*').eq('business_id', business.id).order('name'),
     supabase.from('faqs').select('*').eq('business_id', business.id).order('question'),
     supabase.from('business_hours').select('*').eq('business_id', business.id).order('day_of_week'),
     supabase.from('twilio_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single(),
+    supabase.from('google_calendar_tokens').select('*').eq('business_id', business.id).single(),
   ]);
 
   if (!aiSettings) redirect('/onboarding');
@@ -56,9 +59,24 @@ export default async function SettingsPage() {
         />
       </div>
 
+      {/* Business Email */}
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Business Email</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
+          Contact email your AI can share with customers when it needs to escalate.
+        </p>
+        <BusinessEmailForm businessId={business.id} initialEmail={business.email} />
+      </div>
+
       {/* AI Settings */}
       <div className={`p-6 ${glassCard}`}>
-        <AISettingsForm settings={aiSettings} businessName={business.name} />
+        <AISettingsForm
+          settings={aiSettings}
+          businessName={business.name}
+          calendarConnected={!!calendarToken}
+          calendarEmail={calendarToken?.google_email ?? null}
+          businessId={business.id}
+        />
       </div>
 
       {/* Services */}

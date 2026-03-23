@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import { X } from 'lucide-react';
 import type { AISettings } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import GoogleCalendarConnect from './GoogleCalendarConnect';
 
 const aiSettingsSchema = z.object({
   tone: z.enum(['friendly', 'professional', 'balanced'] as const),
@@ -38,9 +39,12 @@ const LANGUAGE_OPTIONS = [
 interface AISettingsFormProps {
   settings: AISettings;
   businessName: string;
+  calendarConnected?: boolean;
+  calendarEmail?: string | null;
+  businessId?: string;
 }
 
-export default function AISettingsForm({ settings, businessName }: AISettingsFormProps) {
+export default function AISettingsForm({ settings, businessName, calendarConnected = false, calendarEmail = null, businessId }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);
@@ -71,6 +75,7 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
   });
 
   const bookingEnabled = watch('booking_enabled');
+  const bookingMode = watch('booking_mode');
   const responseDelay = watch('sms_response_delay_seconds');
   const selectedTone = watch('tone');
   const smsGreeting = watch('sms_greeting');
@@ -268,7 +273,68 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
         </div>
       </section>
 
-      {/* Section 4: Guardrails */}
+      {/* Section 4: Booking */}
+      <section>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
+
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
+          <Controller
+            name="booking_enabled"
+            control={control}
+            render={({ field }) => (
+              <button
+                type="button"
+                onClick={() => field.onChange(!field.value)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  field.value ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                    field.value ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            )}
+          />
+        </div>
+
+        {bookingEnabled && (
+          <>
+            <div className="mt-3 pl-4 border-l-2 border-[#ff914d]/30 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" value="collect_info" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
+                <div>
+                  <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Collect customer info</p>
+                  <p className="text-xs text-slate-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" value="schedule_direct" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
+                <div>
+                  <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Direct scheduling</p>
+                  <p className="text-xs text-slate-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
+                </div>
+              </label>
+            </div>
+
+            {/* Google Calendar Connection - inline, only when Direct scheduling selected */}
+            {businessId && bookingMode === 'schedule_direct' && (
+              <div className="mt-4 p-4 rounded-xl bg-white/5 border border-white/[0.08]">
+                <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Google Calendar</p>
+                <GoogleCalendarConnect
+                  businessId={businessId}
+                  connectedEmail={calendarEmail ?? null}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* Section 5: Guardrails */}
       <section>
         <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
@@ -319,54 +385,6 @@ export default function AISettingsForm({ settings, businessName }: AISettingsFor
         >
           + Add rules
         </button>
-      </section>
-
-      {/* Section 5: Booking */}
-      <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
-
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
-          <Controller
-            name="booking_enabled"
-            control={control}
-            render={({ field }) => (
-              <button
-                type="button"
-                onClick={() => field.onChange(!field.value)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  field.value ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                    field.value ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            )}
-          />
-        </div>
-
-        {bookingEnabled && (
-          <div className="mt-3 pl-4 border-l-2 border-[#ff914d]/30 space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" value="collect_info" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
-              <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Collect customer info</p>
-                <p className="text-xs text-slate-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
-              </div>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" value="schedule_direct" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
-              <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Direct scheduling</p>
-                <p className="text-xs text-slate-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
-              </div>
-            </label>
-          </div>
-        )}
       </section>
 
       {/* Save */}

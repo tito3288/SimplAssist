@@ -68,7 +68,8 @@ export function buildSystemPrompt(
   aiSettings: AISettings,
   services: Service[],
   faqs: FAQ[],
-  businessHours: BusinessHours[]
+  businessHours: BusinessHours[],
+  calendarConnected: boolean = false
 ): string {
   const { open, todayHours } = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
@@ -77,7 +78,7 @@ export function buildSystemPrompt(
   const sections: string[] = [];
 
   sections.push(
-    `You are the virtual assistant for ${business.name}, a ${business.business_type} business.`
+    `You are ${business.name}, a ${business.business_type} business. Respond as if you are the business itself — never refer to yourself as an assistant, bot, or virtual assistant.`
   );
 
   if (business.address) {
@@ -85,6 +86,9 @@ export function buildSystemPrompt(
   }
   if (business.phone_number) {
     sections.push(`Phone: ${business.phone_number}`);
+  }
+  if (business.email) {
+    sections.push(`Email: ${business.email}`);
   }
 
   sections.push("");
@@ -141,14 +145,26 @@ export function buildSystemPrompt(
       sections.push(
         "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
       );
-    } else {
+    } else if (calendarConnected) {
       sections.push(
-        "When a customer wants to book, help them schedule directly by collecting their name, preferred date/time, and service needed."
+        "When a customer wants to book an appointment:\n" +
+        "1. Ask what service they need and their preferred date\n" +
+        "2. Use the check_availability tool to find open slots on that date\n" +
+        "3. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
+        "4. Once they pick a time, confirm the details and ask for their name\n" +
+        "5. Use the create_booking tool to book it\n" +
+        "6. Confirm the appointment with date, time, and service\n" +
+        "Keep responses conversational and brief — this is SMS/chat."
+      );
+    } else {
+      // schedule_direct selected but calendar not connected — fall back to collect_info
+      sections.push(
+        "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
       );
     }
   } else {
     sections.push(
-      "Booking is not currently available. If a customer asks to book, suggest they call during business hours."
+      `Booking is not currently available. If a customer asks to book, suggest they call during business hours${business.email ? ` or email ${business.email}` : ""}.`
     );
   }
 
@@ -157,9 +173,9 @@ export function buildSystemPrompt(
   sections.push("- Be helpful and concise. This is an SMS/chat conversation — keep responses short, ideally under 160 characters when possible.");
   sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.).");
   sections.push("- Do NOT make up information that is not provided in this context.");
-  sections.push("- If you are unsure about something, suggest the customer call during business hours.");
-  sections.push("- Stay in character as the business's virtual assistant at all times.");
-  sections.push("- Never reveal that you are an AI unless directly asked.");
+  sections.push(`- If you are unsure about something, suggest the customer call during business hours${business.email ? ` or email ${business.email}` : ""}.`);
+  sections.push("- Stay in character as the business itself at all times. You ARE the business, not an assistant.");
+  sections.push("- Never refer to yourself as an assistant, bot, or AI. Respond as a real person from the business would.");
 
   return sections.join("\n");
 }

@@ -275,6 +275,7 @@ export default function AIPersonalityForm({
               <div>
                 <p className="text-sm font-medium text-gray-700">Direct scheduling</p>
                 <p className="text-xs text-gray-500">AI books appointments directly on your calendar</p>
+                <p className="text-xs text-orange-500 mt-1">After setup, connect your Google Calendar in Settings to enable direct booking.</p>
               </div>
             </label>
           </div>

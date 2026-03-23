@@ -31,9 +31,17 @@ export async function POST(request: NextRequest) {
   const businessId = twilioNumber.business_id;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
 
+  const { data: business } = await supabaseAdmin
+    .from("businesses")
+    .select("name")
+    .eq("id", businessId)
+    .single();
+
+  const businessName = business?.name ?? "us";
+
   const response = new twilio.twiml.VoiceResponse();
   response.say(
-    "Thanks for calling. We're unavailable right now but we'll text you right back with assistance. You can also leave a brief message after the tone."
+    `Thanks for calling ${businessName}. We're unavailable right now but we'll text you right back with assistance. If you prefer not to receive messages, reply STOP to opt out. Please leave a message after the beep.`
   );
   response.record({
     action: `${appUrl}/api/twilio/voice/recording`,
@@ -42,7 +50,7 @@ export async function POST(request: NextRequest) {
     transcribe: false,
   });
   response.say(
-    "Thank you. We'll be in touch soon via text message. Goodbye."
+    `Thank you for your message. ${businessName} will be in touch soon. Goodbye.`
   );
   response.hangup();
 

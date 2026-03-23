@@ -15,6 +15,7 @@ const businessInfoSchema = z.object({
   ] as const),
   website: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   phone: z.string().min(10, 'Enter a valid phone number'),
+  email: z.string().email('Enter a valid email address').optional().or(z.literal('')),
   address: z.string().min(1, 'Address is required'),
   city: z.string().min(1, 'City is required'),
   state: z.string().min(1, 'State is required'),
@@ -63,6 +64,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       business_type: initialData?.business_type || 'general',
       website: initialData?.website || '',
       phone: initialData?.phone || '',
+      email: initialData?.email || '',
       address: initialData?.address || '',
       city: initialData?.city || '',
       state: initialData?.state || '',
@@ -103,6 +105,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           business_type: data.business_type,
           website_url: data.website || null,
           phone_number: data.phone,
+          email: data.email || null,
           address: data.address,
           city: data.city,
           state: data.state,
@@ -187,6 +190,18 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
         {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone.message}</p>}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Business Email (optional)</label>
+        <input
+          {...register('email')}
+          type="email"
+          placeholder="info@yourbusiness.com"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>}
+        <p className="text-xs text-gray-500 mt-1">The AI will suggest this email when it can&apos;t fully help a customer.</p>
       </div>
 
       <div>

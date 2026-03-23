@@ -43,6 +43,7 @@ export interface Business {
   business_type: BusinessType;
   website_url: string | null;
   phone_number: string | null;
+  email: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
@@ -148,6 +149,18 @@ export interface Subscription {
   current_period_start: string;
   current_period_end: string;
   created_at: string;
+}
+
+export interface GoogleCalendarToken {
+  id: string;
+  business_id: string;
+  access_token: string;
+  refresh_token: string;
+  token_expiry: string;
+  calendar_id: string;
+  google_email: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WidgetConfig {
