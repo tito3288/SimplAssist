@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
   if (error || !code || !state) {
     return NextResponse.redirect(
-      `${appUrl}/settings?calendar=error`
+      `${appUrl}/settings`
     );
   }
 
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     businessId = Buffer.from(state, "base64").toString("utf-8");
   } catch {
     return NextResponse.redirect(
-      `${appUrl}/settings?calendar=error`
+      `${appUrl}/settings`
     );
   }
 
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   if (!business) {
     return NextResponse.redirect(
-      `${appUrl}/settings?calendar=error`
+      `${appUrl}/settings`
     );
   }
 
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     if (!tokens.access_token || !tokens.refresh_token) {
       console.error("[google-callback] Missing tokens");
       return NextResponse.redirect(
-        `${appUrl}/settings?calendar=error`
+        `${appUrl}/settings`
       );
     }
 
@@ -87,18 +87,24 @@ export async function GET(request: NextRequest) {
     if (dbError) {
       console.error("[google-callback] DB error:", dbError);
       return NextResponse.redirect(
-        `${appUrl}/settings?calendar=error`
+        `${appUrl}/settings`
       );
     }
 
+    // Auto-set booking mode to direct scheduling since they connected their calendar
+    await supabaseAdmin
+      .from("ai_settings")
+      .update({ booking_enabled: true, booking_mode: "schedule_direct" })
+      .eq("business_id", businessId);
+
     console.log("[google-callback] Success! Token saved for business:", businessId);
     return NextResponse.redirect(
-      `${appUrl}/settings?calendar=connected`
+      `${appUrl}/settings`
     );
   } catch (err) {
     console.error("[google-callback] Error:", err);
     return NextResponse.redirect(
-      `${appUrl}/settings?calendar=error`
+      `${appUrl}/settings`
     );
   }
 }
