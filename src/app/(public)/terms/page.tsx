@@ -41,12 +41,48 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="5. SMS Compliance">
+      <LegalSection title="5. SMS and Text Messaging Compliance">
+        <p className="mb-4">
+          SimplAssist sends automated text messages to end users on behalf of businesses using our
+          platform. By using SimplAssist, you (the business owner) agree to the following:
+        </p>
+        <ul className="list-disc pl-6 mb-4 space-y-2">
+          <li>
+            You will only use SimplAssist to communicate with customers who have initiated
+            contact by calling your business phone number, texting your business phone number,
+            or using your website chat widget.
+          </li>
+          <li>
+            You will not use SimplAssist to send unsolicited marketing messages, spam, or bulk
+            promotional texts.
+          </li>
+          <li>
+            You will comply with the Telephone Consumer Protection Act (TCPA), CAN-SPAM Act,
+            and all other applicable federal and state regulations regarding text messaging.
+          </li>
+          <li>
+            You acknowledge that SimplAssist automatically handles opt-out requests. When an
+            end user replies <strong>STOP</strong>, they will be immediately unsubscribed from
+            future messages. You must not attempt to contact opted-out users through other means
+            via the platform.
+          </li>
+        </ul>
+
+        <p className="mb-4 font-semibold">
+          End User Consent Disclosure
+        </p>
+        <p className="mb-4">
+          By calling, texting, or chatting with a business powered by SimplAssist, end users
+          consent to receive automated text messages at the phone number provided. Message
+          frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to
+          opt out at any time. Reply <strong>HELP</strong> for assistance.
+        </p>
         <p>
-          Your business is responsible for obtaining proper consent from customers before sending
-          marketing messages. SimplAssist provides tools for communication initiated by customers
-          contacting your business. You are responsible for maintaining opt-out lists and honoring
-          STOP requests.
+          For more information, see our{" "}
+          <a href="/privacy" className={linkClass}>
+            Privacy Policy
+          </a>
+          .
         </p>
       </LegalSection>
 

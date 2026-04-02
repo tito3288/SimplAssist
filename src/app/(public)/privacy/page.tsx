@@ -36,11 +36,54 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="4. SMS Messaging">
+      <LegalSection title="4. SMS and Text Messaging">
+        <p className="mb-4">
+          SimplAssist sends automated text messages on behalf of businesses using our platform.
+          These messages are sent via Twilio, a third-party messaging service. By using SimplAssist,
+          your business agrees to Twilio&apos;s messaging policies and applicable telecommunications
+          regulations.
+        </p>
+
+        <p className="mb-4 font-semibold">
+          Consent to Receive Text Messages
+        </p>
+        <p className="mb-4">
+          By calling, texting, or chatting with a business powered by SimplAssist, you (the
+          end user/customer) consent to receive automated text messages at the phone number you
+          provided. These messages may include responses to your inquiry, appointment confirmations,
+          follow-up communications, and other messages related to the business you contacted.
+          Consent is not a condition of purchase.
+        </p>
+
+        <p className="mb-4 font-semibold">
+          Opting Out
+        </p>
+        <p className="mb-4">
+          You can opt out of receiving text messages at any time by replying <strong>STOP</strong> to
+          any message. After opting out, you will receive one final confirmation message and no
+          further texts will be sent. To resume messages, text <strong>START</strong> to the same
+          number.
+        </p>
+
+        <p className="mb-4 font-semibold">
+          Getting Help
+        </p>
+        <p className="mb-4">
+          For assistance, reply <strong>HELP</strong> to any message, or contact SimplAssist support
+          at{" "}
+          <a href="mailto:support@simplassist.com" className={linkClass}>
+            support@simplassist.com
+          </a>
+          .
+        </p>
+
+        <p className="mb-4 font-semibold">
+          Message Frequency and Rates
+        </p>
         <p>
-          By using SimplAssist, your business agrees to Twilio&apos;s messaging policies. Customers
-          who receive automated SMS messages have consented by initiating contact. Standard message
-          and data rates may apply. Customers can opt out by replying STOP at any time.
+          Message frequency varies based on your interaction with the business. Message and data
+          rates may apply depending on your mobile carrier and plan. SimplAssist is not responsible
+          for any charges from your carrier.
         </p>
       </LegalSection>
 

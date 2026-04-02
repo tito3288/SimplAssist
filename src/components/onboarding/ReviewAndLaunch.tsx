@@ -84,8 +84,8 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">Review & Launch</h2>
-        <p className="text-sm text-gray-500">Everything looks good? Hit launch to get started.</p>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Launch</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">Everything looks good? Hit launch to get started.</p>
       </div>
 
       {/* Business Info */}
@@ -105,8 +105,8 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         <div className="space-y-1">
           {data.businessHours.map((day) => (
             <div key={day.day} className="flex justify-between text-sm">
-              <span className="capitalize text-gray-600">{day.day}</span>
-              <span className={day.is_closed ? 'text-gray-400' : 'text-gray-900'}>
+              <span className="capitalize text-slate-500 dark:text-[#bdbdbf]">{day.day}</span>
+              <span className={day.is_closed ? 'text-slate-400 dark:text-[#666]' : 'text-slate-900 dark:text-[#f5f5f5]'}>
                 {day.is_closed ? 'Closed' : `${formatTime(day.open_time)} - ${formatTime(day.close_time)}`}
               </span>
             </div>
@@ -125,9 +125,9 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         {data.phoneNumber ? (
           <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
         ) : (
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>
-            <p className="text-xs text-gray-400 mt-1">You can add one later from Settings</p>
+            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">You can add one later from Settings</p>
           </div>
         )}
       </Section>
@@ -148,14 +148,14 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.06]"
         >
           Back
         </button>
         <button
           onClick={handleLaunch}
           disabled={launching}
-          className="py-3 px-8 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 text-lg"
+          className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
         >
           {launching ? 'Launching...' : 'Launch SimplAssist'}
         </button>
@@ -166,12 +166,12 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
 
 function Section({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) {
   return (
-    <div className="border border-gray-200 rounded-lg p-4">
+    <div className="rounded-[22px] bg-white/50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] p-4">
       <div className="flex justify-between items-center mb-3">
-        <h3 className="font-medium text-gray-900">{title}</h3>
+        <h3 className="font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</h3>
         <button
           onClick={onEdit}
-          className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
         >
           Edit
         </button>
@@ -184,8 +184,8 @@ function Section({ title, onEdit, children }: { title: string; onEdit: () => voi
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between text-sm">
-      <span className="text-gray-500">{label}</span>
-      <span className="text-gray-900 font-medium">{value}</span>
+      <span className="text-slate-500 dark:text-[#bdbdbf]">{label}</span>
+      <span className="text-slate-900 dark:text-[#f5f5f5] font-medium">{value}</span>
     </div>
   );
 }

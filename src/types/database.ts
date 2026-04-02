@@ -49,6 +49,8 @@ export interface Business {
   state: string | null;
   zip: string | null;
   timezone: string;
+  sms_consent_agreed: boolean;
+  sms_consent_agreed_at: string | null;
   created_at: string;
   updated_at: string;
 }

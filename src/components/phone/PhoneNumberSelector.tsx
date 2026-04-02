@@ -14,7 +14,11 @@ interface PurchasedNumber {
   is_active: boolean;
 }
 
-export default function PhoneNumberSelector() {
+interface PhoneNumberSelectorProps {
+  onConsentChange?: (agreed: boolean) => void;
+}
+
+export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSelectorProps) {
   const [areaCode, setAreaCode] = useState("");
   const [numbers, setNumbers] = useState<AvailableNumber[]>([]);
   const [searching, setSearching] = useState(false);
@@ -145,6 +149,27 @@ export default function PhoneNumberSelector() {
           ))}
         </ul>
       )}
+
+      {/* SMS Consent Checkbox */}
+      <label className="flex items-start gap-3 mt-6 p-4 rounded-xl border border-slate-200 dark:border-white/[0.10] bg-slate-50 dark:bg-white/[0.04] cursor-pointer">
+        <input
+          type="checkbox"
+          onChange={(e) => onConsentChange?.(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded accent-[#ff914d] flex-shrink-0"
+        />
+        <span className="text-sm text-slate-600 dark:text-[#bdbdbf] leading-relaxed">
+          By selecting a phone number, I agree that SimplAssist will send automated text messages
+          to customers who contact my business. I will not use this number for spam or unsolicited
+          marketing. Customers can opt out at any time by replying STOP. I agree to SimplAssist&apos;s{" "}
+          <a href="/terms" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
+            Terms of Service
+          </a>{" "}
+          and{" "}
+          <a href="/privacy" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
+            Privacy Policy
+          </a>.
+        </span>
+      </label>
     </div>
   );
 }

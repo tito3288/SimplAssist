@@ -60,6 +60,7 @@ export default function OnboardingPage() {
   const [servicesData, setServicesData] = useState<ServicesData | null>(null);
   const [aiData, setAiData] = useState<AIData | null>(null);
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string | null>(null);
+  const [smsConsentAgreed, setSmsConsentAgreed] = useState(false);
 
   const fetchBusiness = useCallback(async () => {
     const supabase = createClient();
@@ -105,6 +106,15 @@ export default function OnboardingPage() {
     if (twilioNumber) {
       setSelectedPhoneNumber(twilioNumber.phone_number);
     }
+
+    // Save SMS consent to database
+    if (smsConsentAgreed) {
+      await supabase.from('businesses').update({
+        sms_consent_agreed: true,
+        sms_consent_agreed_at: new Date().toISOString(),
+      }).eq('id', businessId);
+    }
+
     setStep(6);
   };
 
@@ -177,22 +187,22 @@ export default function OnboardingPage() {
         {step === 5 && (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full mb-4">
-                <Phone className="w-6 h-6 text-blue-600" />
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-orange-100 dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))] border border-orange-200 dark:border-white/[0.10] mb-4">
+                <Phone className="w-6 h-6 text-[#ff914d]" />
               </div>
-              <h2 className="text-xl font-semibold text-gray-900">Choose a phone number for your AI assistant</h2>
-              <p className="mt-2 text-sm text-gray-500">
+              <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Choose a phone number for your AI assistant</h2>
+              <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">
                 Customers will text this number and your AI will respond automatically
               </p>
             </div>
 
-            <PhoneNumberSelector />
+            <PhoneNumberSelector onConsentChange={setSmsConsentAgreed} />
 
             <div className="flex justify-between pt-4">
               <button
                 type="button"
                 onClick={() => setStep(4)}
-                className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+                className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
               >
                 Back
               </button>
@@ -203,14 +213,15 @@ export default function OnboardingPage() {
                     setSelectedPhoneNumber(null);
                     setStep(6);
                   }}
-                  className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+                  className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
                 >
                   Skip for now
                 </button>
                 <button
                   type="button"
                   onClick={handlePhoneStepNext}
-                  className="py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700"
+                  disabled={!smsConsentAgreed}
+                  className="py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-medium rounded-full shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   Next
                 </button>

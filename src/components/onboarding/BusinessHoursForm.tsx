@@ -61,24 +61,24 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
 
   return (
     <div className="space-y-5">
-      <h2 className="text-xl font-semibold text-gray-900">Set your business hours</h2>
-      <p className="text-sm text-gray-500">Let customers know when you&apos;re available.</p>
+      <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Set your business hours</h2>
+      <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">Let customers know when you&apos;re available.</p>
 
       <div className="space-y-3">
         {hours.map((day, index) => (
           <div
             key={day.day}
             className={`flex items-center gap-4 p-3 rounded-lg border ${
-              day.is_closed ? 'bg-gray-50 border-gray-200' : 'border-gray-300'
+              day.is_closed ? 'bg-slate-50 dark:bg-white/[0.04] border-slate-200 dark:border-white/[0.10]' : 'border-slate-200 dark:border-white/[0.12]'
             }`}
           >
-            <span className="w-24 text-sm font-medium text-gray-700 capitalize">{day.day}</span>
+            <span className="w-24 text-sm font-medium text-slate-700 dark:text-[#d4d4d8] capitalize">{day.day}</span>
 
             <button
               type="button"
               onClick={() => updateDay(index, { is_closed: !day.is_closed })}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                !day.is_closed ? 'bg-blue-600' : 'bg-gray-300'
+                !day.is_closed ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
               }`}
             >
               <span
@@ -87,7 +87,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
                 }`}
               />
             </button>
-            <span className="text-xs text-gray-500 w-12">
+            <span className="text-xs text-slate-500 dark:text-[#bdbdbf] w-12">
               {day.is_closed ? 'Closed' : 'Open'}
             </span>
 
@@ -97,14 +97,14 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
                   type="time"
                   value={day.open_time}
                   onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                  className="px-2 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="px-2 py-1 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent"
                 />
-                <span className="text-gray-400">to</span>
+                <span className="text-slate-400 dark:text-[#666]">to</span>
                 <input
                   type="time"
                   value={day.close_time}
                   onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                  className="px-2 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="px-2 py-1 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent"
                 />
               </div>
             )}
@@ -116,7 +116,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.06]"
         >
           Back
         </button>
@@ -124,7 +124,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
           type="button"
           onClick={handleSubmit}
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] font-medium rounded-lg hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
         >
           {saving ? (
             <>

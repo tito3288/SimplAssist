@@ -123,22 +123,22 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-      <h2 className="text-xl font-semibold text-gray-900">Tell us about your business</h2>
+      <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Tell us about your business</h2>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Business Name *</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Name *</label>
         <input
           {...register('name')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         />
-        {errors.name && <p className="text-sm text-red-600 mt-1">{errors.name.message}</p>}
+        {errors.name && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.name.message}</p>}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Business Type *</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Type *</label>
         <select
           {...register('business_type')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         >
           {BUSINESS_TYPE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -149,19 +149,19 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Website URL (optional)</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Website URL (optional)</label>
         <div className="flex gap-2">
           <input
             {...register('website')}
             placeholder="https://www.example.com"
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="flex-1 px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
           />
           {websiteValue && (
             <button
               type="button"
               onClick={handleScanWebsite}
               disabled={scanning}
-              className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
+              className="px-4 py-2 bg-[#ff914d]/10 text-[#ff914d] border border-[#ff914d]/20 hover:bg-[#ff914d]/20 dark:bg-[#ff914d]/10 dark:text-[#ff914d] font-medium rounded-[22px] disabled:opacity-50 whitespace-nowrap"
             >
               {scanning ? (
                 <span className="flex items-center gap-2.5">
@@ -176,67 +176,67 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         </div>
         {scanError && <p className="text-sm text-amber-600 mt-1">{scanError}</p>}
         {scrapedData && (
-          <p className="text-sm text-green-600 mt-1">
+          <p className="text-sm text-green-600 dark:text-green-400 mt-1">
             Website scanned! Found {scrapedData.services?.length || 0} services and {scrapedData.faqs?.length || 0} FAQs.
           </p>
         )}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number *</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Phone Number *</label>
         <input
           {...register('phone')}
           placeholder="(555) 123-4567"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         />
-        {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone.message}</p>}
+        {errors.phone && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.phone.message}</p>}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Business Email (optional)</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Email (optional)</label>
         <input
           {...register('email')}
           type="email"
           placeholder="info@yourbusiness.com"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         />
-        {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>}
-        <p className="text-xs text-gray-500 mt-1">The AI will suggest this email when it can&apos;t fully help a customer.</p>
+        {errors.email && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.email.message}</p>}
+        <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">The AI will suggest this email when it can&apos;t fully help a customer.</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Address *</label>
         <input
           {...register('address')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         />
-        {errors.address && <p className="text-sm text-red-600 mt-1">{errors.address.message}</p>}
+        {errors.address && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.address.message}</p>}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">City *</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">City *</label>
           <input
             {...register('city')}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
           />
-          {errors.city && <p className="text-sm text-red-600 mt-1">{errors.city.message}</p>}
+          {errors.city && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.city.message}</p>}
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">State *</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">State *</label>
           <input
             {...register('state')}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
           />
-          {errors.state && <p className="text-sm text-red-600 mt-1">{errors.state.message}</p>}
+          {errors.state && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.state.message}</p>}
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Zip *</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Zip *</label>
           <input
             {...register('zip')}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
           />
-          {errors.zip && <p className="text-sm text-red-600 mt-1">{errors.zip.message}</p>}
+          {errors.zip && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.zip.message}</p>}
         </div>
       </div>
 
@@ -244,7 +244,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 font-medium rounded-[22px] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
         >
           {saving ? (
             <>

@@ -44,6 +44,15 @@ export async function POST(request: NextRequest) {
       voiceUrl: `${appUrl}/api/twilio/voice`,
     });
 
+    // Associate number with A2P Messaging Service for carrier compliance
+    const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
+    if (messagingServiceSid) {
+      await twilioClient
+        .messaging.v1.services(messagingServiceSid)
+        .phoneNumbers.create({ phoneNumberSid: purchased.sid });
+      console.log(`[purchase] Number ${purchased.phoneNumber} added to Messaging Service ${messagingServiceSid}`);
+    }
+
     const { data: record, error: insertError } = await supabase
       .from("twilio_numbers")
       .insert({

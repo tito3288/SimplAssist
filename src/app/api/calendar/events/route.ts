@@ -1,0 +1,84 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedClient, getCalendarService } from "@/lib/google/client";
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+  const start = searchParams.get("start");
+  const end = searchParams.get("end");
+
+  if (!start || !end) {
+    return NextResponse.json(
+      { error: "start and end query params required" },
+      { status: 400 }
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("id")
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!business) {
+    return NextResponse.json({ error: "Business not found" }, { status: 404 });
+  }
+
+  const { data: token } = await supabase
+    .from("google_calendar_tokens")
+    .select("calendar_id")
+    .eq("business_id", business.id)
+    .single();
+
+  if (!token) {
+    return NextResponse.json({ connected: false });
+  }
+
+  try {
+    const client = await getAuthenticatedClient(business.id);
+    if (!client) {
+      return NextResponse.json({ connected: false });
+    }
+
+    const calendar = getCalendarService(client);
+    const calendarId = token.calendar_id || "primary";
+
+    const response = await calendar.events.list({
+      calendarId,
+      timeMin: start,
+      timeMax: end,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 250,
+    });
+
+    const events = (response.data.items ?? []).map((event) => {
+      const allDay = !!event.start?.date;
+      return {
+        id: event.id ?? "",
+        title: event.summary ?? "(No title)",
+        start: event.start?.dateTime ?? event.start?.date ?? "",
+        end: event.end?.dateTime ?? event.end?.date ?? "",
+        allDay,
+        description: event.description ?? null,
+      };
+    });
+
+    return NextResponse.json({ events });
+  } catch (err) {
+    console.error("[calendar/events] Error fetching events:", err);
+    return NextResponse.json(
+      { error: "Failed to fetch events" },
+      { status: 500 }
+    );
+  }
+}
