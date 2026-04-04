@@ -74,6 +74,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Save SMS consent — user agreed by purchasing a number
+    await supabase.from('businesses').update({
+      sms_consent_agreed: true,
+      sms_consent_agreed_at: new Date().toISOString(),
+    }).eq('id', business.id);
+
     return NextResponse.json({ number: record });
   } catch (error) {
     console.error("Error purchasing number:", error);

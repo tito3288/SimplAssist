@@ -11,15 +11,24 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
   business_type: z.enum([
-    'plumber', 'dentist', 'restaurant', 'car_wash', 'salon', 'hvac', 'auto_shop', 'general',
+    'plumber', 'dentist', 'restaurant', 'car_wash', 'salon', 'hvac', 'auto_shop', 'general', 'other',
   ] as const),
+  business_type_other: z.string().optional(),
   website: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   phone: z.string().min(10, 'Enter a valid phone number'),
-  email: z.string().email('Enter a valid email address').optional().or(z.literal('')),
+  email: z.string().email('Enter a valid email address').min(1, 'Business email is required'),
   address: z.string().min(1, 'Address is required'),
   city: z.string().min(1, 'City is required'),
   state: z.string().min(1, 'State is required'),
   zip: z.string().min(5, 'Enter a valid zip code'),
+}).refine((data) => {
+  if (data.business_type === 'other') {
+    return !!data.business_type_other?.trim();
+  }
+  return true;
+}, {
+  message: 'Please specify your business type',
+  path: ['business_type_other'],
 });
 
 type BusinessInfoData = z.infer<typeof businessInfoSchema>;
@@ -44,6 +53,7 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
   { value: 'hvac', label: 'HVAC' },
   { value: 'auto_shop', label: 'Auto Shop' },
   { value: 'general', label: 'General' },
+  { value: 'other', label: 'Other' },
 ];
 
 export default function BusinessInfoForm({ businessId, initialData, onNext }: BusinessInfoFormProps) {
@@ -60,8 +70,9 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
   } = useForm<BusinessInfoData>({
     resolver: zodResolver(businessInfoSchema),
     defaultValues: {
-      name: initialData?.name || '',
+      name: initialData?.name === 'My Business' ? '' : (initialData?.name || ''),
       business_type: initialData?.business_type || 'general',
+      business_type_other: initialData?.business_type_other || '',
       website: initialData?.website || '',
       phone: initialData?.phone || '',
       email: initialData?.email || '',
@@ -71,6 +82,8 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       zip: initialData?.zip || '',
     },
   });
+
+  const businessTypeValue = watch('business_type');
 
   const websiteValue = watch('website');
 
@@ -103,6 +116,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         .update({
           name: data.name,
           business_type: data.business_type,
+          business_type_other: data.business_type === 'other' ? data.business_type_other || null : null,
           website_url: data.website || null,
           phone_number: data.phone,
           email: data.email || null,
@@ -129,6 +143,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Name *</label>
         <input
           {...register('name')}
+          placeholder="e.g. Joe's Barber Shop"
           className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
         />
         {errors.name && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.name.message}</p>}
@@ -146,6 +161,18 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
             </option>
           ))}
         </select>
+        {businessTypeValue === 'other' && (
+          <div className="mt-2">
+            <input
+              {...register('business_type_other')}
+              placeholder="e.g. Marketing Agency"
+              className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
+            />
+            {errors.business_type_other && (
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.business_type_other.message}</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div>
@@ -193,7 +220,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Email (optional)</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Business Email *</label>
         <input
           {...register('email')}
           type="email"

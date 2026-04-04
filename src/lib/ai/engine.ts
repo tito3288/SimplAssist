@@ -1,6 +1,6 @@
 import { anthropic } from "@/lib/anthropic/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { findOrCreateContact, incrementLeadScore } from "./contacts";
+import { findOrCreateContact, incrementLeadScore, updateContactName, updateContactEmail } from "./contacts";
 import { getOrCreateConversation, addMessage, getConversationHistory } from "./conversations";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
 import { calendarTools, shouldIncludeCalendarTools } from "./tools";
@@ -27,6 +27,60 @@ function scoreMessage(message: string): number {
   if (/\b(service|offer|provide|do you do)\b/.test(lower)) score += 1;
 
   return score;
+}
+
+const contactTools: Anthropic.Tool[] = [
+  {
+    name: "save_contact_name",
+    description: "Save the customer's name to their contact record. Call this when the customer tells you their name.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: {
+          type: "string",
+          description: "The customer's name",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "save_contact_email",
+    description: "Save the customer's email to their contact record. Call this when the customer provides their email address.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        email: {
+          type: "string",
+          description: "The customer's email address",
+        },
+      },
+      required: ["email"],
+    },
+  },
+];
+
+async function executeContactTool(
+  contactId: string,
+  toolName: string,
+  toolInput: Record<string, unknown>
+): Promise<string> {
+  try {
+    if (toolName === "save_contact_name") {
+      const name = toolInput.name as string;
+      await updateContactName(contactId, name);
+      return `Contact name saved: ${name}`;
+    }
+    if (toolName === "save_contact_email") {
+      const email = toolInput.email as string;
+      await updateContactEmail(contactId, email);
+      return `Contact email saved: ${email}`;
+    }
+    return "Unknown tool.";
+  } catch (error) {
+    console.error(`[contact-tool] Error executing ${toolName}:`, error);
+    return "Contact info saved.";
+  }
 }
 
 async function executeCalendarTool(
@@ -160,13 +214,19 @@ export async function processIncomingMessage(
       message
     );
 
+    // Build tools array — contact tools are always available, calendar tools are conditional
+    const tools: Anthropic.Tool[] = [...contactTools];
+    if (useTools) {
+      tools.push(...calendarTools);
+    }
+
     // Build API params
     const apiParams: Anthropic.MessageCreateParamsNonStreaming = {
       model: "claude-haiku-4-20250404",
-      max_tokens: useTools ? 500 : 300,
+      max_tokens: 500,
       system: systemPrompt,
       messages,
-      ...(useTools ? { tools: calendarTools } : {}),
+      tools,
     };
 
     let response = await anthropic.messages.create(apiParams);
@@ -181,13 +241,23 @@ export async function processIncomingMessage(
 
       if (!toolUseBlock) break;
 
-      const toolResult = await executeCalendarTool(
-        businessId,
-        toolUseBlock.name,
-        toolUseBlock.input as Record<string, unknown>,
-        (business as Business).timezone,
-        contactPhone
-      );
+      // Route to the correct tool handler
+      let toolResult: string;
+      if (toolUseBlock.name === "save_contact_name" || toolUseBlock.name === "save_contact_email") {
+        toolResult = await executeContactTool(
+          contact.id,
+          toolUseBlock.name,
+          toolUseBlock.input as Record<string, unknown>
+        );
+      } else {
+        toolResult = await executeCalendarTool(
+          businessId,
+          toolUseBlock.name,
+          toolUseBlock.input as Record<string, unknown>,
+          (business as Business).timezone,
+          contactPhone
+        );
+      }
 
       // Add assistant's response (with tool use) and tool result to messages
       messages.push({ role: "assistant", content: response.content });

@@ -220,23 +220,9 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Web Chat Greeting</label>
-              <span className="text-xs text-slate-400 dark:text-[#666]">{webGreeting.length} characters</span>
-            </div>
-            <textarea
-              {...register('web_chat_greeting')}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] resize-none"
-            />
-            {errors.web_chat_greeting && <p className="text-sm text-red-600 mt-1">{errors.web_chat_greeting.message}</p>}
-            <button
-              type="button"
-              onClick={() => setValue('web_chat_greeting', defaultWebGreeting)}
-              className="text-xs text-[#ff914d] hover:text-[#e07a3a] mt-1"
-            >
-              Reset to default
-            </button>
+            <p className="text-xs text-slate-400 dark:text-[#666]">
+              Web chat greeting is configured in the <a href="/widget" className="text-[#ff914d] hover:text-[#ffb07a] underline">Widget settings</a> page.
+            </p>
           </div>
         </div>
       </section>

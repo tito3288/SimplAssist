@@ -92,12 +92,20 @@ export default function AIPersonalityForm({
         language: data.language,
         sms_response_delay_seconds: data.response_delay_seconds,
         sms_greeting: data.sms_greeting,
-        web_chat_greeting: data.web_greeting,
+        web_chat_greeting: data.web_greeting || 'Hi! How can we help you today?',
         guardrails: guardrailLines,
         booking_enabled: data.booking_enabled,
         booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
       });
       if (error) throw error;
+
+      // Save welcome message to widget config
+      if (data.web_greeting?.trim()) {
+        await supabase.from('widget_configs').upsert({
+          business_id: businessId,
+          welcome_message: data.web_greeting,
+        }, { onConflict: 'business_id' });
+      }
       onNext(data);
     } catch {
       // Silently handle
@@ -213,15 +221,16 @@ export default function AIPersonalityForm({
         {errors.sms_greeting && <p className="text-sm text-red-600 mt-1">{errors.sms_greeting.message}</p>}
       </div>
 
-      {/* Web Chat Greeting */}
+      {/* Widget Welcome Message */}
       <div>
-        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Web Chat Greeting</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">Widget Welcome Message</label>
         <textarea
           {...register('web_greeting')}
           rows={2}
+          placeholder="Welcome to our business! How can we help you today?"
           className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent resize-none"
         />
-        {errors.web_greeting && <p className="text-sm text-red-600 mt-1">{errors.web_greeting.message}</p>}
+        <p className="text-xs text-slate-400 dark:text-[#666] mt-1">The first message visitors see when they open your chat widget.</p>
       </div>
 
       {/* Guardrails */}

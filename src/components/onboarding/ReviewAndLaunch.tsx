@@ -7,6 +7,7 @@ interface ReviewData {
   businessInfo: {
     name: string;
     business_type: string;
+    business_type_other?: string;
     phone: string;
     address: string;
     city: string;
@@ -62,6 +63,7 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   hvac: 'HVAC',
   auto_shop: 'Auto Shop',
   general: 'General',
+  other: 'Other',
 };
 
 export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
@@ -91,7 +93,11 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
       {/* Business Info */}
       <Section title="Business Info" onEdit={() => onEditStep(1)}>
         <SummaryRow label="Name" value={data.businessInfo.name} />
-        <SummaryRow label="Type" value={BUSINESS_TYPE_LABELS[data.businessInfo.business_type] || data.businessInfo.business_type} />
+        <SummaryRow label="Type" value={
+              data.businessInfo.business_type === 'other'
+                ? (data.businessInfo.business_type_other || 'Other')
+                : (BUSINESS_TYPE_LABELS[data.businessInfo.business_type] || data.businessInfo.business_type)
+            } />
         <SummaryRow label="Phone" value={data.businessInfo.phone} />
         <SummaryRow
           label="Address"

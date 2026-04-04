@@ -25,6 +25,12 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [purchased, setPurchased] = useState<PurchasedNumber | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [consented, setConsented] = useState(false);
+
+  function handleConsentToggle(checked: boolean) {
+    setConsented(checked);
+    onConsentChange?.(checked);
+  }
 
   async function handleSearch() {
     if (!/^\d{3}$/.test(areaCode)) {
@@ -103,7 +109,30 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-3">
+      {/* SMS Consent Checkbox — must agree before searching */}
+      <label className="flex items-start gap-3 p-4 rounded-xl border border-slate-200 dark:border-white/[0.10] bg-slate-50 dark:bg-white/[0.04] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={consented}
+          onChange={(e) => handleConsentToggle(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded accent-[#ff914d] flex-shrink-0"
+        />
+        <span className="text-sm text-slate-600 dark:text-[#bdbdbf] leading-relaxed">
+          By selecting a phone number, I agree that SimplAssist will send automated text messages
+          to customers who contact my business. I will not use this number for spam or unsolicited
+          marketing. Customers can opt out at any time by replying STOP. I agree to SimplAssist&apos;s{" "}
+          <a href="/terms" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
+            Terms of Service
+          </a>{" "}
+          and{" "}
+          <a href="/privacy" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
+            Privacy Policy
+          </a>.
+        </span>
+      </label>
+
+      {/* Search area — disabled until consented */}
+      <div className={`flex gap-3 transition-opacity ${!consented ? "opacity-50 pointer-events-none" : ""}`}>
         <input
           type="text"
           value={areaCode}
@@ -111,12 +140,13 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
             setAreaCode(e.target.value.replace(/\D/g, "").slice(0, 3))
           }
           placeholder="Area code (e.g. 415)"
-          className="w-40 rounded-md border border-gray-300 dark:border-white/[0.12] px-3 py-2 text-sm dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
+          disabled={!consented}
+          className="w-40 rounded-md border border-gray-300 dark:border-white/[0.12] px-3 py-2 text-sm dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d] disabled:cursor-not-allowed"
           maxLength={3}
         />
         <button
           onClick={handleSearch}
-          disabled={searching || areaCode.length !== 3}
+          disabled={!consented || searching || areaCode.length !== 3}
           className="rounded-md bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {searching ? "Searching..." : "Search"}
@@ -149,27 +179,6 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
           ))}
         </ul>
       )}
-
-      {/* SMS Consent Checkbox */}
-      <label className="flex items-start gap-3 mt-6 p-4 rounded-xl border border-slate-200 dark:border-white/[0.10] bg-slate-50 dark:bg-white/[0.04] cursor-pointer">
-        <input
-          type="checkbox"
-          onChange={(e) => onConsentChange?.(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded accent-[#ff914d] flex-shrink-0"
-        />
-        <span className="text-sm text-slate-600 dark:text-[#bdbdbf] leading-relaxed">
-          By selecting a phone number, I agree that SimplAssist will send automated text messages
-          to customers who contact my business. I will not use this number for spam or unsolicited
-          marketing. Customers can opt out at any time by replying STOP. I agree to SimplAssist&apos;s{" "}
-          <a href="/terms" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
-            Terms of Service
-          </a>{" "}
-          and{" "}
-          <a href="/privacy" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
-            Privacy Policy
-          </a>.
-        </span>
-      </label>
     </div>
   );
 }

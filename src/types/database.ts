@@ -6,7 +6,8 @@ export type BusinessType =
   | "salon"
   | "hvac"
   | "auto_shop"
-  | "general";
+  | "general"
+  | "other";
 
 export type FAQSource = "scraped" | "manual" | "suggested";
 
@@ -41,6 +42,7 @@ export interface Business {
   owner_id: string;
   name: string;
   business_type: BusinessType;
+  business_type_other: string | null;
   website_url: string | null;
   phone_number: string | null;
   email: string | null;

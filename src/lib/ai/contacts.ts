@@ -64,6 +64,16 @@ export async function updateContactName(
     .eq("id", contactId);
 }
 
+export async function updateContactEmail(
+  contactId: string,
+  email: string
+): Promise<void> {
+  await supabaseAdmin
+    .from("contacts")
+    .update({ email })
+    .eq("id", contactId);
+}
+
 export async function incrementLeadScore(
   contactId: string,
   amount: number

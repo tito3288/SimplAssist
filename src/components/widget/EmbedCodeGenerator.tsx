@@ -26,26 +26,29 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
         Add the chat widget to your website by copying the code below.
       </p>
 
-      <div className="relative rounded-lg bg-gray-900 dark:bg-white/[0.03] dark:border dark:border-white/[0.10] p-4">
-        <pre className="text-sm text-green-400 whitespace-pre-wrap break-all font-mono">
+      <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-gray-900 dark:border-white/[0.10] dark:bg-white/[0.03]">
+        <div className="flex items-center justify-end gap-2 border-b border-slate-700/80 bg-slate-800/80 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-gray-600 dark:bg-white/[0.08] dark:text-[#e8e8e8] dark:hover:bg-white/[0.12]"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Copy to clipboard
+              </>
+            )}
+          </button>
+        </div>
+        <pre className="p-4 text-sm font-mono text-green-400 whitespace-pre-wrap break-all">
           {embedCode}
         </pre>
-        <button
-          onClick={handleCopy}
-          className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-md bg-gray-700 dark:bg-white/[0.06] dark:border dark:border-white/[0.12] px-3 py-1.5 text-xs font-medium text-gray-200 dark:text-[#bdbdbf] hover:bg-gray-600 dark:hover:bg-white/[0.10] transition-colors"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3.5 w-3.5" />
-              Copied!
-            </>
-          ) : (
-            <>
-              <Copy className="h-3.5 w-3.5" />
-              Copy to Clipboard
-            </>
-          )}
-        </button>
       </div>
 
       <div className="mt-4 space-y-2">

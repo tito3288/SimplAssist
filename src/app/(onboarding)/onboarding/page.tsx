@@ -16,6 +16,7 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 interface BusinessInfoData {
   name: string;
   business_type: BusinessType;
+  business_type_other?: string;
   website?: string;
   phone: string;
   address: string;
@@ -78,6 +79,7 @@ export default function OnboardingPage() {
       setBusinessInfo({
         name: business.name || '',
         business_type: business.business_type || 'general',
+        business_type_other: business.business_type_other || '',
         website: business.website_url || '',
         phone: business.phone_number || '',
         address: business.address || '',

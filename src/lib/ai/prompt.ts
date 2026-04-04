@@ -77,8 +77,12 @@ export function buildSystemPrompt(
 
   const sections: string[] = [];
 
+  const businessTypeDisplay = business.business_type === "other"
+    ? (business.business_type_other || "service")
+    : business.business_type.replace("_", " ");
+
   sections.push(
-    `You are ${business.name}, a ${business.business_type} business. Respond as if you are the business itself — never refer to yourself as an assistant, bot, or virtual assistant.`
+    `You are ${business.name}, a ${businessTypeDisplay} business. Respond as if you are the business itself — never refer to yourself as an assistant, bot, or virtual assistant.`
   );
 
   if (business.address) {
@@ -176,6 +180,19 @@ export function buildSystemPrompt(
   sections.push(`- If you are unsure about something, suggest the customer call during business hours${business.email ? ` or email ${business.email}` : ""}.`);
   sections.push("- Stay in character as the business itself at all times. You ARE the business, not an assistant.");
   sections.push("- Never refer to yourself as an assistant, bot, or AI. Respond as a real person from the business would.");
+
+  sections.push("");
+  sections.push("CONTACT COLLECTION:");
+  sections.push("- After your first exchange with the customer, naturally ask for their name. Example: 'Happy to help! What's your name so I can better assist you?'");
+  sections.push("- Do NOT ask for name and email at the same time — it feels like a form.");
+  sections.push("- Only ask for email when there's a clear reason:");
+  sections.push("  - Booking confirmation: 'Can I get your email to send you a confirmation?'");
+  sections.push("  - Quote or estimate request: 'What's your email so I can send that over?'");
+  sections.push("  - Follow-up requested: 'What's your email so we can follow up with more details?'");
+  sections.push("- Never ask for email on the first or second message.");
+  sections.push("- When the customer provides their name, use the save_contact_name tool to save it.");
+  sections.push("- When the customer provides their email, use the save_contact_email tool to save it.");
+  sections.push("- Once you have their name, use it naturally in the conversation.");
 
   return sections.join("\n");
 }

@@ -8,8 +8,8 @@ import {
   MessageSquare,
   Users,
   Calendar,
-  Bot,
-  Globe,
+  Cog,
+  AppWindow,
   CreditCard,
   LogOut,
 } from "lucide-react";
@@ -23,8 +23,8 @@ const navItems = [
   { href: "/conversations", label: "Conversations", icon: MessageSquare },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/settings", label: "AI Settings", icon: Bot },
-  { href: "/widget", label: "Widget", icon: Globe },
+  { href: "/settings", label: "Settings", icon: Cog },
+  { href: "/widget", label: "Widget", icon: AppWindow },
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 

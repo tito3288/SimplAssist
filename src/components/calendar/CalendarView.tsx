@@ -181,7 +181,7 @@ export default function CalendarView({
         </h3>
         <p className={`mb-6 max-w-md mx-auto ${textSecondary}`}>
           Link your Google Calendar to see your appointments and bookings here.
-          Go to AI Settings and enable Direct Scheduling to connect.
+          Go to Settings and enable Direct Scheduling to connect.
           {googleEmail && (
             <span className="block mt-1 text-sm">
               Previously connected: {googleEmail}

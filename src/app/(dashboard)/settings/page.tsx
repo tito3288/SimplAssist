@@ -42,7 +42,7 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">AI Settings</h1>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Settings</h1>
         <p className="mt-1 text-slate-500 dark:text-[#bdbdbf]">Configure how your AI assistant behaves and communicates.</p>
       </div>
 

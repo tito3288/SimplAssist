@@ -42,19 +42,12 @@ export async function GET(request: NextRequest) {
       .eq("id", businessId)
       .single();
 
-    const { data: aiSettings } = await supabaseAdmin
-      .from("ai_settings")
-      .select("web_chat_greeting")
-      .eq("business_id", businessId)
-      .single();
-
     return NextResponse.json(
       {
         businessName: business?.name || "Business",
         brandColor: widgetConfig.brand_color,
         position: widgetConfig.position,
-        welcomeMessage:
-          aiSettings?.web_chat_greeting || widgetConfig.welcome_message,
+        welcomeMessage: widgetConfig.welcome_message,
         showLogo: widgetConfig.show_logo,
         logoUrl: widgetConfig.logo_url,
         leadCaptureEnabled: widgetConfig.lead_capture_enabled,

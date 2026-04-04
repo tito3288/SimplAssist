@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { MessageSquare, Users, Zap, Mail, ArrowRight, Sparkles, CreditCard, Flame, Phone, X, AlertTriangle } from 'lucide-react';
+import { MessageSquare, Users, Zap, Mail, ArrowRight, Cog, CreditCard, Flame, Phone, X, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import type { Conversation, Contact } from '@/types/database';
@@ -287,10 +287,10 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
             <div
               className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
             >
-              <Sparkles className="w-5 h-5 text-[#ff914d]" />
+              <Cog className="w-5 h-5 text-[#ff914d]" />
             </div>
             <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${textPrimary}`}>
-              AI Settings
+              Settings
             </h4>
             <p className={`text-sm leading-relaxed ${textSecondary}`}>
               Tune tone, greetings, and guardrails so your assistant sounds like your brand.
