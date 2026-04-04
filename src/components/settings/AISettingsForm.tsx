@@ -49,7 +49,6 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);
 
   const defaultSmsGreeting = `Hey! Thanks for reaching out to ${businessName}. How can we help?`;
-  const defaultWebGreeting = `Hi! I'm ${businessName}'s assistant. Ask me anything about our services.`;
 
   const {
     register,
@@ -78,7 +77,6 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   const responseDelay = watch('sms_response_delay_seconds');
   const selectedTone = watch('tone');
   const smsGreeting = watch('sms_greeting');
-  const webGreeting = watch('web_chat_greeting');
 
   const addGuardrail = (text: string) => {
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
