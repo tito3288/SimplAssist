@@ -82,15 +82,19 @@ export async function GET() {
     '.sa-widget-footer{padding:10px 12px;border-top:1px solid #e8eaed;background:#f3f4f6;flex-shrink:0;text-align:center;font-size:11px;line-height:1.4;}',
     '.sa-widget-footer a{color:#9ca3af;text-decoration:none;}',
     '.sa-widget-footer a:hover{color:#6b7280;text-decoration:underline;}',
-    '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:#ff8c42;flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
+    '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:var(--sa-brand,#ff8c42);flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
     '@keyframes sa-widget-dot-pulse{0%{transform:scale(1);opacity:1;}50%{transform:scale(1.6);opacity:0.4;}100%{transform:scale(1);opacity:1;}}',
+    '.sa-widget-cursor{display:inline-block;width:2px;height:1em;background:#1a1a1a;margin-left:1px;vertical-align:text-bottom;animation:sa-widget-blink 0.7s step-end infinite;}',
+    '@keyframes sa-widget-blink{0%,100%{opacity:1;}50%{opacity:0;}}',
     '.sa-widget-lead-form{padding:20px 16px;display:flex;flex-direction:column;gap:12px;}',
     '.sa-widget-lead-form p{margin:0;font-size:14px;color:#4a5568;text-align:center;}',
     '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit;}',
     '.sa-widget-lead-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
     '.sa-widget-lead-btn{border:none;color:#fff;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
-    '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}'
+    '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
+    '.sa-widget-btn.sa-btn-hidden{opacity:0;transform:scale(0.8);pointer-events:none;}',
+    '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}'
   ].join('\\n');
   document.head.appendChild(style);
 
@@ -206,10 +210,37 @@ export async function GET() {
     }
   }
 
-  function addMsg(text, type) {
+  function typeMsg(text, msgEl, callback) {
+    var i = 0;
+    var cursor = el('span', { class: 'sa-widget-cursor' });
+    msgEl.textContent = '';
+    msgEl.appendChild(cursor);
+    var speed = Math.max(5, Math.min(30, 1500 / (text.length || 1)));
+    var timer = setInterval(function() {
+      if (i < text.length) {
+        if (text.charAt(i) === '\\n') {
+          cursor.before(document.createElement('br'));
+        } else {
+          cursor.before(document.createTextNode(text.charAt(i)));
+        }
+        i++;
+        if (i % 3 === 0) scrollToBottom();
+      } else {
+        clearInterval(timer);
+        cursor.remove();
+        scrollToBottom();
+        if (callback) callback();
+      }
+    }, speed);
+  }
+
+  function addMsg(text, type, callback) {
     var cls = type === 'bot' ? 'sa-widget-msg sa-widget-msg-bot' : 'sa-widget-msg sa-widget-msg-user';
-    var msg = el('div', { class: cls }, text);
-    if (type === 'user' && config) msg.style.backgroundColor = config.brandColor;
+    var msg = el('div', { class: cls });
+    if (type === 'user') {
+      msg.textContent = text;
+      if (config) msg.style.backgroundColor = config.brandColor;
+    }
     messagesArea.appendChild(msg);
     messages.push({ text: text, type: type });
     if (type === 'bot' && !isOpen) {
@@ -218,6 +249,11 @@ export async function GET() {
       badge.style.display = 'flex';
     }
     scrollToBottom();
+    if (type === 'bot') {
+      typeMsg(text, msg, callback);
+    } else if (callback) {
+      callback();
+    }
   }
 
   function scrollToBottom() {
@@ -308,25 +344,34 @@ export async function GET() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       hideLoading();
-      sendBtn.disabled = false;
+      isLoading = true;
       if (data.response) {
-        addMsg(data.response, 'bot');
-        messageCount++;
-        if (needsLeadCapture()) showLeadForm();
+        addMsg(data.response, 'bot', function() {
+          sendBtn.disabled = false;
+          isLoading = false;
+          messageCount++;
+          if (needsLeadCapture()) showLeadForm();
+        });
       } else if (data.error) {
-        addMsg('Sorry, something went wrong. Please try again.', 'bot');
+        addMsg('Sorry, something went wrong. Please try again.', 'bot', function() {
+          sendBtn.disabled = false;
+          isLoading = false;
+        });
       }
     })
     .catch(function() {
       hideLoading();
-      sendBtn.disabled = false;
-      addMsg('Sorry, something went wrong. Please try again.', 'bot');
+      isLoading = true;
+      addMsg('Sorry, something went wrong. Please try again.', 'bot', function() {
+        sendBtn.disabled = false;
+        isLoading = false;
+      });
     });
   }
 
-  // Initialize
+  // Initialize — hide button until config loads
+  btn.classList.add('sa-btn-hidden');
   positionWidget('bottom_right');
-  applyBrandColor('#0066FF');
 
   fetch(baseUrl + '/api/widget/config?businessId=' + encodeURIComponent(businessId))
     .then(function(r) { return r.json(); })
@@ -337,6 +382,8 @@ export async function GET() {
       applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
       applyBrandColor(data.brandColor || '#0066FF');
       positionWidget(data.position || 'bottom_right');
+      btn.classList.remove('sa-btn-hidden');
+      btn.classList.add('sa-btn-visible');
       addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot');
       unreadCount = 0;
       badge.style.display = 'none';
@@ -346,6 +393,9 @@ export async function GET() {
       console.error('SimplAssist: failed to load config', err);
       titleH3.textContent = 'SimplAssist';
       applyHeaderAvatar('SimplAssist', false, '');
+      applyBrandColor('#0066FF');
+      btn.classList.remove('sa-btn-hidden');
+      btn.classList.add('sa-btn-visible');
       addMsg('Hi! How can we help you today?', 'bot');
       unreadCount = 0;
       badge.style.display = 'none';

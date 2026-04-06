@@ -204,7 +204,8 @@ export async function processIncomingMessage(
       (services ?? []) as Service[],
       (faqs ?? []) as FAQ[],
       (businessHours ?? []) as BusinessHours[],
-      hasCalendar
+      hasCalendar,
+      channel
     );
 
     const history = await getConversationHistory(conversation.id);

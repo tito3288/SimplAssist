@@ -69,7 +69,8 @@ export function buildSystemPrompt(
   services: Service[],
   faqs: FAQ[],
   businessHours: BusinessHours[],
-  calendarConnected: boolean = false
+  calendarConnected: boolean = false,
+  channel: string = "sms"
 ): string {
   const { open, todayHours } = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
@@ -174,8 +175,17 @@ export function buildSystemPrompt(
 
   sections.push("");
   sections.push("GENERAL INSTRUCTIONS:");
-  sections.push("- Be helpful and concise. This is an SMS/chat conversation — keep responses short, ideally under 160 characters when possible.");
-  sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.).");
+  if (channel === "web_chat") {
+    sections.push("- Be helpful and concise. This is a website chat conversation.");
+    sections.push("- Use simple, beginner-friendly language.");
+    sections.push("- Break things down clearly with numbered steps or short paragraphs.");
+    sections.push("- Add line breaks between each tip or section so it is easy to skim.");
+    sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.) — just use plain text with line breaks.");
+    sections.push("- Keep answers short by default but you can be more detailed when the question warrants it.");
+  } else {
+    sections.push("- Be helpful and concise. This is an SMS conversation — keep responses short, ideally under 160 characters when possible.");
+    sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.).");
+  }
   sections.push("- Do NOT make up information that is not provided in this context.");
   sections.push(`- If you are unsure about something, suggest the customer call during business hours${business.email ? ` or email ${business.email}` : ""}.`);
   sections.push("- Stay in character as the business itself at all times. You ARE the business, not an assistant.");
