@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import { glassCard } from '@/lib/glass';
+import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -77,10 +78,16 @@ export default async function DashboardPage() {
     })
   );
 
+  const firstName = getFirstNameFromAuthMetadata(user);
+  const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Dashboard</h1>
+        <p className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-[#f5f5f5]">
+          {welcomeLine}
+        </p>
+        <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Dashboard</h1>
         <p className="mt-1 text-slate-500 dark:text-[#bdbdbf]">Overview of your business activity.</p>
       </div>
 

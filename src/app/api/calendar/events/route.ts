@@ -82,3 +82,99 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export async function POST(request: NextRequest) {
+  let body: { title?: string; description?: string; startTime?: string; endTime?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { title, description, startTime, endTime } = body;
+
+  if (!title || !startTime || !endTime) {
+    return NextResponse.json(
+      { error: "title, startTime, and endTime are required" },
+      { status: 400 }
+    );
+  }
+
+  if (new Date(endTime) <= new Date(startTime)) {
+    return NextResponse.json(
+      { error: "endTime must be after startTime" },
+      { status: 400 }
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("id")
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!business) {
+    return NextResponse.json({ error: "Business not found" }, { status: 404 });
+  }
+
+  const { data: token } = await supabase
+    .from("google_calendar_tokens")
+    .select("calendar_id")
+    .eq("business_id", business.id)
+    .single();
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Google Calendar not connected" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const client = await getAuthenticatedClient(business.id);
+    if (!client) {
+      return NextResponse.json(
+        { error: "Google Calendar not connected" },
+        { status: 400 }
+      );
+    }
+
+    const calendar = getCalendarService(client);
+    const calendarId = token.calendar_id || "primary";
+
+    const event = await calendar.events.insert({
+      calendarId,
+      requestBody: {
+        summary: title,
+        description: description || undefined,
+        start: { dateTime: startTime },
+        end: { dateTime: endTime },
+        reminders: { useDefault: true },
+      },
+    });
+
+    return NextResponse.json({
+      event: {
+        id: event.data.id ?? "",
+        title: event.data.summary ?? title,
+        start: event.data.start?.dateTime ?? startTime,
+        end: event.data.end?.dateTime ?? endTime,
+      },
+    });
+  } catch (err) {
+    console.error("[calendar/events] Error creating event:", err);
+    return NextResponse.json(
+      { error: "Failed to create event" },
+      { status: 500 }
+    );
+  }
+}

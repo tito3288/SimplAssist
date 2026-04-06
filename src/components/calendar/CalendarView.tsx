@@ -7,7 +7,9 @@ import {
   CalendarDays,
   Clock,
   Loader2,
+  Plus,
 } from "lucide-react";
+import CreateEventModal from "./CreateEventModal";
 import {
   glassCard,
   glassCardSubtle,
@@ -93,6 +95,7 @@ export default function CalendarView({
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(initialConnected);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const fetchEvents = useCallback(async () => {
     if (!connected) return;
@@ -295,9 +298,18 @@ export default function CalendarView({
         {/* Right: Day detail panel */}
         <div className="lg:col-span-1">
           <div className="p-4 rounded-[22px] bg-white/50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] h-full">
-            <h3 className={`text-sm font-bold mb-4 ${textPrimary}`}>
-              {formatFullDate(selectedDate)}
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`text-sm font-bold ${textPrimary}`}>
+                {formatFullDate(selectedDate)}
+              </h3>
+              <button
+                onClick={() => setCreateModalOpen(true)}
+                className="w-7 h-7 grid place-items-center rounded-lg bg-[#ff914d] text-white hover:bg-[#e87d3a] transition-colors"
+                title="Create event"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
 
             {selectedEvents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -338,6 +350,13 @@ export default function CalendarView({
           </div>
         </div>
       </div>
+
+      <CreateEventModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        selectedDate={selectedDate}
+        onEventCreated={fetchEvents}
+      />
     </div>
   );
 }

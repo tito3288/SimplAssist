@@ -20,3 +20,14 @@ export function formatDate(date: string | Date, formatStr: string = "PPp"): stri
 export function generateId(size: number = 12): string {
   return nanoid(size);
 }
+
+/** First token of Supabase Auth `user_metadata.full_name`, title-cased, or null if missing. */
+export function getFirstNameFromAuthMetadata(user: {
+  user_metadata?: Record<string, unknown> | null;
+}): string | null {
+  const raw = user.user_metadata?.full_name;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const first = raw.trim().split(/\s+/)[0];
+  if (!first) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}

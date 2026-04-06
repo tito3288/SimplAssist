@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { useForm } from 'react-hook-form';
 import { createBrowserClient } from '@/lib/supabase/client';
 import type { WidgetConfig, WidgetPosition, LeadCaptureTiming } from '@/types/database';
@@ -9,6 +10,9 @@ import {
   Save,
   Check,
   RotateCcw,
+  Upload,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 
@@ -38,6 +42,116 @@ interface FormValues {
 interface WidgetConfigFormProps {
   config: WidgetConfig;
   onSaved?: () => void;
+}
+
+function LogoUpload({
+  currentUrl,
+  businessId,
+  onUploaded,
+  onRemoved,
+}: {
+  currentUrl: string;
+  businessId: string;
+  onUploaded: (url: string) => void;
+  onRemoved: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setError(null);
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("businessId", businessId);
+
+      const res = await fetch("/api/widget/logo", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Upload failed");
+        return;
+      }
+
+      onUploaded(data.url);
+    } catch {
+      setError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Logo</label>
+
+      {currentUrl ? (
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-slate-200 dark:border-white/[0.12] flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={currentUrl} alt="Logo" className="w-full h-full object-cover" />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
+            >
+              {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Change
+            </button>
+            <button
+              type="button"
+              onClick={onRemoved}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="w-full flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-slate-200 dark:border-white/[0.12] hover:border-[#ff914d] dark:hover:border-[#ff914d]/50 transition-colors cursor-pointer"
+        >
+          {uploading ? (
+            <Loader2 className="w-6 h-6 text-[#ff914d] animate-spin" />
+          ) : (
+            <Upload className="w-6 h-6 text-slate-400 dark:text-[#666]" />
+          )}
+          <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+            {uploading ? "Uploading..." : "Click to upload your logo"}
+          </span>
+          <span className="text-xs text-slate-400 dark:text-[#666]">PNG, JPG, SVG, or WEBP. Max 2MB.</span>
+        </button>
+      )}
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/svg+xml,image/webp"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      {error && <p className="text-sm text-red-600 dark:text-red-400 mt-2">{error}</p>}
+    </div>
+  );
 }
 
 export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormProps) {
@@ -109,12 +223,29 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
           {/* Brand color */}
           <div>
             <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Brand Color</label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                {...register('brand_color')}
-                className="h-10 w-10 rounded border border-slate-200 dark:border-white/[0.12] cursor-pointer p-0.5"
+            <div className="space-y-3">
+              <HexColorPicker
+                color={brandColor}
+                onChange={(color) => setValue('brand_color', color)}
               />
+
+              {/* Hex input + current swatch */}
+              <div className="flex items-center gap-3">
+                <div
+                  className="h-9 w-9 rounded-lg border border-slate-200 dark:border-white/[0.12] flex-shrink-0"
+                  style={{ backgroundColor: brandColor }}
+                />
+                <div className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-white/[0.12] dark:bg-white/[0.06] px-3 py-2">
+                  <span className="text-sm text-slate-400 dark:text-[#666]">#</span>
+                  <HexColorInput
+                    color={brandColor}
+                    onChange={(color) => setValue('brand_color', color)}
+                    className="w-20 bg-transparent text-sm text-slate-900 dark:text-[#f5f5f5] outline-none uppercase tracking-wider"
+                  />
+                </div>
+              </div>
+
+              {/* Preset swatches */}
               <div className="flex gap-2">
                 {PRESET_COLORS.map((color) => (
                   <button
@@ -186,17 +317,14 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
             </button>
           </div>
 
-          {/* Logo URL */}
+          {/* Logo Upload */}
           {showLogo && (
-            <div>
-              <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-1">Logo URL</label>
-              <input
-                type="url"
-                {...register('logo_url')}
-                placeholder="https://example.com/logo.png"
-                className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none"
-              />
-            </div>
+            <LogoUpload
+              currentUrl={watch('logo_url')}
+              businessId={config.business_id}
+              onUploaded={(url) => setValue('logo_url', url)}
+              onRemoved={() => setValue('logo_url', '')}
+            />
           )}
         </div>
       </div>

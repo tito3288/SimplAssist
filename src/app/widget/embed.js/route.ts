@@ -54,32 +54,42 @@ export async function GET() {
     '.sa-widget-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
     '.sa-widget-btn:hover{transform:scale(1.05);box-shadow:0 6px 16px rgba(0,0,0,0.2);}',
     '.sa-widget-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;}',
-    '.sa-widget-panel{width:400px;height:500px;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.12);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
+    '.sa-widget-panel{--sa-brand:#0066FF;width:400px;height:auto;min-height:260px;max-height:500px;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.14);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
     '.sa-widget-panel.sa-hidden{opacity:0;transform:translateY(12px) scale(0.95);pointer-events:none;}',
     '.sa-widget-panel.sa-visible{opacity:1;transform:translateY(0) scale(1);}',
-    '.sa-widget-header{padding:16px;color:#fff;display:flex;align-items:center;justify-content:space-between;}',
-    '.sa-widget-header-text h3{margin:0;font-size:16px;font-weight:600;}',
-    '.sa-widget-header-text p{margin:2px 0 0;font-size:11px;opacity:0.85;}',
-    '.sa-widget-close{background:none;border:none;color:#fff;cursor:pointer;padding:4px;opacity:0.8;font-size:20px;line-height:1;}',
+    '.sa-widget-header{padding:14px 16px;color:#fff;display:flex;align-items:center;gap:12px;flex-shrink:0;}',
+    '.sa-widget-header-avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,0.22);position:relative;}',
+    '.sa-widget-header-avatar img{width:100%;height:100%;object-fit:cover;display:block;}',
+    '.sa-widget-header-avatar-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff;background:rgba(255,255,255,0.18);}',
+    '.sa-widget-header-avatar.sa-has-logo .sa-widget-header-avatar-fallback{display:none;}',
+    '.sa-widget-header-center{flex:1;min-width:0;text-align:left;}',
+    '.sa-widget-header-center h3{margin:0;font-size:16px;font-weight:600;line-height:1.25;}',
+    '.sa-widget-header-subtitle{margin:4px 0 0;font-size:12px;font-weight:400;opacity:0.92;line-height:1.3;}',
+    '.sa-widget-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}',
+    '.sa-widget-status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(255,255,255,0.35);flex-shrink:0;}',
+    '.sa-widget-close{background:none;border:none;color:#fff;cursor:pointer;padding:4px 6px;opacity:0.9;font-size:22px;line-height:1;}',
     '.sa-widget-close:hover{opacity:1;}',
-    '.sa-widget-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;}',
-    '.sa-widget-msg{max-width:80%;padding:10px 14px;border-radius:16px;word-wrap:break-word;font-size:14px;line-height:1.4;}',
-    '.sa-widget-msg-bot{align-self:flex-start;background:#f1f3f5;color:#1a1a1a;border-bottom-left-radius:4px;}',
-    '.sa-widget-msg-user{align-self:flex-end;color:#fff;border-bottom-right-radius:4px;}',
-    '.sa-widget-input-area{padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;align-items:center;}',
-    '.sa-widget-input{flex:1;border:1px solid #d1d5db;border-radius:24px;padding:10px 16px;font-size:14px;outline:none;font-family:inherit;}',
-    '.sa-widget-input:focus{border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,0.15);}',
-    '.sa-widget-send{width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;}',
+    '.sa-widget-messages{flex:1 1 auto;align-self:stretch;overflow-y:auto;min-height:0;max-height:calc(500px - 200px);padding:16px;display:flex;flex-direction:column;gap:10px;background:#fff;}',
+    '.sa-widget-msg{max-width:85%;padding:12px 14px;border-radius:14px;word-wrap:break-word;font-size:14px;line-height:1.45;}',
+    '.sa-widget-msg-bot{align-self:flex-start;background:#eef1f4;color:#1a1a1a;border-bottom-left-radius:6px;}',
+    '.sa-widget-msg-user{align-self:flex-end;color:#fff;border-bottom-right-radius:6px;}',
+    '.sa-widget-input-area{padding:12px 16px;border-top:1px solid #e8eaed;display:flex;gap:10px;align-items:center;flex-shrink:0;background:#fff;}',
+    '.sa-widget-input{flex:1;border:1px solid #d1d5db;border-radius:999px;padding:10px 16px;font-size:14px;outline:none;font-family:inherit;background:#fff;}',
+    '.sa-widget-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
+    '.sa-widget-send{width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;flex-shrink:0;}',
     '.sa-widget-send:disabled{opacity:0.5;cursor:default;}',
+    '.sa-widget-footer{padding:10px 12px;border-top:1px solid #e8eaed;background:#f3f4f6;flex-shrink:0;text-align:center;font-size:11px;line-height:1.4;}',
+    '.sa-widget-footer a{color:#9ca3af;text-decoration:none;}',
+    '.sa-widget-footer a:hover{color:#6b7280;text-decoration:underline;}',
     '.sa-widget-loading-dot{width:12px;height:12px;border-radius:50%;background:#ff8c42;flex-shrink:0;margin:10px 14px;align-self:flex-start;animation:sa-widget-dot-pulse 1.5s infinite;}',
     '@keyframes sa-widget-dot-pulse{0%{transform:scale(1);opacity:1;}50%{transform:scale(1.6);opacity:0.4;}100%{transform:scale(1);opacity:1;}}',
     '.sa-widget-lead-form{padding:20px 16px;display:flex;flex-direction:column;gap:12px;}',
     '.sa-widget-lead-form p{margin:0;font-size:14px;color:#4a5568;text-align:center;}',
     '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit;}',
-    '.sa-widget-lead-input:focus{border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,0.15);}',
+    '.sa-widget-lead-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
     '.sa-widget-lead-btn{border:none;color:#fff;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
-    '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}'
+    '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}'
   ].join('\\n');
   document.head.appendChild(style);
 
@@ -88,18 +98,34 @@ export async function GET() {
   var badge = el('div', { class: 'sa-widget-badge', style: { display: 'none' } }, '0');
   var panel = el('div', { class: 'sa-widget-panel sa-hidden' });
   var header = el('div', { class: 'sa-widget-header' });
-  var headerText = el('div', { class: 'sa-widget-header-text' }, [
-    el('h3', null, 'Loading...'),
-    el('p', null, 'Powered by SimplAssist')
-  ]);
-  var closeBtn = el('button', { class: 'sa-widget-close', onClick: togglePanel }, '\\u00D7');
-  header.appendChild(headerText);
-  header.appendChild(closeBtn);
+  var avatarWrap = el('div', { class: 'sa-widget-header-avatar' });
+  var avatarImg = el('img', { class: 'sa-widget-header-avatar-img', alt: '' });
+  avatarImg.style.display = 'none';
+  var avatarFallback = el('span', { class: 'sa-widget-header-avatar-fallback' }, '\\u2026');
+  avatarWrap.appendChild(avatarImg);
+  avatarWrap.appendChild(avatarFallback);
+  var titleH3 = el('h3', null, 'Loading...');
+  var subtitleP = el('p', { class: 'sa-widget-header-subtitle' }, 'Typically replies instantly');
+  var headerCenter = el('div', { class: 'sa-widget-header-center' });
+  headerCenter.appendChild(titleH3);
+  headerCenter.appendChild(subtitleP);
+  var statusDot = el('span', { class: 'sa-widget-status-dot' });
+  statusDot.setAttribute('aria-hidden', 'true');
+  var closeBtn = el('button', { class: 'sa-widget-close', onClick: togglePanel, type: 'button', 'aria-label': 'Close chat' }, '\\u00D7');
+  var headerActions = el('div', { class: 'sa-widget-header-actions' });
+  headerActions.appendChild(statusDot);
+  headerActions.appendChild(closeBtn);
+  header.appendChild(avatarWrap);
+  header.appendChild(headerCenter);
+  header.appendChild(headerActions);
   var messagesArea = el('div', { class: 'sa-widget-messages' });
   var inputArea = el('div', { class: 'sa-widget-input-area' });
-  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type a message...', type: 'text' });
-  var sendBtn = el('button', { class: 'sa-widget-send' });
+  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text' });
+  var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
   sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  var footerEl = el('div', { class: 'sa-widget-footer' });
+  var footerLink = el('a', { href: baseUrl + '/home', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
+  footerEl.appendChild(footerLink);
 
   input.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
   sendBtn.addEventListener('click', sendMessage);
@@ -108,10 +134,12 @@ export async function GET() {
   panel.appendChild(header);
   panel.appendChild(messagesArea);
   panel.appendChild(inputArea);
+  panel.appendChild(footerEl);
   btn.appendChild(badge);
   container.appendChild(panel);
   container.appendChild(btn);
   document.body.appendChild(container);
+  btn.addEventListener('click', togglePanel);
 
   function positionWidget(pos) {
     container.style.bottom = '20px';
@@ -133,10 +161,32 @@ export async function GET() {
     btn.style.backgroundColor = color;
     btn.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     btn.appendChild(badge);
-    btn.addEventListener('click', togglePanel);
+    panel.style.setProperty('--sa-brand', color);
     header.style.backgroundColor = color;
     sendBtn.style.backgroundColor = color;
   }
+
+  function applyHeaderAvatar(name, showLogo, logoUrl) {
+    var initial = (name && name.charAt(0)) ? name.charAt(0).toUpperCase() : '?';
+    avatarFallback.textContent = initial;
+    if (showLogo && logoUrl) {
+      avatarWrap.classList.add('sa-has-logo');
+      avatarImg.style.display = 'block';
+      avatarFallback.style.display = 'none';
+      avatarImg.src = logoUrl;
+    } else {
+      avatarWrap.classList.remove('sa-has-logo');
+      avatarImg.removeAttribute('src');
+      avatarImg.style.display = 'none';
+      avatarFallback.style.display = 'flex';
+    }
+  }
+
+  avatarImg.addEventListener('error', function() {
+    avatarWrap.classList.remove('sa-has-logo');
+    avatarImg.style.display = 'none';
+    avatarFallback.style.display = 'flex';
+  });
 
   function togglePanel() {
     isOpen = !isOpen;
@@ -282,7 +332,8 @@ export async function GET() {
     .then(function(data) {
       if (data.error) { console.error('SimplAssist:', data.error); return; }
       config = data;
-      headerText.querySelector('h3').textContent = data.businessName;
+      titleH3.textContent = data.businessName || 'Chat';
+      applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
       applyBrandColor(data.brandColor || '#0066FF');
       positionWidget(data.position || 'bottom_right');
       addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot');
@@ -292,6 +343,8 @@ export async function GET() {
     })
     .catch(function(err) {
       console.error('SimplAssist: failed to load config', err);
+      titleH3.textContent = 'SimplAssist';
+      applyHeaderAvatar('SimplAssist', false, '');
       addMsg('Hi! How can we help you today?', 'bot');
       unreadCount = 0;
       badge.style.display = 'none';

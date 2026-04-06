@@ -19,7 +19,7 @@ export default async function DashboardLayout({
   // Check if user has completed onboarding
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type")
+    .select("business_type, website_url")
     .eq("owner_id", user.id)
     .single();
 
@@ -69,7 +69,7 @@ export default async function DashboardLayout({
         }}
       />
 
-      <Sidebar userEmail={user.email ?? ""} />
+      <Sidebar userEmail={user.email ?? ""} websiteUrl={business.website_url ?? null} />
       <main className="flex-1 bg-transparent px-4 pt-[4.75rem] pb-6 lg:pt-5 lg:pr-6 lg:pb-6 lg:pl-0 relative z-[1] min-w-0 lg:min-h-0 lg:overflow-y-auto">
         {children}
       </main>

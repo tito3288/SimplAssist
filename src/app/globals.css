@@ -101,3 +101,28 @@ body {
     background: color-mix(in srgb, var(--background) 40%, transparent);
   }
 }
+
+/* react-colorful overrides */
+.react-colorful {
+  width: 100% !important;
+  height: 160px !important;
+  border-radius: 0.5rem;
+}
+
+.dark .react-colorful {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.react-colorful__saturation {
+  border-radius: 0.5rem 0.5rem 0 0 !important;
+}
+
+.react-colorful__hue {
+  border-radius: 0 0 0.5rem 0.5rem !important;
+  height: 14px !important;
+}
+
+.react-colorful__pointer {
+  width: 20px !important;
+  height: 20px !important;
+}

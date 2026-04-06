@@ -28,7 +28,11 @@ const navItems = [
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
-export default function Sidebar({ userEmail }: { userEmail: string }) {
+function formatWebsiteUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; websiteUrl: string | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -82,11 +86,25 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
       </nav>
 
       <div className="p-4 border-t border-slate-200 dark:border-white/[0.10] shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-slate-500 dark:text-[#bdbdbf] truncate">
+        <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1.5 items-start">
+          <p className="text-xs leading-snug text-slate-500 dark:text-[#bdbdbf] truncate min-w-0 col-start-1 row-start-1">
             {userEmail}
           </p>
-          <ThemeToggle />
+          {websiteUrl && (
+            <a
+              href={websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs leading-snug text-[#ff914d] hover:text-[#ffb07a] truncate block col-start-1 row-start-2 mb-2 transition-colors"
+            >
+              {formatWebsiteUrl(websiteUrl)}
+            </a>
+          )}
+          <div
+            className={`col-start-2 row-start-1 justify-self-end shrink-0 ${websiteUrl ? "row-span-2 self-start" : ""}`}
+          >
+            <ThemeToggle />
+          </div>
         </div>
         <button
           onClick={handleSignOut}
