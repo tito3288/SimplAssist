@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { authInputClass, glassInput, primaryCtaClass, textPrimary, textSecondary } from "@/lib/glass";
+import { authInputClass, primaryCtaClass, textSecondary } from "@/lib/glass";
 import { Loader2 } from "lucide-react";
 
 interface CreateEventModalProps {
