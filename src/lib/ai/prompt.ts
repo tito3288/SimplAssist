@@ -96,6 +96,12 @@ export function buildSystemPrompt(
     sections.push(`Email: ${business.email}`);
   }
 
+  // Include today's date so the AI can calculate relative dates like "this Friday"
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: business.timezone }));
+  const todayFormatted = now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  sections.push("");
+  sections.push(`TODAY'S DATE: ${todayFormatted}`);
+
   sections.push("");
   sections.push("BUSINESS HOURS:");
   sections.push(formatHoursSchedule(businessHours));

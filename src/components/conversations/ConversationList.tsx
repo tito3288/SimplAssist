@@ -141,11 +141,11 @@ export function ConversationList({
               : "No messages yet";
 
             return (
-              <button
+              <div
                 key={conv.id}
                 onClick={() => onSelect(conv)}
                 className={cn(
-                  "group flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
+                  "group flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
                   activeId === conv.id && "bg-orange-50 dark:bg-[rgba(255,145,77,.08)] hover:bg-orange-50 dark:hover:bg-[rgba(255,145,77,.08)]"
                 )}
               >
@@ -217,7 +217,7 @@ export function ConversationList({
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              </button>
+              </div>
             );
           })
         )}
