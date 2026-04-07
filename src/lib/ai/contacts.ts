@@ -5,7 +5,8 @@ export async function findOrCreateContact(
   businessId: string,
   phone: string | null,
   email: string | null,
-  channel: Channel
+  channel: Channel,
+  sessionId: string | null = null
 ): Promise<Contact> {
   let existing: Contact | null = null;
 
@@ -25,12 +26,26 @@ export async function findOrCreateContact(
       .eq("email", email)
       .single();
     existing = data;
+  } else if (channel === "web_chat" && sessionId) {
+    const { data } = await supabaseAdmin
+      .from("contacts")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("session_id", sessionId)
+      .single();
+    existing = data;
   }
 
   if (existing) {
+    const updateFields: Record<string, unknown> = {
+      last_contacted_at: new Date().toISOString(),
+    };
+    if (email && !existing.email) {
+      updateFields.email = email;
+    }
     const { data } = await supabaseAdmin
       .from("contacts")
-      .update({ last_contacted_at: new Date().toISOString() })
+      .update(updateFields)
       .eq("id", existing.id)
       .select("*")
       .single();
@@ -43,6 +58,7 @@ export async function findOrCreateContact(
       business_id: businessId,
       phone_number: phone,
       email: email,
+      session_id: sessionId,
       source_channel: channel,
       lead_score: 0,
       last_contacted_at: new Date().toISOString(),

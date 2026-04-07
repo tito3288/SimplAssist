@@ -20,7 +20,26 @@ export async function GET() {
 
   var config = null;
   var messages = [];
-  var sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sa-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+  var storageKey = 'sa-session-' + businessId;
+  var timestampKey = 'sa-session-ts-' + businessId;
+  var SESSION_TIMEOUT = 5 * 60 * 60 * 1000;
+  var sessionId = null;
+  var sessionExpired = false;
+  try {
+    sessionId = localStorage.getItem(storageKey);
+    var lastTs = localStorage.getItem(timestampKey);
+    if (sessionId && lastTs && (Date.now() - Number(lastTs)) > SESSION_TIMEOUT) {
+      sessionId = null;
+      sessionExpired = true;
+    }
+  } catch(e) {}
+  if (!sessionId) {
+    sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sa-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    try {
+      localStorage.setItem(storageKey, sessionId);
+      localStorage.setItem(timestampKey, String(Date.now()));
+    } catch(e) {}
+  }
   var isOpen = false;
   var isLoading = false;
   var unreadCount = 0;
@@ -94,7 +113,10 @@ export async function GET() {
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
     '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
     '.sa-widget-btn.sa-btn-hidden{opacity:0;transform:scale(0.8);pointer-events:none;}',
-    '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}'
+    '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}',
+    '.sa-widget-end-area{padding:0 16px 8px;text-align:center;background:#fff;flex-shrink:0;}',
+    '.sa-widget-end{background:none;border:none;color:#9ca3af;cursor:pointer;padding:0;font-size:11px;font-weight:500;transition:color 0.2s;}',
+    '.sa-widget-end:hover{color:#ef4444;}'
   ].join('\\n');
   document.head.appendChild(style);
 
@@ -131,6 +153,9 @@ export async function GET() {
   var footerEl = el('div', { class: 'sa-widget-footer' });
   var footerLink = el('a', { href: baseUrl + '/home', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
   footerEl.appendChild(footerLink);
+  var endArea = el('div', { class: 'sa-widget-end-area' });
+  var endBtn = el('button', { class: 'sa-widget-end', onClick: endConversation, type: 'button' }, 'End Conversation');
+  endArea.appendChild(endBtn);
 
   input.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
   sendBtn.addEventListener('click', sendMessage);
@@ -139,6 +164,7 @@ export async function GET() {
   panel.appendChild(header);
   panel.appendChild(messagesArea);
   panel.appendChild(inputArea);
+  panel.appendChild(endArea);
   panel.appendChild(footerEl);
   btn.appendChild(badge);
   container.appendChild(panel);
@@ -192,6 +218,34 @@ export async function GET() {
     avatarImg.style.display = 'none';
     avatarFallback.style.display = 'flex';
   });
+
+  function endConversation() {
+    fetch(baseUrl + '/api/widget/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ businessId: businessId, sessionId: sessionId })
+    }).catch(function() {});
+
+    // Clear chat UI
+    messagesArea.innerHTML = '';
+    messages = [];
+    messageCount = 0;
+    isLoading = false;
+    sendBtn.disabled = false;
+    leadCaptured = false;
+    visitorName = '';
+    visitorEmail = '';
+
+    // Generate new session
+    sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sa-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    try {
+      localStorage.setItem(storageKey, sessionId);
+      localStorage.setItem(timestampKey, String(Date.now()));
+    } catch(e) {}
+
+    // Show ended message then welcome
+    addMsg('Conversation ended. Feel free to start a new one!', 'bot');
+  }
 
   function togglePanel() {
     isOpen = !isOpen;
@@ -322,6 +376,7 @@ export async function GET() {
     input.value = '';
     addMsg(text, 'user');
     messageCount++;
+    try { localStorage.setItem(timestampKey, String(Date.now())); } catch(e) {}
 
     if (checkBookingMention(text)) {
       showLeadForm();

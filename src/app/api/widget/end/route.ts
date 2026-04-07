@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { processIncomingMessage } from "@/lib/ai/engine";
+import { closeConversation } from "@/lib/ai/conversations";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,45 +14,49 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { businessId, message, sessionId, visitorEmail } = body;
+    const { businessId, sessionId } = await request.json();
 
-    if (!businessId || !message || !sessionId) {
+    if (!businessId || !sessionId) {
       return NextResponse.json(
-        { error: "Missing required fields: businessId, message, sessionId" },
+        { error: "Missing businessId or sessionId" },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const { data: widgetConfig } = await supabaseAdmin
-      .from("widget_configs")
+    // Find contact by session_id
+    const { data: contact } = await supabaseAdmin
+      .from("contacts")
       .select("id")
       .eq("business_id", businessId)
-      .eq("is_active", true)
+      .eq("session_id", sessionId)
       .single();
 
-    if (!widgetConfig) {
+    if (!contact) {
       return NextResponse.json(
-        { error: "Widget not found or not active" },
-        { status: 404, headers: corsHeaders }
+        { success: true },
+        { headers: corsHeaders }
       );
     }
 
-    const response = await processIncomingMessage(
-      businessId,
-      null,
-      visitorEmail || null,
-      message,
-      "web_chat",
-      sessionId || null
-    );
+    // Find active conversation for this contact
+    const { data: conversation } = await supabaseAdmin
+      .from("conversations")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("contact_id", contact.id)
+      .eq("status", "active")
+      .single();
+
+    if (conversation) {
+      await closeConversation(conversation.id);
+    }
 
     return NextResponse.json(
-      { response, sessionId },
+      { success: true },
       { headers: corsHeaders }
     );
   } catch (error) {
-    console.error("Widget chat error:", error);
+    console.error("Widget end conversation error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500, headers: corsHeaders }

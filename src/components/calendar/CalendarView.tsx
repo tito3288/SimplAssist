@@ -12,7 +12,6 @@ import {
 import CreateEventModal from "./CreateEventModal";
 import {
   glassCard,
-  glassCardSubtle,
   textPrimary,
   textSecondary,
   orangeAccentIcon,
@@ -269,7 +268,13 @@ export default function CalendarView({
                   <span
                     className={`
                       w-7 h-7 grid place-items-center rounded-full font-medium
-                      ${isToday ? "bg-[#ff914d] text-white font-bold" : textPrimary}
+                      ${
+                        isToday
+                          ? "bg-[#ff914d] text-white font-bold"
+                          : dateHasEvents
+                            ? "text-[#ff914d] font-semibold"
+                            : textPrimary
+                      }
                     `}
                   >
                     {date.getDate()}
@@ -323,22 +328,29 @@ export default function CalendarView({
                 {selectedEvents.map((event) => (
                   <div
                     key={event.id}
-                    className={`p-3 border-l-[3px] border-l-[#ff914d] ${glassCardSubtle}`}
+                    className="
+                      p-3.5 rounded-[22px]
+                      border border-[#ff914d]/25 dark:border-[#ff914d]/35
+                      bg-gradient-to-br from-[rgba(255,145,77,.2)] via-[rgba(255,145,77,.1)] to-[rgba(255,145,77,.04)]
+                      dark:from-[rgba(255,145,77,.22)] dark:via-[rgba(255,145,77,.1)] dark:to-[rgba(255,145,77,.04)]
+                      shadow-[0_4px_24px_rgba(255,145,77,.12)] dark:shadow-[0_8px_32px_rgba(255,145,77,.1)]
+                      border-l-[3px] border-l-[#ff914d]
+                    "
                   >
                     <div className="flex items-center gap-1.5 mb-1">
-                      <Clock className={`w-3.5 h-3.5 ${textSecondary}`} />
-                      <span className={`text-xs font-medium ${textSecondary}`}>
+                      <Clock className="w-3.5 h-3.5 text-[#e07a35] dark:text-[#ffb07a]" />
+                      <span className="text-xs font-medium text-[#b85a28] dark:text-[#e8a878]">
                         {event.allDay
                           ? "All day"
                           : `${formatTime(event.start)} – ${formatTime(event.end)}`}
                       </span>
                     </div>
-                    <p className={`text-sm font-medium ${textPrimary}`}>
+                    <p className={`text-sm font-semibold ${textPrimary}`}>
                       {event.title}
                     </p>
                     {event.description && (
                       <p
-                        className={`text-xs mt-1 line-clamp-2 ${textSecondary}`}
+                        className={`text-xs mt-1 line-clamp-2 text-slate-600 dark:text-[#c8c8cc]`}
                       >
                         {event.description}
                       </p>

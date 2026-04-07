@@ -106,6 +106,7 @@ export interface Contact {
   name: string | null;
   phone_number: string | null;
   email: string | null;
+  session_id: string | null;
   source_channel: Channel;
   lead_score: number;
   notes: string | null;

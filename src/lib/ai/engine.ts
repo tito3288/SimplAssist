@@ -131,14 +131,16 @@ export async function processIncomingMessage(
   contactPhone: string | null,
   contactEmail: string | null,
   message: string,
-  channel: Channel
+  channel: Channel,
+  sessionId: string | null = null
 ): Promise<string> {
   try {
     const contact = await findOrCreateContact(
       businessId,
       contactPhone,
       contactEmail,
-      channel
+      channel,
+      sessionId
     );
 
     const conversation = await getOrCreateConversation(
