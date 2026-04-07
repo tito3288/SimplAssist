@@ -4,6 +4,57 @@ import type { BusinessHours } from "@/types/database";
 
 const SLOT_DURATION_MINUTES = 30;
 
+/**
+ * Attempts to parse relative date strings into YYYY-MM-DD format.
+ * Safety net in case the AI passes a non-ISO date string.
+ */
+function normalizeDate(input: string): string {
+  // Already in YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+
+  const lower = input.toLowerCase().trim();
+  const now = new Date();
+
+  // Handle common relative dates
+  if (lower === "today") {
+    return formatYMD(now);
+  }
+  if (lower === "tomorrow") {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 1);
+    return formatYMD(d);
+  }
+
+  // Handle day names: "friday", "this friday", "next friday", etc.
+  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const isNext = lower.startsWith("next ");
+  const cleaned = lower.replace(/^(this |next )/, "");
+  const dayIndex = dayNames.indexOf(cleaned);
+
+  if (dayIndex !== -1) {
+    const today = now.getDay();
+    let daysAhead = dayIndex - today;
+    if (daysAhead <= 0) daysAhead += 7;
+    if (isNext && daysAhead <= 7) daysAhead += 7;
+    const d = new Date(now);
+    d.setDate(d.getDate() + daysAhead);
+    return formatYMD(d);
+  }
+
+  // Try native Date parsing as last resort (handles "April 11, 2026", "4/11/2026", etc.)
+  const parsed = new Date(input);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2000) {
+    return formatYMD(parsed);
+  }
+
+  // Return original — will likely fail downstream, but at least we tried
+  return input;
+}
+
+function formatYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 interface BookingParams {
   customerName: string;
   customerPhone?: string;
@@ -41,8 +92,11 @@ export async function checkAvailability(
 
   const calendarId = tokenData?.calendar_id || "primary";
 
+  // Normalize date in case AI passes a relative date string
+  const normalizedDate = normalizeDate(date);
+
   // Get business hours for this day
-  const dayDate = new Date(`${date}T12:00:00`);
+  const dayDate = new Date(`${normalizedDate}T12:00:00`);
   const dayOfWeek = dayDate.getDay();
 
   const { data: hoursData } = await supabaseAdmin
@@ -58,8 +112,8 @@ export async function checkAvailability(
   }
 
   // Query Google Calendar for busy times
-  const timeMin = `${date}T${hours.open_time}:00`;
-  const timeMax = `${date}T${hours.close_time}:00`;
+  const timeMin = `${normalizedDate}T${hours.open_time}:00`;
+  const timeMax = `${normalizedDate}T${hours.close_time}:00`;
 
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
@@ -90,7 +144,7 @@ export async function checkAvailability(
     m + SLOT_DURATION_MINUTES <= closeMinutes;
     m += SLOT_DURATION_MINUTES
   ) {
-    const slotStart = new Date(`${date}T00:00:00`);
+    const slotStart = new Date(`${normalizedDate}T00:00:00`);
     slotStart.setHours(Math.floor(m / 60), m % 60, 0, 0);
 
     const slotEnd = new Date(slotStart);

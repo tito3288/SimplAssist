@@ -67,6 +67,10 @@ export default function ContactDetail({
 
   const [name, setName] = useState(contact.name ?? "");
   const [editingName, setEditingName] = useState(false);
+  const [phone, setPhone] = useState(contact.phone_number ?? "");
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [email, setEmail] = useState(contact.email ?? "");
+  const [editingEmail, setEditingEmail] = useState(false);
   const [notes, setNotes] = useState(contact.notes ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,6 +83,36 @@ export default function ContactDetail({
     const { data } = await supabase
       .from("contacts")
       .update({ name: trimmed })
+      .eq("id", contact.id)
+      .select()
+      .single();
+    setSaving(false);
+    if (data) onUpdated(data as Contact);
+  }
+
+  async function savePhone() {
+    setEditingPhone(false);
+    const trimmed = phone.trim() || null;
+    if (trimmed === contact.phone_number) return;
+    setSaving(true);
+    const { data } = await supabase
+      .from("contacts")
+      .update({ phone_number: trimmed })
+      .eq("id", contact.id)
+      .select()
+      .single();
+    setSaving(false);
+    if (data) onUpdated(data as Contact);
+  }
+
+  async function saveEmail() {
+    setEditingEmail(false);
+    const trimmed = email.trim() || null;
+    if (trimmed === contact.email) return;
+    setSaving(true);
+    const { data } = await supabase
+      .from("contacts")
+      .update({ email: trimmed })
       .eq("id", contact.id)
       .select()
       .single();
@@ -151,27 +185,58 @@ export default function ContactDetail({
           </div>
 
           {/* Phone */}
-          {contact.phone_number && (
-            <div>
-              <label className="text-xs font-medium uppercase text-gray-400 dark:text-[#666]">
-                Phone
-              </label>
-              <p className={`mt-1 flex items-center gap-2 text-sm ${textPrimary}`}>
-                <Phone className="h-4 w-4 text-gray-400 dark:text-[#666]" />
-                {formatPhoneNumber(contact.phone_number)}
+          <div>
+            <label className="text-xs font-medium uppercase text-gray-400 dark:text-[#666]">
+              Phone
+            </label>
+            {editingPhone ? (
+              <input
+                autoFocus
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                onBlur={savePhone}
+                onKeyDown={(e) => e.key === "Enter" && savePhone()}
+                placeholder="Enter phone number"
+                className={`mt-1 block w-full rounded-lg px-3 py-2 text-sm focus:outline-none ${glassInput}`}
+              />
+            ) : (
+              <p
+                onClick={() => setEditingPhone(true)}
+                className={`mt-1 cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-white/[0.04] ${textPrimary}`}
+              >
+                {contact.phone_number ? formatPhoneNumber(contact.phone_number) : "—"}{" "}
+                <span className="text-xs text-gray-400 dark:text-[#666]">(click to edit)</span>
               </p>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Email */}
-          {contact.email && (
-            <div>
-              <label className="text-xs font-medium uppercase text-gray-400 dark:text-[#666]">
-                Email
-              </label>
-              <p className={`mt-1 text-sm ${textPrimary}`}>{contact.email}</p>
-            </div>
-          )}
+          <div>
+            <label className="text-xs font-medium uppercase text-gray-400 dark:text-[#666]">
+              Email
+            </label>
+            {editingEmail ? (
+              <input
+                autoFocus
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={saveEmail}
+                onKeyDown={(e) => e.key === "Enter" && saveEmail()}
+                placeholder="Enter email address"
+                className={`mt-1 block w-full rounded-lg px-3 py-2 text-sm focus:outline-none ${glassInput}`}
+              />
+            ) : (
+              <p
+                onClick={() => setEditingEmail(true)}
+                className={`mt-1 cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-white/[0.04] ${textPrimary}`}
+              >
+                {contact.email || "—"}{" "}
+                <span className="text-xs text-gray-400 dark:text-[#666]">(click to edit)</span>
+              </p>
+            )}
+          </div>
 
           {/* Channel & Lead Score */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">

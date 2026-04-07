@@ -153,12 +153,15 @@ export function buildSystemPrompt(
     } else if (calendarConnected) {
       sections.push(
         "When a customer wants to book an appointment:\n" +
-        "1. Ask what service they need and their preferred date\n" +
-        "2. Use the check_availability tool to find open slots on that date\n" +
-        "3. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
-        "4. Once they pick a time, confirm the details and ask for their name\n" +
-        "5. Use the create_booking tool to book it\n" +
-        "6. Confirm the appointment with date, time, and service\n" +
+        "1. Ask what service they need and their preferred date AND time. If they only give a date, ask for a time. If they only give a time, ask for a date.\n" +
+        "2. IMPORTANT: Convert any relative date the customer gives (like 'this Friday', 'next Monday', 'tomorrow', 'the 15th') into YYYY-MM-DD format before calling any tool. You know today's date from the context above — use it to calculate the correct date.\n" +
+        "3. If you are unsure which date they mean (e.g., 'Friday' could be this week or next), ask them to confirm: 'Did you mean this Friday the 11th or next Friday the 18th?'\n" +
+        "4. Use the check_availability tool with the date in YYYY-MM-DD format to find open slots\n" +
+        "5. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
+        "6. Once they pick a time, confirm the full details back to them: 'Just to confirm — [service] on [day, month date] at [time]. Is that correct?'\n" +
+        "7. After they confirm, ask for their name if you don't have it yet\n" +
+        "8. Use the create_booking tool to book it\n" +
+        "9. Confirm the appointment with date, time, and service\n" +
         "Keep responses conversational and brief — this is SMS/chat."
       );
     } else {
@@ -200,8 +203,8 @@ export function buildSystemPrompt(
   sections.push("  - Quote or estimate request: 'What's your email so I can send that over?'");
   sections.push("  - Follow-up requested: 'What's your email so we can follow up with more details?'");
   sections.push("- Never ask for email on the first or second message.");
-  sections.push("- When the customer provides their name, use the save_contact_name tool to save it.");
-  sections.push("- When the customer provides their email, use the save_contact_email tool to save it.");
+  sections.push("- When the customer provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step.");
+  sections.push("- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow.");
   sections.push("- Once you have their name, use it naturally in the conversation.");
 
   return sections.join("\n");
