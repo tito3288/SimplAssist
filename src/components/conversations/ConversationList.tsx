@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Phone, MessageCircle, Search, Bot, User } from "lucide-react";
+import { Phone, MessageCircle, Search, Bot, User, Trash2, Loader2 } from "lucide-react";
 import { cn, formatPhoneNumber } from "@/lib/utils";
+import { Modal } from "@/components/ui/Modal";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 
 interface ConversationListProps {
   conversations: ConversationWithContact[];
   activeId: string | null;
   onSelect: (conversation: ConversationWithContact) => void;
+  onDelete: (id: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -33,9 +35,30 @@ export function ConversationList({
   conversations,
   activeId,
   onSelect,
+  onDelete,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterTab>("all");
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirmDelete() {
+    if (!deleteTargetId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/conversations/${deleteTargetId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        onDelete(deleteTargetId);
+      }
+    } catch {
+      // Handle silently
+    } finally {
+      setDeleting(false);
+      setDeleteTargetId(null);
+    }
+  }
 
   const filtered = useMemo(() => {
     let result = conversations;
@@ -122,7 +145,7 @@ export function ConversationList({
                 key={conv.id}
                 onClick={() => onSelect(conv)}
                 className={cn(
-                  "flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
+                  "group flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
                   activeId === conv.id && "bg-orange-50 dark:bg-[rgba(255,145,77,.08)] hover:bg-orange-50 dark:hover:bg-[rgba(255,145,77,.08)]"
                 )}
               >
@@ -177,15 +200,60 @@ export function ConversationList({
                   </div>
                 </div>
 
-                {/* Unread indicator */}
-                {conv.status === "active" && !conv.is_ai_handling && (
-                  <div className="mt-2 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#ff914d]" />
-                )}
+                {/* Delete + Unread indicator */}
+                <div className="mt-1 flex flex-col items-center gap-1 flex-shrink-0">
+                  {conv.status === "active" && !conv.is_ai_handling && (
+                    <div className="h-2.5 w-2.5 rounded-full bg-[#ff914d]" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTargetId(conv.id);
+                    }}
+                    className="p-1 rounded-lg text-slate-300 dark:text-white/[0.15] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                    title="Delete conversation"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </button>
             );
           })
         )}
       </div>
+
+      {/* Delete confirmation modal */}
+      <Modal
+        open={!!deleteTargetId}
+        onClose={() => setDeleteTargetId(null)}
+        title="Delete Conversation"
+        description="Are you sure? This will permanently delete this conversation and all its messages."
+      >
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            onClick={() => setDeleteTargetId(null)}
+            disabled={deleting}
+            className="flex-1 rounded-full border border-slate-200 dark:border-white/[0.12] px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirmDelete}
+            disabled={deleting}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            {deleting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              "Delete"
+            )}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

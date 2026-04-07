@@ -13,8 +13,16 @@ interface InboxLayoutProps {
   businessId: string;
 }
 
-export function InboxLayout({ conversations, businessId }: InboxLayoutProps) {
+export function InboxLayout({ conversations: initialConversations, businessId }: InboxLayoutProps) {
+  const [conversations, setConversations] = useState(initialConversations);
   const [selected, setSelected] = useState<ConversationWithContact | null>(null);
+
+  function handleDelete(id: string) {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (selected?.id === id) {
+      setSelected(null);
+    }
+  }
 
   return (
     <div className={`flex h-full overflow-hidden ${glassCard}`}>
@@ -29,6 +37,7 @@ export function InboxLayout({ conversations, businessId }: InboxLayoutProps) {
           conversations={conversations}
           activeId={selected?.id ?? null}
           onSelect={setSelected}
+          onDelete={handleDelete}
         />
       </div>
 
