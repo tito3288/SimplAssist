@@ -112,9 +112,11 @@ export async function checkAvailability(
   }
 
   // Query Google Calendar for busy times
-  // Pass times with timezone — Google API handles conversion
-  const timeMin = `${normalizedDate}T${hours.open_time}:00`;
-  const timeMax = `${normalizedDate}T${hours.close_time}:00`;
+  // Ensure time is in HH:MM:SS format (open_time may be HH:MM or HH:MM:SS)
+  const openTime = hours.open_time.length === 5 ? `${hours.open_time}:00` : hours.open_time;
+  const closeTime = hours.close_time.length === 5 ? `${hours.close_time}:00` : hours.close_time;
+  const timeMin = `${normalizedDate}T${openTime}`;
+  const timeMax = `${normalizedDate}T${closeTime}`;
 
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
