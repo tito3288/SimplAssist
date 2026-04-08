@@ -238,41 +238,43 @@ export async function processIncomingMessage(
 
     // Tool-calling loop
     while (response.stop_reason === "tool_use" && loopCount < maxLoops) {
-      const toolUseBlock = response.content.find(
+      const toolUseBlocks = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
       );
 
-      if (!toolUseBlock) break;
+      if (toolUseBlocks.length === 0) break;
 
-      // Route to the correct tool handler
-      let toolResult: string;
-      if (toolUseBlock.name === "save_contact_name" || toolUseBlock.name === "save_contact_email") {
-        toolResult = await executeContactTool(
-          contact.id,
-          toolUseBlock.name,
-          toolUseBlock.input as Record<string, unknown>
-        );
-      } else {
-        toolResult = await executeCalendarTool(
-          businessId,
-          toolUseBlock.name,
-          toolUseBlock.input as Record<string, unknown>,
-          (business as Business).timezone,
-          contactPhone
-        );
+      // Execute ALL tool calls and collect results
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolUseBlock of toolUseBlocks) {
+        let toolResult: string;
+        if (toolUseBlock.name === "save_contact_name" || toolUseBlock.name === "save_contact_email") {
+          toolResult = await executeContactTool(
+            contact.id,
+            toolUseBlock.name,
+            toolUseBlock.input as Record<string, unknown>
+          );
+        } else {
+          toolResult = await executeCalendarTool(
+            businessId,
+            toolUseBlock.name,
+            toolUseBlock.input as Record<string, unknown>,
+            (business as Business).timezone,
+            contactPhone
+          );
+        }
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUseBlock.id,
+          content: toolResult,
+        });
       }
 
-      // Add assistant's response (with tool use) and tool result to messages
+      // Add assistant's response (with tool uses) and ALL tool results
       messages.push({ role: "assistant", content: response.content });
       messages.push({
         role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: toolUseBlock.id,
-            content: toolResult,
-          },
-        ],
+        content: toolResults,
       });
 
       // Update apiParams with the extended messages

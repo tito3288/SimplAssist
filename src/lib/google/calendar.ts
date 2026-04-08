@@ -112,17 +112,14 @@ export async function checkAvailability(
   }
 
   // Query Google Calendar for busy times
+  // Pass times with timezone — Google API handles conversion
   const timeMin = `${normalizedDate}T${hours.open_time}:00`;
   const timeMax = `${normalizedDate}T${hours.close_time}:00`;
 
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
-      timeMin: new Date(
-        new Date(timeMin).toLocaleString("en-US", { timeZone: timezone })
-      ).toISOString(),
-      timeMax: new Date(
-        new Date(timeMax).toLocaleString("en-US", { timeZone: timezone })
-      ).toISOString(),
+      timeMin: timeMin,
+      timeMax: timeMax,
       timeZone: timezone,
       items: [{ id: calendarId }],
     },
