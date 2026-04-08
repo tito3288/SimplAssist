@@ -112,16 +112,19 @@ export async function checkAvailability(
   }
 
   // Query Google Calendar for busy times
-  // Ensure time is in HH:MM:SS format (open_time may be HH:MM or HH:MM:SS)
-  const openTime = hours.open_time.length === 5 ? `${hours.open_time}:00` : hours.open_time;
-  const closeTime = hours.close_time.length === 5 ? `${hours.close_time}:00` : hours.close_time;
-  const timeMin = `${normalizedDate}T${openTime}`;
-  const timeMax = `${normalizedDate}T${closeTime}`;
+  // Build Date objects from business hours and convert to ISO for Google API
+  const [openH, openM] = hours.open_time.split(":").map(Number);
+  const [closeH, closeM] = hours.close_time.split(":").map(Number);
+
+  const minDate = new Date(`${normalizedDate}T12:00:00`);
+  minDate.setHours(openH, openM, 0, 0);
+  const maxDate = new Date(`${normalizedDate}T12:00:00`);
+  maxDate.setHours(closeH, closeM, 0, 0);
 
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
-      timeMin: timeMin,
-      timeMax: timeMax,
+      timeMin: minDate.toISOString(),
+      timeMax: maxDate.toISOString(),
       timeZone: timezone,
       items: [{ id: calendarId }],
     },
