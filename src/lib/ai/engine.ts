@@ -88,7 +88,8 @@ async function executeCalendarTool(
   toolName: string,
   toolInput: Record<string, unknown>,
   timezone: string,
-  contactPhone: string | null
+  contactPhone: string | null,
+  contactId: string | null = null
 ): Promise<string> {
   try {
     if (toolName === "check_availability") {
@@ -103,18 +104,24 @@ async function executeCalendarTool(
     }
 
     if (toolName === "create_booking") {
+      const customerEmail = (toolInput.customer_email as string) || undefined;
       const result = await createBooking(
         businessId,
         {
           customerName: toolInput.customer_name as string,
           customerPhone: (toolInput.customer_phone as string) || contactPhone || undefined,
-          customerEmail: (toolInput.customer_email as string) || undefined,
+          customerEmail,
           serviceName: toolInput.service_name as string,
           startTime: toolInput.start_time as string,
           durationMinutes: (toolInput.duration_minutes as number) || 30,
         },
         timezone
       );
+
+      // Save email to contact as a safety net
+      if (customerEmail && contactId) {
+        await updateContactEmail(contactId, customerEmail).catch(() => {});
+      }
 
       return `Appointment booked successfully! ${result.summary} at ${result.startTime}. Event ID: ${result.eventId}`;
     }
@@ -260,7 +267,8 @@ export async function processIncomingMessage(
             toolUseBlock.name,
             toolUseBlock.input as Record<string, unknown>,
             (business as Business).timezone,
-            contactPhone
+            contactPhone,
+            contact.id
           );
         }
         toolResults.push({

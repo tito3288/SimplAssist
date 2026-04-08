@@ -166,8 +166,9 @@ export function buildSystemPrompt(
         "5. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
         "6. Once they pick a time, confirm the full details back to them: 'Just to confirm — [service] on [day, month date] at [time]. Is that correct?'\n" +
         "7. After they confirm, ask for their name if you don't have it yet\n" +
-        "8. Use the create_booking tool to book it\n" +
-        "9. Confirm the appointment with date, time, and service\n" +
+        "8. Ask for their email so we can send them a calendar invite with the appointment details. You MUST have their email before booking.\n" +
+        "9. Use the create_booking tool to book it — always include the customer_email\n" +
+        "10. Confirm the appointment with date, time, and service\n" +
         "Keep responses conversational and brief — this is SMS/chat."
       );
     } else {

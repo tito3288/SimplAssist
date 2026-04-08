@@ -199,23 +199,31 @@ export async function createBooking(
     descriptionParts.push(`Email: ${params.customerEmail}`);
   descriptionParts.push("Booked via SimplAssist AI");
 
+  const requestBody: Record<string, unknown> = {
+    summary: `${params.serviceName} - ${params.customerName}`,
+    description: descriptionParts.join("\n"),
+    start: {
+      dateTime: startDate.toISOString(),
+      timeZone: timezone,
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+      timeZone: timezone,
+    },
+    reminders: {
+      useDefault: true,
+    },
+  };
+
+  // Add customer as attendee so Google sends them a calendar invite
+  if (params.customerEmail) {
+    requestBody.attendees = [{ email: params.customerEmail }];
+  }
+
   const event = await calendar.events.insert({
     calendarId,
-    requestBody: {
-      summary: `${params.serviceName} - ${params.customerName}`,
-      description: descriptionParts.join("\n"),
-      start: {
-        dateTime: startDate.toISOString(),
-        timeZone: timezone,
-      },
-      end: {
-        dateTime: endDate.toISOString(),
-        timeZone: timezone,
-      },
-      reminders: {
-        useDefault: true,
-      },
-    },
+    sendUpdates: "all",
+    requestBody,
   });
 
   return {
