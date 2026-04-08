@@ -178,3 +178,74 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+  const eventId = searchParams.get("eventId");
+
+  if (!eventId) {
+    return NextResponse.json(
+      { error: "eventId query param required" },
+      { status: 400 }
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("id")
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!business) {
+    return NextResponse.json({ error: "Business not found" }, { status: 404 });
+  }
+
+  const { data: token } = await supabase
+    .from("google_calendar_tokens")
+    .select("calendar_id")
+    .eq("business_id", business.id)
+    .single();
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Google Calendar not connected" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const client = await getAuthenticatedClient(business.id);
+    if (!client) {
+      return NextResponse.json(
+        { error: "Google Calendar not connected" },
+        { status: 400 }
+      );
+    }
+
+    const calendar = getCalendarService(client);
+    const calendarId = token.calendar_id || "primary";
+
+    await calendar.events.delete({
+      calendarId,
+      eventId,
+      sendUpdates: "all",
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("[calendar/events] Error deleting event:", err);
+    return NextResponse.json(
+      { error: "Failed to delete event" },
+      { status: 500 }
+    );
+  }
+}

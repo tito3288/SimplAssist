@@ -8,8 +8,10 @@ import {
   Clock,
   Loader2,
   Plus,
+  Trash2,
 } from "lucide-react";
 import CreateEventModal from "./CreateEventModal";
+import { Modal } from "@/components/ui/Modal";
 import {
   glassCard,
   textPrimary,
@@ -95,6 +97,26 @@ export default function CalendarView({
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(initialConnected);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDeleteEvent() {
+    if (!deleteEventId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/calendar/events?eventId=${encodeURIComponent(deleteEventId)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchEvents();
+      }
+    } catch {
+      // Handle silently
+    } finally {
+      setDeleting(false);
+      setDeleteEventId(null);
+    }
+  }
 
   const fetchEvents = useCallback(async () => {
     if (!connected) return;
@@ -337,13 +359,22 @@ export default function CalendarView({
                       border-l-[3px] border-l-[#ff914d]
                     "
                   >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Clock className="w-3.5 h-3.5 text-[#e07a35] dark:text-[#ffb07a]" />
-                      <span className="text-xs font-medium text-[#b85a28] dark:text-[#e8a878]">
-                        {event.allDay
-                          ? "All day"
-                          : `${formatTime(event.start)} – ${formatTime(event.end)}`}
-                      </span>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-[#e07a35] dark:text-[#ffb07a]" />
+                        <span className="text-xs font-medium text-[#b85a28] dark:text-[#e8a878]">
+                          {event.allDay
+                            ? "All day"
+                            : `${formatTime(event.start)} – ${formatTime(event.end)}`}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setDeleteEventId(event.id)}
+                        className="p-1 rounded-lg text-slate-300 dark:text-white/[0.2] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all"
+                        title="Delete event"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     <p className={`text-sm font-semibold ${textPrimary}`}>
                       {event.title}
@@ -369,6 +400,37 @@ export default function CalendarView({
         selectedDate={selectedDate}
         onEventCreated={fetchEvents}
       />
+
+      <Modal
+        open={!!deleteEventId}
+        onClose={() => setDeleteEventId(null)}
+        title="Delete Event"
+        description="Are you sure? This will remove the event from your Google Calendar and notify any attendees."
+      >
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            onClick={() => setDeleteEventId(null)}
+            disabled={deleting}
+            className="flex-1 rounded-full border border-slate-200 dark:border-white/[0.12] px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDeleteEvent}
+            disabled={deleting}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            {deleting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              "Delete"
+            )}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -124,6 +124,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           city: data.city,
           state: data.state,
           zip: data.zip,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         })
         .eq('id', businessId);
       if (error) throw error;

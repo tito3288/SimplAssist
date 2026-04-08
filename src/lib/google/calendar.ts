@@ -55,6 +55,11 @@ function formatYMD(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Format as YYYY-MM-DDTHH:MM:SS (no Z suffix) for Google Calendar event creation */
+function formatLocalDateTime(d: Date): string {
+  return `${formatYMD(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
 interface BookingParams {
   customerName: string;
   customerPhone?: string;
@@ -208,11 +213,11 @@ export async function createBooking(
     summary: `${params.serviceName} - ${params.customerName}`,
     description: descriptionParts.join("\n"),
     start: {
-      dateTime: startDate.toISOString(),
+      dateTime: formatLocalDateTime(startDate),
       timeZone: timezone,
     },
     end: {
-      dateTime: endDate.toISOString(),
+      dateTime: formatLocalDateTime(endDate),
       timeZone: timezone,
     },
     reminders: {

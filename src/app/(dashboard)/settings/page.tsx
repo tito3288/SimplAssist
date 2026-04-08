@@ -6,6 +6,7 @@ import FAQManager from '@/components/settings/FAQManager';
 import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
 import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
 import BusinessEmailForm from '@/components/settings/BusinessEmailForm';
+import TimezoneSelector from '@/components/settings/TimezoneSelector';
 import { glassCard } from '@/lib/glass';
 
 export default async function SettingsPage() {
@@ -96,6 +97,14 @@ export default async function SettingsPage() {
       <div className={`p-6 ${glassCard}`}>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Business Hours</h2>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Set when your business is open. Your AI will inform customers of your hours.</p>
+
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-2">
+            Timezone
+          </label>
+          <TimezoneSelector businessId={business.id} initialTimezone={business.timezone} />
+        </div>
+
         <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
       </div>
     </div>
