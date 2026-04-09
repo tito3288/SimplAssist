@@ -99,6 +99,7 @@ export default function CalendarView({
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [viewEvent, setViewEvent] = useState<CalendarEvent | null>(null);
 
   async function handleDeleteEvent() {
     if (!deleteEventId) return;
@@ -350,31 +351,24 @@ export default function CalendarView({
                 {selectedEvents.map((event) => (
                   <div
                     key={event.id}
+                    onClick={() => setViewEvent(event)}
                     className="
-                      p-3.5 rounded-[22px]
+                      p-3.5 rounded-[22px] cursor-pointer
                       border border-[#ff914d]/25 dark:border-[#ff914d]/35
                       bg-gradient-to-br from-[rgba(255,145,77,.2)] via-[rgba(255,145,77,.1)] to-[rgba(255,145,77,.04)]
                       dark:from-[rgba(255,145,77,.22)] dark:via-[rgba(255,145,77,.1)] dark:to-[rgba(255,145,77,.04)]
                       shadow-[0_4px_24px_rgba(255,145,77,.12)] dark:shadow-[0_8px_32px_rgba(255,145,77,.1)]
                       border-l-[3px] border-l-[#ff914d]
+                      hover:shadow-[0_6px_28px_rgba(255,145,77,.18)] dark:hover:shadow-[0_10px_36px_rgba(255,145,77,.14)] transition-shadow
                     "
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-[#e07a35] dark:text-[#ffb07a]" />
-                        <span className="text-xs font-medium text-[#b85a28] dark:text-[#e8a878]">
-                          {event.allDay
-                            ? "All day"
-                            : `${formatTime(event.start)} – ${formatTime(event.end)}`}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setDeleteEventId(event.id)}
-                        className="p-1 rounded-lg text-slate-300 dark:text-white/[0.2] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all"
-                        title="Delete event"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Clock className="w-3.5 h-3.5 text-[#e07a35] dark:text-[#ffb07a]" />
+                      <span className="text-xs font-medium text-[#b85a28] dark:text-[#e8a878]">
+                        {event.allDay
+                          ? "All day"
+                          : `${formatTime(event.start)} – ${formatTime(event.end)}`}
+                      </span>
                     </div>
                     <p className={`text-sm font-semibold ${textPrimary}`}>
                       {event.title}
@@ -401,6 +395,50 @@ export default function CalendarView({
         onEventCreated={fetchEvents}
       />
 
+      {/* Event Detail Modal */}
+      <Modal
+        open={!!viewEvent}
+        onClose={() => setViewEvent(null)}
+        title={viewEvent?.title || ""}
+        description={formatFullDate(selectedDate)}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Clock className={`w-4 h-4 ${textSecondary}`} />
+            <span className={`text-sm font-medium ${textPrimary}`}>
+              {viewEvent?.allDay
+                ? "All day"
+                : viewEvent
+                  ? `${formatTime(viewEvent.start)} – ${formatTime(viewEvent.end)}`
+                  : ""}
+            </span>
+          </div>
+
+          {viewEvent?.description && (
+            <div>
+              <p className={`text-xs font-medium uppercase mb-1 ${textSecondary}`}>Description</p>
+              <p className={`text-sm whitespace-pre-wrap ${textPrimary}`}>
+                {viewEvent.description}
+              </p>
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-slate-200 dark:border-white/[0.10]">
+            <button
+              onClick={() => {
+                setDeleteEventId(viewEvent?.id || null);
+                setViewEvent(null);
+              }}
+              className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Event
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
       <Modal
         open={!!deleteEventId}
         onClose={() => setDeleteEventId(null)}

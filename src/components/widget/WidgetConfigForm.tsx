@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { useForm } from 'react-hook-form';
 import { createBrowserClient } from '@/lib/supabase/client';
@@ -28,7 +28,7 @@ const PRESET_COLORS = [
 const DEFAULT_WELCOME_MESSAGE =
   'Hi there! 👋 How can we help you today?';
 
-interface FormValues {
+export interface WidgetConfigFormValues {
   brand_color: string;
   position: WidgetPosition;
   show_logo: boolean;
@@ -42,6 +42,8 @@ interface FormValues {
 interface WidgetConfigFormProps {
   config: WidgetConfig;
   onSaved?: () => void;
+  /** Fires on mount and whenever the user edits the form — for live preview only; does not persist. */
+  onPreviewChange?: (values: WidgetConfigFormValues) => void;
 }
 
 function LogoUpload({
@@ -154,7 +156,7 @@ function LogoUpload({
   );
 }
 
-export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormProps) {
+export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: WidgetConfigFormProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -163,7 +165,7 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
     handleSubmit,
     watch,
     setValue,
-  } = useForm<FormValues>({
+  } = useForm<WidgetConfigFormValues>({
     defaultValues: {
       brand_color: config.brand_color,
       position: config.position,
@@ -183,7 +185,15 @@ export default function WidgetConfigForm({ config, onSaved }: WidgetConfigFormPr
   const leadCaptureEnabled = watch('lead_capture_enabled');
   const isActive = watch('is_active');
 
-  const onSubmit = async (data: FormValues) => {
+  useEffect(() => {
+    if (!onPreviewChange) return;
+    const sub = watch((value) => {
+      onPreviewChange(value as WidgetConfigFormValues);
+    });
+    return () => sub.unsubscribe();
+  }, [watch, onPreviewChange]);
+
+  const onSubmit = async (data: WidgetConfigFormValues) => {
     setSaving(true);
     setSaved(false);
     const supabase = createBrowserClient();

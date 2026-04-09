@@ -43,10 +43,12 @@ export async function GET() {
   var isOpen = false;
   var isLoading = false;
   var unreadCount = 0;
+  var attentionDismissed = false;
   var messageCount = 0;
   var leadCaptured = false;
   var visitorName = '';
   var visitorEmail = '';
+  var pendingPreviewPatch = null;
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -73,6 +75,7 @@ export async function GET() {
     '.sa-widget-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
     '.sa-widget-btn:hover{transform:scale(1.05);box-shadow:0 6px 16px rgba(0,0,0,0.2);}',
     '.sa-widget-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;}',
+    '.sa-widget-attention-dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:#ef4444;display:none;}',
     '.sa-widget-panel{--sa-brand:#0066FF;width:400px;height:auto;min-height:260px;max-height:500px;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.14);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
     '.sa-widget-panel.sa-hidden{opacity:0;transform:translateY(12px) scale(0.95);pointer-events:none;}',
     '.sa-widget-panel.sa-visible{opacity:1;transform:translateY(0) scale(1);}',
@@ -123,6 +126,7 @@ export async function GET() {
   var container = el('div', { class: 'sa-widget-container' });
   var btn = el('div');
   var badge = el('div', { class: 'sa-widget-badge', style: { display: 'none' } }, '0');
+  var attentionDot = el('div', { class: 'sa-widget-attention-dot', style: { display: 'none' }, 'aria-hidden': 'true' });
   var panel = el('div', { class: 'sa-widget-panel sa-hidden' });
   var header = el('div', { class: 'sa-widget-header' });
   var avatarWrap = el('div', { class: 'sa-widget-header-avatar' });
@@ -167,6 +171,7 @@ export async function GET() {
   panel.appendChild(endArea);
   panel.appendChild(footerEl);
   btn.appendChild(badge);
+  btn.appendChild(attentionDot);
   container.appendChild(panel);
   container.appendChild(btn);
   document.body.appendChild(container);
@@ -192,9 +197,31 @@ export async function GET() {
     btn.style.backgroundColor = color;
     btn.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     btn.appendChild(badge);
+    btn.appendChild(attentionDot);
     panel.style.setProperty('--sa-brand', color);
     header.style.backgroundColor = color;
     sendBtn.style.backgroundColor = color;
+  }
+
+  function updateLauncherIndicators() {
+    if (isOpen) {
+      badge.style.display = 'none';
+      attentionDot.style.display = 'none';
+      return;
+    }
+    if (unreadCount > 0) {
+      badge.textContent = String(unreadCount);
+      badge.style.display = 'flex';
+      attentionDot.style.display = 'none';
+      return;
+    }
+    if (!attentionDismissed) {
+      badge.style.display = 'none';
+      attentionDot.style.display = 'block';
+      return;
+    }
+    badge.style.display = 'none';
+    attentionDot.style.display = 'none';
   }
 
   function applyHeaderAvatar(name, showLogo, logoUrl) {
@@ -253,14 +280,16 @@ export async function GET() {
       panel.classList.remove('sa-hidden');
       panel.classList.add('sa-visible');
       container.classList.add('sa-open');
+      attentionDismissed = true;
       unreadCount = 0;
-      badge.style.display = 'none';
+      updateLauncherIndicators();
       input.focus();
       scrollToBottom();
     } else {
       panel.classList.remove('sa-visible');
       panel.classList.add('sa-hidden');
       container.classList.remove('sa-open');
+      updateLauncherIndicators();
     }
   }
 
@@ -299,8 +328,7 @@ export async function GET() {
     messages.push({ text: text, type: type });
     if (type === 'bot' && !isOpen) {
       unreadCount++;
-      badge.textContent = String(unreadCount);
-      badge.style.display = 'flex';
+      updateLauncherIndicators();
     }
     scrollToBottom();
     if (type === 'bot') {
@@ -369,6 +397,69 @@ export async function GET() {
     form.appendChild(skipBtn);
     panel.insertBefore(form, inputArea);
   }
+
+  function resetPreviewConversation() {
+    hideLoading();
+    var lf = document.getElementById('sa-lead-form');
+    if (lf) lf.remove();
+    messagesArea.innerHTML = '';
+    messages = [];
+    messageCount = 0;
+    isLoading = false;
+    sendBtn.disabled = false;
+    leadCaptured = false;
+    visitorName = '';
+    visitorEmail = '';
+    inputArea.style.display = 'flex';
+    input.value = '';
+    addMsg(config.welcomeMessage || 'Hi! How can we help you today?', 'bot');
+    unreadCount = 0;
+    attentionDismissed = false;
+    updateLauncherIndicators();
+    if (needsLeadCapture()) showLeadForm();
+  }
+
+  function applyPreviewPatch(patch) {
+    if (!patch || !config) return;
+    var resetMessages = false;
+    var oldWelcome = config.welcomeMessage;
+    var oldLeadE = config.leadCaptureEnabled;
+    var oldLeadT = config.leadCaptureTiming;
+    if (patch.brandColor !== undefined) {
+      config.brandColor = patch.brandColor;
+      applyBrandColor(patch.brandColor || '#0066FF');
+      var userMsgs = messagesArea.querySelectorAll('.sa-widget-msg-user');
+      for (var u = 0; u < userMsgs.length; u++) {
+        userMsgs[u].style.backgroundColor = config.brandColor;
+      }
+    }
+    if (patch.position !== undefined) {
+      config.position = patch.position;
+      positionWidget(patch.position);
+    }
+    if (patch.showLogo !== undefined) config.showLogo = patch.showLogo;
+    if (patch.logoUrl !== undefined) config.logoUrl = patch.logoUrl;
+    applyHeaderAvatar(config.businessName || 'Chat', !!config.showLogo, config.logoUrl || '');
+    if (patch.welcomeMessage !== undefined) {
+      if (patch.welcomeMessage !== oldWelcome) resetMessages = true;
+      config.welcomeMessage = patch.welcomeMessage;
+    }
+    if (patch.leadCaptureEnabled !== undefined) {
+      if (patch.leadCaptureEnabled !== oldLeadE) resetMessages = true;
+      config.leadCaptureEnabled = patch.leadCaptureEnabled;
+    }
+    if (patch.leadCaptureTiming !== undefined) {
+      if (patch.leadCaptureTiming !== oldLeadT) resetMessages = true;
+      config.leadCaptureTiming = patch.leadCaptureTiming;
+    }
+    if (resetMessages) resetPreviewConversation();
+  }
+
+  window.addEventListener('message', function(ev) {
+    if (!ev.data || ev.data.source !== 'simplassist-widget-preview' || ev.data.type !== 'apply-preview') return;
+    pendingPreviewPatch = ev.data.payload;
+    if (config) applyPreviewPatch(pendingPreviewPatch);
+  });
 
   function sendMessage() {
     var text = input.value.trim();
@@ -441,8 +532,10 @@ export async function GET() {
       btn.classList.add('sa-btn-visible');
       addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot');
       unreadCount = 0;
-      badge.style.display = 'none';
+      attentionDismissed = false;
+      updateLauncherIndicators();
       if (needsLeadCapture()) showLeadForm();
+      if (pendingPreviewPatch) applyPreviewPatch(pendingPreviewPatch);
     })
     .catch(function(err) {
       console.error('SimplAssist: failed to load config', err);
@@ -453,7 +546,8 @@ export async function GET() {
       btn.classList.add('sa-btn-visible');
       addMsg('Hi! How can we help you today?', 'bot');
       unreadCount = 0;
-      badge.style.display = 'none';
+      attentionDismissed = false;
+      updateLauncherIndicators();
     });
 })();`;
 

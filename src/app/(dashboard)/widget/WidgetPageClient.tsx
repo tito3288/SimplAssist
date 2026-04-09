@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { WidgetConfig } from '@/types/database';
-import WidgetConfigForm from '@/components/widget/WidgetConfigForm';
+import WidgetConfigForm, { type WidgetConfigFormValues } from '@/components/widget/WidgetConfigForm';
 import WidgetPreview from '@/components/widget/WidgetPreview';
 import EmbedCodeGenerator from '@/components/widget/EmbedCodeGenerator';
 import { glassCard } from '@/lib/glass';
@@ -15,6 +15,20 @@ interface WidgetPageClientProps {
 
 export default function WidgetPageClient({ config, businessId }: WidgetPageClientProps) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [previewValues, setPreviewValues] = useState<WidgetConfigFormValues>(() => ({
+    brand_color: config.brand_color,
+    position: config.position,
+    show_logo: config.show_logo,
+    logo_url: config.logo_url || '',
+    welcome_message: config.welcome_message,
+    lead_capture_enabled: config.lead_capture_enabled,
+    lead_capture_timing: config.lead_capture_timing,
+    is_active: config.is_active,
+  }));
+
+  const handlePreviewChange = useCallback((values: WidgetConfigFormValues) => {
+    setPreviewValues(values);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -29,13 +43,14 @@ export default function WidgetPageClient({ config, businessId }: WidgetPageClien
           <WidgetConfigForm
             config={config}
             onSaved={() => setRefreshKey((k) => k + 1)}
+            onPreviewChange={handlePreviewChange}
           />
         </div>
 
         {/* Right column — preview + embed code */}
         <div className="lg:col-span-2 space-y-6">
           <div className={`p-6 ${glassCard}`}>
-            <WidgetPreview businessId={businessId} refreshKey={refreshKey} />
+            <WidgetPreview businessId={businessId} refreshKey={refreshKey} preview={previewValues} />
           </div>
           <div className={`p-6 ${glassCard}`}>
             <EmbedCodeGenerator businessId={businessId} />
