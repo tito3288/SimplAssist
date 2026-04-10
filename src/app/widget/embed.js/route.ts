@@ -158,6 +158,7 @@ export async function GET() {
   var footerLink = el('a', { href: baseUrl + '/home', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
   footerEl.appendChild(footerLink);
   var endArea = el('div', { class: 'sa-widget-end-area' });
+  endArea.style.display = 'none';
   var endBtn = el('button', { class: 'sa-widget-end', onClick: endConversation, type: 'button' }, 'End Conversation');
   endArea.appendChild(endBtn);
 
@@ -466,6 +467,7 @@ export async function GET() {
     if (!text || isLoading) return;
     input.value = '';
     addMsg(text, 'user');
+    endArea.style.display = '';
     messageCount++;
     try { localStorage.setItem(timestampKey, String(Date.now())); } catch(e) {}
 

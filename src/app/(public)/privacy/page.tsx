@@ -95,14 +95,33 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="6. Third-Party Services">
+      <LegalSection title="6. Account Deletion and Data Retention">
+        <p className="mb-4">
+          You may delete your account at any time from the Settings page. Upon deletion,
+          your account enters a 60-day grace period during which you can log back in
+          and reactivate your account with all data intact.
+        </p>
+        <p className="mb-4">
+          After 60 days, your data is permanently processed as follows: personal information
+          (names, email addresses, phone numbers) is removed from all records. Conversation
+          content is erased. Anonymous, aggregated metadata (lead scores, message counts,
+          timestamps) may be retained for service improvement and analytics.
+        </p>
+        <p>
+          Business configuration data (services, FAQs, business hours, AI settings,
+          phone numbers, calendar connections, and widget settings) is permanently deleted.
+          Your authentication credentials are permanently removed.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="7. Third-Party Services">
         <p>
           SimplAssist integrates with Twilio (messaging), Anthropic (AI), Stripe (payments), and
           Supabase (database). Each service has its own privacy policy.
         </p>
       </LegalSection>
 
-      <LegalSection title="7. Contact Us">
+      <LegalSection title="8. Contact Us">
         <p>
           For privacy questions, contact us at{" "}
           <a href="mailto:privacy@simplassist.com" className={linkClass}>

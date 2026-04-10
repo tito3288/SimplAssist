@@ -8,6 +8,7 @@ import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
 import BusinessEmailForm from '@/components/settings/BusinessEmailForm';
 import TimezoneSelector from '@/components/settings/TimezoneSelector';
 import { glassCard } from '@/lib/glass';
+import DangerZone from '@/components/settings/DangerZone';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -107,6 +108,9 @@ export default async function SettingsPage() {
 
         <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
       </div>
+
+      {/* Danger Zone */}
+      <DangerZone />
     </div>
   );
 }

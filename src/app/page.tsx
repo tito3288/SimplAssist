@@ -13,12 +13,16 @@ export default async function HomePage() {
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type")
+    .select("business_type, deleted_at")
     .eq("owner_id", user.id)
     .single();
 
   if (!business || business.business_type === "general") {
     redirect("/onboarding");
+  }
+
+  if (business.deleted_at) {
+    redirect("/account-deleted");
   }
 
   redirect("/dashboard");

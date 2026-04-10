@@ -19,12 +19,16 @@ export default async function DashboardLayout({
   // Check if user has completed onboarding
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type, website_url")
+    .select("business_type, website_url, deleted_at")
     .eq("owner_id", user.id)
     .single();
 
   if (!business || business.business_type === "general") {
     redirect("/onboarding");
+  }
+
+  if (business.deleted_at) {
+    redirect("/account-deleted");
   }
 
   return (

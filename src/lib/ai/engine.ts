@@ -22,9 +22,9 @@ function scoreMessage(message: string): number {
   const lower = message.toLowerCase();
   let score = 0;
 
-  if (/\b(price|pricing|cost|how much|rate|fee|quote)\b/.test(lower)) score += 2;
-  if (/\b(book|booking|appointment|schedule|reserve)\b/.test(lower)) score += 3;
-  if (/\b(service|offer|provide|do you do)\b/.test(lower)) score += 1;
+  if (/\b(price|pricing|cost|how much|rate|fee|quote|cheap|cheapest|budget|afford|estimate|pay|payment)\b/.test(lower)) score += 2;
+  if (/\b(book|booking|appointment|schedule|reserve|set up a time|consultation|meet|meeting|call|demo)\b/.test(lower)) score += 3;
+  if (/\b(service|offer|provide|do you do|available|help me|need|looking for|interested)\b/.test(lower)) score += 1;
 
   return score;
 }
