@@ -7,10 +7,12 @@ import {
   CalendarDays,
   Clock,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
 import CreateEventModal from "./CreateEventModal";
+import EditEventModal from "./EditEventModal";
 import { Modal } from "@/components/ui/Modal";
 import {
   glassCard,
@@ -100,6 +102,7 @@ export default function CalendarView({
   const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [viewEvent, setViewEvent] = useState<CalendarEvent | null>(null);
+  const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
 
   async function handleDeleteEvent() {
     if (!deleteEventId) return;
@@ -395,6 +398,13 @@ export default function CalendarView({
         onEventCreated={fetchEvents}
       />
 
+      <EditEventModal
+        open={!!editEvent}
+        onClose={() => setEditEvent(null)}
+        event={editEvent}
+        onEventUpdated={fetchEvents}
+      />
+
       {/* Event Detail Modal */}
       <Modal
         open={!!viewEvent}
@@ -423,7 +433,17 @@ export default function CalendarView({
             </div>
           )}
 
-          <div className="pt-2 border-t border-slate-200 dark:border-white/[0.10]">
+          <div className="pt-2 border-t border-slate-200 dark:border-white/[0.10] flex items-center justify-between">
+            <button
+              onClick={() => {
+                setEditEvent(viewEvent);
+                setViewEvent(null);
+              }}
+              className="flex items-center gap-2 text-sm text-[#ff914d] hover:text-[#e07a35] transition-colors"
+            >
+              <Pencil className="w-4 h-4" />
+              Edit Event
+            </button>
             <button
               onClick={() => {
                 setDeleteEventId(viewEvent?.id || null);
