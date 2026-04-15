@@ -61,6 +61,15 @@ export async function POST(request: NextRequest) {
   const businessId = twilioNumber.business_id;
 
   try {
+    const { data: existingContact } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("phone_number", from)
+      .maybeSingle();
+
+    const isFirstContact = !existingContact;
+
     const aiResponse = await processIncomingMessage(
       businessId,
       from,
@@ -81,7 +90,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return twimlResponse(aiResponse);
+    const finalResponse = isFirstContact
+      ? `${aiResponse}\n\nReply STOP to opt out.`
+      : aiResponse;
+
+    return twimlResponse(finalResponse);
   } catch (error) {
     console.error("Error processing incoming SMS:", error);
     return twimlResponse(
