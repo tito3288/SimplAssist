@@ -37,7 +37,7 @@ export async function sendMissedCallSMS(
       businessId,
       callerPhone,
       null,
-      "A customer just called and no one answered. Generate a friendly SMS as if the business itself is replying — never say assistant or bot. Let them know you missed their call and ask how you can help. End the message with: Reply STOP to opt out. Keep the entire message under 160 characters.",
+      "A customer just called and no one answered. Generate a friendly SMS as if the business itself is replying — never say assistant or bot. You MUST include the business name in this message so the customer knows who is texting them. Let them know you missed their call and ask how you can help. End the message with: Reply STOP to opt out. Keep the entire message under 160 characters.",
       "sms"
     );
 

@@ -194,6 +194,7 @@ export function buildSystemPrompt(
     sections.push("- Keep answers short by default but you can be more detailed when the question warrants it.");
   } else {
     sections.push("- Be helpful and concise. This is an SMS conversation — keep responses short, ideally under 160 characters when possible.");
+    sections.push("- IMPORTANT: On your very first reply to a new customer, always include the business name so they know who is texting them.");
     sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.).");
   }
   sections.push("- Do NOT make up information that is not provided in this context.");
