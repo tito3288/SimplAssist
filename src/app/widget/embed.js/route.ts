@@ -96,7 +96,7 @@ export async function GET() {
     '.sa-widget-msg-bot{align-self:flex-start;background:#eef1f4;color:#1a1a1a;border-bottom-left-radius:6px;}',
     '.sa-widget-msg-user{align-self:flex-end;color:#fff;border-bottom-right-radius:6px;}',
     '.sa-widget-input-area{padding:12px 16px;border-top:1px solid #e8eaed;display:flex;gap:10px;align-items:center;flex-shrink:0;background:#fff;}',
-    '.sa-widget-input{flex:1;border:1px solid #d1d5db;border-radius:999px;padding:10px 16px;font-size:14px;outline:none;font-family:inherit;background:#fff;color:#1a1a1a;}',
+    '.sa-widget-input{flex:1;border:1px solid #d1d5db;border-radius:999px;padding:10px 16px;font-size:16px;outline:none;font-family:inherit;background:#fff;color:#1a1a1a;}',
     '.sa-widget-input::placeholder{color:#9ca3af;}',
     '.sa-widget-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
     '.sa-widget-send{width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;flex-shrink:0;}',
@@ -110,7 +110,7 @@ export async function GET() {
     '@keyframes sa-widget-blink{0%,100%{opacity:1;}50%{opacity:0;}}',
     '.sa-widget-lead-form{padding:20px 16px;display:flex;flex-direction:column;gap:12px;}',
     '.sa-widget-lead-form p{margin:0;font-size:14px;color:#4a5568;text-align:center;}',
-    '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit;}',
+    '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:16px;outline:none;font-family:inherit;}',
     '.sa-widget-lead-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
     '.sa-widget-lead-btn{border:none;color:#fff;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
@@ -119,7 +119,10 @@ export async function GET() {
     '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}',
     '.sa-widget-end-area{padding:0 16px 8px;text-align:center;background:#fff;flex-shrink:0;}',
     '.sa-widget-end{background:none;border:none;color:#9ca3af;cursor:pointer;padding:0;font-size:11px;font-weight:500;transition:color 0.2s;}',
-    '.sa-widget-end:hover{color:#ef4444;}'
+    '.sa-widget-end:hover{color:#ef4444;}',
+    '.sa-widget-quick-replies{display:flex;flex-wrap:wrap;gap:8px;padding:0 16px 12px;align-self:stretch;}',
+    '.sa-widget-quick-reply-btn{border:1.5px solid var(--sa-brand,#0066FF);color:var(--sa-brand,#0066FF);background:transparent;border-radius:999px;padding:8px 16px;font-size:13px;font-family:inherit;cursor:pointer;transition:background 0.2s,color 0.2s;line-height:1.3;white-space:normal;text-align:left;}',
+    '.sa-widget-quick-reply-btn:hover{background:var(--sa-brand,#0066FF);color:#fff;}'
   ].join('\\n');
   document.head.appendChild(style);
 
@@ -272,7 +275,7 @@ export async function GET() {
     } catch(e) {}
 
     // Show ended message then welcome
-    addMsg('Conversation ended. Feel free to start a new one!', 'bot');
+    addMsg('Conversation ended. Feel free to start a new one!', 'bot', showQuickReplies);
   }
 
   function togglePanel() {
@@ -337,6 +340,32 @@ export async function GET() {
     } else if (callback) {
       callback();
     }
+  }
+
+  function showQuickReplies() {
+    if (document.getElementById('sa-quick-replies')) return;
+    var quickReplies = (config && config.quickReplies && config.quickReplies.length > 0)
+      ? config.quickReplies
+      : [];
+    if (quickReplies.length === 0) return;
+    var qrContainer = el('div', { class: 'sa-widget-quick-replies', id: 'sa-quick-replies' });
+    quickReplies.forEach(function(q) {
+      var qBtn = el('button', {
+        class: 'sa-widget-quick-reply-btn',
+        type: 'button',
+        onClick: function() { handleQuickReply(q); }
+      }, q);
+      qrContainer.appendChild(qBtn);
+    });
+    messagesArea.appendChild(qrContainer);
+    scrollToBottom();
+  }
+
+  function handleQuickReply(text) {
+    var qr = document.getElementById('sa-quick-replies');
+    if (qr) qr.remove();
+    input.value = text;
+    sendMessage();
   }
 
   function scrollToBottom() {
@@ -413,7 +442,9 @@ export async function GET() {
     visitorEmail = '';
     inputArea.style.display = 'flex';
     input.value = '';
-    addMsg(config.welcomeMessage || 'Hi! How can we help you today?', 'bot');
+    addMsg(config.welcomeMessage || 'Hi! How can we help you today?', 'bot', function() {
+      showQuickReplies();
+    });
     unreadCount = 0;
     attentionDismissed = false;
     updateLauncherIndicators();
@@ -453,6 +484,11 @@ export async function GET() {
       if (patch.leadCaptureTiming !== oldLeadT) resetMessages = true;
       config.leadCaptureTiming = patch.leadCaptureTiming;
     }
+    if (patch.quickReplies !== undefined) {
+      var oldQR = JSON.stringify(config.quickReplies || []);
+      config.quickReplies = patch.quickReplies;
+      if (JSON.stringify(patch.quickReplies) !== oldQR) resetMessages = true;
+    }
     if (resetMessages) resetPreviewConversation();
   }
 
@@ -465,6 +501,7 @@ export async function GET() {
   function sendMessage() {
     var text = input.value.trim();
     if (!text || isLoading) return;
+    var qr = document.getElementById('sa-quick-replies'); if (qr) qr.remove();
     input.value = '';
     addMsg(text, 'user');
     endArea.style.display = '';
@@ -532,7 +569,7 @@ export async function GET() {
       positionWidget(data.position || 'bottom_right');
       btn.classList.remove('sa-btn-hidden');
       btn.classList.add('sa-btn-visible');
-      addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot');
+      addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot', showQuickReplies);
       unreadCount = 0;
       attentionDismissed = false;
       updateLauncherIndicators();
@@ -546,7 +583,7 @@ export async function GET() {
       applyBrandColor('#0066FF');
       btn.classList.remove('sa-btn-hidden');
       btn.classList.add('sa-btn-visible');
-      addMsg('Hi! How can we help you today?', 'bot');
+      addMsg('Hi! How can we help you today?', 'bot', showQuickReplies);
       unreadCount = 0;
       attentionDismissed = false;
       updateLauncherIndicators();

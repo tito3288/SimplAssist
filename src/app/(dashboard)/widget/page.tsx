@@ -34,6 +34,7 @@ export default async function WidgetPage() {
         logo_url: null,
         lead_capture_enabled: true,
         lead_capture_timing: 'after_3_messages',
+        quick_replies: ['Book a free consultation', 'What services do you offer?', 'What areas do you cover?'],
         is_active: false,
       })
       .select()

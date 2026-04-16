@@ -178,6 +178,7 @@ export interface WidgetConfig {
   logo_url: string | null;
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
+  quick_replies: string[];
   is_active: boolean;
   created_at: string;
   updated_at: string;

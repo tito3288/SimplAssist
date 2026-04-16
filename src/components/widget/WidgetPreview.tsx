@@ -23,6 +23,7 @@ function buildPreviewPayload(values: WidgetConfigFormValues) {
     welcomeMessage: values.welcome_message,
     leadCaptureEnabled: values.lead_capture_enabled,
     leadCaptureTiming: values.lead_capture_timing,
+    quickReplies: values.quick_replies.filter(q => q.trim() !== ''),
   };
 }
 

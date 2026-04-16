@@ -13,6 +13,8 @@ import {
   Upload,
   Trash2,
   Loader2,
+  Plus,
+  X,
 } from 'lucide-react';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 
@@ -36,6 +38,7 @@ export interface WidgetConfigFormValues {
   welcome_message: string;
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
+  quick_replies: string[];
   is_active: boolean;
 }
 
@@ -174,6 +177,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       welcome_message: config.welcome_message,
       lead_capture_enabled: config.lead_capture_enabled,
       lead_capture_timing: config.lead_capture_timing,
+      quick_replies: config.quick_replies || [],
       is_active: config.is_active,
     },
   });
@@ -183,6 +187,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
   const position = watch('position');
   const welcomeMessage = watch('welcome_message');
   const leadCaptureEnabled = watch('lead_capture_enabled');
+  const quickReplies = watch('quick_replies');
   const isActive = watch('is_active');
 
   useEffect(() => {
@@ -208,6 +213,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
         welcome_message: data.welcome_message,
         lead_capture_enabled: data.lead_capture_enabled,
         lead_capture_timing: data.lead_capture_timing,
+        quick_replies: data.quick_replies.filter(q => q.trim() !== ''),
         is_active: data.is_active,
         updated_at: new Date().toISOString(),
       })
@@ -365,7 +371,60 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
         </div>
       </div>
 
-      {/* Section 3: Lead Capture */}
+      {/* Section 3: Quick Reply Buttons */}
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Quick Reply Buttons</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
+          Suggested questions shown below the welcome message. Visitors can click to start a conversation. Leave empty to hide.
+        </p>
+
+        <div className="space-y-3">
+          {quickReplies.map((reply, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={reply}
+                  onChange={(e) => {
+                    const updated = [...quickReplies];
+                    updated[index] = e.target.value;
+                    setValue('quick_replies', updated);
+                  }}
+                  maxLength={50}
+                  placeholder={`Question ${index + 1}`}
+                  className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-[#666] pointer-events-none">
+                  {reply.length}/50
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = quickReplies.filter((_, i) => i !== index);
+                  setValue('quick_replies', updated);
+                }}
+                className="p-2 rounded-lg border border-slate-200 dark:border-white/[0.12] text-slate-400 dark:text-[#666] hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-500/30 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+
+          {quickReplies.length < 3 && (
+            <button
+              type="button"
+              onClick={() => setValue('quick_replies', [...quickReplies, ''])}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-slate-200 dark:border-white/[0.12] text-slate-500 dark:text-[#bdbdbf] hover:border-[#ff914d] hover:text-[#ff914d] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add question
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Section 4: Lead Capture */}
       <div>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Lead Capture</h2>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Collect visitor contact information during conversations.</p>

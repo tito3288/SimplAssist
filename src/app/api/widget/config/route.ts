@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         logoUrl: widgetConfig.logo_url,
         leadCaptureEnabled: widgetConfig.lead_capture_enabled,
         leadCaptureTiming: widgetConfig.lead_capture_timing,
+        quickReplies: widgetConfig.quick_replies || [],
       },
       { headers: corsHeaders }
     );

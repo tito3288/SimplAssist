@@ -23,6 +23,7 @@ export default function WidgetPageClient({ config, businessId }: WidgetPageClien
     welcome_message: config.welcome_message,
     lead_capture_enabled: config.lead_capture_enabled,
     lead_capture_timing: config.lead_capture_timing,
+    quick_replies: config.quick_replies || [],
     is_active: config.is_active,
   }));
 
