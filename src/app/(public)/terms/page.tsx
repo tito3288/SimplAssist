@@ -13,8 +13,9 @@ export default function TermsPage() {
     >
       <LegalSection title="1. Acceptance of Terms">
         <p>
-          By creating a SimplAssist account, you agree to these terms. If you do not agree, do not
-          use the service.
+          These Terms of Service govern your use of SimplAssist, a service operated by
+          ARAMBULA VENTURES LLC. By creating a SimplAssist account, you agree to these terms.
+          If you do not agree, do not use the service.
         </p>
       </LegalSection>
 

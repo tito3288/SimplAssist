@@ -653,7 +653,7 @@ export default function HomePage() {
                   className="block dark:hidden h-[22px] w-auto object-contain"
                 />
                 <small className="text-slate-400 dark:text-[#bdbdbf] block mt-1">
-                  &copy; {new Date().getFullYear()} SimplAssist
+                  &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
                 </small>
               </div>
               <div className="flex gap-5 flex-wrap text-sm">

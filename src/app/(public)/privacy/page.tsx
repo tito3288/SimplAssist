@@ -13,9 +13,10 @@ export default function PrivacyPage() {
     >
       <LegalSection title="1. Introduction">
         <p>
-          SimplAssist (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;) is committed to
-          protecting your privacy. This policy explains how we collect, use, and protect information
-          when businesses use our platform and when their customers interact with our AI assistant.
+          SimplAssist (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;), a product of
+          ARAMBULA VENTURES LLC, is committed to protecting your privacy. This policy explains how
+          we collect, use, and protect information when businesses use our platform and when their
+          customers interact with our AI assistant.
         </p>
       </LegalSection>
 
