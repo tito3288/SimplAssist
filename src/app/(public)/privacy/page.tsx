@@ -32,7 +32,7 @@ export default function PrivacyPage() {
       <LegalSection title="3. How We Use Your Information">
         <p>
           To power the AI assistant responses. To maintain conversation history in your CRM. To send
-          SMS messages on behalf of your business via Twilio. To provide analytics and reporting in
+          SMS messages on behalf of your business via Telnyx. To provide analytics and reporting in
           your dashboard. We do not sell your data to third parties.
         </p>
       </LegalSection>
@@ -40,8 +40,8 @@ export default function PrivacyPage() {
       <LegalSection title="4. SMS and Text Messaging">
         <p className="mb-4">
           SimplAssist sends automated text messages on behalf of businesses using our platform.
-          These messages are sent via Twilio, a third-party messaging service. By using SimplAssist,
-          your business agrees to Twilio&apos;s messaging policies and applicable telecommunications
+          These messages are sent via Telnyx, a third-party messaging service. By using SimplAssist,
+          your business agrees to Telnyx&apos;s messaging policies and applicable telecommunications
           regulations.
         </p>
 
@@ -54,6 +54,12 @@ export default function PrivacyPage() {
           provided. These messages may include responses to your inquiry, appointment confirmations,
           follow-up communications, and other messages related to the business you contacted.
           Consent is not a condition of purchase.
+        </p>
+        <p className="mb-4">
+          By providing your phone number to a business using SimplAssist, you give express written
+          consent to receive automated SMS messages from that business and SimplAssist as described
+          above. You may receive roughly 1 to 10 messages per inquiry depending on your
+          conversation; overall message frequency varies.
         </p>
 
         <p className="mb-4 font-semibold">
@@ -72,8 +78,8 @@ export default function PrivacyPage() {
         <p className="mb-4">
           For assistance, reply <strong>HELP</strong> to any message, or contact SimplAssist support
           at{" "}
-          <a href="mailto:support@simplassist.com" className={linkClass}>
-            support@simplassist.com
+          <a href="mailto:bryan@simplassist.com" className={linkClass}>
+            bryan@simplassist.com
           </a>
           .
         </p>
@@ -117,7 +123,7 @@ export default function PrivacyPage() {
 
       <LegalSection title="7. Third-Party Services">
         <p>
-          SimplAssist integrates with Twilio (messaging), Anthropic (AI), Stripe (payments), and
+          SimplAssist integrates with Telnyx (messaging), Anthropic (AI), Stripe (payments), and
           Supabase (database). Each service has its own privacy policy.
         </p>
       </LegalSection>
@@ -125,8 +131,8 @@ export default function PrivacyPage() {
       <LegalSection title="8. Contact Us">
         <p>
           For privacy questions, contact us at{" "}
-          <a href="mailto:privacy@simplassist.com" className={linkClass}>
-            privacy@simplassist.com
+          <a href="mailto:bryan@simplassist.com" className={linkClass}>
+            bryan@simplassist.com
           </a>
           .
         </p>

@@ -29,8 +29,8 @@ export default function PhoneNumberSection({ phoneNumber, isActive }: PhoneNumbe
         </div>
         <p className="text-xs text-slate-400 dark:text-[#666]">
           Need to change your number? Contact{' '}
-          <a href="mailto:support@simplassist.com" className="text-[#ff914d] hover:text-[#ffb07a] underline">
-            support@simplassist.com
+          <a href="mailto:bryan@simplassist.com" className="text-[#ff914d] hover:text-[#ffb07a] underline">
+            bryan@simplassist.com
           </a>
         </p>
       </div>

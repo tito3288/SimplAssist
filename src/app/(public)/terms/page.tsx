@@ -80,7 +80,7 @@ export default function TermsPage() {
         </p>
         <p>
           For more information, see our{" "}
-          <a href="/privacy" className={linkClass}>
+          <a href="https://simplassist.com/privacy" className={linkClass}>
             Privacy Policy
           </a>
           .
@@ -88,9 +88,14 @@ export default function TermsPage() {
       </LegalSection>
 
       <LegalSection title="6. Subscription and Billing">
-        <p>
+        <p className="mb-4">
           Services are billed monthly. You may cancel at any time. Refunds are not provided for
           partial months. SimplAssist reserves the right to change pricing with 30 days notice.
+        </p>
+        <p>
+          Subscription and setup fees may include carrier registration costs required for SMS
+          compliance. Those fees are passed through from carriers and TCR (The Campaign Registry)
+          and are non-refundable once registration has been submitted on your behalf.
         </p>
       </LegalSection>
 
@@ -112,8 +117,8 @@ export default function TermsPage() {
       <LegalSection title="9. Contact">
         <p>
           For questions about these terms, contact us at{" "}
-          <a href="mailto:legal@simplassist.com" className={linkClass}>
-            legal@simplassist.com
+          <a href="mailto:bryan@simplassist.com" className={linkClass}>
+            bryan@simplassist.com
           </a>
           .
         </p>
