@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { purchaseNumber, twilioClient } from "@/lib/twilio/client";
+import { purchaseNumber } from "@/lib/messaging/numbers";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -36,32 +36,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const purchased = await purchaseNumber(phoneNumber);
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
-    await twilioClient.incomingPhoneNumbers(purchased.sid).update({
-      smsUrl: `${appUrl}/api/twilio/webhook`,
-      voiceUrl: `${appUrl}/api/twilio/voice`,
-    });
-
-    // Associate number with A2P Messaging Service for carrier compliance
-    const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-    if (messagingServiceSid) {
-      await twilioClient
-        .messaging.v1.services(messagingServiceSid)
-        .phoneNumbers.create({ phoneNumberSid: purchased.sid });
-      console.log(`[purchase] Number ${purchased.phoneNumber} added to Messaging Service ${messagingServiceSid}`);
-    }
+    const purchased = await purchaseNumber(phoneNumber, business.id);
+    console.log(
+      `[purchase] Telnyx order for ${purchased.phoneNumber} status=${purchased.status} id=${purchased.phoneNumberId}`
+    );
 
     const { data: record, error: insertError } = await supabase
       .from("twilio_numbers")
       .insert({
         business_id: business.id,
         phone_number: purchased.phoneNumber,
-        twilio_sid: purchased.sid,
+        twilio_sid: purchased.phoneNumberId,
         is_active: true,
-        sms_webhook_url: `${appUrl}/api/twilio/webhook`,
-        voice_webhook_url: `${appUrl}/api/twilio/voice`,
       })
       .select()
       .single();
@@ -74,11 +60,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Save SMS consent — user agreed by purchasing a number
-    await supabase.from('businesses').update({
+    await supabase.from("businesses").update({
       sms_consent_agreed: true,
       sms_consent_agreed_at: new Date().toISOString(),
-    }).eq('id', business.id);
+    }).eq("id", business.id);
 
     return NextResponse.json({ number: record });
   } catch (error) {

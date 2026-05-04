@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { releaseNumber } from "@/lib/twilio/client";
+import { releaseNumber } from "@/lib/messaging/numbers";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // twilio_sid column holds a Telnyx phone_number_id (UUID); column gets renamed in Phase E.
     await releaseNumber(twilioNumber.twilio_sid);
 
     await supabase.from("twilio_numbers").delete().eq("id", numberId);

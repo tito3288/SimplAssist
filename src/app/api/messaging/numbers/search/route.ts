@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { searchAvailableNumbers } from "@/lib/twilio/client";
+import { searchAvailableNumbers } from "@/lib/messaging/numbers";
 
 export async function GET(request: NextRequest) {
   const areaCode = request.nextUrl.searchParams.get("areaCode");
