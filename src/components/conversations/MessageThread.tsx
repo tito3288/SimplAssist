@@ -110,7 +110,7 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
 
       // If SMS, also send via Twilio
       if (conversation.channel === "sms" && conversation.contact?.phone_number) {
-        await fetch("/api/twilio/send", {
+        await fetch("/api/messaging/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

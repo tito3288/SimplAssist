@@ -45,7 +45,7 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
 
     try {
       const res = await fetch(
-        `/api/twilio/numbers/search?areaCode=${areaCode}`
+        `/api/messaging/numbers/search?areaCode=${areaCode}`
       );
       const data = await res.json();
 
@@ -70,7 +70,7 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
     setError(null);
 
     try {
-      const res = await fetch("/api/twilio/numbers/purchase", {
+      const res = await fetch("/api/messaging/numbers/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phoneNumber }),
