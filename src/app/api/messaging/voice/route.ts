@@ -214,7 +214,19 @@ async function handleRecordingSaved(payload: Record<string, unknown>) {
     payload.recording_urls
   );
 
-  await telnyx.calls.actions.hangup(state.callControlId, {});
+  // Hangup is a best-effort cleanup. The caller has typically already hung up by
+  // the time recording.saved fires (caller hangs up -> recording finalizes -> we
+  // get this event), in which case Telnyx returns 422 "Call has already ended".
+  // Swallowing the error here prevents it from bubbling and blocking the
+  // missed-call SMS, which is the actually-important side effect.
+  try {
+    await telnyx.calls.actions.hangup(state.callControlId, {});
+  } catch (err) {
+    console.log(
+      `[messaging:voice] hangup skipped (call likely already ended):`,
+      err instanceof Error ? err.message : err
+    );
+  }
 
   console.log(
     `[messaging:voice] Triggering missed-call SMS to ${state.from} for ${state.businessId}`
