@@ -1,4 +1,4 @@
-import { twilioClient } from "./client";
+import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { processIncomingMessage } from "@/lib/ai/engine";
@@ -27,7 +27,7 @@ export async function sendMissedCallSMS(
       .single();
 
     if (!twilioNumber) {
-      console.warn(`[missed-call] No active Twilio number for business: ${businessId}`);
+      console.warn(`[missed-call] No active phone number for business: ${businessId}`);
       return;
     }
 
@@ -41,13 +41,17 @@ export async function sendMissedCallSMS(
       "sms"
     );
 
-    await twilioClient.messages.create({
+    const result = await telnyx.messages.send({
       from: twilioNumber.phone_number,
       to: callerPhone,
-      body: aiResponse,
+      text: aiResponse,
+      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+      type: "SMS",
     });
 
-    console.log(`[missed-call] SMS sent to ${callerPhone} for business ${businessId}`);
+    console.log(
+      `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (id: ${result.data?.id})`
+    );
   } catch (error) {
     console.error("[missed-call] Error sending missed call SMS:", error);
   }

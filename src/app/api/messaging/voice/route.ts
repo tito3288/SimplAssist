@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { twilio } from "@/lib/twilio/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { sendMissedCallSMS } from "@/lib/twilio/missed-call";
+import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();

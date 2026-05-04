@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { twilioClient } from "@/lib/twilio/client";
+import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "@/lib/messaging/client";
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,7 +23,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the user owns the business
     const { data: business } = await supabase
       .from("businesses")
       .select("id")
@@ -38,7 +37,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get the business's Twilio number
     const { data: twilioNumber } = await supabase
       .from("twilio_numbers")
       .select("phone_number")
@@ -48,19 +46,20 @@ export async function POST(request: NextRequest) {
 
     if (!twilioNumber) {
       return NextResponse.json(
-        { error: "No active Twilio number found for this business" },
+        { error: "No active phone number found for this business" },
         { status: 404 }
       );
     }
 
-    // Send SMS via Twilio
-    const result = await twilioClient.messages.create({
+    const result = await telnyx.messages.send({
       to,
       from: twilioNumber.phone_number,
-      body: message,
+      text: message,
+      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+      type: "SMS",
     });
 
-    return NextResponse.json({ success: true, sid: result.sid });
+    return NextResponse.json({ success: true, id: result.data?.id });
   } catch (error) {
     console.error("Error sending SMS:", error);
     return NextResponse.json(
