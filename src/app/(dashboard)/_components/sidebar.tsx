@@ -40,6 +40,10 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
 
   async function handleSignOut() {
     await supabase.auth.signOut();
+    // Invalidate the Router Cache so the next session's layout re-fetches.
+    // Without this, Next.js can serve the stale Sidebar (with the previous
+    // user's email + website) when a different account signs back in.
+    router.refresh();
     router.push("/home");
   }
 

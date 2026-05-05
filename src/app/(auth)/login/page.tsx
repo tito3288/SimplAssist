@@ -51,6 +51,9 @@ export default function LoginPage() {
       return;
     }
 
+    // Invalidate the Router Cache so the dashboard layout re-fetches with the
+    // new user's auth cookie instead of serving a previous session's render.
+    router.refresh();
     router.push("/dashboard");
   }
 
