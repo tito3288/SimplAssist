@@ -1,57 +1,116 @@
 import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
-import { processIncomingMessage } from "@/lib/ai/engine";
+import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
+import type { Language } from "@/types/database";
+
+// Static templates indexed by ai_settings.language. Missed-call SMS is a
+// transactional, time-sensitive, near-identical-every-time message — using
+// the AI for it isn't earning its cost, and routing through the customer
+// conversation engine caused two bugs:
+//   (1) the LLM occasionally leaked reasoning text into the SMS body
+//       ("I appreciate the request, but I need to let you know that...")
+//   (2) the prompt-instruction string got persisted as a role:"customer"
+//       row in the messages table, polluting conversation history.
+// Static templates eliminate both. Bilingual subsequent turns (when the
+// customer replies via SMS) are still handled by the conversation engine
+// based on ai_settings.language.
+const MISSED_CALL_TEMPLATES = {
+  en: (businessName: string) =>
+    `Hi! This is ${businessName}. We missed your call — how can we help? Reply STOP to opt out.`,
+  es: (businessName: string) =>
+    `¡Hola! Somos ${businessName}. No pudimos contestar — ¿en qué le ayudamos? Responda STOP para cancelar.`,
+};
+
+// "both" defaults to English on first contact since we don't yet know the
+// caller's preferred language. The conversation engine adapts on subsequent
+// turns once the customer replies.
+function renderTemplate(businessName: string, language: Language): string {
+  if (language === "es") return MISSED_CALL_TEMPLATES.es(businessName);
+  return MISSED_CALL_TEMPLATES.en(businessName);
+}
 
 export async function sendMissedCallSMS(
   callerPhone: string,
   businessId: string
 ): Promise<void> {
   try {
-    const { data: business } = await supabaseAdmin
-      .from("businesses")
-      .select("*")
-      .eq("id", businessId)
-      .single();
+    const [
+      { data: business },
+      { data: aiSettings },
+      { data: phoneNumberRow },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("businesses")
+        .select("name")
+        .eq("id", businessId)
+        .single(),
+      supabaseAdmin
+        .from("ai_settings")
+        .select("language")
+        .eq("business_id", businessId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("phone_numbers")
+        .select("phone_number")
+        .eq("business_id", businessId)
+        .eq("is_active", true)
+        .maybeSingle(),
+    ]);
 
     if (!business) {
       console.warn(`[missed-call] Business not found: ${businessId}`);
       return;
     }
 
-    const { data: phoneNumberRow } = await supabaseAdmin
-      .from("phone_numbers")
-      .select("*")
-      .eq("business_id", businessId)
-      .eq("is_active", true)
-      .single();
-
     if (!phoneNumberRow) {
-      console.warn(`[missed-call] No active phone number for business: ${businessId}`);
+      console.warn(
+        `[missed-call] No active phone number for business: ${businessId}`
+      );
       return;
     }
 
-    await findOrCreateContact(businessId, callerPhone, null, "sms");
+    const language: Language = (aiSettings?.language as Language) ?? "en";
+    const smsBody = renderTemplate(business.name, language);
 
-    const aiResponse = await processIncomingMessage(
+    // Ensure a contact + conversation exist so the dashboard can show the
+    // missed-call SMS in the conversation thread for that caller. We add
+    // ONLY the outbound assistant message — never a synthetic "customer"
+    // row, since the customer didn't actually send anything (they called).
+    const contact = await findOrCreateContact(
       businessId,
       callerPhone,
       null,
-      "A customer just called and no one answered. Generate a friendly SMS as if the business itself is replying — never say assistant or bot. You MUST include the business name in this message so the customer knows who is texting them. Let them know you missed their call and ask how you can help. End the message with: Reply STOP to opt out. Keep the entire message under 160 characters.",
+      "sms"
+    );
+    const conversation = await getOrCreateConversation(
+      businessId,
+      contact.id,
       "sms"
     );
 
     const result = await telnyx.messages.send({
       from: phoneNumberRow.phone_number,
       to: callerPhone,
-      text: aiResponse,
+      text: smsBody,
       messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
       type: "SMS",
     });
 
     console.log(
-      `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (id: ${result.data?.id})`
+      `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (lang=${language}, telnyxId=${result.data?.id})`
     );
+
+    // Decoupled from the send: a logging failure here must not look like an
+    // SMS failure in the outer catch. The customer already got the text.
+    try {
+      await addMessage(conversation.id, businessId, "assistant", smsBody, "sms");
+    } catch (logErr) {
+      console.error(
+        `[missed-call] SMS sent (telnyxId=${result.data?.id}) but failed to persist to messages table — manual reconciliation may be needed:`,
+        logErr
+      );
+    }
   } catch (error) {
     console.error("[missed-call] Error sending missed call SMS:", error);
   }
