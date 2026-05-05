@@ -5,7 +5,6 @@ import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 
 interface PhoneNumberSectionProps {
   phoneNumber: string | null;
-  twilioSid: string | null;
   isActive: boolean;
 }
 

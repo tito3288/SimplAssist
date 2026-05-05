@@ -31,7 +31,7 @@ export default async function DashboardPage() {
     { count: messagesThisWeek },
     { data: recentConversationsRaw },
     { data: hotLeads },
-    { data: twilioNumber },
+    { data: phoneNumberRow },
     ,
     { data: calendarToken },
   ] = await Promise.all([
@@ -53,7 +53,7 @@ export default async function DashboardPage() {
       .order('lead_score', { ascending: false })
       .limit(10),
     supabase
-      .from('twilio_numbers')
+      .from('phone_numbers')
       .select('phone_number, is_active')
       .eq('business_id', business.id)
       .eq('is_active', true)
@@ -123,7 +123,7 @@ export default async function DashboardPage() {
         }}
         recentConversations={recentConversations}
         hotLeads={hotLeads || []}
-        phoneNumber={twilioNumber?.phone_number || null}
+        phoneNumber={phoneNumberRow?.phone_number || null}
       />
     </div>
   );

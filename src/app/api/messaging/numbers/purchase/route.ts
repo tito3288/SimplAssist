@@ -42,11 +42,11 @@ export async function POST(request: NextRequest) {
     );
 
     const { data: record, error: insertError } = await supabase
-      .from("twilio_numbers")
+      .from("phone_numbers")
       .insert({
         business_id: business.id,
         phone_number: purchased.phoneNumber,
-        twilio_sid: purchased.phoneNumberId,
+        telnyx_phone_number_id: purchased.phoneNumberId,
         is_active: true,
       })
       .select()

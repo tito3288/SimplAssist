@@ -88,14 +88,14 @@ export async function POST(request: NextRequest) {
     return new NextResponse("OK", { status: 200 });
   }
 
-  const { data: twilioNumber, error: lookupError } = await supabaseAdmin
-    .from("twilio_numbers")
+  const { data: phoneNumberRow, error: lookupError } = await supabaseAdmin
+    .from("phone_numbers")
     .select("business_id")
     .eq("phone_number", to)
     .eq("is_active", true)
     .single();
 
-  if (lookupError || !twilioNumber) {
+  if (lookupError || !phoneNumberRow) {
     console.warn(
       `[messaging:webhook] No active business found for to=${to}`,
       lookupError
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse("OK", { status: 200 });
   }
 
-  const businessId = twilioNumber.business_id;
+  const businessId = phoneNumberRow.business_id;
   console.log(`[messaging:webhook] Resolved businessId=${businessId}, dispatching AI reply`);
 
   // Detached background work: ack now, do AI + reply send in the background.

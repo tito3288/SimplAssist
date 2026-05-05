@@ -120,20 +120,20 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     `[messaging:voice] call.initiated from=${from} to=${to} call_control_id=${callControlId}`
   );
 
-  const { data: twilioNumber } = await supabaseAdmin
-    .from("twilio_numbers")
+  const { data: phoneNumberRow } = await supabaseAdmin
+    .from("phone_numbers")
     .select("business_id")
     .eq("phone_number", to)
     .eq("is_active", true)
     .single();
 
-  if (!twilioNumber) {
+  if (!phoneNumberRow) {
     console.warn(`[messaging:voice] No active business for to=${to}, rejecting call`);
     await telnyx.calls.actions.reject(callControlId, { cause: "USER_BUSY" });
     return;
   }
 
-  const businessId = twilioNumber.business_id;
+  const businessId = phoneNumberRow.business_id;
   const { data: business } = await supabaseAdmin
     .from("businesses")
     .select("name")

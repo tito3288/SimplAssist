@@ -98,15 +98,15 @@ export default function OnboardingPage() {
   // Check if a phone number was purchased when advancing from step 5
   const handlePhoneStepNext = async () => {
     const supabase = createClient();
-    const { data: twilioNumber } = await supabase
-      .from('twilio_numbers')
+    const { data: phoneNumberRow } = await supabase
+      .from('phone_numbers')
       .select('phone_number')
       .eq('business_id', businessId)
       .eq('is_active', true)
       .single();
 
-    if (twilioNumber) {
-      setSelectedPhoneNumber(twilioNumber.phone_number);
+    if (phoneNumberRow) {
+      setSelectedPhoneNumber(phoneNumberRow.phone_number);
     }
 
     // Save SMS consent to database

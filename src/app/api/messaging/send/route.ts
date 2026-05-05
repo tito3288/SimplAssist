@@ -37,14 +37,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: twilioNumber } = await supabase
-      .from("twilio_numbers")
+    const { data: phoneNumberRow } = await supabase
+      .from("phone_numbers")
       .select("phone_number")
       .eq("business_id", businessId)
       .eq("is_active", true)
       .single();
 
-    if (!twilioNumber) {
+    if (!phoneNumberRow) {
       return NextResponse.json(
         { error: "No active phone number found for this business" },
         { status: 404 }
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     const result = await telnyx.messages.send({
       to,
-      from: twilioNumber.phone_number,
+      from: phoneNumberRow.phone_number,
       text: message,
       messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
       type: "SMS",

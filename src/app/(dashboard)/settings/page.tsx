@@ -28,14 +28,14 @@ export default async function SettingsPage() {
     { data: services },
     { data: faqs },
     { data: businessHours },
-    { data: twilioNumber },
+    { data: phoneNumberRow },
     { data: calendarToken },
   ] = await Promise.all([
     supabase.from('ai_settings').select('*').eq('business_id', business.id).single(),
     supabase.from('services').select('*').eq('business_id', business.id).order('name'),
     supabase.from('faqs').select('*').eq('business_id', business.id).order('question'),
     supabase.from('business_hours').select('*').eq('business_id', business.id).order('day_of_week'),
-    supabase.from('twilio_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single(),
+    supabase.from('phone_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single(),
     supabase.from('google_calendar_tokens').select('*').eq('business_id', business.id).single(),
   ]);
 
@@ -55,9 +55,8 @@ export default async function SettingsPage() {
           The phone number customers use to text your AI assistant.
         </p>
         <PhoneNumberSection
-          phoneNumber={twilioNumber?.phone_number || null}
-          twilioSid={twilioNumber?.twilio_sid || null}
-          isActive={twilioNumber?.is_active || false}
+          phoneNumber={phoneNumberRow?.phone_number || null}
+          isActive={phoneNumberRow?.is_active || false}
         />
       </div>
 

@@ -8,10 +8,7 @@ interface AvailableNumber {
 }
 
 interface PurchasedNumber {
-  id: string;
   phone_number: string;
-  twilio_sid: string;
-  is_active: boolean;
 }
 
 interface PhoneNumberSelectorProps {

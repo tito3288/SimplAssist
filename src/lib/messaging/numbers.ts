@@ -35,8 +35,7 @@ export async function searchAvailableNumbers(
 
 export interface PurchasedNumber {
   phoneNumber: string;
-  // Telnyx phone_number_id (UUID). Stored in twilio_numbers.twilio_sid for now;
-  // the column gets renamed to telnyx_phone_number_id in Phase E.
+  // Telnyx phone_number_id (UUID). Stored in phone_numbers.telnyx_phone_number_id.
   phoneNumberId: string;
   status: "pending" | "success" | "failure" | undefined;
 }

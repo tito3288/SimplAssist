@@ -108,7 +108,6 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversation.id);
 
-      // If SMS, also send via Twilio
       if (conversation.channel === "sms" && conversation.contact?.phone_number) {
         await fetch("/api/messaging/send", {
           method: "POST",

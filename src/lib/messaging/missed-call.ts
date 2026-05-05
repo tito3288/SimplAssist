@@ -19,14 +19,14 @@ export async function sendMissedCallSMS(
       return;
     }
 
-    const { data: twilioNumber } = await supabaseAdmin
-      .from("twilio_numbers")
+    const { data: phoneNumberRow } = await supabaseAdmin
+      .from("phone_numbers")
       .select("*")
       .eq("business_id", businessId)
       .eq("is_active", true)
       .single();
 
-    if (!twilioNumber) {
+    if (!phoneNumberRow) {
       console.warn(`[missed-call] No active phone number for business: ${businessId}`);
       return;
     }
@@ -42,7 +42,7 @@ export async function sendMissedCallSMS(
     );
 
     const result = await telnyx.messages.send({
-      from: twilioNumber.phone_number,
+      from: phoneNumberRow.phone_number,
       to: callerPhone,
       text: aiResponse,
       messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,

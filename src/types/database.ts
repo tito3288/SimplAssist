@@ -135,11 +135,11 @@ export interface Message {
   created_at: string;
 }
 
-export interface TwilioNumber {
+export interface PhoneNumber {
   id: string;
   business_id: string;
   phone_number: string;
-  twilio_sid: string;
+  telnyx_phone_number_id: string;
   is_active: boolean;
   created_at: string;
 }

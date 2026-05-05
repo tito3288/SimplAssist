@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin.from("services").delete().eq("business_id", business.id);
       await supabaseAdmin.from("faqs").delete().eq("business_id", business.id);
       await supabaseAdmin.from("business_hours").delete().eq("business_id", business.id);
-      await supabaseAdmin.from("twilio_numbers").delete().eq("business_id", business.id);
+      await supabaseAdmin.from("phone_numbers").delete().eq("business_id", business.id);
       await supabaseAdmin.from("widget_configs").delete().eq("business_id", business.id);
       await supabaseAdmin.from("google_calendar_tokens").delete().eq("business_id", business.id);
       await supabaseAdmin.from("subscriptions").delete().eq("business_id", business.id);

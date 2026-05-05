@@ -35,14 +35,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: twilioNumber, error: lookupError } = await supabase
-    .from("twilio_numbers")
+  const { data: phoneNumberRow, error: lookupError } = await supabase
+    .from("phone_numbers")
     .select("*")
     .eq("id", numberId)
     .eq("business_id", business.id)
     .single();
 
-  if (lookupError || !twilioNumber) {
+  if (lookupError || !phoneNumberRow) {
     return NextResponse.json(
       { error: "Number not found" },
       { status: 404 }
@@ -50,10 +50,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // twilio_sid column holds a Telnyx phone_number_id (UUID); column gets renamed in Phase E.
-    await releaseNumber(twilioNumber.twilio_sid);
+    await releaseNumber(phoneNumberRow.telnyx_phone_number_id);
 
-    await supabase.from("twilio_numbers").delete().eq("id", numberId);
+    await supabase.from("phone_numbers").delete().eq("id", numberId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
