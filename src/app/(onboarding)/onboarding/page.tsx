@@ -42,7 +42,6 @@ interface AIData {
   business_voice: 'we' | 'business_name';
   language: 'en' | 'es' | 'both';
   response_delay_seconds: number;
-  sms_greeting: string;
   web_greeting: string;
   guardrails?: string;
   booking_enabled: boolean;

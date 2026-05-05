@@ -15,8 +15,6 @@ const aiSettingsSchema = z.object({
   business_voice: z.enum(['we', 'business_name'] as const),
   language: z.enum(['en', 'es', 'both'] as const),
   sms_response_delay_seconds: z.number().min(0).max(60),
-  sms_greeting: z.string().min(1, 'SMS greeting is required'),
-  web_chat_greeting: z.string().min(1, 'Web chat greeting is required'),
   guardrails_text: z.string().optional(),
   booking_enabled: z.boolean(),
   booking_mode: z.enum(['collect_info', 'schedule_direct'] as const),
@@ -48,15 +46,12 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   const [success, setSuccess] = useState(false);
   const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);
 
-  const defaultSmsGreeting = `Hey! Thanks for reaching out to ${businessName}. How can we help?`;
-
   const {
     register,
     control,
     handleSubmit,
     watch,
     setValue,
-    formState: { errors },
   } = useForm<AISettingsData>({
     resolver: zodResolver(aiSettingsSchema),
     defaultValues: {
@@ -64,8 +59,6 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
       business_voice: settings.business_voice,
       language: settings.language,
       sms_response_delay_seconds: settings.sms_response_delay_seconds,
-      sms_greeting: settings.sms_greeting,
-      web_chat_greeting: settings.web_chat_greeting,
       guardrails_text: '',
       booking_enabled: settings.booking_enabled,
       booking_mode: settings.booking_mode,
@@ -76,7 +69,6 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   const bookingMode = watch('booking_mode');
   const responseDelay = watch('sms_response_delay_seconds');
   const selectedTone = watch('tone');
-  const smsGreeting = watch('sms_greeting');
 
   const addGuardrail = (text: string) => {
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -108,8 +100,6 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
           business_voice: data.business_voice,
           language: data.language,
           sms_response_delay_seconds: data.sms_response_delay_seconds,
-          sms_greeting: data.sms_greeting,
-          web_chat_greeting: data.web_chat_greeting,
           guardrails: guardrails,
           booking_enabled: data.booking_enabled,
           booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
@@ -191,38 +181,12 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         </div>
       </section>
 
-      {/* Section 2: Greetings */}
+      {/* Section 2: Web Chat Greeting */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Greetings</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">The first message customers see when they reach out.</p>
-
-        <div className="space-y-4">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">SMS Greeting</label>
-              <span className="text-xs text-slate-400 dark:text-[#666]">{smsGreeting.length} characters</span>
-            </div>
-            <textarea
-              {...register('sms_greeting')}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] resize-none"
-            />
-            {errors.sms_greeting && <p className="text-sm text-red-600 mt-1">{errors.sms_greeting.message}</p>}
-            <button
-              type="button"
-              onClick={() => setValue('sms_greeting', defaultSmsGreeting)}
-              className="text-xs text-[#ff914d] hover:text-[#e07a3a] mt-1"
-            >
-              Reset to default
-            </button>
-          </div>
-
-          <div>
-            <p className="text-xs text-slate-400 dark:text-[#666]">
-              Web chat greeting is configured in the <a href="/widget" className="text-[#ff914d] hover:text-[#ffb07a] underline">Widget settings</a> page.
-            </p>
-          </div>
-        </div>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+          Configure your web chat greeting in <a href="/widget" className="text-[#ff914d] hover:text-[#ffb07a] underline">Widget Settings</a>.
+        </p>
       </section>
 
       {/* Section 3: Response Behavior */}

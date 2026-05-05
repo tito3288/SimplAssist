@@ -13,7 +13,6 @@ const aiPersonalitySchema = z.object({
   business_voice: z.enum(['we', 'business_name'] as const),
   language: z.enum(['en', 'es', 'both'] as const),
   response_delay_seconds: z.number().min(0).max(60),
-  sms_greeting: z.string().min(1, 'SMS greeting is required'),
   web_greeting: z.string().min(1, 'Web chat greeting is required'),
   guardrails: z.string().optional(),
   booking_enabled: z.boolean(),
@@ -56,7 +55,6 @@ export default function AIPersonalityForm({
     control,
     handleSubmit,
     watch,
-    formState: { errors },
   } = useForm<AIPersonalityData>({
     resolver: zodResolver(aiPersonalitySchema),
     defaultValues: {
@@ -64,7 +62,6 @@ export default function AIPersonalityForm({
       business_voice: initialData?.business_voice || 'we',
       language: initialData?.language || 'en',
       response_delay_seconds: initialData?.response_delay_seconds ?? 5,
-      sms_greeting: initialData?.sms_greeting || `Hey! Thanks for reaching out to ${businessName}. How can we help?`,
       web_greeting: initialData?.web_greeting || `Hi! I'm ${businessName}'s assistant. Ask me anything about our services.`,
       guardrails: initialData?.guardrails || '',
       booking_enabled: initialData?.booking_enabled ?? false,
@@ -91,8 +88,6 @@ export default function AIPersonalityForm({
         business_voice: data.business_voice,
         language: data.language,
         sms_response_delay_seconds: data.response_delay_seconds,
-        sms_greeting: data.sms_greeting,
-        web_chat_greeting: data.web_greeting || 'Hi! How can we help you today?',
         guardrails: guardrailLines,
         booking_enabled: data.booking_enabled,
         booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
@@ -208,17 +203,6 @@ export default function AIPersonalityForm({
           <span>Instant</span>
           <span>1 minute</span>
         </div>
-      </div>
-
-      {/* SMS Greeting */}
-      <div>
-        <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">SMS Greeting</label>
-        <textarea
-          {...register('sms_greeting')}
-          rows={2}
-          className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent resize-none"
-        />
-        {errors.sms_greeting && <p className="text-sm text-red-600 mt-1">{errors.sms_greeting.message}</p>}
       </div>
 
       {/* Widget Welcome Message */}

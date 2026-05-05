@@ -91,8 +91,6 @@ export interface AISettings {
   business_voice: BusinessVoice;
   language: Language;
   sms_response_delay_seconds: number;
-  sms_greeting: string;
-  web_chat_greeting: string;
   guardrails: string[];
   booking_enabled: boolean;
   booking_mode: BookingMode;

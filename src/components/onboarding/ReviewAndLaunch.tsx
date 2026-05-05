@@ -28,7 +28,6 @@ interface ReviewData {
     business_voice: string;
     language: string;
     response_delay_seconds: number;
-    sms_greeting: string;
     web_greeting: string;
     booking_enabled: boolean;
     booking_mode?: string;
