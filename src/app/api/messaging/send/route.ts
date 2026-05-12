@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "@/lib/messaging/client";
+import { telnyx } from "@/lib/messaging/client";
+import { getMessagingProfileForOutbound } from "@/lib/messaging/lookup";
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,11 +52,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const messagingProfileId = await getMessagingProfileForOutbound(
+      phoneNumberRow.phone_number
+    );
+
     const result = await telnyx.messages.send({
       to,
       from: phoneNumberRow.phone_number,
       text: message,
-      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+      messaging_profile_id: messagingProfileId,
       type: "SMS",
     });
 

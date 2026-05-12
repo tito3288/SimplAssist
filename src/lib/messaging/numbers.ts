@@ -1,8 +1,5 @@
-import {
-  telnyx,
-  TELNYX_CONNECTION_ID,
-  TELNYX_MESSAGING_PROFILE_ID,
-} from "./client";
+import { telnyx } from "./client";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export interface AvailableNumber {
   phoneNumber: string;
@@ -44,10 +41,34 @@ export async function purchaseNumber(
   phoneNumber: string,
   businessId: string
 ): Promise<PurchasedNumber> {
+  const { data: business, error: readError } = await supabaseAdmin
+    .from("businesses")
+    .select("telnyx_messaging_profile_id, telnyx_voice_application_id")
+    .eq("id", businessId)
+    .single();
+
+  if (readError || !business) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} not found: ${readError?.message ?? "not found"}`
+    );
+  }
+
+  if (!business.telnyx_messaging_profile_id) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} has no telnyx_messaging_profile_id — complete brand verification before purchasing a number`
+    );
+  }
+
+  if (!business.telnyx_voice_application_id) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} has no telnyx_voice_application_id — complete brand verification before purchasing a number`
+    );
+  }
+
   const order = await telnyx.numberOrders.create({
     phone_numbers: [{ phone_number: phoneNumber }],
-    connection_id: TELNYX_CONNECTION_ID,
-    messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+    connection_id: business.telnyx_voice_application_id,
+    messaging_profile_id: business.telnyx_messaging_profile_id,
     customer_reference: businessId,
   });
 

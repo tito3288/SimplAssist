@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "@/lib/messaging/client";
+import { telnyx } from "@/lib/messaging/client";
+import { getMessagingProfileForOutbound } from "@/lib/messaging/lookup";
 import { markProcessedOnce } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { processIncomingMessage } from "@/lib/ai/engine";
@@ -115,11 +116,12 @@ export async function POST(request: NextRequest) {
 }
 
 async function sendFallbackReply(from: string, to: string) {
+  const messagingProfileId = await getMessagingProfileForOutbound(from);
   const result = await telnyx.messages.send({
     from,
     to,
     text: MMS_FALLBACK_MESSAGE,
-    messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+    messaging_profile_id: messagingProfileId,
     type: "SMS",
   });
   console.log(`[messaging:webhook] MMS fallback sent, telnyxId=${result.data?.id}`);
@@ -168,11 +170,12 @@ async function processAndReply(
     : aiResponse;
 
   console.log(`[messaging:webhook] Sending reply via Telnyx`);
+  const messagingProfileId = await getMessagingProfileForOutbound(to);
   const result = await telnyx.messages.send({
     from: to,
     to: from,
     text: finalReply,
-    messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+    messaging_profile_id: messagingProfileId,
     type: "SMS",
   });
   console.log(`[messaging:webhook] Reply sent, telnyxId=${result.data?.id}`);

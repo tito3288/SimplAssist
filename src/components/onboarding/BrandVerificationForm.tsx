@@ -4,7 +4,6 @@ import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 
@@ -126,7 +125,13 @@ export default function BrandVerificationForm({
   onBack,
 }: BrandVerificationFormProps) {
   const [saving, setSaving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  // After a hard-fail registration response, the user can hit "Try again" to
+  // replay registration without re-submitting the form. We keep the validated
+  // payload so the retry can hand it back to the parent on success.
+  const [pendingRetryData, setPendingRetryData] =
+    useState<BrandVerificationData | null>(null);
 
   const initialSampleMessages =
     initialData?.sample_messages && initialData.sample_messages.length >= 3
@@ -170,29 +175,16 @@ export default function BrandVerificationForm({
   const onSubmit = async (data: BrandVerificationData) => {
     setSaving(true);
     setSubmitError('');
+    setPendingRetryData(null);
     try {
-      const supabase = createClient();
-
-      const { data: existing, error: readError } = await supabase
-        .from('businesses')
-        .select('compliance_info_completed_at')
-        .eq('id', businessId)
-        .single();
-      if (readError) throw readError;
-
-      // Phase 3 uses this as a "has completed compliance step" flag, not a
-      // last-modified marker -- do not overwrite on re-submit.
-      const setOnceTimestamp = existing?.compliance_info_completed_at
-        ? {}
-        : { compliance_info_completed_at: new Date().toISOString() };
-
-      const { error: updateError } = await supabase
-        .from('businesses')
-        .update({
+      const response = await fetch('/api/onboarding/brand-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId,
           legal_business_name: data.legal_business_name,
           business_entity_type: data.business_entity_type,
           business_registration_state: data.business_registration_state,
-          tax_id_type: 'ein',
           ein: data.ein,
           authorized_rep_name: data.authorized_rep_name,
           authorized_rep_title: data.authorized_rep_title,
@@ -202,18 +194,74 @@ export default function BrandVerificationForm({
           estimated_monthly_volume: data.estimated_monthly_volume,
           sample_messages: data.sample_messages.map((m) => m.value.trim()),
           opt_in_description: data.opt_in_description,
-          ...setOnceTimestamp,
-        })
-        .eq('id', businessId);
-      if (updateError) throw updateError;
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        success?: boolean;
+      };
+
+      if (!response.ok) {
+        // 500 from the brand-verification route signals registration failed
+        // server-side after compliance fields were persisted. Surface the
+        // canonical message and let the user retry without re-submitting.
+        if (response.status === 500) {
+          setPendingRetryData(data);
+        }
+        setSubmitError(
+          payload.error ?? 'Could not save brand verification info. Please try again.'
+        );
+        return;
+      }
 
       onNext(data);
     } catch (err) {
       setSubmitError(
-        err instanceof Error ? err.message : 'Could not save brand verification info. Please try again.'
+        err instanceof Error
+          ? err.message
+          : 'Could not save brand verification info. Please try again.'
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onRetry = async () => {
+    if (!pendingRetryData) return;
+    setRetrying(true);
+    setSubmitError('');
+    try {
+      const response = await fetch('/api/onboarding/retry-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessId }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        success?: boolean;
+      };
+
+      if (!response.ok) {
+        setSubmitError(
+          payload.error ??
+            'Could not register your business with carriers. Please try again or contact support.'
+        );
+        return;
+      }
+
+      const data = pendingRetryData;
+      setPendingRetryData(null);
+      onNext(data);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not register your business with carriers. Please try again or contact support.'
+      );
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -281,7 +329,7 @@ export default function BrandVerificationForm({
           />
           {errors.ein && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.ein.message}</p>}
           <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
-            Don&apos;t have an EIN? You can get one free from the IRS in about 15 minutes.
+            Don&apos;t have an EIN? You can get one free from the IRS in about 15 minutes. Sole Proprietor flow coming soon.
           </p>
         </div>
       </div>
@@ -441,7 +489,26 @@ export default function BrandVerificationForm({
       </div>
 
       {submitError && (
-        <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+        <div className="space-y-2">
+          <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+          {pendingRetryData && (
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retrying}
+              className="inline-flex items-center justify-center gap-2 py-2 px-4 border border-red-300 dark:border-red-500/40 text-red-700 dark:text-red-300 font-medium rounded-[22px] hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
+            >
+              {retrying ? (
+                <>
+                  <PulsingDot inline />
+                  Retrying…
+                </>
+              ) : (
+                'Try again'
+              )}
+            </button>
+          )}
+        </div>
       )}
 
       <div className="flex justify-between pt-4">
@@ -454,7 +521,7 @@ export default function BrandVerificationForm({
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || retrying}
           className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 font-medium rounded-[22px] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
         >
           {saving ? (

@@ -1,4 +1,5 @@
-import { telnyx, TELNYX_MESSAGING_PROFILE_ID } from "./client";
+import { telnyx } from "./client";
+import { getMessagingProfileForOutbound } from "./lookup";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
@@ -73,6 +74,10 @@ export async function sendMissedCallSMS(
     const language: Language = (aiSettings?.language as Language) ?? "en";
     const smsBody = renderTemplate(business.name, language);
 
+    const messagingProfileId = await getMessagingProfileForOutbound(
+      phoneNumberRow.phone_number
+    );
+
     // Ensure a contact + conversation exist so the dashboard can show the
     // missed-call SMS in the conversation thread for that caller. We add
     // ONLY the outbound assistant message — never a synthetic "customer"
@@ -93,7 +98,7 @@ export async function sendMissedCallSMS(
       from: phoneNumberRow.phone_number,
       to: callerPhone,
       text: smsBody,
-      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+      messaging_profile_id: messagingProfileId,
       type: "SMS",
     });
 
