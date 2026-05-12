@@ -47,6 +47,27 @@ export type BusinessEntityType =
 
 export type TaxIdType = "ein" | "ssn_last_4";
 
+export type RegistrationStatus = "pending" | "approved" | "rejected";
+
+// DB column telnyx_registration_events.event_type is intentionally unconstrained
+// text so Phase 4/11 can add new event types without a migration. App code
+// should write through TELNYX_EVENT_TYPES to keep audit logs typo-free.
+export const TELNYX_EVENT_TYPES = [
+  "brand_submitted",
+  "brand_status_changed",
+  "campaign_submitted",
+  "campaign_status_changed",
+  "messaging_profile_created",
+  "voice_application_created",
+] as const;
+export type TelnyxEventType = (typeof TELNYX_EVENT_TYPES)[number];
+
+export type TelnyxResourceType =
+  | "brand"
+  | "campaign"
+  | "messaging_profile"
+  | "voice_application";
+
 export interface Business {
   id: string;
   owner_id: string;
@@ -79,8 +100,32 @@ export interface Business {
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
   compliance_info_completed_at: string | null;
+  telnyx_brand_id: string | null;
+  telnyx_campaign_id: string | null;
+  telnyx_messaging_profile_id: string | null;
+  telnyx_voice_application_id: string | null;
+  brand_status: RegistrationStatus | null;
+  brand_status_updated_at: string | null;
+  brand_rejection_reason: string | null;
+  campaign_status: RegistrationStatus | null;
+  campaign_status_updated_at: string | null;
+  campaign_rejection_reason: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TelnyxRegistrationEvent {
+  id: string;
+  business_id: string;
+  // Widened to string because the DB column is unconstrained; future phases
+  // (Phase 4 webhook, Phase 11 OTP) will append types to TELNYX_EVENT_TYPES.
+  event_type: string;
+  telnyx_resource_type: TelnyxResourceType | null;
+  telnyx_resource_id: string | null;
+  status: string | null;
+  rejection_reason: string | null;
+  raw_payload: Record<string, unknown> | null;
+  created_at: string;
 }
 
 export interface BusinessHours {
