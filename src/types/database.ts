@@ -37,6 +37,16 @@ export type WidgetPosition = "bottom_right" | "bottom_left";
 
 export type LeadCaptureTiming = "start" | "after_3_messages" | "on_booking";
 
+export type BusinessEntityType =
+  | "llc"
+  | "c_corp"
+  | "s_corp"
+  | "nonprofit"
+  | "partnership"
+  | "sole_proprietor";
+
+export type TaxIdType = "ein" | "ssn_last_4";
+
 export interface Business {
   id: string;
   owner_id: string;
@@ -53,6 +63,22 @@ export interface Business {
   timezone: string;
   sms_consent_agreed: boolean;
   sms_consent_agreed_at: string | null;
+  legal_business_name: string | null;
+  business_entity_type: BusinessEntityType | null;
+  business_registration_state: string | null;
+  tax_id_type: TaxIdType | null;
+  ein: string | null;
+  last_4_ssn: string | null;
+  registrant_mobile: string | null;
+  authorized_rep_name: string | null;
+  authorized_rep_title: string | null;
+  authorized_rep_email: string | null;
+  authorized_rep_phone: string | null;
+  use_case_description: string | null;
+  sample_messages: string[] | null;
+  estimated_monthly_volume: string | null;
+  opt_in_description: string | null;
+  compliance_info_completed_at: string | null;
   created_at: string;
   updated_at: string;
 }

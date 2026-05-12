@@ -33,6 +33,16 @@ interface ReviewData {
     booking_mode?: string;
   };
   phoneNumber?: string | null;
+  brandVerification?: {
+    legal_business_name?: string;
+    business_entity_type?: string | null;
+    ein?: string;
+    authorized_rep_name?: string;
+    authorized_rep_email?: string;
+    use_case_description?: string;
+    estimated_monthly_volume?: string;
+    sample_messages?: string[];
+  } | null;
 }
 
 interface ReviewAndLaunchProps {
@@ -64,6 +74,27 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   general: 'General',
   other: 'Other',
 };
+
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  llc: 'LLC',
+  c_corp: 'C-Corporation',
+  s_corp: 'S-Corporation',
+  partnership: 'Partnership',
+  nonprofit: 'Nonprofit',
+  sole_proprietor: 'Sole Proprietor',
+};
+
+const VOLUME_LABELS: Record<string, string> = {
+  under_1k: 'Under 1,000 / month',
+  '1k_10k': '1,000 – 10,000 / month',
+  '10k_100k': '10,000 – 100,000 / month',
+  over_100k: 'Over 100,000 / month',
+};
+
+function maskEin(ein: string): string {
+  if (ein.length !== 10) return ein;
+  return `${ein.slice(0, 2)}-***-${ein.slice(-4)}`;
+}
 
 export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
   const router = useRouter();
@@ -125,18 +156,6 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         <SummaryRow label="FAQs" value={`${data.faqsCount} FAQ${data.faqsCount !== 1 ? 's' : ''}`} />
       </Section>
 
-      {/* Phone Number */}
-      <Section title="Phone Number" onEdit={() => onEditStep(5)}>
-        {data.phoneNumber ? (
-          <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
-        ) : (
-          <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-            <p>No phone number selected</p>
-            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">You can add one later from Settings</p>
-          </div>
-        )}
-      </Section>
-
       {/* AI Settings */}
       <Section title="AI Personality" onEdit={() => onEditStep(4)}>
         <SummaryRow label="Tone" value={TONE_LABELS[data.aiSettings.tone] || data.aiSettings.tone} />
@@ -147,6 +166,74 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
           value={data.aiSettings.response_delay_seconds === 0 ? 'Instant' : `${data.aiSettings.response_delay_seconds}s`}
         />
         <SummaryRow label="Booking" value={data.aiSettings.booking_enabled ? 'Enabled' : 'Disabled'} />
+      </Section>
+
+      {/* Brand Verification */}
+      {data.brandVerification && (
+        <Section title="Brand Verification" onEdit={() => onEditStep(5)}>
+          {data.brandVerification.legal_business_name && (
+            <SummaryRow label="Legal name" value={data.brandVerification.legal_business_name} />
+          )}
+          {data.brandVerification.business_entity_type && (
+            <SummaryRow
+              label="Entity type"
+              value={
+                ENTITY_TYPE_LABELS[data.brandVerification.business_entity_type] ||
+                data.brandVerification.business_entity_type
+              }
+            />
+          )}
+          {data.brandVerification.ein && (
+            <SummaryRow label="EIN" value={maskEin(data.brandVerification.ein)} />
+          )}
+          {data.brandVerification.authorized_rep_name && (
+            <SummaryRow
+              label="Representative"
+              value={
+                data.brandVerification.authorized_rep_email
+                  ? `${data.brandVerification.authorized_rep_name} (${data.brandVerification.authorized_rep_email})`
+                  : data.brandVerification.authorized_rep_name
+              }
+            />
+          )}
+          {data.brandVerification.estimated_monthly_volume && (
+            <SummaryRow
+              label="Est. volume"
+              value={
+                VOLUME_LABELS[data.brandVerification.estimated_monthly_volume] ||
+                data.brandVerification.estimated_monthly_volume
+              }
+            />
+          )}
+          {data.brandVerification.use_case_description && (
+            <SummaryRow
+              label="Use case"
+              value={
+                data.brandVerification.use_case_description.length > 80
+                  ? `${data.brandVerification.use_case_description.slice(0, 80)}…`
+                  : data.brandVerification.use_case_description
+              }
+            />
+          )}
+          {data.brandVerification.sample_messages && (
+            <SummaryRow
+              label="Sample messages"
+              value={`${data.brandVerification.sample_messages.length} provided`}
+            />
+          )}
+        </Section>
+      )}
+
+      {/* Phone Number */}
+      <Section title="Phone Number" onEdit={() => onEditStep(6)}>
+        {data.phoneNumber ? (
+          <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
+        ) : (
+          <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+            <p>No phone number selected</p>
+            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">You can add one later from Settings</p>
+          </div>
+        )}
       </Section>
 
       <div className="flex justify-between pt-4">

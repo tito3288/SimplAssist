@@ -7,6 +7,7 @@ import BusinessInfoForm, { type ScrapedData } from '@/components/onboarding/Busi
 import BusinessHoursForm from '@/components/onboarding/BusinessHoursForm';
 import ServicesAndFaqsForm from '@/components/onboarding/ServicesAndFaqsForm';
 import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
+import BrandVerificationForm, { type BrandVerificationInitialData } from '@/components/onboarding/BrandVerificationForm';
 import ReviewAndLaunch from '@/components/onboarding/ReviewAndLaunch';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 import type { BusinessType } from '@/types/database';
@@ -59,6 +60,7 @@ export default function OnboardingPage() {
   const [hoursData, setHoursData] = useState<HoursData[] | null>(null);
   const [servicesData, setServicesData] = useState<ServicesData | null>(null);
   const [aiData, setAiData] = useState<AIData | null>(null);
+  const [brandVerificationData, setBrandVerificationData] = useState<BrandVerificationInitialData | null>(null);
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string | null>(null);
   const [smsConsentAgreed, setSmsConsentAgreed] = useState(false);
 
@@ -86,6 +88,22 @@ export default function OnboardingPage() {
         state: business.state || '',
         zip: business.zip || '',
       });
+      if (business.legal_business_name || business.ein || business.authorized_rep_name) {
+        setBrandVerificationData({
+          legal_business_name: business.legal_business_name || '',
+          business_entity_type: business.business_entity_type || null,
+          business_registration_state: business.business_registration_state || '',
+          ein: business.ein || '',
+          authorized_rep_name: business.authorized_rep_name || '',
+          authorized_rep_title: business.authorized_rep_title || '',
+          authorized_rep_email: business.authorized_rep_email || '',
+          authorized_rep_phone: business.authorized_rep_phone || '',
+          use_case_description: business.use_case_description || '',
+          estimated_monthly_volume: business.estimated_monthly_volume || '',
+          sample_messages: business.sample_messages || [],
+          opt_in_description: business.opt_in_description || '',
+        });
+      }
     }
     setLoading(false);
   }, []);
@@ -116,7 +134,7 @@ export default function OnboardingPage() {
       }).eq('id', businessId);
     }
 
-    setStep(6);
+    setStep(7);
   };
 
   if (loading) {
@@ -186,6 +204,31 @@ export default function OnboardingPage() {
         )}
 
         {step === 5 && (
+          <BrandVerificationForm
+            businessId={businessId}
+            initialData={brandVerificationData || undefined}
+            onNext={(data) => {
+              setBrandVerificationData({
+                legal_business_name: data.legal_business_name,
+                business_entity_type: data.business_entity_type,
+                business_registration_state: data.business_registration_state,
+                ein: data.ein,
+                authorized_rep_name: data.authorized_rep_name,
+                authorized_rep_title: data.authorized_rep_title,
+                authorized_rep_email: data.authorized_rep_email,
+                authorized_rep_phone: data.authorized_rep_phone,
+                use_case_description: data.use_case_description,
+                estimated_monthly_volume: data.estimated_monthly_volume,
+                sample_messages: data.sample_messages.map((m) => m.value.trim()),
+                opt_in_description: data.opt_in_description,
+              });
+              setStep(6);
+            }}
+            onBack={() => setStep(4)}
+          />
+        )}
+
+        {step === 6 && (
           <div className="space-y-6">
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-orange-100 dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))] border border-orange-200 dark:border-white/[0.10] mb-4">
@@ -202,7 +245,7 @@ export default function OnboardingPage() {
             <div className="flex justify-between pt-4">
               <button
                 type="button"
-                onClick={() => setStep(4)}
+                onClick={() => setStep(5)}
                 className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
               >
                 Back
@@ -212,7 +255,7 @@ export default function OnboardingPage() {
                   type="button"
                   onClick={() => {
                     setSelectedPhoneNumber(null);
-                    setStep(6);
+                    setStep(7);
                   }}
                   className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
                 >
@@ -231,7 +274,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 6 && businessInfo && hoursData && servicesData && aiData && (
+        {step === 7 && businessInfo && hoursData && servicesData && aiData && (
           <ReviewAndLaunch
             data={{
               businessInfo,
@@ -240,9 +283,10 @@ export default function OnboardingPage() {
               faqsCount: servicesData.faqs.filter((f) => f.question && f.answer).length,
               aiSettings: aiData,
               phoneNumber: selectedPhoneNumber,
+              brandVerification: brandVerificationData,
             }}
             onEditStep={(s) => setStep(s)}
-            onBack={() => setStep(5)}
+            onBack={() => setStep(6)}
           />
         )}
       </div>
