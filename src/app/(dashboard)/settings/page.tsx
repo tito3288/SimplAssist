@@ -7,6 +7,7 @@ import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
 import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
 import BusinessEmailForm from '@/components/settings/BusinessEmailForm';
 import TimezoneSelector from '@/components/settings/TimezoneSelector';
+import CompliancePanel from '@/components/settings/CompliancePanel';
 import { glassCard } from '@/lib/glass';
 import DangerZone from '@/components/settings/DangerZone';
 
@@ -67,6 +68,30 @@ export default async function SettingsPage() {
           Contact email your AI can share with customers when it needs to escalate.
         </p>
         <BusinessEmailForm businessId={business.id} initialEmail={business.email} />
+      </div>
+
+      {/* Compliance (Phase 6) — privacy/terms URLs submitted to Telnyx */}
+      <div className={`p-6 ${glassCard}`}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Compliance</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
+          Where your privacy policy and terms of service live. Carriers (T-Mobile, AT&amp;T, Verizon) check these when reviewing your SMS campaign.
+        </p>
+        <CompliancePanel
+          slug={business.slug}
+          business={{
+            name: business.name,
+            phone_number: business.phone_number,
+            email: business.email,
+            address: business.address,
+            city: business.city,
+            state: business.state,
+            zip: business.zip,
+            opt_in_description: business.opt_in_description,
+          }}
+          initialMode={business.privacy_terms_mode ?? 'hosted'}
+          initialPrivacyUrl={business.privacy_url_override}
+          initialTermsUrl={business.terms_url_override}
+        />
       </div>
 
       {/* AI Settings */}

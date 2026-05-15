@@ -3,9 +3,22 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { runFullRegistration } from "@/lib/messaging/registration";
+import { generateSlug, ensureUniqueSlug, isPendingSlug } from "@/lib/util/slug";
+import {
+  resolveLegalUrls,
+  buildBusinessLandingUrl,
+  type PrivacyTermsMode,
+} from "@/lib/messaging/registration/legalUrls";
+import {
+  appendRegistrationEvent,
+  serializeError,
+} from "@/lib/messaging/registration/audit";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
+
+const PREFLIGHT_FAILURE_MESSAGE =
+  "Couldn't validate your compliance settings. Check Settings → Compliance, then try again.";
 
 const brandVerificationServerSchema = z.object({
   businessId: z.string().uuid(),
@@ -52,7 +65,9 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id, compliance_info_completed_at")
+    .select(
+      "id, compliance_info_completed_at, slug, privacy_terms_mode, privacy_url_override, terms_url_override, website_url"
+    )
     .eq("id", data.businessId)
     .eq("owner_id", user.id)
     .single();
@@ -64,38 +79,146 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const setOnceTimestamp = business.compliance_info_completed_at
-    ? {}
-    : { compliance_info_completed_at: new Date().toISOString() };
+  const isFirstSubmit = !business.compliance_info_completed_at;
 
-  const { error: updateError } = await supabaseAdmin
-    .from("businesses")
-    .update({
-      legal_business_name: data.legal_business_name,
-      business_entity_type: data.business_entity_type,
-      business_registration_state: data.business_registration_state,
-      tax_id_type: "ein",
-      ein: data.ein,
-      authorized_rep_name: data.authorized_rep_name,
-      authorized_rep_title: data.authorized_rep_title,
-      authorized_rep_email: data.authorized_rep_email,
-      authorized_rep_phone: data.authorized_rep_phone,
-      use_case_description: data.use_case_description,
-      estimated_monthly_volume: data.estimated_monthly_volume,
-      sample_messages: data.sample_messages,
-      opt_in_description: data.opt_in_description,
-      ...setOnceTimestamp,
-    })
-    .eq("id", data.businessId);
+  // Phase 6: slug is generated from the real legal_business_name on first
+  // submit only. If the current slug is not a 'pending-*' placeholder, it's
+  // already been finalized and is FROZEN — subsequent edits to
+  // legal_business_name do NOT regenerate it, because URLs already submitted
+  // to Telnyx must remain reachable for the lifetime of the campaign.
+  let slugForUpdate: string | undefined;
+  if (isPendingSlug(business.slug)) {
+    const baseSlug = generateSlug(data.legal_business_name);
+    try {
+      slugForUpdate = await ensureUniqueSlug(baseSlug);
+    } catch (err) {
+      console.error(
+        `[onboarding:brand-verification] Slug generation failed for ${data.businessId}:`,
+        err
+      );
+      return NextResponse.json(
+        { error: "Failed to generate a unique URL slug for your business" },
+        { status: 500 }
+      );
+    }
+  }
 
-  if (updateError) {
+  const editablePayload = {
+    legal_business_name: data.legal_business_name,
+    business_entity_type: data.business_entity_type,
+    business_registration_state: data.business_registration_state,
+    tax_id_type: "ein" as const,
+    ein: data.ein,
+    authorized_rep_name: data.authorized_rep_name,
+    authorized_rep_title: data.authorized_rep_title,
+    authorized_rep_email: data.authorized_rep_email,
+    authorized_rep_phone: data.authorized_rep_phone,
+    use_case_description: data.use_case_description,
+    estimated_monthly_volume: data.estimated_monthly_volume,
+    sample_messages: data.sample_messages,
+    opt_in_description: data.opt_in_description,
+  };
+
+  // Race-safe first-submit transition: when compliance_info_completed_at is
+  // null, the conditional UPDATE only succeeds for the one request that wins
+  // the null→timestamp flip. Subsequent concurrent requests get 0 rows back
+  // and skip the Phase 3 trigger. Matches the Phase 4/5 pattern documented
+  // in project_post_isv_roadmap.md.
+  //
+  // On subsequent edits (compliance_info_completed_at already set), do a
+  // plain UPDATE without changing the timestamp, slug, or firing Phase 3 —
+  // the customer is just amending their info post-registration. If the
+  // initial Phase 3 attempt failed, retries are out of scope for this flow.
+  let shouldFirePhase3 = false;
+
+  if (isFirstSubmit) {
+    const completedAt = new Date().toISOString();
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("businesses")
+      .update({
+        ...editablePayload,
+        ...(slugForUpdate ? { slug: slugForUpdate } : {}),
+        compliance_info_completed_at: completedAt,
+      })
+      .eq("id", data.businessId)
+      .is("compliance_info_completed_at", null)
+      .select("id");
+
+    if (updateError) {
+      console.error(
+        `[onboarding:brand-verification] Failed to persist compliance fields for ${data.businessId}:`,
+        updateError
+      );
+      return NextResponse.json(
+        { error: "Failed to save brand verification info" },
+        { status: 500 }
+      );
+    }
+
+    if (updated && updated.length > 0) {
+      shouldFirePhase3 = true;
+    } else {
+      // Another concurrent request won the race and already fired Phase 3.
+      // Return success — duplicate submits should be no-ops, not errors.
+      return NextResponse.json({ success: true });
+    }
+  } else {
+    const { error: updateError } = await supabaseAdmin
+      .from("businesses")
+      .update(editablePayload)
+      .eq("id", data.businessId);
+
+    if (updateError) {
+      console.error(
+        `[onboarding:brand-verification] Failed to update compliance fields for ${data.businessId}:`,
+        updateError
+      );
+      return NextResponse.json(
+        { error: "Failed to save brand verification info" },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (!shouldFirePhase3) {
+    return NextResponse.json({ success: true });
+  }
+
+  // Pre-flight gate: assert legal URLs + brand-website URL resolve cleanly
+  // BEFORE any Telnyx API call. Same defense-in-depth that resolveLegalUrls
+  // and buildBusinessLandingUrl provide internally; here it surfaces a
+  // 400 to the customer with actionable text instead of a 500 from a
+  // half-completed registration attempt.
+  const resolvedSlug = slugForUpdate ?? business.slug;
+  const preflightBusiness = {
+    slug: resolvedSlug,
+    privacy_terms_mode: (business.privacy_terms_mode ??
+      "hosted") as PrivacyTermsMode,
+    privacy_url_override: business.privacy_url_override,
+    terms_url_override: business.terms_url_override,
+  };
+
+  try {
+    resolveLegalUrls(preflightBusiness);
+    const trimmedWebsite = business.website_url?.trim();
+    if (!trimmedWebsite) {
+      buildBusinessLandingUrl(resolvedSlug);
+    }
+  } catch (err) {
     console.error(
-      `[onboarding:brand-verification] Failed to persist compliance fields for ${data.businessId}:`,
-      updateError
+      `[onboarding:brand-verification] Pre-flight failed for ${data.businessId}:`,
+      err
     );
+    await appendRegistrationEvent({
+      businessId: data.businessId,
+      eventType: "brand_submitted",
+      resourceType: "brand",
+      status: "error",
+      rawPayload: { preflight_failure: serializeError(err) },
+    });
     return NextResponse.json(
-      { error: "Failed to save brand verification info" },
-      { status: 500 }
+      { error: PREFLIGHT_FAILURE_MESSAGE },
+      { status: 400 }
     );
   }
 

@@ -1,6 +1,7 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { appendRegistrationEvent, serializeError } from "./audit";
+import { resolveLegalUrls, type PrivacyTermsMode } from "./legalUrls";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -26,10 +27,21 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, opt_in_description"
+      "id, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, opt_in_description, slug, privacy_terms_mode, privacy_url_override, terms_url_override"
     )
     .eq("id", businessId)
-    .single();
+    .single<{
+      id: string;
+      telnyx_brand_id: string | null;
+      telnyx_campaign_id: string | null;
+      use_case_description: string | null;
+      sample_messages: string[] | null;
+      opt_in_description: string | null;
+      slug: string;
+      privacy_terms_mode: PrivacyTermsMode;
+      privacy_url_override: string | null;
+      terms_url_override: string | null;
+    }>();
 
   if (readError || !business) {
     throw new Error(
@@ -63,6 +75,14 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
   const messageFlow = business.opt_in_description ?? OPTIN_MESSAGE;
 
+  // Phase 6: privacy + terms URLs submitted to Telnyx. Resolved BEFORE the
+  // try/catch so a placeholder slug or missing override URL fails fast and
+  // never reaches the Telnyx API (no wasted submission, no retry quota burn,
+  // no half-submitted campaign in TCR). The pre-flight gate in
+  // /api/onboarding/brand-verification is the primary safety net; this is
+  // defense in depth.
+  const { privacyUrl, termsUrl } = resolveLegalUrls(business);
+
   try {
     const response = await telnyx.messaging10dlc.campaignBuilder.submit({
       brandId: business.telnyx_brand_id,
@@ -83,7 +103,11 @@ export async function registerCampaign(businessId: string): Promise<void> {
       subscriberHelp: true,
       helpKeywords: HELP_KEYWORDS,
       helpMessage: HELP_MESSAGE,
+      // Boolean acceptance flag — REQUIRED by Telnyx, separate from the URL
+      // fields below. Do not remove when refactoring URL handling.
       termsAndConditions: true,
+      privacyPolicyLink: privacyUrl,
+      termsAndConditionsLink: termsUrl,
       autoRenewal: true,
       embeddedLink: false,
       embeddedPhone: false,
@@ -123,7 +147,13 @@ export async function registerCampaign(businessId: string): Promise<void> {
       resourceType: "campaign",
       resourceId: campaignId,
       status: "pending",
-      rawPayload: response as unknown as Record<string, unknown>,
+      rawPayload: {
+        ...(response as unknown as Record<string, unknown>),
+        _submitted: {
+          privacyPolicyLink: privacyUrl,
+          termsAndConditionsLink: termsUrl,
+        },
+      },
     });
   } catch (err) {
     await appendRegistrationEvent({
@@ -131,7 +161,13 @@ export async function registerCampaign(businessId: string): Promise<void> {
       eventType: "campaign_submitted",
       resourceType: "campaign",
       status: "error",
-      rawPayload: serializeError(err),
+      rawPayload: {
+        error: serializeError(err),
+        _submitted: {
+          privacyPolicyLink: privacyUrl,
+          termsAndConditionsLink: termsUrl,
+        },
+      },
     });
     throw err;
   }

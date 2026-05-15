@@ -49,6 +49,10 @@ export type TaxIdType = "ein" | "ssn_last_4";
 
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 
+// Matches the CHECK constraint on businesses.privacy_terms_mode in
+// supabase/migrations/015_business_slug_and_compliance_mode.sql. Phase 6.
+export type PrivacyTermsMode = "hosted" | "self_hosted" | "existing";
+
 // DB column telnyx_registration_events.event_type is intentionally unconstrained
 // text so Phase 4/11 can add new event types without a migration. App code
 // should write through TELNYX_EVENT_TYPES to keep audit logs typo-free.
@@ -100,6 +104,10 @@ export interface Business {
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
   compliance_info_completed_at: string | null;
+  slug: string;
+  privacy_terms_mode: PrivacyTermsMode;
+  privacy_url_override: string | null;
+  terms_url_override: string | null;
   telnyx_brand_id: string | null;
   telnyx_campaign_id: string | null;
   telnyx_messaging_profile_id: string | null;

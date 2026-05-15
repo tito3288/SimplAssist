@@ -2,6 +2,7 @@ import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BusinessEntityType, BusinessType } from "@/types/database";
 import { appendRegistrationEvent, serializeError } from "./audit";
+import { buildBusinessLandingUrl } from "./legalUrls";
 
 type TelnyxEntityType =
   | "PRIVATE_PROFIT"
@@ -86,7 +87,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, legal_business_name, business_entity_type, business_type, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
+      "id, name, slug, legal_business_name, business_entity_type, business_type, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
     )
     .eq("id", businessId)
     .single();
@@ -138,6 +139,17 @@ export async function registerBrand(businessId: string): Promise<void> {
   const einDigits = business.ein.replace(/\D/g, "");
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
 
+  // Phase 6: customers without a website_url still need a brand `website`
+  // value on Telnyx submission — submitting null/undefined delays MNO review.
+  // Fall back to the hosted business landing page at /c/[slug] in that case.
+  // buildBusinessLandingUrl throws on a 'pending-*' placeholder slug; the
+  // brand-verification pre-flight gate is the primary safety net for that.
+  const trimmedWebsite = business.website_url?.trim();
+  const resolvedWebsite =
+    trimmedWebsite && trimmedWebsite.length > 0
+      ? trimmedWebsite
+      : buildBusinessLandingUrl(business.slug);
+
   try {
     const response = await telnyx.messaging10dlc.brand.create({
       country: "US",
@@ -160,7 +172,7 @@ export async function registerBrand(businessId: string): Promise<void> {
       city: business.city ?? undefined,
       state: business.state ?? undefined,
       postalCode: business.zip ?? undefined,
-      website: business.website_url ?? undefined,
+      website: resolvedWebsite,
       webhookURL,
       webhookFailoverURL: webhookURL,
     });
@@ -193,7 +205,10 @@ export async function registerBrand(businessId: string): Promise<void> {
       resourceType: "brand",
       resourceId: brandId,
       status: "pending",
-      rawPayload: response as unknown as Record<string, unknown>,
+      rawPayload: {
+        ...(response as unknown as Record<string, unknown>),
+        _submitted: { website: resolvedWebsite },
+      },
     });
   } catch (err) {
     await appendRegistrationEvent({
@@ -201,7 +216,10 @@ export async function registerBrand(businessId: string): Promise<void> {
       eventType: "brand_submitted",
       resourceType: "brand",
       status: "error",
-      rawPayload: serializeError(err),
+      rawPayload: {
+        error: serializeError(err),
+        _submitted: { website: resolvedWebsite },
+      },
     });
     throw err;
   }

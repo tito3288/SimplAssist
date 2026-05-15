@@ -10,6 +10,20 @@ type LegalDocLayoutProps = {
   /** Cross-link to the other legal page */
   siblingHref?: string;
   siblingLabel?: string;
+  /**
+   * Back-link target. Defaults to "/home" (SimplAssist marketing page). For
+   * per-business legal pages (Phase 6), override to "/c/[slug]" and label
+   * with the business name.
+   */
+  backHref?: string;
+  backLabel?: string;
+  /**
+   * When set, replaces the SimplAssist logo + global copyright footer with
+   * the business's name and a "Messaging service powered by SimplAssist"
+   * subline. Used by per-business legal pages so the business's identity
+   * (not SimplAssist's) is what carrier reviewers see at the top and bottom.
+   */
+  businessName?: string;
   children: React.ReactNode;
 };
 
@@ -18,8 +32,12 @@ export function LegalDocLayout({
   lastUpdated = "March 2026",
   siblingHref,
   siblingLabel,
+  backHref = "/home",
+  backLabel = "Back to home",
+  businessName,
   children,
 }: LegalDocLayoutProps) {
+  const isPerBusiness = Boolean(businessName);
   return (
     <div
       className="
@@ -62,11 +80,11 @@ export function LegalDocLayout({
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center gap-4 sm:gap-6">
             <Link
-              href="/home"
+              href={backHref}
               className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition-colors hover:text-[#ff914d] dark:text-[#bdbdbf]"
             >
               <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-              Back to home
+              {backLabel}
             </Link>
             {siblingHref && siblingLabel && (
               <Link
@@ -78,25 +96,33 @@ export function LegalDocLayout({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              href="/home"
-              className="hidden sm:block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff914d]/50 rounded-lg"
-            >
-              <Image
-                src="/logo-light.png"
-                alt="SimplAssist"
-                width={140}
-                height={36}
-                className="h-8 w-auto object-contain dark:hidden"
-              />
-              <Image
-                src="/logo-dark.png"
-                alt="SimplAssist"
-                width={140}
-                height={36}
-                className="hidden h-8 w-auto object-contain dark:block"
-              />
-            </Link>
+            {isPerBusiness ? (
+              <span
+                className={`hidden sm:block text-sm font-semibold tracking-tight ${textPrimary}`}
+              >
+                {businessName}
+              </span>
+            ) : (
+              <Link
+                href="/home"
+                className="hidden sm:block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff914d]/50 rounded-lg"
+              >
+                <Image
+                  src="/logo-light.png"
+                  alt="SimplAssist"
+                  width={140}
+                  height={36}
+                  className="h-8 w-auto object-contain dark:hidden"
+                />
+                <Image
+                  src="/logo-dark.png"
+                  alt="SimplAssist"
+                  width={140}
+                  height={36}
+                  className="hidden h-8 w-auto object-contain dark:block"
+                />
+              </Link>
+            )}
             <ThemeToggle />
           </div>
         </div>
@@ -115,9 +141,15 @@ export function LegalDocLayout({
           <div className="mt-10 space-y-10">{children}</div>
         </article>
 
-        <p className={`mt-8 text-center text-xs ${textSecondary}`}>
-          &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
-        </p>
+        {isPerBusiness ? (
+          <p className={`mt-8 text-center text-xs ${textSecondary}`}>
+            &copy; {new Date().getFullYear()} {businessName}. Messaging service powered by SimplAssist.
+          </p>
+        ) : (
+          <p className={`mt-8 text-center text-xs ${textSecondary}`}>
+            &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
+          </p>
+        )}
       </main>
     </div>
   );

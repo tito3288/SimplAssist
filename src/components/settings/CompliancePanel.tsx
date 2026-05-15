@@ -1,0 +1,441 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { ExternalLink, Copy, Check, AlertCircle } from 'lucide-react';
+import {
+  buildPrivacyContent,
+  buildTermsContent,
+  toPlainText,
+  type LegalTemplateBusiness,
+} from '@/lib/legal/perBusinessCopy';
+import { isPendingSlug } from '@/lib/util/slug';
+
+type Mode = 'hosted' | 'self_hosted' | 'existing';
+
+interface CompliancePanelProps {
+  slug: string;
+  business: LegalTemplateBusiness;
+  initialMode: Mode;
+  initialPrivacyUrl: string | null;
+  initialTermsUrl: string | null;
+}
+
+const CHECKLIST_ITEMS = [
+  'Explicit mention of SMS/text messaging (not just email/web)',
+  '"Mobile information will not be shared with third parties for marketing"',
+  'Instructions to opt out (e.g., "Reply STOP to unsubscribe")',
+  'A statement that message frequency varies and msg & data rates may apply',
+] as const;
+
+export default function CompliancePanel({
+  slug,
+  business,
+  initialMode,
+  initialPrivacyUrl,
+  initialTermsUrl,
+}: CompliancePanelProps) {
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [privacyUrl, setPrivacyUrl] = useState(initialPrivacyUrl ?? '');
+  const [termsUrl, setTermsUrl] = useState(initialTermsUrl ?? '');
+  const [checklist, setChecklist] = useState<boolean[]>([false, false, false, false]);
+  const [showGenerated, setShowGenerated] = useState(false);
+  const [copied, setCopied] = useState<'privacy' | 'terms' | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [errors, setErrors] = useState<{
+    privacyUrlOverride?: string;
+    termsUrlOverride?: string;
+    general?: string;
+  }>({});
+
+  const pending = isPendingSlug(slug);
+
+  // Generated plain-text bodies for self_hosted mode. Built lazily — same
+  // template the public pages and Phase 3 submission use. NOT HTML; pasted
+  // into the customer's own CMS.
+  const generated = useMemo(() => {
+    return {
+      privacy: toPlainText(buildPrivacyContent(business)),
+      terms: toPlainText(buildTermsContent(business)),
+    };
+  }, [business]);
+
+  const allChecked = checklist.every(Boolean);
+  // Save button disabled when:
+  //   - already submitting
+  //   - slug is still 'pending-*' (brand verification not done — API would throw)
+  //   - mode is 'existing' and not all 4 self-check boxes are ticked
+  const saveDisabled =
+    submitting || pending || (mode === 'existing' && !allChecked);
+
+  const previewPrivacyHref = `/c/${slug}/privacy`;
+  const previewTermsHref = `/c/${slug}/terms`;
+
+  const handleCopy = async (kind: 'privacy' | 'terms') => {
+    try {
+      await navigator.clipboard.writeText(generated[kind]);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      // clipboard API blocked — surface a tiny inline note
+      setCopied(null);
+    }
+  };
+
+  const handleSave = async () => {
+    setSubmitting(true);
+    setErrors({});
+    setSaved(false);
+
+    const payload =
+      mode === 'hosted'
+        ? { mode, privacyUrlOverride: null, termsUrlOverride: null }
+        : {
+            mode,
+            privacyUrlOverride: privacyUrl.trim(),
+            termsUrlOverride: termsUrl.trim(),
+          };
+
+    try {
+      const res = await fetch('/api/settings/compliance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        field?: 'privacyUrlOverride' | 'termsUrlOverride';
+      };
+
+      if (!res.ok) {
+        if (data.field) {
+          setErrors({ [data.field]: data.error ?? 'Invalid URL' });
+        } else {
+          setErrors({ general: data.error ?? 'Failed to save compliance settings' });
+        }
+        return;
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      setErrors({ general: 'Network error — please try again' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {pending && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden />
+            <span>
+              Complete brand verification first — your compliance options unlock
+              once your business is registered with carriers.
+            </span>
+          </div>
+        </div>
+      )}
+
+      <fieldset disabled={pending} className="space-y-5">
+        <legend className="sr-only">Privacy and Terms hosting mode</legend>
+
+        {/* Mode: Hosted */}
+        <ModeOption
+          id="mode-hosted"
+          name="compliance_mode"
+          checked={mode === 'hosted'}
+          onChange={() => setMode('hosted')}
+          title="SimplAssist-hosted (default)"
+          description="We generate and host your privacy policy and terms at SimplAssist URLs. Zero effort — and Telnyx automatically receives the right URLs."
+        >
+          {mode === 'hosted' && (
+            <div className="mt-3 grid gap-2 text-sm">
+              <PreviewRow label="Privacy Policy" href={previewPrivacyHref} />
+              <PreviewRow label="Terms of Service" href={previewTermsHref} />
+            </div>
+          )}
+        </ModeOption>
+
+        {/* Mode: Self-hosted */}
+        <ModeOption
+          id="mode-self-hosted"
+          name="compliance_mode"
+          checked={mode === 'self_hosted'}
+          onChange={() => setMode('self_hosted')}
+          title="Host on your own domain"
+          description="We give you the formatted text — you paste it into your own website and tell us the resulting URLs."
+        >
+          {mode === 'self_hosted' && (
+            <div className="mt-3 space-y-4">
+              <button
+                type="button"
+                onClick={() => setShowGenerated((v) => !v)}
+                className="text-sm font-medium text-[#ff914d] hover:text-[#ffb07a]"
+              >
+                {showGenerated ? 'Hide generated copy' : 'View generated copy'}
+              </button>
+              {showGenerated && (
+                <div className="space-y-4">
+                  <GeneratedTextarea
+                    label="Privacy Policy"
+                    value={generated.privacy}
+                    onCopy={() => handleCopy('privacy')}
+                    copied={copied === 'privacy'}
+                  />
+                  <GeneratedTextarea
+                    label="Terms of Service"
+                    value={generated.terms}
+                    onCopy={() => handleCopy('terms')}
+                    copied={copied === 'terms'}
+                  />
+                </div>
+              )}
+              <UrlInput
+                label="Your privacy policy URL"
+                value={privacyUrl}
+                onChange={setPrivacyUrl}
+                placeholder="https://yourbusiness.com/privacy"
+                error={errors.privacyUrlOverride}
+              />
+              <UrlInput
+                label="Your terms of service URL"
+                value={termsUrl}
+                onChange={setTermsUrl}
+                placeholder="https://yourbusiness.com/terms"
+                error={errors.termsUrlOverride}
+              />
+            </div>
+          )}
+        </ModeOption>
+
+        {/* Mode: Existing */}
+        <ModeOption
+          id="mode-existing"
+          name="compliance_mode"
+          checked={mode === 'existing'}
+          onChange={() => setMode('existing')}
+          title="I already have an SMS-compliant privacy policy"
+          description="Your existing privacy policy must mention SMS, opt-in/opt-out, and the required carrier clauses. Not sure? Choose &quot;Host on your own domain&quot; to get the correct copy."
+        >
+          {mode === 'existing' && (
+            <div className="mt-4 space-y-4">
+              <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+                  Before pasting your URL, confirm your existing privacy policy includes:
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {CHECKLIST_ITEMS.map((item, idx) => (
+                    <li key={idx}>
+                      <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-[#bdbdbf]">
+                        <input
+                          type="checkbox"
+                          checked={checklist[idx]}
+                          onChange={(e) => {
+                            const next = [...checklist];
+                            next[idx] = e.target.checked;
+                            setChecklist(next);
+                          }}
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-[#ff914d] focus:ring-[#ff914d]/40"
+                        />
+                        <span>{item}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-xs text-slate-600 dark:text-[#9a9a9c]">
+                  If your policy is missing any of these, choose &quot;Host on your own domain&quot; instead to get compliant copy.
+                </p>
+              </div>
+              <UrlInput
+                label="Your privacy policy URL"
+                value={privacyUrl}
+                onChange={setPrivacyUrl}
+                placeholder="https://yourbusiness.com/privacy"
+                error={errors.privacyUrlOverride}
+              />
+              <UrlInput
+                label="Your terms of service URL"
+                value={termsUrl}
+                onChange={setTermsUrl}
+                placeholder="https://yourbusiness.com/terms"
+                error={errors.termsUrlOverride}
+              />
+            </div>
+          )}
+        </ModeOption>
+      </fieldset>
+
+      {errors.general && (
+        <p className="text-sm text-red-500">{errors.general}</p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveDisabled}
+          className="px-5 py-2.5 rounded-lg bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {submitting
+            ? mode === 'hosted'
+              ? 'Saving…'
+              : 'Checking URLs…'
+            : saved
+              ? 'Saved!'
+              : 'Save'}
+        </button>
+        {mode !== 'hosted' && submitting && (
+          <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+            Verifying your URLs are reachable — this can take up to 10 seconds.
+          </span>
+        )}
+        {mode === 'existing' && !allChecked && (
+          <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+            Tick all four checkboxes to enable save.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ----- sub-components -----
+
+function ModeOption({
+  id,
+  name,
+  checked,
+  onChange,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  name: string;
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  description: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className={`block cursor-pointer rounded-xl border p-4 transition-colors ${
+        checked
+          ? 'border-[#ff914d] bg-orange-50/60 dark:border-[#ff914d]/60 dark:bg-orange-500/[0.06]'
+          : 'border-slate-200 bg-white hover:border-slate-300 dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <input
+          id={id}
+          name={name}
+          type="radio"
+          checked={checked}
+          onChange={onChange}
+          className="mt-1 h-4 w-4 shrink-0 text-[#ff914d] focus:ring-[#ff914d]/40"
+        />
+        <div className="flex-1">
+          <div className="text-sm font-semibold text-slate-900 dark:text-[#f5f5f5]">
+            {title}
+          </div>
+          <p className="mt-0.5 text-sm text-slate-600 dark:text-[#bdbdbf]">
+            {description}
+          </p>
+          {children}
+        </div>
+      </div>
+    </label>
+  );
+}
+
+function PreviewRow({ label, href }: { label: string; href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+    >
+      <span>
+        <span className="font-medium">{label}</span>
+        <span className="ml-2 text-xs text-slate-500 dark:text-[#9a9a9c]">{href}</span>
+      </span>
+      <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+    </a>
+  );
+}
+
+function GeneratedTextarea({
+  label,
+  value,
+  onCopy,
+  copied,
+}: {
+  label: string;
+  value: string;
+  onCopy: () => void;
+  copied: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <textarea
+        readOnly
+        value={value}
+        rows={10}
+        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-slate-700 dark:border-white/10 dark:bg-white/[0.02] dark:text-[#bdbdbf]"
+      />
+    </div>
+  );
+}
+
+function UrlInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  error,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  error?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-1.5">
+        {label}
+      </label>
+      <input
+        type="url"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full px-3 py-2 rounded-lg border bg-white dark:bg-white/5 text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-orange-500/40 ${
+          error
+            ? 'border-red-400 dark:border-red-500/50'
+            : 'border-slate-200 dark:border-white/10'
+        }`}
+      />
+      {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}

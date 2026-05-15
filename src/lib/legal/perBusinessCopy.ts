@@ -1,0 +1,236 @@
+/**
+ * Per-business privacy + terms templates (Phase 6).
+ *
+ * Single source of truth for both:
+ *   1. The rendered JSX at /c/[slug]/privacy and /c/[slug]/terms.
+ *   2. The "View generated copy" plain-text view in the dashboard Compliance
+ *      panel (mode = self_hosted), which customers paste into their own CMS.
+ *
+ * The privacy template intentionally hits all four carrier-required clauses
+ * called out in the Compliance panel's "existing mode" self-check:
+ *   1. Explicit mention of SMS/text messaging (Section 3 + 4)
+ *   2. "Mobile information will not be shared with third parties for marketing"
+ *      (Section 4, last paragraph — verbatim, do not paraphrase)
+ *   3. Instructions to opt out via STOP (Section 4)
+ *   4. Message frequency varies + msg & data rates may apply (Section 4)
+ *
+ * If any of these clauses is removed or weakened during edits, the campaign
+ * registrations that reference these URLs may be rejected by MNO review.
+ */
+
+export interface LegalSection {
+  title: string;
+  paragraphs: string[];
+}
+
+export interface LegalDoc {
+  sections: LegalSection[];
+  lastUpdated: string; // YYYY-MM-DD
+}
+
+/**
+ * The fields this template needs from a `businesses` row.
+ *
+ * IMPORTANT — PII boundary: this interface deliberately does NOT include
+ * authorized_rep_*, ein, last_4_ssn, or registrant_mobile. Those are
+ * registration-only fields not safe to render on a public page. The public
+ * page projections (src/app/(public)/c/[slug]/*) and the dashboard preview
+ * must select only fields listed here.
+ */
+export interface LegalTemplateBusiness {
+  name: string;
+  phone_number: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  opt_in_description: string | null;
+}
+
+const LAST_UPDATED = "2026-05-15";
+
+function contactEmail(b: LegalTemplateBusiness): string {
+  // business.email is required in onboarding Step 1 (BusinessInfoForm), so it
+  // is guaranteed non-null by the time the slug is finalized and this page is
+  // reachable. The fallback string is defensive only.
+  return b.email ?? "our customer service email";
+}
+
+function postalAddress(b: LegalTemplateBusiness): string | null {
+  const parts = [b.address, [b.city, b.state].filter(Boolean).join(", "), b.zip]
+    .filter((p) => p && p.trim().length > 0)
+    .map((p) => p!.trim());
+  if (parts.length === 0) return null;
+  return parts.join(", ");
+}
+
+function phoneClause(b: LegalTemplateBusiness): string {
+  if (b.phone_number) return `at ${b.phone_number}`;
+  return "at the number you texted or called";
+}
+
+export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
+  const name = b.name;
+  const email = contactEmail(b);
+  const address = postalAddress(b);
+  const phone = phoneClause(b);
+  const optIn =
+    b.opt_in_description?.trim() ||
+    `${name} sends text messages in response to inquiries received by phone, text, or our web chat — including answers to your questions, appointment confirmations, and follow-up communications.`;
+
+  return {
+    lastUpdated: LAST_UPDATED,
+    sections: [
+      {
+        title: "1. Introduction",
+        paragraphs: [
+          `${name} operates an SMS text messaging program to communicate with current and prospective customers. This Privacy Policy explains what information we collect when you text or call us ${phone}, how we use it, and the rights you have over that information.`,
+          `${name} is the business responsible for this messaging program. SimplAssist provides the underlying technology platform and AI-assisted reply infrastructure on our behalf, and Telnyx is our messaging carrier. References to "we," "our," and "us" in this policy mean ${name}.`,
+        ],
+      },
+      {
+        title: "2. Information We Collect",
+        paragraphs: [
+          `We collect the mobile phone number you use to contact us, along with the contents of any text messages you send to us and the messages we send back. If you provide your name, email address, or other contact information in the course of a conversation, we collect that too.`,
+          `We also collect basic technical metadata about your messages — timestamps, delivery status, and the channel you used to reach us (SMS or web chat).`,
+        ],
+      },
+      {
+        title: "3. How We Use Your Information",
+        paragraphs: [
+          `We use your information to respond to your inquiries, schedule appointments, send follow-up messages related to a conversation you started, and provide customer service. ${optIn}`,
+          `We do not use your information for unrelated marketing, and we do not sell your information.`,
+        ],
+      },
+      {
+        title: "4. SMS / Text Messaging",
+        paragraphs: [
+          `By providing your phone number to ${name} — whether by texting us ${phone}, agreeing to receive a reply during a phone or web chat conversation, or otherwise opting in — you consent to receive automated and AI-assisted text messages from ${name} at the mobile number you provided. These messages may include responses to your questions, appointment confirmations, follow-up communications, and other messages related to our services. Consent is not a condition of any purchase.`,
+          `Message frequency varies based on your conversation and our follow-up needs. Message and data rates may apply depending on your mobile plan. You are responsible for any charges from your wireless carrier.`,
+          `You can opt out of SMS messages at any time by replying STOP to any message from us. After you opt out, you will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP and we will share our contact information.`,
+          `Mobile information, including your phone number and the contents of any text messages you send to us, will not be shared with third parties or affiliates for marketing or promotional purposes. We share this information only with our messaging service provider (Telnyx), our technology platform provider (SimplAssist), and other service providers strictly necessary to deliver and respond to your messages.`,
+        ],
+      },
+      {
+        title: "5. Third-Party Service Providers",
+        paragraphs: [
+          `We rely on a small number of vendors to deliver this messaging service: Telnyx (carrier and SMS delivery), SimplAssist (technology platform and AI assistance), and Anthropic (the AI model that helps draft responses). Each of these providers processes your information only as necessary to deliver the service, under their own privacy and security commitments.`,
+        ],
+      },
+      {
+        title: "6. Data Retention and Deletion",
+        paragraphs: [
+          `We retain message content and conversation history for as long as it is necessary to provide customer service and meet recordkeeping obligations. You may request deletion of your data at any time by contacting us at ${email}. Once deleted, conversation contents are erased and your phone number is removed from our active records, subject to any obligation to retain records required by law.`,
+        ],
+      },
+      {
+        title: "7. Your Rights",
+        paragraphs: [
+          `Depending on where you live, you may have the right to access, correct, or delete the personal information we hold about you, and to opt out of certain uses of that information. To exercise these rights, contact us at ${email}.`,
+        ],
+      },
+      {
+        title: "8. Contact Us",
+        paragraphs: [
+          address
+            ? `${name} — ${address}. Email: ${email}.`
+            : `${name}. Email: ${email}.`,
+          `If you have questions about this Privacy Policy or our SMS messaging practices, please reach out.`,
+        ],
+      },
+      {
+        title: "9. Updates to This Policy",
+        paragraphs: [
+          `We may update this Privacy Policy from time to time. The "Last updated" date at the top reflects the most recent revision. Material changes will be reflected here; please check this page periodically.`,
+        ],
+      },
+    ],
+  };
+}
+
+export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
+  const name = b.name;
+  const email = contactEmail(b);
+  const phone = phoneClause(b);
+
+  return {
+    lastUpdated: LAST_UPDATED,
+    sections: [
+      {
+        title: "1. Overview",
+        paragraphs: [
+          `These Terms of Service ("Terms") govern your use of the SMS text messaging program operated by ${name}. By texting or calling us ${phone}, or by agreeing to receive messages during a conversation, you agree to these Terms.`,
+          `SimplAssist provides the technology platform and AI-assisted reply infrastructure that powers this messaging program on our behalf. ${name} is the business responsible for the program and these Terms.`,
+        ],
+      },
+      {
+        title: "2. Eligibility",
+        paragraphs: [
+          `You must be at least 18 years old, or the age of majority in your jurisdiction, to participate in our SMS messaging program. By agreeing to these Terms, you represent that you meet this requirement and that the mobile number you provided is one you own or are authorized to use.`,
+        ],
+      },
+      {
+        title: "3. The Messaging Program",
+        paragraphs: [
+          `Our SMS messaging program is intended for customer service and operational communications related to ${name}. Typical messages include responses to your inquiries, appointment confirmations, follow-up communications, and other messages related to a conversation you started with us. Responses may be drafted with the help of AI; a human team member may also reply.`,
+          `Message frequency varies based on your conversation and our follow-up needs. Message and data rates may apply depending on your mobile plan.`,
+        ],
+      },
+      {
+        title: "4. Opting In and Opting Out",
+        paragraphs: [
+          `You opt in by texting us, calling us, or agreeing to receive a reply during a conversation. Consent is not a condition of any purchase.`,
+          `You can opt out at any time by replying STOP to any message from us. You will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP.`,
+        ],
+      },
+      {
+        title: "5. Acceptable Use",
+        paragraphs: [
+          `You agree not to use our messaging program to send unlawful, abusive, harassing, or threatening messages, to impersonate another person, to transmit malware, or to interfere with the operation of the program. We reserve the right to suspend or terminate access for any user who violates these Terms.`,
+        ],
+      },
+      {
+        title: "6. Disclaimers",
+        paragraphs: [
+          `Our SMS messaging program is provided on an "as is" and "as available" basis. AI-assisted replies are intended to be helpful but may not be accurate in every case; for matters that require certainty (medical, legal, financial, or safety-critical questions, for example), please confirm directly with a qualified person at ${name} before relying on a response.`,
+          `Carrier delivery of SMS messages is not guaranteed. Neither ${name} nor SimplAssist is responsible for messages that are delayed, undelivered, or misrouted by your wireless carrier.`,
+        ],
+      },
+      {
+        title: "7. Limitation of Liability",
+        paragraphs: [
+          `To the fullest extent permitted by law, ${name} and SimplAssist will not be liable for indirect, incidental, special, consequential, or punitive damages arising out of or in connection with the SMS messaging program, even if advised of the possibility of such damages.`,
+        ],
+      },
+      {
+        title: "8. Changes to These Terms",
+        paragraphs: [
+          `We may update these Terms from time to time. The "Last updated" date at the top reflects the most recent revision. Continued use of our messaging program after a change constitutes acceptance of the updated Terms.`,
+        ],
+      },
+      {
+        title: "9. Contact",
+        paragraphs: [
+          `Questions about these Terms? Email ${email}.`,
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Convert a LegalDoc to plain formatted text suitable for a customer to copy
+ * into their own CMS (used by Compliance panel's self_hosted mode).
+ *
+ * Format: each section title in UPPERCASE on its own line, followed by a blank
+ * line, then paragraphs separated by blank lines. No HTML, no markdown markers.
+ * Customers can paste into a rich-text editor and the visual structure survives.
+ */
+export function toPlainText(doc: LegalDoc): string {
+  const header = `Last updated: ${doc.lastUpdated}`;
+  const body = doc.sections
+    .map((s) => `${s.title.toUpperCase()}\n\n${s.paragraphs.join("\n\n")}`)
+    .join("\n\n\n");
+  return `${header}\n\n\n${body}\n`;
+}
