@@ -1,6 +1,6 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { BusinessEntityType } from "@/types/database";
+import type { BusinessEntityType, BusinessType } from "@/types/database";
 import { appendRegistrationEvent, serializeError } from "./audit";
 
 type TelnyxEntityType =
@@ -9,6 +9,11 @@ type TelnyxEntityType =
   | "NON_PROFIT"
   | "GOVERNMENT"
   | "SOLE_PROPRIETOR";
+
+// Subset of the Telnyx `Vertical` enum we actually map to. Sourced from
+// node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
+// Full enum has 23 values; we use 4. Extend as new business_type values land.
+type TelnyxVertical = "CONSTRUCTION" | "HEALTHCARE" | "HOSPITALITY" | "PROFESSIONAL";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -37,6 +42,28 @@ function toTelnyxEntityType(entity: BusinessEntityType): TelnyxEntityType {
   }
 }
 
+// Maps our business_type domain to Telnyx's Vertical enum. Carriers (especially
+// T-Mobile) check brand vertical against the business's industry — a misaligned
+// vertical can trigger MNO review friction even on otherwise-valid brands.
+// Any unmapped value falls through to PROFESSIONAL as a safe generic.
+function toTelnyxVertical(businessType: BusinessType): TelnyxVertical {
+  switch (businessType) {
+    case "plumber":
+    case "hvac":
+      return "CONSTRUCTION";
+    case "dentist":
+      return "HEALTHCARE";
+    case "restaurant":
+      return "HOSPITALITY";
+    case "car_wash":
+    case "salon":
+    case "auto_shop":
+    case "general":
+    case "other":
+      return "PROFESSIONAL";
+  }
+}
+
 function splitName(fullName: string): { firstName: string; lastName: string } {
   const trimmed = fullName.trim();
   const idx = trimmed.indexOf(" ");
@@ -59,7 +86,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, legal_business_name, business_entity_type, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
+      "id, name, legal_business_name, business_entity_type, business_type, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
     )
     .eq("id", businessId)
     .single();
@@ -105,6 +132,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   }
 
   const entityType = toTelnyxEntityType(business.business_entity_type);
+  const vertical = toTelnyxVertical(business.business_type);
   const { firstName, lastName } = splitName(business.authorized_rep_name ?? "");
   const phone = toE164(business.authorized_rep_phone);
   const einDigits = business.ein.replace(/\D/g, "");
@@ -117,7 +145,13 @@ export async function registerBrand(businessId: string): Promise<void> {
       companyName: business.legal_business_name,
       email: business.authorized_rep_email,
       entityType,
-      vertical: "PROFESSIONAL",
+      vertical,
+      // ISV/SaaS flag — corresponds to the Telnyx dashboard checkbox
+      // "Yes, I am creating a brand on behalf of another organization".
+      // SimplAssist is always the registering ISV when this code path runs;
+      // each customer brand belongs to a separate end-business (Mike's Roofing,
+      // etc.), so the flag is unconditionally true.
+      isReseller: true,
       ein: einDigits,
       firstName,
       lastName,
