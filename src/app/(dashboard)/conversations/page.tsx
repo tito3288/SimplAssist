@@ -19,11 +19,13 @@ export default async function ConversationsPage() {
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("id")
+    .select("id, campaign_status")
     .eq("owner_id", user.id)
     .single();
 
   if (!business) redirect("/onboarding");
+
+  const campaignApproved = business.campaign_status === "approved";
 
   const { data: conversations } = await supabase
     .from("conversations")
@@ -64,6 +66,7 @@ export default async function ConversationsPage() {
       <InboxLayout
         conversations={conversationsWithPreviews}
         businessId={business.id}
+        campaignApproved={campaignApproved}
       />
     </div>
   );

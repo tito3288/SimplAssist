@@ -23,7 +23,7 @@ export type Channel = "sms" | "web_chat";
 
 export type ConversationStatus = "active" | "closed" | "handed_off";
 
-export type MessageRole = "customer" | "assistant" | "human_agent";
+export type MessageRole = "customer" | "assistant" | "human_agent" | "system";
 
 export type SubscriptionPlan = "sms_only" | "sms_and_chat" | "full";
 

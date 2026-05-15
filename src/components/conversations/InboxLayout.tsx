@@ -11,9 +11,10 @@ import { glassCard } from "@/lib/glass";
 interface InboxLayoutProps {
   conversations: ConversationWithContact[];
   businessId: string;
+  campaignApproved: boolean;
 }
 
-export function InboxLayout({ conversations: initialConversations, businessId }: InboxLayoutProps) {
+export function InboxLayout({ conversations: initialConversations, businessId, campaignApproved }: InboxLayoutProps) {
   const [conversations, setConversations] = useState(initialConversations);
   const [selected, setSelected] = useState<ConversationWithContact | null>(null);
 
@@ -64,6 +65,7 @@ export function InboxLayout({ conversations: initialConversations, businessId }:
               <MessageThread
                 conversation={selected}
                 businessId={businessId}
+                campaignApproved={campaignApproved}
               />
             </div>
           </div>

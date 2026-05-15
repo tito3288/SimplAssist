@@ -124,6 +124,14 @@ export default async function DashboardPage() {
         recentConversations={recentConversations}
         hotLeads={hotLeads || []}
         phoneNumber={phoneNumberRow?.phone_number || null}
+        a2pStatus={{
+          brandStatus: business.brand_status ?? null,
+          brandStatusUpdatedAt: business.brand_status_updated_at ?? null,
+          brandRejectionReason: business.brand_rejection_reason ?? null,
+          campaignStatus: business.campaign_status ?? null,
+          campaignStatusUpdatedAt: business.campaign_status_updated_at ?? null,
+          campaignRejectionReason: business.campaign_rejection_reason ?? null,
+        }}
       />
     </div>
   );

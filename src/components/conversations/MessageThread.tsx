@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle } from "lucide-react";
+import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn, formatPhoneNumber } from "@/lib/utils";
 import type { Message } from "@/types/database";
@@ -10,6 +10,7 @@ import type { ConversationWithContact } from "@/app/(dashboard)/conversations/pa
 interface MessageThreadProps {
   conversation: ConversationWithContact;
   businessId: string;
+  campaignApproved: boolean;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -17,7 +18,7 @@ function formatTimestamp(dateStr: string): string {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export function MessageThread({ conversation, businessId }: MessageThreadProps) {
+export function MessageThread({ conversation, businessId, campaignApproved }: MessageThreadProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -75,7 +76,7 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
   }, [messages]);
 
   async function handleSend() {
-    if (!input.trim() || sending || isAiHandling) return;
+    if (!input.trim() || sending || isAiHandling || !campaignApproved) return;
 
     setSending(true);
     const content = input.trim();
@@ -223,6 +224,18 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
             {messages.map((msg) => {
               const isCustomer = msg.role === "customer";
               const isHumanAgent = msg.role === "human_agent";
+              const isSystem = msg.role === "system";
+
+              if (isSystem) {
+                return (
+                  <div key={msg.id} className="flex justify-center">
+                    <div className="max-w-[80%] rounded-full bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-3 py-1.5 text-center text-xs text-amber-700 dark:text-amber-300">
+                      <Info className="mr-1 inline-block h-3 w-3 align-[-2px]" />
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -289,6 +302,16 @@ export function MessageThread({ conversation, businessId }: MessageThreadProps) 
           <div className="flex items-center justify-center gap-2 rounded-lg bg-purple-50 dark:bg-purple-500/10 px-4 py-3 text-sm text-purple-600 dark:text-purple-300">
             <Bot className="h-4 w-4" />
             AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
+          </div>
+        ) : !campaignApproved ? (
+          <div className="flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3 text-sm">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+            <div>
+              <p className="font-medium text-amber-700 dark:text-amber-300">SMS sending paused</p>
+              <p className="mt-0.5 text-xs text-amber-600/90 dark:text-amber-300/80">
+                Your campaign is still under carrier review. You&apos;ll be able to reply once it&apos;s approved.
+              </p>
+            </div>
           </div>
         ) : (
           <form

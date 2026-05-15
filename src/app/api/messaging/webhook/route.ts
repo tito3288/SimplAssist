@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
-import { getMessagingProfileForOutbound } from "@/lib/messaging/lookup";
+import { getOutboundSendContext } from "@/lib/messaging/lookup";
+import { insertPausedSystemMessageIfNeeded } from "@/lib/messaging/pausedNotice";
 import { markProcessedOnce } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { processIncomingMessage } from "@/lib/ai/engine";
+import { findOrCreateContact } from "@/lib/ai/contacts";
+import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
 
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
@@ -115,13 +118,44 @@ export async function POST(request: NextRequest) {
   return new NextResponse("OK", { status: 200 });
 }
 
+// `from` here is the business's own number (the webhook's `to`); `to` is the
+// customer who sent the MMS (the webhook's `from`). See call site line 86
+// where the args are intentionally swapped.
 async function sendFallbackReply(from: string, to: string) {
-  const messagingProfileId = await getMessagingProfileForOutbound(from);
+  const sendContext = await getOutboundSendContext(from);
+
+  // Phase 5: block fallback send if campaign isn't approved. The customer
+  // who sent the MMS would otherwise just see silence — drop a paused
+  // notice into their conversation so the dashboard reflects what happened.
+  if (sendContext.campaignStatus !== "approved") {
+    console.warn(
+      `[messaging:webhook] MMS fallback blocked: campaign_status=${sendContext.campaignStatus} for business ${sendContext.businessId}`
+    );
+    const contact = await findOrCreateContact(
+      sendContext.businessId,
+      to,
+      null,
+      "sms"
+    );
+    const conversation = await getOrCreateConversation(
+      sendContext.businessId,
+      contact.id,
+      "sms"
+    );
+    await insertPausedSystemMessageIfNeeded({
+      conversationId: conversation.id,
+      businessId: sendContext.businessId,
+      channel: "sms",
+      context: "mms_fallback",
+    });
+    return;
+  }
+
   const result = await telnyx.messages.send({
     from,
     to,
     text: MMS_FALLBACK_MESSAGE,
-    messaging_profile_id: messagingProfileId,
+    messaging_profile_id: sendContext.messagingProfileId,
     type: "SMS",
   });
   console.log(`[messaging:webhook] MMS fallback sent, telnyxId=${result.data?.id}`);
@@ -133,6 +167,34 @@ async function processAndReply(
   to: string,
   text: string
 ) {
+  // Resolve the outbound context FIRST so we can gate the AI call on campaign
+  // approval. Same single-join query that the merged helper exposes — net DB
+  // cost vs. pre-Phase-5 is neutral (replaces a later getMessagingProfileForOutbound call).
+  const sendContext = await getOutboundSendContext(to);
+
+  if (sendContext.campaignStatus !== "approved") {
+    console.warn(
+      `[messaging:webhook] AI reply blocked: campaign_status=${sendContext.campaignStatus} for business ${businessId}`
+    );
+    // The AI engine normally owns customer-message persistence — replicate
+    // just enough here so the inbound is still visible in the dashboard,
+    // followed by a dedupe-aware paused notice.
+    const contact = await findOrCreateContact(businessId, from, null, "sms");
+    const conversation = await getOrCreateConversation(
+      businessId,
+      contact.id,
+      "sms"
+    );
+    await addMessage(conversation.id, businessId, "customer", text, "sms");
+    await insertPausedSystemMessageIfNeeded({
+      conversationId: conversation.id,
+      businessId,
+      channel: "sms",
+      context: "ai_reply",
+    });
+    return;
+  }
+
   const { data: existingContact } = await supabaseAdmin
     .from("contacts")
     .select("id")
@@ -170,12 +232,11 @@ async function processAndReply(
     : aiResponse;
 
   console.log(`[messaging:webhook] Sending reply via Telnyx`);
-  const messagingProfileId = await getMessagingProfileForOutbound(to);
   const result = await telnyx.messages.send({
     from: to,
     to: from,
     text: finalReply,
-    messaging_profile_id: messagingProfileId,
+    messaging_profile_id: sendContext.messagingProfileId,
     type: "SMS",
   });
   console.log(`[messaging:webhook] Reply sent, telnyxId=${result.data?.id}`);

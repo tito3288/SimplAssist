@@ -1,5 +1,6 @@
 import { telnyx } from "./client";
-import { getMessagingProfileForOutbound } from "./lookup";
+import { getOutboundSendContext } from "./lookup";
+import { insertPausedSystemMessageIfNeeded } from "./pausedNotice";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
@@ -74,9 +75,7 @@ export async function sendMissedCallSMS(
     const language: Language = (aiSettings?.language as Language) ?? "en";
     const smsBody = renderTemplate(business.name, language);
 
-    const messagingProfileId = await getMessagingProfileForOutbound(
-      phoneNumberRow.phone_number
-    );
+    const sendContext = await getOutboundSendContext(phoneNumberRow.phone_number);
 
     // Ensure a contact + conversation exist so the dashboard can show the
     // missed-call SMS in the conversation thread for that caller. We add
@@ -94,11 +93,28 @@ export async function sendMissedCallSMS(
       "sms"
     );
 
+    // Phase 5: hard-block the send if the customer's campaign isn't approved.
+    // Telnyx would reject with error 40010 anyway — failing fast here avoids
+    // the API call and surfaces a dedupe-aware notice in the customer's inbox
+    // so they see what would've gone out.
+    if (sendContext.campaignStatus !== "approved") {
+      console.warn(
+        `[missed-call] send blocked: campaign_status=${sendContext.campaignStatus} for business ${businessId}`
+      );
+      await insertPausedSystemMessageIfNeeded({
+        conversationId: conversation.id,
+        businessId,
+        channel: "sms",
+        context: "missed_call",
+      });
+      return;
+    }
+
     const result = await telnyx.messages.send({
       from: phoneNumberRow.phone_number,
       to: callerPhone,
       text: smsBody,
-      messaging_profile_id: messagingProfileId,
+      messaging_profile_id: sendContext.messagingProfileId,
       type: "SMS",
     });
 

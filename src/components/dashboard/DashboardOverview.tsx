@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import type { Conversation, Contact } from '@/types/database';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
+import A2pStatusCard, { type A2pStatusCardProps } from '@/components/dashboard/A2pStatusCard';
 import { glassCard, orangeAccentIcon, textPrimary, textSecondary } from '@/lib/glass';
 
 interface DashboardStats {
@@ -25,6 +26,7 @@ interface DashboardOverviewProps {
   recentConversations: RecentConversation[];
   hotLeads: Contact[];
   phoneNumber: string | null;
+  a2pStatus: A2pStatusCardProps;
 }
 
 const statCards = [
@@ -64,7 +66,7 @@ function EmptyConversationsIllustration() {
   );
 }
 
-export default function DashboardOverview({ stats, recentConversations, hotLeads, phoneNumber }: DashboardOverviewProps) {
+export default function DashboardOverview({ stats, recentConversations, hotLeads, phoneNumber, a2pStatus }: DashboardOverviewProps) {
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -100,6 +102,9 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
           </div>
         </div>
       )}
+
+      {/* A2P Registration Status */}
+      <A2pStatusCard {...a2pStatus} />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
