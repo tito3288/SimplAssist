@@ -7,14 +7,21 @@ import { ConversationList } from "./ConversationList";
 import { MessageThread } from "./MessageThread";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 import { glassCard } from "@/lib/glass";
+import type { SmsBlockReason } from "@/types/database";
 
 interface InboxLayoutProps {
   conversations: ConversationWithContact[];
   businessId: string;
-  campaignApproved: boolean;
+  smsReady: boolean;
+  smsBlockReason: SmsBlockReason | null;
 }
 
-export function InboxLayout({ conversations: initialConversations, businessId, campaignApproved }: InboxLayoutProps) {
+export function InboxLayout({
+  conversations: initialConversations,
+  businessId,
+  smsReady,
+  smsBlockReason,
+}: InboxLayoutProps) {
   const [conversations, setConversations] = useState(initialConversations);
   const [selected, setSelected] = useState<ConversationWithContact | null>(null);
 
@@ -65,7 +72,8 @@ export function InboxLayout({ conversations: initialConversations, businessId, c
               <MessageThread
                 conversation={selected}
                 businessId={businessId}
-                campaignApproved={campaignApproved}
+                smsReady={smsReady}
+                smsBlockReason={smsBlockReason}
               />
             </div>
           </div>

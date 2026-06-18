@@ -139,6 +139,12 @@ export async function registerBrand(businessId: string): Promise<void> {
   const einDigits = business.ein.replace(/\D/g, "");
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
 
+  if (!firstName || !lastName) {
+    throw new Error(
+      `[registration:brand] Business ${businessId} authorized_rep_name must include first and last name`
+    );
+  }
+
   // Phase 6: customers without a website_url still need a brand `website`
   // value on Telnyx submission — submitting null/undefined delays MNO review.
   // Fall back to the hosted business landing page at /c/[slug] in that case.

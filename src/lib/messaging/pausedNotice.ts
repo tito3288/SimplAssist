@@ -1,17 +1,22 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { Channel } from "@/types/database";
+import type { Channel, SmsBlockReason } from "@/types/database";
 
 // Shared marker so the dedupe LIKE query stays robust against copy changes.
 // Every paused-system message we insert MUST contain this substring.
-const PAUSED_MARKER = "SMS campaign is awaiting carrier approval";
+const PAUSED_MARKER = "SMS sending is paused";
 
-const PAUSED_COPY: Record<PausedContext, string> = {
-  missed_call: `Auto-reply paused — your ${PAUSED_MARKER}.`,
-  ai_reply: `AI reply paused — your ${PAUSED_MARKER}.`,
-  mms_fallback: `Auto-reply paused — your ${PAUSED_MARKER}.`,
+const CONTEXT_PREFIX: Record<PausedContext, string> = {
+  missed_call: "Auto-reply paused",
+  ai_reply: "AI reply paused",
+  mms_fallback: "Auto-reply paused",
 };
 
 export type PausedContext = "missed_call" | "ai_reply" | "mms_fallback";
+
+export type PausedReason = Extract<
+  SmsBlockReason,
+  "campaign_not_approved" | "assignment_pending" | "assignment_failed"
+>;
 
 const DEDUPE_WINDOW_MINUTES = 30;
 
@@ -27,6 +32,7 @@ export async function insertPausedSystemMessageIfNeeded(args: {
   businessId: string;
   channel: Channel;
   context: PausedContext;
+  reason?: PausedReason;
 }): Promise<void> {
   try {
     const cutoff = new Date(
@@ -60,7 +66,7 @@ export async function insertPausedSystemMessageIfNeeded(args: {
       conversation_id: args.conversationId,
       business_id: args.businessId,
       role: "system",
-      content: PAUSED_COPY[args.context],
+      content: pausedCopy(args.context, args.reason ?? "campaign_not_approved"),
       channel: args.channel,
     });
 
@@ -78,5 +84,18 @@ export async function insertPausedSystemMessageIfNeeded(args: {
       .eq("id", args.conversationId);
   } catch (err) {
     console.error("[pausedNotice] unexpected error:", err);
+  }
+}
+
+function pausedCopy(context: PausedContext, reason: PausedReason): string {
+  const prefix = CONTEXT_PREFIX[context];
+  switch (reason) {
+    case "assignment_pending":
+      return `${prefix} - ${PAUSED_MARKER} while Telnyx links this phone number to the approved SMS campaign.`;
+    case "assignment_failed":
+      return `${prefix} - ${PAUSED_MARKER} because Telnyx phone number assignment needs attention.`;
+    case "campaign_not_approved":
+    default:
+      return `${prefix} - ${PAUSED_MARKER} while your SMS campaign is awaiting carrier approval.`;
   }
 }

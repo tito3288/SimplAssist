@@ -49,6 +49,19 @@ export type TaxIdType = "ein" | "ssn_last_4";
 
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 
+export type CampaignAssignmentStatus =
+  | "unassigned"
+  | "pending"
+  | "assigned"
+  | "failed";
+
+export type SmsBlockReason =
+  | "campaign_not_approved"
+  | "assignment_pending"
+  | "assignment_failed"
+  | "missing_messaging_profile"
+  | "missing_phone_number";
+
 // Matches the CHECK constraint on businesses.privacy_terms_mode in
 // supabase/migrations/015_business_slug_and_compliance_mode.sql. Phase 6.
 export type PrivacyTermsMode = "hosted" | "self_hosted" | "existing";
@@ -63,6 +76,10 @@ export const TELNYX_EVENT_TYPES = [
   "campaign_status_changed",
   "messaging_profile_created",
   "voice_application_created",
+  "campaign_preflight_checked",
+  "phone_number_assignment_started",
+  "phone_number_assignment_status_changed",
+  "phone_number_assignment_failed",
 ] as const;
 export type TelnyxEventType = (typeof TELNYX_EVENT_TYPES)[number];
 
@@ -70,7 +87,8 @@ export type TelnyxResourceType =
   | "brand"
   | "campaign"
   | "messaging_profile"
-  | "voice_application";
+  | "voice_application"
+  | "phone_number_assignment";
 
 export interface Business {
   id: string;
@@ -217,6 +235,12 @@ export interface PhoneNumber {
   business_id: string;
   phone_number: string;
   telnyx_phone_number_id: string;
+  telnyx_campaign_assignment_status: CampaignAssignmentStatus;
+  telnyx_campaign_assignment_task_id: string | null;
+  telnyx_campaign_assignment_campaign_id: string | null;
+  telnyx_campaign_assignment_failure_reason: string | null;
+  telnyx_campaign_assignment_updated_at: string | null;
+  telnyx_campaign_assigned_at: string | null;
   is_active: boolean;
   created_at: string;
 }

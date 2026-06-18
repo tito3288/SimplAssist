@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { telnyx } from "@/lib/messaging/client";
+import {
+  getOutboundSendContext,
+  smsBlockCode,
+  smsBlockMessage,
+} from "@/lib/messaging/lookup";
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     const { data: business } = await supabase
       .from("businesses")
-      .select("id, telnyx_messaging_profile_id, campaign_status")
+      .select("id")
       .eq("id", businessId)
       .eq("owner_id", user.id)
       .single();
@@ -34,24 +39,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Business not found or unauthorized" },
         { status: 403 }
-      );
-    }
-
-    if (business.campaign_status !== "approved") {
-      return NextResponse.json(
-        {
-          error: "CAMPAIGN_NOT_APPROVED",
-          message:
-            "Your SMS campaign is still under carrier review. Sending is paused until approval — usually 1-5 days.",
-        },
-        { status: 403 }
-      );
-    }
-
-    if (!business.telnyx_messaging_profile_id) {
-      return NextResponse.json(
-        { error: "Messaging profile not configured for this business" },
-        { status: 500 }
       );
     }
 
@@ -69,11 +56,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const sendContext = await getOutboundSendContext(
+      phoneNumberRow.phone_number
+    );
+
+    if (!sendContext.smsReady) {
+      return NextResponse.json(
+        {
+          error: smsBlockCode(sendContext.blockReason),
+          message: smsBlockMessage(sendContext.blockReason),
+          assignmentStatus: sendContext.assignmentStatus,
+          assignmentFailureReason: sendContext.assignmentFailureReason,
+        },
+        { status: 403 }
+      );
+    }
+
+    if (!sendContext.messagingProfileId) {
+      return NextResponse.json(
+        { error: "Messaging profile not configured for this business" },
+        { status: 500 }
+      );
+    }
+
     const result = await telnyx.messages.send({
       to,
       from: phoneNumberRow.phone_number,
       text: message,
-      messaging_profile_id: business.telnyx_messaging_profile_id,
+      messaging_profile_id: sendContext.messagingProfileId,
       type: "SMS",
     });
 

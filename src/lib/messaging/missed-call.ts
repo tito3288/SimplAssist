@@ -4,7 +4,7 @@ import { insertPausedSystemMessageIfNeeded } from "./pausedNotice";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
-import type { Language } from "@/types/database";
+import type { Language, SmsBlockReason } from "@/types/database";
 
 // Static templates indexed by ai_settings.language. Missed-call SMS is a
 // transactional, time-sensitive, near-identical-every-time message — using
@@ -93,21 +93,24 @@ export async function sendMissedCallSMS(
       "sms"
     );
 
-    // Phase 5: hard-block the send if the customer's campaign isn't approved.
-    // Telnyx would reject with error 40010 anyway — failing fast here avoids
-    // the API call and surfaces a dedupe-aware notice in the customer's inbox
-    // so they see what would've gone out.
-    if (sendContext.campaignStatus !== "approved") {
+    if (!sendContext.smsReady) {
       console.warn(
-        `[missed-call] send blocked: campaign_status=${sendContext.campaignStatus} for business ${businessId}`
+        `[missed-call] send blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${businessId}`
       );
       await insertPausedSystemMessageIfNeeded({
         conversationId: conversation.id,
         businessId,
         channel: "sms",
         context: "missed_call",
+        reason: toPausedReason(sendContext.blockReason),
       });
       return;
+    }
+
+    if (!sendContext.messagingProfileId) {
+      throw new Error(
+        `[missed-call] Missing messaging profile for business ${businessId}`
+      );
     }
 
     const result = await telnyx.messages.send({
@@ -135,4 +138,12 @@ export async function sendMissedCallSMS(
   } catch (error) {
     console.error("[missed-call] Error sending missed call SMS:", error);
   }
+}
+
+function toPausedReason(
+  reason: SmsBlockReason | null
+): "campaign_not_approved" | "assignment_pending" | "assignment_failed" {
+  if (reason === "assignment_failed") return "assignment_failed";
+  if (reason === "assignment_pending") return "assignment_pending";
+  return "campaign_not_approved";
 }

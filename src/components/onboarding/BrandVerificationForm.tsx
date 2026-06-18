@@ -13,6 +13,10 @@ const EIN_PATTERN = /^\d{2}-\d{7}$/;
 const DEFAULT_OPT_IN_DESCRIPTION =
   'Customers opt in by texting this business number or by checking the SMS consent box on our website chat widget. This business sends appointment reminders, missed-call follow-ups, and replies to customer questions. Reply STOP to opt out.';
 
+function hasFirstAndLastName(value: string): boolean {
+  return value.trim().split(/\s+/).length >= 2;
+}
+
 const brandVerificationSchema = z.object({
   legal_business_name: z.string().min(1, 'Legal business name is required'),
   business_entity_type: z.enum(['llc', 'c_corp', 's_corp', 'nonprofit', 'partnership'] as const, {
@@ -23,7 +27,13 @@ const brandVerificationSchema = z.object({
     .string()
     .min(1, 'EIN is required')
     .regex(EIN_PATTERN, 'EIN must be in the format XX-XXXXXXX'),
-  authorized_rep_name: z.string().min(1, 'Representative name is required'),
+  authorized_rep_name: z
+    .string()
+    .min(1, 'Representative name is required')
+    .refine(
+      hasFirstAndLastName,
+      'Enter the authorized representative\'s first and last name'
+    ),
   authorized_rep_title: z.string().min(1, 'Representative title is required'),
   authorized_rep_email: z.string().email('Enter a valid email address'),
   authorized_rep_phone: z.string().min(10, 'Enter a valid phone number'),
@@ -348,6 +358,9 @@ export default function BrandVerificationForm({
             {errors.authorized_rep_name && (
               <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.authorized_rep_name.message}</p>
             )}
+            <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
+              Full legal name of the authorized representative.
+            </p>
           </div>
           <div>
             <label className={LABEL_CLASS}>Title *</label>

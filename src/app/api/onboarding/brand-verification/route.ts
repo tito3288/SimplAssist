@@ -20,13 +20,23 @@ const REGISTRATION_FAILURE_MESSAGE =
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings → Compliance, then try again.";
 
+function hasFirstAndLastName(value: string): boolean {
+  return value.trim().split(/\s+/).length >= 2;
+}
+
 const brandVerificationServerSchema = z.object({
   businessId: z.string().uuid(),
   legal_business_name: z.string().min(1),
   business_entity_type: z.enum(["llc", "c_corp", "s_corp", "nonprofit", "partnership"]),
   business_registration_state: z.string().min(2),
   ein: z.string().regex(/^\d{2}-\d{7}$/),
-  authorized_rep_name: z.string().min(1),
+  authorized_rep_name: z
+    .string()
+    .min(1)
+    .refine(
+      hasFirstAndLastName,
+      "Representative name must include first and last name"
+    ),
   authorized_rep_title: z.string().min(1),
   authorized_rep_email: z.string().email(),
   authorized_rep_phone: z.string().min(10),
@@ -119,6 +129,41 @@ export async function POST(request: NextRequest) {
     opt_in_description: data.opt_in_description,
   };
 
+  if (isFirstSubmit) {
+    const resolvedSlug = slugForUpdate ?? business.slug;
+    const preflightBusiness = {
+      slug: resolvedSlug,
+      privacy_terms_mode: (business.privacy_terms_mode ??
+        "hosted") as PrivacyTermsMode,
+      privacy_url_override: business.privacy_url_override,
+      terms_url_override: business.terms_url_override,
+    };
+
+    try {
+      resolveLegalUrls(preflightBusiness);
+      const trimmedWebsite = business.website_url?.trim();
+      if (!trimmedWebsite) {
+        buildBusinessLandingUrl(resolvedSlug);
+      }
+    } catch (err) {
+      console.error(
+        `[onboarding:brand-verification] Pre-flight failed for ${data.businessId}:`,
+        err
+      );
+      await appendRegistrationEvent({
+        businessId: data.businessId,
+        eventType: "brand_submitted",
+        resourceType: "brand",
+        status: "error",
+        rawPayload: { preflight_failure: serializeError(err) },
+      });
+      return NextResponse.json(
+        { error: PREFLIGHT_FAILURE_MESSAGE },
+        { status: 400 }
+      );
+    }
+  }
+
   // Race-safe first-submit transition: when compliance_info_completed_at is
   // null, the conditional UPDATE only succeeds for the one request that wins
   // the null→timestamp flip. Subsequent concurrent requests get 0 rows back
@@ -182,44 +227,6 @@ export async function POST(request: NextRequest) {
 
   if (!shouldFirePhase3) {
     return NextResponse.json({ success: true });
-  }
-
-  // Pre-flight gate: assert legal URLs + brand-website URL resolve cleanly
-  // BEFORE any Telnyx API call. Same defense-in-depth that resolveLegalUrls
-  // and buildBusinessLandingUrl provide internally; here it surfaces a
-  // 400 to the customer with actionable text instead of a 500 from a
-  // half-completed registration attempt.
-  const resolvedSlug = slugForUpdate ?? business.slug;
-  const preflightBusiness = {
-    slug: resolvedSlug,
-    privacy_terms_mode: (business.privacy_terms_mode ??
-      "hosted") as PrivacyTermsMode,
-    privacy_url_override: business.privacy_url_override,
-    terms_url_override: business.terms_url_override,
-  };
-
-  try {
-    resolveLegalUrls(preflightBusiness);
-    const trimmedWebsite = business.website_url?.trim();
-    if (!trimmedWebsite) {
-      buildBusinessLandingUrl(resolvedSlug);
-    }
-  } catch (err) {
-    console.error(
-      `[onboarding:brand-verification] Pre-flight failed for ${data.businessId}:`,
-      err
-    );
-    await appendRegistrationEvent({
-      businessId: data.businessId,
-      eventType: "brand_submitted",
-      resourceType: "brand",
-      status: "error",
-      rawPayload: { preflight_failure: serializeError(err) },
-    });
-    return NextResponse.json(
-      { error: PREFLIGHT_FAILURE_MESSAGE },
-      { status: 400 }
-    );
   }
 
   try {

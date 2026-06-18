@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import { glassCard } from '@/lib/glass';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
+import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -80,6 +81,7 @@ export default async function DashboardPage() {
 
   const firstName = getFirstNameFromAuthMetadata(user);
   const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
+  const smsReadiness = await getSmsReadinessForBusiness(business.id);
 
   return (
     <div className="space-y-6">
@@ -123,7 +125,7 @@ export default async function DashboardPage() {
         }}
         recentConversations={recentConversations}
         hotLeads={hotLeads || []}
-        phoneNumber={phoneNumberRow?.phone_number || null}
+        phoneNumber={smsReadiness.phoneNumber || phoneNumberRow?.phone_number || null}
         a2pStatus={{
           brandStatus: business.brand_status ?? null,
           brandStatusUpdatedAt: business.brand_status_updated_at ?? null,
@@ -131,6 +133,10 @@ export default async function DashboardPage() {
           campaignStatus: business.campaign_status ?? null,
           campaignStatusUpdatedAt: business.campaign_status_updated_at ?? null,
           campaignRejectionReason: business.campaign_rejection_reason ?? null,
+          assignmentStatus: smsReadiness.assignmentStatus,
+          assignmentFailureReason: smsReadiness.assignmentFailureReason,
+          smsReady: smsReadiness.smsReady,
+          smsBlockReason: smsReadiness.blockReason,
         }}
       />
     </div>

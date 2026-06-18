@@ -1,10 +1,14 @@
 'use client';
 
-import { Building2, MessageSquare, Send } from 'lucide-react';
+import { Building2, Link2, MessageSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { glassCard, orangeAccentIcon, textPrimary, textSecondary } from '@/lib/glass';
 import { formatDate } from '@/lib/utils';
-import type { RegistrationStatus } from '@/types/database';
+import type {
+  CampaignAssignmentStatus,
+  RegistrationStatus,
+  SmsBlockReason,
+} from '@/types/database';
 
 export interface A2pStatusCardProps {
   brandStatus: RegistrationStatus | null;
@@ -13,6 +17,10 @@ export interface A2pStatusCardProps {
   campaignStatus: RegistrationStatus | null;
   campaignStatusUpdatedAt: string | null;
   campaignRejectionReason: string | null;
+  assignmentStatus: CampaignAssignmentStatus | null;
+  assignmentFailureReason: string | null;
+  smsReady: boolean;
+  smsBlockReason: SmsBlockReason | null;
 }
 
 const SUPPORT_MAILTO_BRAND =
@@ -25,6 +33,17 @@ function StatusBadge({ status }: { status: RegistrationStatus | null }) {
   if (status === 'rejected') return <Badge variant="error">Needs update</Badge>;
   if (status === 'pending') return <Badge variant="warning">Under carrier review</Badge>;
   return <Badge variant="default">Not submitted</Badge>;
+}
+
+function AssignmentBadge({
+  status,
+}: {
+  status: CampaignAssignmentStatus | null;
+}) {
+  if (status === 'assigned') return <Badge variant="success">Assigned</Badge>;
+  if (status === 'pending') return <Badge variant="warning">Linking</Badge>;
+  if (status === 'failed') return <Badge variant="error">Needs attention</Badge>;
+  return <Badge variant="default">Not assigned</Badge>;
 }
 
 function RejectionBanner({
@@ -90,7 +109,58 @@ function StatusRow({
   );
 }
 
-function SmsLiveRow({ campaignApproved }: { campaignApproved: boolean }) {
+function AssignmentRow({
+  status,
+  failureReason,
+}: {
+  status: CampaignAssignmentStatus | null;
+  failureReason: string | null;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
+          <Link2 className="w-5 h-5 text-[#ff914d]" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium ${textPrimary}`}>Phone number assignment</p>
+          <p className={`text-xs ${textSecondary}`}>
+            Your Telnyx number must be linked to the approved SMS campaign.
+          </p>
+        </div>
+        <AssignmentBadge status={status} />
+      </div>
+      {status === 'failed' && (
+        <RejectionBanner reason={failureReason} mailto={SUPPORT_MAILTO_CAMPAIGN} />
+      )}
+    </div>
+  );
+}
+
+function smsReadyCopy(reason: SmsBlockReason | null): string {
+  switch (reason) {
+    case 'campaign_not_approved':
+      return 'Available once your campaign is approved.';
+    case 'assignment_pending':
+      return 'Campaign approved. Waiting for Telnyx to finish phone number assignment.';
+    case 'assignment_failed':
+      return 'Campaign approved, but phone number assignment needs attention.';
+    case 'missing_phone_number':
+      return 'Available once your business has an active phone number.';
+    case 'missing_messaging_profile':
+      return 'Messaging profile setup is incomplete.';
+    default:
+      return 'Your AI assistant can send and reply to customers.';
+  }
+}
+
+function SmsLiveRow({
+  smsReady,
+  blockReason,
+}: {
+  smsReady: boolean;
+  blockReason: SmsBlockReason | null;
+}) {
   return (
     <div className="flex items-center gap-3">
       <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
@@ -99,12 +169,10 @@ function SmsLiveRow({ campaignApproved }: { campaignApproved: boolean }) {
       <div className="flex-1 min-w-0">
         <p className={`text-sm font-medium ${textPrimary}`}>SMS sending</p>
         <p className={`text-xs ${textSecondary}`}>
-          {campaignApproved
-            ? 'Your AI assistant can send and reply to customers.'
-            : 'Available once your campaign is approved.'}
+          {smsReady ? smsReadyCopy(null) : smsReadyCopy(blockReason)}
         </p>
       </div>
-      {campaignApproved ? (
+      {smsReady ? (
         <Badge variant="success">Active</Badge>
       ) : (
         <Badge variant="default">Paused</Badge>
@@ -120,12 +188,14 @@ export default function A2pStatusCard({
   campaignStatus,
   campaignStatusUpdatedAt,
   campaignRejectionReason,
+  assignmentStatus,
+  assignmentFailureReason,
+  smsReady,
+  smsBlockReason,
 }: A2pStatusCardProps) {
   // Visibility gate: only render once Phase 3 has fired (brand or campaign has any status).
   // Pre-onboarding businesses get no card.
   if (!brandStatus && !campaignStatus) return null;
-
-  const campaignApproved = campaignStatus === 'approved';
 
   return (
     <div className={`p-5 ${glassCard}`}>
@@ -154,7 +224,11 @@ export default function A2pStatusCard({
           rejectionReason={campaignRejectionReason}
           rejectionMailto={SUPPORT_MAILTO_CAMPAIGN}
         />
-        <SmsLiveRow campaignApproved={campaignApproved} />
+        <AssignmentRow
+          status={assignmentStatus}
+          failureReason={assignmentFailureReason}
+        />
+        <SmsLiveRow smsReady={smsReady} blockReason={smsBlockReason} />
       </div>
     </div>
   );

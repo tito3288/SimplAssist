@@ -138,11 +138,15 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
               <div className="flex items-center gap-2">
                 <p className={`text-sm ${textSecondary}`}>Your AI Number</p>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-[rgba(255,145,77,.14)] text-[#ff914d] border border-[rgba(255,145,77,.22)]">
-                  Active
+                  {a2pStatus.smsReady ? 'Active' : 'Setup pending'}
                 </span>
               </div>
               <p className={`text-lg font-bold ${textPrimary}`}>{phoneNumber}</p>
-              <p className="text-xs text-slate-400 dark:text-[#888]">Customers can text this number 24/7</p>
+              <p className="text-xs text-slate-400 dark:text-[#888]">
+                {a2pStatus.smsReady
+                  ? 'Customers can text this number 24/7'
+                  : 'SMS unlocks once carrier approval and number assignment are complete'}
+              </p>
             </div>
           </div>
         </div>

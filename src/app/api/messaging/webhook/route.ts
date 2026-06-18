@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { processIncomingMessage } from "@/lib/ai/engine";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
+import type { SmsBlockReason } from "@/types/database";
 
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
@@ -124,12 +125,9 @@ export async function POST(request: NextRequest) {
 async function sendFallbackReply(from: string, to: string) {
   const sendContext = await getOutboundSendContext(from);
 
-  // Phase 5: block fallback send if campaign isn't approved. The customer
-  // who sent the MMS would otherwise just see silence — drop a paused
-  // notice into their conversation so the dashboard reflects what happened.
-  if (sendContext.campaignStatus !== "approved") {
+  if (!sendContext.smsReady) {
     console.warn(
-      `[messaging:webhook] MMS fallback blocked: campaign_status=${sendContext.campaignStatus} for business ${sendContext.businessId}`
+      `[messaging:webhook] MMS fallback blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${sendContext.businessId}`
     );
     const contact = await findOrCreateContact(
       sendContext.businessId,
@@ -147,8 +145,15 @@ async function sendFallbackReply(from: string, to: string) {
       businessId: sendContext.businessId,
       channel: "sms",
       context: "mms_fallback",
+      reason: toPausedReason(sendContext.blockReason),
     });
     return;
+  }
+
+  if (!sendContext.messagingProfileId) {
+    throw new Error(
+      `[messaging:webhook] Missing messaging profile for ${from}`
+    );
   }
 
   const result = await telnyx.messages.send({
@@ -172,9 +177,9 @@ async function processAndReply(
   // cost vs. pre-Phase-5 is neutral (replaces a later getMessagingProfileForOutbound call).
   const sendContext = await getOutboundSendContext(to);
 
-  if (sendContext.campaignStatus !== "approved") {
+  if (!sendContext.smsReady) {
     console.warn(
-      `[messaging:webhook] AI reply blocked: campaign_status=${sendContext.campaignStatus} for business ${businessId}`
+      `[messaging:webhook] AI reply blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${businessId}`
     );
     // The AI engine normally owns customer-message persistence — replicate
     // just enough here so the inbound is still visible in the dashboard,
@@ -191,8 +196,15 @@ async function processAndReply(
       businessId,
       channel: "sms",
       context: "ai_reply",
+      reason: toPausedReason(sendContext.blockReason),
     });
     return;
+  }
+
+  if (!sendContext.messagingProfileId) {
+    throw new Error(
+      `[messaging:webhook] Missing messaging profile for ${to}`
+    );
   }
 
   const { data: existingContact } = await supabaseAdmin
@@ -240,4 +252,12 @@ async function processAndReply(
     type: "SMS",
   });
   console.log(`[messaging:webhook] Reply sent, telnyxId=${result.data?.id}`);
+}
+
+function toPausedReason(
+  reason: SmsBlockReason | null
+): "campaign_not_approved" | "assignment_pending" | "assignment_failed" {
+  if (reason === "assignment_failed") return "assignment_failed";
+  if (reason === "assignment_pending") return "assignment_pending";
+  return "campaign_not_approved";
 }

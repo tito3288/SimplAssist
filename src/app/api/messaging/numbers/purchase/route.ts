@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { purchaseNumber } from "@/lib/messaging/numbers";
+import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -64,6 +65,18 @@ export async function POST(request: NextRequest) {
       sms_consent_agreed: true,
       sms_consent_agreed_at: new Date().toISOString(),
     }).eq("id", business.id);
+
+    try {
+      await ensureCampaignAssignmentForBusiness(business.id, {
+        force: true,
+        reason: "number_purchase",
+      });
+    } catch (assignmentError) {
+      console.error(
+        `[purchase] Number ${purchased.phoneNumber} saved but assignment helper failed:`,
+        assignmentError
+      );
+    }
 
     return NextResponse.json({ number: record });
   } catch (error) {

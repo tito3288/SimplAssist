@@ -4,13 +4,14 @@ import { useState, useEffect, useRef } from "react";
 import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn, formatPhoneNumber } from "@/lib/utils";
-import type { Message } from "@/types/database";
+import type { Message, SmsBlockReason } from "@/types/database";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
   businessId: string;
-  campaignApproved: boolean;
+  smsReady: boolean;
+  smsBlockReason: SmsBlockReason | null;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -18,7 +19,28 @@ function formatTimestamp(dateStr: string): string {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export function MessageThread({ conversation, businessId, campaignApproved }: MessageThreadProps) {
+function smsPausedCopy(reason: SmsBlockReason | null): string {
+  switch (reason) {
+    case "assignment_pending":
+      return "Your campaign is approved, and Telnyx is linking your phone number to it. You can reply once assignment finishes.";
+    case "assignment_failed":
+      return "Your campaign is approved, but phone number assignment needs attention before replies can send.";
+    case "missing_phone_number":
+      return "Add an active phone number before replying by SMS.";
+    case "missing_messaging_profile":
+      return "Messaging setup is incomplete. Contact support before replying by SMS.";
+    case "campaign_not_approved":
+    default:
+      return "Your campaign is still under carrier review. You can reply once it is approved.";
+  }
+}
+
+export function MessageThread({
+  conversation,
+  businessId,
+  smsReady,
+  smsBlockReason,
+}: MessageThreadProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -26,6 +48,7 @@ export function MessageThread({ conversation, businessId, campaignApproved }: Me
   const [toggling, setToggling] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createBrowserClient();
+  const smsBlocked = conversation.channel === "sms" && !smsReady;
 
   // Fetch messages
   useEffect(() => {
@@ -76,7 +99,7 @@ export function MessageThread({ conversation, businessId, campaignApproved }: Me
   }, [messages]);
 
   async function handleSend() {
-    if (!input.trim() || sending || isAiHandling || !campaignApproved) return;
+    if (!input.trim() || sending || isAiHandling || smsBlocked) return;
 
     setSending(true);
     const content = input.trim();
@@ -303,13 +326,13 @@ export function MessageThread({ conversation, businessId, campaignApproved }: Me
             <Bot className="h-4 w-4" />
             AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
           </div>
-        ) : !campaignApproved ? (
+        ) : smsBlocked ? (
           <div className="flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3 text-sm">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
             <div>
               <p className="font-medium text-amber-700 dark:text-amber-300">SMS sending paused</p>
               <p className="mt-0.5 text-xs text-amber-600/90 dark:text-amber-300/80">
-                Your campaign is still under carrier review. You&apos;ll be able to reply once it&apos;s approved.
+                {smsPausedCopy(smsBlockReason)}
               </p>
             </div>
           </div>

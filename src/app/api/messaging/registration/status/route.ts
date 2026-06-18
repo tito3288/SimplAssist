@@ -6,6 +6,7 @@ import {
   appendRegistrationEvent,
   serializeError,
 } from "@/lib/messaging/registration/audit";
+import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 import {
   extractRejectionReason,
   mapBrandStatus,
@@ -191,6 +192,22 @@ async function handleEvent(event: unknown): Promise<void> {
       rejectionReason,
       rawPayload: event as Record<string, unknown>,
     });
+
+    if (
+      kind === "campaign" &&
+      mapped.dbStatus === "approved" &&
+      statusChanged
+    ) {
+      ensureCampaignAssignmentForBusiness(business.id, {
+        force: true,
+        reason: "campaign_approved_webhook",
+      }).catch((err) =>
+        console.error(
+          `[registration:webhook] campaign assignment start failed for business ${business.id}:`,
+          err
+        )
+      );
+    }
 
     if (mapped.isTerminal && statusChanged) {
       dispatchStatusEmail({

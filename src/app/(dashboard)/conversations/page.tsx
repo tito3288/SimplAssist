@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { InboxLayout } from "@/components/conversations/InboxLayout";
 import type { Conversation, Contact } from "@/types/database";
+import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
 
 export type ConversationWithContact = Conversation & {
   contact: Pick<Contact, "id" | "name" | "phone_number" | "email">;
@@ -19,13 +20,13 @@ export default async function ConversationsPage() {
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("id, campaign_status")
+    .select("id")
     .eq("owner_id", user.id)
     .single();
 
   if (!business) redirect("/onboarding");
 
-  const campaignApproved = business.campaign_status === "approved";
+  const smsReadiness = await getSmsReadinessForBusiness(business.id);
 
   const { data: conversations } = await supabase
     .from("conversations")
@@ -66,7 +67,8 @@ export default async function ConversationsPage() {
       <InboxLayout
         conversations={conversationsWithPreviews}
         businessId={business.id}
-        campaignApproved={campaignApproved}
+        smsReady={smsReadiness.smsReady}
+        smsBlockReason={smsReadiness.blockReason}
       />
     </div>
   );

@@ -16,6 +16,7 @@ function appBaseUrl(): string {
 const HELP_KEYWORDS = "HELP,INFO";
 const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
+const CAMPAIGN_USECASE = "CUSTOMER_CARE";
 const HELP_MESSAGE =
   "Reply with your question and we'll get back to you during business hours, or call us directly.";
 const OPTOUT_MESSAGE =
@@ -82,12 +83,46 @@ export async function registerCampaign(businessId: string): Promise<void> {
   // /api/onboarding/brand-verification is the primary safety net; this is
   // defense in depth.
   const { privacyUrl, termsUrl } = resolveLegalUrls(business);
+  let campaignPreflightChecked = false;
 
   try {
+    const [cost, qualification] = await Promise.all([
+      telnyx.messaging10dlc.campaign.usecase.getCost({
+        usecase: CAMPAIGN_USECASE,
+      }),
+      telnyx.messaging10dlc.campaignBuilder.brand.qualifyByUsecase(
+        CAMPAIGN_USECASE,
+        { brandId: business.telnyx_brand_id }
+      ),
+    ]);
+
+    if (qualification.usecase && qualification.usecase !== CAMPAIGN_USECASE) {
+      throw new Error(
+        `[registration:campaign] Brand ${business.telnyx_brand_id} qualification returned unexpected usecase ${qualification.usecase}`
+      );
+    }
+
+    console.log(
+      `[registration:campaign] ${CAMPAIGN_USECASE} cost for business ${businessId}: monthly=${cost.monthlyCost} upfront=${cost.upFrontCost}`
+    );
+
+    await appendRegistrationEvent({
+      businessId,
+      eventType: "campaign_preflight_checked",
+      resourceType: "campaign",
+      status: "ok",
+      rawPayload: {
+        usecase: CAMPAIGN_USECASE,
+        cost,
+        qualification,
+      },
+    });
+    campaignPreflightChecked = true;
+
     const response = await telnyx.messaging10dlc.campaignBuilder.submit({
       brandId: business.telnyx_brand_id,
       description: business.use_case_description,
-      usecase: "CUSTOMER_CARE",
+      usecase: CAMPAIGN_USECASE,
       sample1: samples[0],
       sample2: samples[1],
       sample3: samples[2],
@@ -156,6 +191,19 @@ export async function registerCampaign(businessId: string): Promise<void> {
       },
     });
   } catch (err) {
+    if (!campaignPreflightChecked) {
+      await appendRegistrationEvent({
+        businessId,
+        eventType: "campaign_preflight_checked",
+        resourceType: "campaign",
+        status: "error",
+        rawPayload: {
+          usecase: CAMPAIGN_USECASE,
+          error: serializeError(err),
+        },
+      });
+    }
+
     await appendRegistrationEvent({
       businessId,
       eventType: "campaign_submitted",
