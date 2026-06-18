@@ -190,6 +190,10 @@ A2P verification often checks the customer's OWN website for an SMS-related Priv
 
 - **Widget SMS opt-in checkbox** — deferred. The current widget captures only name + email (no phone), so no SMS goes out from web chat. Becomes load-bearing with the future "Order Now" restaurant feature (phone number for order status). Revisit then.
 - **Retry path for failed Phase 3 registrations** — the race-safe transition gates Phase 3 to first-submit only. If the initial Telnyx call failed, customer can't retry via the form. Needs an explicit "Retry registration" dashboard action.
+- **Rejected brand/campaign correction + resubmission** — required before real customer launch. Current app stores rejection reasons and shows "Needs update," but does not yet provide a complete flow to edit rejected brand/campaign fields and send the correct Telnyx recovery action. This is distinct from initial technical retry:
+  - brand rejection may require updating the existing Telnyx brand, revetting, or support/manual intervention depending on Telnyx/TCR response;
+  - campaign rejection may require updating editable fields (notably samples/message flow), submitting a campaign appeal, or creating a replacement campaign because many campaign attributes are immutable after submit;
+  - Phase 7 should include the customer UX for rejected states, but the first controlled Alpha Dog EIN test can proceed without this so any real rejection teaches which recovery path matters first.
 - **Backfill of pre-Phase-6 campaigns** — manual via Mission Control if needed.
 - **zod deprecation cleanup** — `z.string().email()` and `parsed.error.flatten()` are deprecated in zod 4.x types, used across many files. Codebase-wide tech debt, dedicated pass.
 - **`appBaseUrl()` duplication** — 5 copies (brand.ts, campaign.ts, messagingProfile.ts, voiceApplication.ts, legalUrls.ts). Extract to a shared module when there's a natural reason to touch them.
