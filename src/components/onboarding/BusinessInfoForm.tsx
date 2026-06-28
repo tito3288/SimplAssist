@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
@@ -19,7 +20,10 @@ const businessInfoSchema = z.object({
   email: z.string().email('Enter a valid email address').min(1, 'Business email is required'),
   address: z.string().min(1, 'Address is required'),
   city: z.string().min(1, 'City is required'),
-  state: z.string().min(1, 'State is required'),
+  state: z
+    .string()
+    .min(1, 'State is required')
+    .refine((value) => Boolean(normalizeUsStateCode(value)), 'Select a valid state'),
   zip: z.string().min(5, 'Enter a valid zip code'),
 }).refine((data) => {
   if (data.business_type === 'other') {
@@ -78,7 +82,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       email: initialData?.email || '',
       address: initialData?.address || '',
       city: initialData?.city || '',
-      state: initialData?.state || '',
+      state: normalizeUsStateCode(initialData?.state) || '',
       zip: initialData?.zip || '',
     },
   });
@@ -122,7 +126,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           email: data.email || null,
           address: data.address,
           city: data.city,
-          state: data.state,
+          state: normalizeUsStateCode(data.state),
           zip: data.zip,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         })
@@ -241,7 +245,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         {errors.address && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.address.message}</p>}
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">City *</label>
           <input
@@ -252,10 +256,16 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1">State *</label>
-          <input
+          <select
             {...register('state')}
             className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30"
-          />
+            defaultValue=""
+          >
+            <option value="" disabled>Select state</option>
+            {US_STATES.map(([code, name]) => (
+              <option key={code} value={code}>{name} ({code})</option>
+            ))}
+          </select>
           {errors.state && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.state.message}</p>}
         </div>
         <div>

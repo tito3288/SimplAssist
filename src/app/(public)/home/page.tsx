@@ -77,10 +77,11 @@ const plans = [
     price: "$25",
     description: "Missed-call texting for small teams that want fast coverage.",
     features: [
-      "AI missed-call SMS responses",
-      "Smart contact management",
-      "Conversation inbox",
-      "Up to 500 texts/month",
+      "One local AI phone number",
+      "Manual SMS inbox and replies",
+      "Missed-call auto text",
+      "Basic AI missed-call response",
+      "500 included SMS parts/month",
     ],
     highlighted: false,
   },
@@ -91,9 +92,10 @@ const plans = [
     features: [
       "Everything in SMS Only",
       "Website chat widget",
-      "Multi-channel inbox",
-      "Customizable AI personality",
-      "Up to 1,000 texts/month",
+      "Web chat lead capture",
+      "Full AI SMS conversations",
+      "Customize your AI's answers and tone",
+      "1,500 included SMS parts/month",
     ],
     highlighted: true,
   },
@@ -103,10 +105,11 @@ const plans = [
     description: "The complete communication platform for growing businesses.",
     features: [
       "Everything in SMS + Web Chat",
-      "Lead scoring",
+      "Google Calendar booking",
+      "AI appointment scheduling",
+      "Advanced AI guardrails",
       "Priority support",
-      "Advanced analytics",
-      "Unlimited texts",
+      "2,500 included SMS parts/month",
     ],
     highlighted: false,
   },
@@ -515,7 +518,7 @@ export default function HomePage() {
                 <span className="text-[#ff914d]">business grows</span>.
               </h2>
               <p className="text-slate-500 dark:text-[#bdbdbf] max-w-[600px] leading-[1.65] lg:text-right">
-                No hidden fees, no contracts. Cancel anytime.
+                No contracts. Paid SMS activation includes a one-time $25 setup fee.
               </p>
             </div>
           </FadeIn>

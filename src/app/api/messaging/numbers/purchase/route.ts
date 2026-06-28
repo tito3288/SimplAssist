@@ -37,6 +37,46 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const { data: existingNumber, error: existingNumberError } = await supabase
+      .from("phone_numbers")
+      .select("*")
+      .eq("business_id", business.id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingNumberError) {
+      console.error("Error checking existing number:", existingNumberError);
+      return NextResponse.json(
+        { error: "Failed to check existing phone number" },
+        { status: 500 }
+      );
+    }
+
+    if (existingNumber) {
+      await supabase
+        .from("businesses")
+        .update({
+          sms_consent_agreed: true,
+          sms_consent_agreed_at: new Date().toISOString(),
+        })
+        .eq("id", business.id);
+
+      try {
+        await ensureCampaignAssignmentForBusiness(business.id, {
+          force: true,
+          reason: "number_purchase_existing",
+        });
+      } catch (assignmentError) {
+        console.error(
+          `[purchase] Existing number ${existingNumber.phone_number} found but assignment helper failed:`,
+          assignmentError
+        );
+      }
+
+      return NextResponse.json({ number: existingNumber });
+    }
+
     const purchased = await purchaseNumber(phoneNumber, business.id);
     console.log(
       `[purchase] Telnyx order for ${purchased.phoneNumber} status=${purchased.status} id=${purchased.phoneNumberId}`

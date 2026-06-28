@@ -240,7 +240,10 @@ export default function OnboardingPage() {
               </p>
             </div>
 
-            <PhoneNumberSelector onConsentChange={setSmsConsentAgreed} />
+            <PhoneNumberSelector
+              onConsentChange={setSmsConsentAgreed}
+              onNumberPurchased={setSelectedPhoneNumber}
+            />
 
             <div className="flex justify-between pt-4">
               <button
@@ -251,16 +254,18 @@ export default function OnboardingPage() {
                 Back
               </button>
               <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedPhoneNumber(null);
-                    setStep(7);
-                  }}
-                  className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
-                >
-                  Skip for now
-                </button>
+                {!selectedPhoneNumber && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPhoneNumber(null);
+                      setStep(7);
+                    }}
+                    className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
+                  >
+                    Skip for now
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handlePhoneStepNext}

@@ -6,6 +6,20 @@ This is the shared source of truth for the per-customer A2P (Application-to-Pers
 
 > **What does NOT belong in this file:** secrets, API keys, access tokens, real customer PII, EINs, SSNs, or private business data. Architecture, flow logic, phase specs, and locked decisions only.
 
+## Product UX Principle for Phases 7–11
+
+SimplAssist's advantage is that a beginner can set up business SMS, AI replies, compliance, and a phone number without understanding telecom infrastructure. Future phases must preserve that.
+
+Implementation rule: make each phase simple and self-explanatory as it is built, not as a cleanup pass at the end. Technical accuracy is not enough if the customer cannot tell what is happening, what they are paying for, what is waiting on approval, or what action is needed next.
+
+Carry this through every Phase 7–11 implementation:
+- Use plain-English labels before telecom terms. Prefer "Business verification" / "SMS activation" / "Carrier review" over raw terms like TCR, 10DLC, MNO, campaign provisioning, or messaging profile.
+- When a step costs money, blocks setup, or requires waiting, explain why in one calm sentence near the action.
+- Show "what happens next" after every major submit: payment, business verification, campaign review, number purchase, OTP, rejection, approval, and activation.
+- Never show a feature as active until it is truly usable. If SMS is waiting on approval or phone-number assignment, show a waiting/paused state instead.
+- Locked or unavailable features should explain the reason and next step: upgrade, wait for approval, fix rejected info, verify OTP, or contact support.
+- Keep advanced technical details available for support/admin context, but do not make regular customers decode them during onboarding.
+
 ---
 
 ## Background & Why
@@ -220,6 +234,30 @@ Not in the original 11-phase plan — added after Phase 6 to close runtime-readi
 - **New:** signup → basic info → detailed business info + rep → use case + sample messages → pay → status/waiting screen → pick number when brand approved → activation when campaign approved.
 - Telnyx has no "profile approval" stage — two stages only (brand approval, then campaign approval).
 
+### Partial onboarding + resume requirements
+
+The current onboarding saves data only when each step's Next/Submit button is clicked, and the resume flow is not robust. Phase 7 must make partial setup safe for real users who close the tab, lose signal, or stop midway.
+
+Current behavior to fix:
+- Signup immediately creates a placeholder `businesses` row.
+- Step 1 business info saves on Next.
+- Step 2 business hours saves on Next.
+- Step 3 services/FAQs saves on Next.
+- Step 4 AI settings saves on Next.
+- Step 5 brand/EIN verification saves and triggers Telnyx registration on submit.
+- Typed data on the current step is lost if the user closes the page before clicking Next.
+- On reload, the app does not reliably reconstruct every completed step from the database.
+- The onboarding layout can redirect to `/dashboard` once `ai_settings` exists, even when brand verification / phone setup / launch status are not complete. This can make an incomplete user look "done" too early.
+
+Phase 7 implementation requirements:
+- Add an explicit onboarding progress state, e.g. `onboarding_step`, `onboarding_completed_at`, or equivalent derived status that cannot confuse "started" with "finished."
+- Resume users at the next incomplete step, not always Step 1 and not dashboard unless onboarding is truly complete.
+- Load saved business hours, services, FAQs, AI settings, brand verification fields, and purchased phone number when rebuilding the onboarding state.
+- Treat Step 5 as a special boundary: do not trigger Telnyx registration until the user intentionally submits exact legal/EIN data.
+- Add a calm "Your progress is saved" / "Continue setup" UX so users understand they can safely pause between steps.
+- If a user abandons during a step before clicking Next, either autosave drafts or make it clear that the current step is not saved yet.
+- Dashboard should show a clear "Continue setup" or waiting/approval status for incomplete accounts rather than acting like the account is fully launched.
+
 **Carry-forward constraints:**
 - Keep the `A2pStatusCard` null-gate (Phase 5) — onboarding has its own step-by-step status UX.
 - Consider closing the business-type/vertical mapping gap here (Phase 3 note).
@@ -230,6 +268,55 @@ Not in the original 11-phase plan — added after Phase 6 to close runtime-readi
 
 - Reject prohibited use cases at signup via a single checkbox. **Locked-in 9 prohibited categories:** cannabis/CBD, adult content/escort/dating, gambling/sports betting, payday loans/debt collection, crypto/get-rich-quick, political messaging, firearms, MLM, prescription drugs/pharmacy.
 - Tighten `src/lib/ai/prompt.ts` so the AI never drifts into promotional/marketing messaging — must stay within the registered Customer Care use case, or campaigns get pulled.
+
+### Customer Care campaign text generator
+
+SimplAssist's initial 10DLC use case is **Customer Care / Conversational Messaging** only. Do not broaden this into marketing, promotional campaigns, lead-list outreach, coupons, blasts, or unrelated vertical use cases during Phase 8.
+
+Current behavior to replace: the user manually writes `use_case_description`, 3–5 `sample_messages`, and `opt_in_description` during onboarding. Real customers will not know what carriers expect, and freeform entries can cause preventable Telnyx/TCR rejection.
+
+Phase 8 should implement a **controlled template generator**, not open-ended AI copywriting:
+- Hard-code the compliant structure and carrier-safe language.
+- Dynamically insert the customer's real `business.name`, relevant service/category wording from onboarding (`services`, `business_type`, `business_type_other`, FAQs, website scan), and real opt-in channels.
+- Let AI lightly choose service wording only inside strict rules; do not let it invent a different use case.
+- Show generated text as editable but framed: "We drafted this for carrier review. Please confirm it matches your business."
+- Run validation before submit: no placeholders like `[Business Name]`, no prohibited/risky categories, no marketing/blast/coupon/discount/cold-outreach language, and no claims about features the product does not actually perform yet.
+- Keep at least one sample message with opt-out wording such as `Reply STOP to opt out.`
+
+Recommended generated use-case template:
+
+```text
+{BusinessName} will use SMS for customer care conversations with people who contact the business. Messages may include replies to customer questions, missed-call follow-ups, service inquiry responses, and next-step coordination related to {ServiceCategory}. This campaign will not be used for mass marketing, promotional blasts, cold outreach, or affiliate marketing.
+```
+
+Recommended sample-message templates:
+
+```text
+Thanks for contacting {BusinessName}. We received your message and can help with your question about {ServiceCategory}. What can we help you with today?
+```
+
+```text
+Hi, this is {BusinessName}. We saw your missed call and wanted to follow up. What service or question can we help with? Reply STOP to opt out.
+```
+
+```text
+Thanks for your interest in {BusinessName}. We can help coordinate next steps for your inquiry. What day and time works best for a quick call?
+```
+
+Recommended opt-in description template:
+
+```text
+Customers opt in by contacting {BusinessName} through the business website, website chat, phone call, or SMS. {BusinessName} uses SMS to respond to customer questions, follow up on missed calls, and coordinate service inquiries. Customers can reply STOP to opt out.
+```
+
+Dynamic insertion rules:
+- `{BusinessName}` should use the customer-facing business name unless legal review requires `legal_business_name`; never use a placeholder.
+- `{ServiceCategory}` should be a short, truthful phrase such as `marketing services`, `plumbing services`, `dental appointment questions`, or `auto repair services`.
+- If service/category data is weak, default to `the services offered by the business` rather than inventing specifics.
+- Avoid "appointment reminders" until the product actually sends appointment reminders. Use "appointment coordination" or "consultation scheduling" only when the business setup supports that language.
+- If Google Calendar booking is disabled, do not claim automatic booking; "coordinate next steps" is safer.
+
+These templates must describe what SimplAssist actually does: inbound customer conversations, missed-call follow-ups, manual/AI SMS replies, service questions, and next-step coordination. They are not just Telnyx approval theater.
 
 ---
 
@@ -245,6 +332,146 @@ Campaign registration: ~$10/month per campaign (any brand tier).
 **Locked decision:** a **$25 one-time setup fee** at signup absorbs brand cost + first month of campaign ($4 + ~$10 = ~$14, comfortably under $25). Recurring $10/month campaign fee absorbed into existing $25/$45/$65 tier pricing. **No separate "compliance line item"** on customer invoices.
 
 Pre-approval rate limits: providers throttle heavily (often 1 msg/sec) until campaign approved — handle gracefully.
+
+**First checkout math:**
+
+| Selected plan | First checkout | Future monthly billing |
+|---------------|----------------|------------------------|
+| Starter / SMS Only | $25 plan + $25 setup = **$50 today** | **$25/month** |
+| Growth / SMS + Web Chat | $45 plan + $25 setup = **$70 today** | **$45/month** |
+| Pro / Full Suite | $65 plan + $25 setup = **$90 today** | **$65/month** |
+
+### Checkout UX and setup-fee explanation
+
+SimplAssist's product promise is beginner-friendly setup. Phase 9 must explain the one-time setup fee in plain English before payment, not bury it in a Stripe line item or telecom jargon.
+
+Recommended customer-facing copy:
+
+> One-time setup and SMS compliance activation fee. We use this to verify your business, register your SMS sending with carriers, activate your phone number, and set up your compliance pages so your messages can be delivered reliably.
+
+Implementation notes:
+- Show the one-time setup fee as its own line item in the plan/checkout review before redirecting to Stripe.
+- Include a small "What's this?" tooltip, inline explainer, or modal near the setup fee.
+- Avoid leading with "Telnyx," "TCR," "10DLC," or carrier acronyms in beginner-facing checkout copy. Those can appear in a secondary "technical details" accordion if needed.
+- Make the total today vs monthly renewal obvious: e.g. "$70 today, then $45/month after setup."
+- Explain that business verification can take time and that SMS activation is not instant, so users do not expect the number to send immediately.
+- Keep the tone calm and helpful. This fee should feel like assisted setup, not a surprise telecom tax.
+- Do not submit paid Telnyx/TCR registration until checkout succeeds.
+
+### Pricing + usage model to implement
+
+Phase 9 must turn the existing plan skeleton in `src/lib/stripe/config.ts` into a profitable ladder. The current public plan anchors are:
+- `sms_only` / **SMS Only** — $25/month
+- `sms_and_chat` / **SMS + Web Chat** — $45/month
+- `full` / **Full Suite** — $65/month
+
+Keep the entry plan affordable, but do **not** sell unlimited SMS/MMS/AI usage. Telnyx charges per SMS/MMS part in both directions, carrier fees are pass-through, each customer has recurring 10DLC campaign cost, each number has monthly cost, and AI replies add variable token cost. The product can say "unlimited conversations" only if pricing copy clearly limits included message parts.
+
+**Provider-cost assumptions as of the 2026-06 pricing review — re-verify before implementation:**
+- Telnyx local 10DLC SMS is charged per inbound/outbound message part plus U.S. carrier fees. Model planning cost around **$0.01 per SMS part** to leave room for carrier variation and long-message segmentation.
+- Telnyx MMS is materially more expensive than SMS. Do not include unlimited MMS; meter it separately or make it Pro/add-on only.
+- Telnyx local numbers are roughly low single-digit dollars per month including SMS/MMS capability; keep one included number in each tier and charge for extras.
+- Stripe fees and AI model token costs should be included in margin math.
+- Re-check Telnyx, Stripe, and AI-provider pricing during Phase 9 before locking final public numbers.
+
+**Recommended ladder:**
+- **Starter / SMS Only — $25/month**
+  - Purpose: affordable entry point for small service businesses.
+  - Include: one local phone number, A2P compliance handling, missed-call auto text, manual SMS inbox, contacts/conversation history, basic AI missed-call response, hosted compliance pages.
+  - Exclude or upsell: website chat widget, booking, analytics, custom branding, MMS, high-volume automations.
+  - Included usage target: **300–500 SMS parts/month**. Default recommendation: start at **500 SMS parts/month** only if usage enforcement is live.
+- **Growth / SMS + Web Chat — $45/month**
+  - Purpose: main value tier and expected "Most Popular" plan.
+  - Include: everything in Starter, AI SMS conversations, website chat widget, lead capture, widget/custom-brand settings, business FAQ/services/tone customization.
+  - Included usage target: **1,500 SMS parts/month**.
+- **Pro / Full Suite — $65/month initially, consider $79/month before broad launch**
+  - Purpose: advanced customers who need automation and reporting.
+  - Include: everything in Growth, review requests, appointment booking/calendar integration, analytics, weekly summary, priority support, advanced AI guardrails/custom instructions.
+  - Included usage target at $65: **2,500 SMS parts/month**.
+  - If priced at $79: can include roughly **3,000 SMS parts/month** with healthier margin.
+  - MMS should be Pro-only or add-on, with separate metering/overage.
+
+**Feature entitlement matrix:**
+
+| Feature / capability | Starter / SMS Only | Growth / SMS + Web Chat | Pro / Full Suite |
+|----------------------|--------------------|--------------------------|------------------|
+| One local AI phone number | Included | Included | Included |
+| A2P 10DLC registration + hosted legal pages | Included | Included | Included |
+| Manual SMS inbox/replies | Included | Included | Included |
+| Missed-call auto text | Included | Included | Included |
+| Contacts + conversation history | Included | Included | Included |
+| Basic AI missed-call response | Included | Included | Included |
+| Full AI SMS conversations | Locked or limited trial | Included | Included |
+| Website chat widget | Locked; upgrade prompt | Included | Included |
+| Web chat lead capture | Locked; upgrade prompt | Included | Included |
+| Widget branding/customization | Locked; upgrade prompt | Included | Included, with advanced options |
+| Business FAQ/services/tone customization | Basic only | Included | Included, with advanced guardrails |
+| MMS | Locked by default | Paid add-on only if margin supports it | Pro/add-on only; meter separately |
+| Appointment booking / calendar integration | Locked | Locked or upgrade prompt | Included |
+| Review requests | Locked | Locked or upgrade prompt | Included |
+| Analytics dashboard | Basic usage only | Basic usage only | Full analytics |
+| Weekly email summary | Locked | Locked or upgrade prompt | Included |
+| Priority support | Locked | Locked | Included |
+| Extra phone numbers | Paid add-on | Paid add-on | Paid add-on |
+| Higher-volume SMS pool | Upgrade or custom plan | Upgrade or custom plan | Custom plan |
+
+**Feature-gating implementation rules:**
+- Do not rely on frontend hiding alone. Every gated feature needs backend/API enforcement so a lower-tier account cannot call a locked route directly.
+- Prefer a shared entitlement helper such as `canUseFeature(plan, featureKey)` used by both UI components and route handlers.
+- Lower-tier UI should usually show locked states with an upgrade CTA for high-value features (chat widget, booking, analytics) rather than making the product feel broken or empty.
+- Hard-block cost-generating features when the plan does not include them: AI sends beyond allowed tier, MMS, extra numbers, high-volume automations, and any future outbound bulk/marketing-like workflow.
+- Keep all customer-to-consumer messaging inside the registered Customer Care use case regardless of tier. Higher tiers add capability and volume, not a different TCR use case.
+
+**Overages and add-ons:**
+- Extra SMS parts: target **$0.03 per additional SMS part** after included usage.
+- MMS: separate paid meter, e.g. **$0.06–$0.10 per MMS part/message event** after real Telnyx cost is confirmed.
+- Extra phone numbers: **$5–$10/month per number**.
+- Higher-volume custom plans: require manual approval and a larger included-usage pool.
+
+**Rough margin targets using conservative assumptions:**
+- Starter $25 with 500 SMS parts: variable/platform cost roughly $17–$19/month → ~$6–$8 gross profit.
+- Growth $45 with 1,500 SMS parts: cost roughly $29–$32/month → ~$13–$16 gross profit.
+- Pro $65 with 2,500 SMS parts: cost roughly $41–$45/month → ~$20–$24 gross profit.
+- Pro $79 with 3,000 SMS parts: cost roughly $47–$52/month → ~$27–$32 gross profit.
+
+These are planning estimates, not accounting truth. The implementation should store enough usage and cost data to compare real gross margin by account.
+
+### Phase 9 implementation requirements
+
+- Add a real payment gate before any paid Telnyx/TCR registration is submitted. If payment fails or the user abandons checkout, do not call `registerBrand()` / `registerCampaign()`.
+- Charge the $25 setup fee at signup/onboarding before the paid submit. Keep this separate from the recurring plan in Stripe so refunds/support decisions are clean.
+- Replace placeholder `STRIPE_PRICE_IDS` with real Stripe Price IDs via environment/config.
+- Add Stripe Checkout for initial signup payment and the Stripe customer portal for plan changes/cancellations.
+- Add Stripe webhook handling for subscription state. The app must know active / trialing / past_due / canceled before enabling paid features.
+- Add usage tables or counters keyed by business + billing period. Track at minimum:
+  - inbound SMS parts
+  - outbound SMS parts
+  - MMS events/parts
+  - Telnyx phone-number monthly cost basis
+  - campaign monthly cost basis
+  - AI input/output token estimates or actual usage where available
+  - overage opt-in and overage amount
+- Count **billable message parts**, not just `messages` rows. Long SMS can split into multiple parts, and inbound SMS still costs money.
+- Usage gates must apply to every customer-facing send path: manual dashboard sends, AI replies, MMS fallback text, and missed-call SMS.
+- Add customer-visible usage UI: current billing period, included SMS parts, used SMS parts, warning at 80%, hard stop or upgrade/overage prompt at 100%.
+- At 100% usage, default to pausing outbound sends until upgrade/overage opt-in. Do not silently continue unbounded usage.
+- Add internal/admin visibility for gross margin and high-usage accounts before launch.
+- Update plan copy so "unlimited conversations" cannot be interpreted as unlimited SMS/MMS/AI usage.
+- Keep account notifications / billing emails separate from customer-to-consumer SMS usage.
+
+### Pilot/test account billing migration
+
+The first real-EIN account may start as a no-charge internal pilot while SimplAssist absorbs Telnyx/TCR/SMS/AI costs. Phase 9 must support converting that existing approved account into a normal paid account without rerunning compliance registration or disturbing the phone number.
+
+Migration requirements:
+- Do **not** rerun brand registration, campaign registration, number purchase, or campaign assignment for a pilot account that is already approved/assigned.
+- Keep the existing `businesses.id`, auth `owner_id`, Telnyx IDs, phone number, conversations, contacts, legal-page slug, and status history intact.
+- Create or attach a Stripe customer + subscription to the existing business when the pilot becomes paid.
+- Decide manually whether to waive the $25 setup fee for pilot accounts. Default recommendation: waive it or comp it if SimplAssist already absorbed the setup during testing.
+- Start included usage/message caps from the first paid billing period, not retroactively from the free pilot period.
+- Add an internal/admin way to mark accounts as `pilot`, `comped`, or `billing_exempt` until billing starts, so free tests do not look like broken subscriptions.
+- Once converted to paid, enforce the same tier entitlements, SMS/MMS caps, overage rules, and past-due behavior as every other account.
+- Avoid surprising the pilot customer with back charges. Any first invoice should be clearly agreed to before Stripe billing is attached.
 
 ---
 

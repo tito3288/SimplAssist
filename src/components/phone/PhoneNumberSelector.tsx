@@ -13,9 +13,13 @@ interface PurchasedNumber {
 
 interface PhoneNumberSelectorProps {
   onConsentChange?: (agreed: boolean) => void;
+  onNumberPurchased?: (phoneNumber: string) => void;
 }
 
-export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSelectorProps) {
+export default function PhoneNumberSelector({
+  onConsentChange,
+  onNumberPurchased,
+}: PhoneNumberSelectorProps) {
   const [areaCode, setAreaCode] = useState("");
   const [numbers, setNumbers] = useState<AvailableNumber[]>([]);
   const [searching, setSearching] = useState(false);
@@ -80,6 +84,7 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
       }
 
       setPurchased(data.number);
+      onNumberPurchased?.(data.number.phone_number);
       setNumbers([]);
     } catch {
       setError("Failed to purchase number");
@@ -98,7 +103,7 @@ export default function PhoneNumberSelector({ onConsentChange }: PhoneNumberSele
           {purchased.phone_number}
         </p>
         <p className="mt-1 text-sm text-green-600">
-          Your new number is ready to receive messages.
+          Number purchased. SMS activation is pending carrier approval.
         </p>
       </div>
     );

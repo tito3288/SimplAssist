@@ -6,12 +6,13 @@ import { z } from 'zod';
 import { useState } from 'react';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
 
 const DEFAULT_OPT_IN_DESCRIPTION =
-  'Customers opt in by texting this business number or by checking the SMS consent box on our website chat widget. This business sends appointment reminders, missed-call follow-ups, and replies to customer questions. Reply STOP to opt out.';
+  'Customers opt in by texting this business number or by requesting a text response after contacting this business by phone. This business uses SMS to answer customer questions, follow up on missed calls, and coordinate service inquiries. Reply STOP to opt out.';
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
@@ -22,7 +23,10 @@ const brandVerificationSchema = z.object({
   business_entity_type: z.enum(['llc', 'c_corp', 's_corp', 'nonprofit', 'partnership'] as const, {
     message: 'Select an entity type',
   }),
-  business_registration_state: z.string().min(2, 'Select the state of registration'),
+  business_registration_state: z
+    .string()
+    .min(2, 'Select the state of registration')
+    .refine((value) => Boolean(normalizeUsStateCode(value)), 'Select a valid state'),
   ein: z
     .string()
     .min(1, 'EIN is required')
@@ -105,22 +109,6 @@ const VOLUME_OPTIONS: { value: BrandVerificationData['estimated_monthly_volume']
   { value: 'over_100k', label: 'Over 100,000 messages / month' },
 ];
 
-const US_STATES = [
-  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'],
-  ['CA', 'California'], ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'],
-  ['DC', 'District of Columbia'], ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'],
-  ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
-  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'],
-  ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
-  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'],
-  ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'],
-  ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
-  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'],
-  ['SC', 'South Carolina'], ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'],
-  ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'], ['WA', 'Washington'],
-  ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
-] as const;
-
 const INPUT_CLASS =
   'w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30';
 
@@ -161,7 +149,7 @@ export default function BrandVerificationForm({
         initialData?.business_entity_type && initialData.business_entity_type !== 'sole_proprietor'
           ? initialData.business_entity_type
           : undefined,
-      business_registration_state: initialData?.business_registration_state || '',
+      business_registration_state: normalizeUsStateCode(initialData?.business_registration_state) || '',
       ein: initialData?.ein || '',
       authorized_rep_name: initialData?.authorized_rep_name || '',
       authorized_rep_title: initialData?.authorized_rep_title || '',
@@ -194,7 +182,7 @@ export default function BrandVerificationForm({
           businessId,
           legal_business_name: data.legal_business_name,
           business_entity_type: data.business_entity_type,
-          business_registration_state: data.business_registration_state,
+          business_registration_state: normalizeUsStateCode(data.business_registration_state),
           ein: data.ein,
           authorized_rep_name: data.authorized_rep_name,
           authorized_rep_title: data.authorized_rep_title,
@@ -319,7 +307,7 @@ export default function BrandVerificationForm({
             <select {...register('business_registration_state')} className={INPUT_CLASS} defaultValue="">
               <option value="" disabled>Select a state</option>
               {US_STATES.map(([code, name]) => (
-                <option key={code} value={code}>{name}</option>
+                <option key={code} value={code}>{name} ({code})</option>
               ))}
             </select>
             {errors.business_registration_state && (
@@ -406,7 +394,7 @@ export default function BrandVerificationForm({
           <textarea
             {...register('use_case_description')}
             rows={4}
-            placeholder="e.g. Reply to customer inquiries about appointment availability, send missed-call follow-ups, and confirm bookings."
+            placeholder="e.g. Reply to customer inquiries, send missed-call follow-ups, and coordinate service requests."
             className={INPUT_CLASS}
           />
           {errors.use_case_description && (

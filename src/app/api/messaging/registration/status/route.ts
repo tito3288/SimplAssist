@@ -153,6 +153,8 @@ async function handleEvent(event: unknown): Promise<void> {
       kind === "brand"
         ? mapBrandStatus({
             identityStatus: pickString(payload, [
+              "brandIdentityStatus",
+              "brand_identity_status",
               "identityStatus",
               "identity_status",
             ]),

@@ -13,12 +13,15 @@ import {
   appendRegistrationEvent,
   serializeError,
 } from "@/lib/messaging/registration/audit";
+import { normalizeUsStateCode } from "@/lib/usStates";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
 
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings → Compliance, then try again.";
+
+const PLACEHOLDER_PATTERN = /\[.+?\]/;
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
@@ -28,7 +31,10 @@ const brandVerificationServerSchema = z.object({
   businessId: z.string().uuid(),
   legal_business_name: z.string().min(1),
   business_entity_type: z.enum(["llc", "c_corp", "s_corp", "nonprofit", "partnership"]),
-  business_registration_state: z.string().min(2),
+  business_registration_state: z
+    .string()
+    .min(2)
+    .refine((value) => Boolean(normalizeUsStateCode(value))),
   ein: z.string().regex(/^\d{2}-\d{7}$/),
   authorized_rep_name: z
     .string()
@@ -42,7 +48,18 @@ const brandVerificationServerSchema = z.object({
   authorized_rep_phone: z.string().min(10),
   use_case_description: z.string().min(40),
   estimated_monthly_volume: z.enum(["under_1k", "1k_10k", "10k_100k", "over_100k"]),
-  sample_messages: z.array(z.string().min(1)).min(3).max(5),
+  sample_messages: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine(
+          (value) => !PLACEHOLDER_PATTERN.test(value),
+          "Sample messages cannot contain placeholders"
+        )
+    )
+    .min(3)
+    .max(5),
   opt_in_description: z.string().min(40),
 });
 
@@ -72,6 +89,14 @@ export async function POST(request: NextRequest) {
     );
   }
   const data = parsed.data;
+  const registrationStateCode = normalizeUsStateCode(data.business_registration_state);
+
+  if (!registrationStateCode) {
+    return NextResponse.json(
+      { error: "Invalid state of registration" },
+      { status: 400 }
+    );
+  }
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
@@ -116,7 +141,7 @@ export async function POST(request: NextRequest) {
   const editablePayload = {
     legal_business_name: data.legal_business_name,
     business_entity_type: data.business_entity_type,
-    business_registration_state: data.business_registration_state,
+    business_registration_state: registrationStateCode,
     tax_id_type: "ein" as const,
     ein: data.ein,
     authorized_rep_name: data.authorized_rep_name,

@@ -1,6 +1,7 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BusinessEntityType, BusinessType } from "@/types/database";
+import { normalizeUsStateCode } from "@/lib/usStates";
 import { appendRegistrationEvent, serializeError } from "./audit";
 import { buildBusinessLandingUrl } from "./legalUrls";
 
@@ -138,10 +139,17 @@ export async function registerBrand(businessId: string): Promise<void> {
   const phone = toE164(business.authorized_rep_phone);
   const einDigits = business.ein.replace(/\D/g, "");
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
+  const stateCode = normalizeUsStateCode(business.state);
 
   if (!firstName || !lastName) {
     throw new Error(
       `[registration:brand] Business ${businessId} authorized_rep_name must include first and last name`
+    );
+  }
+
+  if (!stateCode) {
+    throw new Error(
+      `[registration:brand] Business ${businessId} address state must be a valid 2-letter US state code`
     );
   }
 
@@ -176,7 +184,7 @@ export async function registerBrand(businessId: string): Promise<void> {
       phone,
       street: business.address ?? undefined,
       city: business.city ?? undefined,
-      state: business.state ?? undefined,
+      state: stateCode,
       postalCode: business.zip ?? undefined,
       website: resolvedWebsite,
       webhookURL,

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getUsStateName } from '@/lib/usStates';
 
 interface ReviewData {
   businessInfo: {
@@ -131,7 +132,7 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         <SummaryRow label="Phone" value={data.businessInfo.phone} />
         <SummaryRow
           label="Address"
-          value={`${data.businessInfo.address}, ${data.businessInfo.city}, ${data.businessInfo.state} ${data.businessInfo.zip}`}
+          value={`${data.businessInfo.address}, ${data.businessInfo.city}, ${getUsStateName(data.businessInfo.state)} ${data.businessInfo.zip}`}
         />
         {data.businessInfo.website && <SummaryRow label="Website" value={data.businessInfo.website} />}
       </Section>
