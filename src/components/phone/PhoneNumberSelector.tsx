@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface AvailableNumber {
   phoneNumber: string;
@@ -12,11 +12,15 @@ interface PurchasedNumber {
 }
 
 interface PhoneNumberSelectorProps {
+  initialPhoneNumber?: string | null;
+  initialConsentAgreed?: boolean;
   onConsentChange?: (agreed: boolean) => void;
   onNumberPurchased?: (phoneNumber: string) => void;
 }
 
 export default function PhoneNumberSelector({
+  initialPhoneNumber,
+  initialConsentAgreed = false,
   onConsentChange,
   onNumberPurchased,
 }: PhoneNumberSelectorProps) {
@@ -27,6 +31,15 @@ export default function PhoneNumberSelector({
   const [purchased, setPurchased] = useState<PurchasedNumber | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [consented, setConsented] = useState(false);
+
+  useEffect(() => {
+    if (initialPhoneNumber) {
+      setPurchased({ phone_number: initialPhoneNumber });
+    }
+
+    setConsented(initialConsentAgreed);
+    onConsentChange?.(initialConsentAgreed);
+  }, [initialPhoneNumber, initialConsentAgreed, onConsentChange]);
 
   function handleConsentToggle(checked: boolean) {
     setConsented(checked);
@@ -103,7 +116,7 @@ export default function PhoneNumberSelector({
           {purchased.phone_number}
         </p>
         <p className="mt-1 text-sm text-green-600">
-          Number purchased. SMS activation is pending carrier approval.
+          SMS activation is pending registration and carrier approval.
         </p>
       </div>
     );

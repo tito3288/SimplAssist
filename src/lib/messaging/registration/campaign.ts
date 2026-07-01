@@ -1,5 +1,6 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getActivePhoneNumberForBusiness } from "@/lib/messaging/numbers";
 import { appendRegistrationEvent, serializeError } from "./audit";
 import { resolveLegalUrls, type PrivacyTermsMode } from "./legalUrls";
 
@@ -34,28 +35,22 @@ function supportContact(business: {
   );
 }
 
-function optInPath(business: { phone_number: string | null }): string {
-  const phone = cleanText(business.phone_number);
-  if (phone) {
-    return `by texting or calling ${phone} and requesting an SMS response`;
-  }
-  return "by texting the business number or requesting an SMS response during a phone conversation";
-}
-
 function buildCampaignComplianceCopy(
   business: {
     name: string;
     email: string | null;
     phone_number: string | null;
   },
-  privacyUrl: string
+  privacyUrl: string,
+  smsPhoneNumber: string
 ) {
   const brandName = business.name.trim();
   const contact = supportContact(business);
 
   return {
     messageFlow: [
-      `Customers opt in to ${brandName} SMS ${optInPath(business)}.`,
+      `Customers opt in to ${brandName} SMS by calling or texting ${smsPhoneNumber}, the ${brandName} SMS number.`,
+      `Calls to this number may be forwarded to ${brandName}, and missed calls may receive an SMS follow-up.`,
       `${brandName} uses SMS for customer care only, including responses to customer questions, missed-call follow-ups, and service coordination.`,
       "Message frequency varies by conversation. Message and data rates may apply.",
       "Reply HELP for help or STOP to opt out.",
@@ -127,10 +122,32 @@ export async function registerCampaign(businessId: string): Promise<void> {
   // /api/onboarding/brand-verification is the primary safety net; this is
   // defense in depth.
   const { privacyUrl, termsUrl } = resolveLegalUrls(business);
-  const complianceCopy = buildCampaignComplianceCopy(business, privacyUrl);
+  const smsPhoneNumber = await getActivePhoneNumberForBusiness(businessId);
+  if (!smsPhoneNumber) {
+    throw new Error(
+      `[registration:campaign] Business ${businessId} must have an active purchased phone number before campaign submission`
+    );
+  }
+
+  const complianceCopy = buildCampaignComplianceCopy(
+    business,
+    privacyUrl,
+    smsPhoneNumber
+  );
   let campaignPreflightChecked = false;
 
   try {
+    const { error: optInUpdateError } = await supabaseAdmin
+      .from("businesses")
+      .update({ opt_in_description: complianceCopy.messageFlow })
+      .eq("id", businessId);
+
+    if (optInUpdateError) {
+      throw new Error(
+        `[registration:campaign] Failed to persist final opt-in description for business ${businessId}: ${optInUpdateError.message}`
+      );
+    }
+
     const [cost, qualification] = await Promise.all([
       telnyx.messaging10dlc.campaign.usecase.getCost({
         usecase: CAMPAIGN_USECASE,
@@ -233,6 +250,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
           messageFlow: complianceCopy.messageFlow,
+          smsPhoneNumber,
           optinMessage: complianceCopy.optinMessage,
           optoutMessage: complianceCopy.optoutMessage,
           helpMessage: complianceCopy.helpMessage,
@@ -264,6 +282,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
           messageFlow: complianceCopy.messageFlow,
+          smsPhoneNumber,
           optinMessage: complianceCopy.optinMessage,
           optoutMessage: complianceCopy.optoutMessage,
           helpMessage: complianceCopy.helpMessage,

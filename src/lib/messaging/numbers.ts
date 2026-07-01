@@ -37,6 +37,27 @@ export interface PurchasedNumber {
   status: "pending" | "success" | "failure" | undefined;
 }
 
+export async function getActivePhoneNumberForBusiness(
+  businessId: string
+): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("phone_numbers")
+    .select("phone_number")
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `[messaging:numbers] Failed to read active phone number for ${businessId}: ${error.message}`
+    );
+  }
+
+  return data?.phone_number ?? null;
+}
+
 export async function purchaseNumber(
   phoneNumber: string,
   businessId: string

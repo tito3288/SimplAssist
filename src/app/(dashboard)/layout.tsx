@@ -16,10 +16,10 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  // Check if user has completed onboarding
+  // Dashboard unlocks only after the final Step 7 SMS registration submit.
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type, website_url, deleted_at")
+    .select("business_type, website_url, deleted_at, telnyx_campaign_id")
     .eq("owner_id", user.id)
     .single();
 
@@ -29,6 +29,10 @@ export default async function DashboardLayout({
 
   if (business.deleted_at) {
     redirect("/account-deleted");
+  }
+
+  if (!business.telnyx_campaign_id) {
+    redirect("/onboarding");
   }
 
   return (

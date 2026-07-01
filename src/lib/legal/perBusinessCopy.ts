@@ -40,6 +40,7 @@ export interface LegalDoc {
 export interface LegalTemplateBusiness {
   name: string;
   phone_number: string | null;
+  sms_phone_number?: string | null;
   email: string | null;
   address: string | null;
   city: string | null;
@@ -66,6 +67,7 @@ function postalAddress(b: LegalTemplateBusiness): string | null {
 }
 
 function phoneClause(b: LegalTemplateBusiness): string {
+  if (b.sms_phone_number) return `at ${b.sms_phone_number}`;
   if (b.phone_number) return `at ${b.phone_number}`;
   return "at the number you texted or called";
 }

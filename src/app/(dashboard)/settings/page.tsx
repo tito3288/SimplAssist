@@ -81,6 +81,7 @@ export default async function SettingsPage() {
           business={{
             name: business.name,
             phone_number: business.phone_number,
+            sms_phone_number: phoneNumberRow?.phone_number ?? null,
             email: business.email,
             address: business.address,
             city: business.city,

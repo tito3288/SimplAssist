@@ -100,10 +100,38 @@ function maskEin(ein: string): string {
 export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
   const router = useRouter();
   const [launching, setLaunching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
+    setError(null);
+
+    if (!data.phoneNumber) {
+      onEditStep(6);
+      return;
+    }
+
     setLaunching(true);
-    router.push('/dashboard');
+
+    try {
+      const res = await fetch('/api/onboarding/submit-registration', {
+        method: 'POST',
+      });
+      const response = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(response.error || 'Could not submit SMS registration right now.');
+        if (response.code === 'missing_phone_number') {
+          onEditStep(6);
+        }
+        return;
+      }
+
+      router.push('/dashboard');
+    } catch {
+      setError('Could not submit SMS registration right now.');
+    } finally {
+      setLaunching(false);
+    }
   };
 
   const formatTime = (time: string) => {
@@ -117,8 +145,10 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Launch</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">Everything looks good? Hit launch to get started.</p>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Submit</h2>
+        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+          Submit your SMS registration for carrier review.
+        </p>
       </div>
 
       {/* Business Info */}
@@ -232,10 +262,18 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         ) : (
           <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>
-            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">You can add one later from Settings</p>
+            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">
+              Choose a SimpleAssist number before submitting SMS registration.
+            </p>
           </div>
         )}
       </Section>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          {error}
+        </div>
+      )}
 
       <div className="flex justify-between pt-4">
         <button
@@ -250,7 +288,11 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
           disabled={launching}
           className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
         >
-          {launching ? 'Launching...' : 'Launch SimplAssist'}
+          {launching
+            ? 'Submitting...'
+            : data.phoneNumber
+              ? 'Submit SMS registration'
+              : 'Choose number to submit'}
         </button>
       </div>
     </div>

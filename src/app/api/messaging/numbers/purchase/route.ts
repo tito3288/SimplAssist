@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { purchaseNumber } from "@/lib/messaging/numbers";
+import { createMessagingProfile } from "@/lib/messaging/registration/messagingProfile";
+import { createVoiceApplication } from "@/lib/messaging/registration/voiceApplication";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 
 export async function POST(request: NextRequest) {
@@ -16,7 +18,7 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: bizError } = await supabase
     .from("businesses")
-    .select("id")
+    .select("id, compliance_info_completed_at")
     .eq("owner_id", user.id)
     .single();
 
@@ -76,6 +78,19 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ number: existingNumber });
     }
+
+    if (!business.compliance_info_completed_at) {
+      return NextResponse.json(
+        {
+          error:
+            "Finish business verification before choosing your SimplAssist number",
+        },
+        { status: 400 }
+      );
+    }
+
+    await createMessagingProfile(business.id);
+    await createVoiceApplication(business.id);
 
     const purchased = await purchaseNumber(phoneNumber, business.id);
     console.log(

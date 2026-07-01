@@ -19,7 +19,7 @@ import { isPendingSlug } from "@/lib/util/slug";
 type PageProps = { params: Promise<{ slug: string }> };
 
 const PUBLIC_PROJECTION =
-  "slug, name, email, phone_number, address, city, state, zip, opt_in_description";
+  "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description";
 
 async function loadBusiness(
   slug: string
@@ -33,7 +33,25 @@ async function loadBusiness(
     .maybeSingle();
 
   if (error || !data) return null;
-  return data as unknown as LegalTemplateBusiness & { slug: string };
+
+  const business = data as unknown as LegalTemplateBusiness & {
+    id: string;
+    slug: string;
+  };
+
+  const { data: phoneNumber } = await supabaseAdmin
+    .from("phone_numbers")
+    .select("phone_number")
+    .eq("business_id", business.id)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    ...business,
+    sms_phone_number: phoneNumber?.phone_number ?? null,
+  };
 }
 
 export async function generateMetadata({

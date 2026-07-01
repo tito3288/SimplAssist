@@ -104,6 +104,19 @@ export default function OnboardingPage() {
           opt_in_description: business.opt_in_description || '',
         });
       }
+
+      setSmsConsentAgreed(Boolean(business.sms_consent_agreed));
+
+      const { data: phoneNumberRow } = await supabase
+        .from('phone_numbers')
+        .select('phone_number')
+        .eq('business_id', business.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      setSelectedPhoneNumber(phoneNumberRow?.phone_number ?? null);
     }
     setLoading(false);
   }, []);
@@ -120,7 +133,9 @@ export default function OnboardingPage() {
       .select('phone_number')
       .eq('business_id', businessId)
       .eq('is_active', true)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (phoneNumberRow) {
       setSelectedPhoneNumber(phoneNumberRow.phone_number);
@@ -236,11 +251,13 @@ export default function OnboardingPage() {
               </div>
               <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Choose a phone number for your AI assistant</h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">
-                Customers will text this number and your AI will respond automatically
+                Customers can call or text this number. SMS activates after carrier approval.
               </p>
             </div>
 
             <PhoneNumberSelector
+              initialPhoneNumber={selectedPhoneNumber}
+              initialConsentAgreed={smsConsentAgreed}
               onConsentChange={setSmsConsentAgreed}
               onNumberPurchased={setSelectedPhoneNumber}
             />
@@ -269,7 +286,7 @@ export default function OnboardingPage() {
                 <button
                   type="button"
                   onClick={handlePhoneStepNext}
-                  disabled={!smsConsentAgreed}
+                  disabled={!selectedPhoneNumber && !smsConsentAgreed}
                   className="py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-medium rounded-full shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   Next

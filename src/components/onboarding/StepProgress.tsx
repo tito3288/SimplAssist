@@ -7,7 +7,7 @@ const STEP_LABELS = [
   'AI Personality',
   'Verification',
   'Phone Number',
-  'Review & Launch',
+  'Review & Submit',
 ];
 
 interface StepProgressProps {

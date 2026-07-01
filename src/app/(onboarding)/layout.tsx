@@ -18,14 +18,18 @@ export default async function OnboardingLayout({
     redirect('/login');
   }
 
-  // Check if user already completed onboarding
+  // Check if user already completed onboarding through final SMS submission.
   const { data: business } = await supabase
     .from('businesses')
-    .select('*')
+    .select('id, business_type, telnyx_campaign_id')
     .eq('owner_id', user.id)
     .single();
 
-  if (business && business.business_type !== 'general') {
+  if (
+    business &&
+    business.business_type !== 'general' &&
+    business.telnyx_campaign_id
+  ) {
     const { data: aiSettings } = await supabase
       .from('ai_settings')
       .select('id')

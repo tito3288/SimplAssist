@@ -20,9 +20,9 @@ export type { PrivacyTermsMode };
  *
  * Defense in depth: throws if called with a 'pending-*' placeholder slug.
  * The primary gate is the pre-flight check in
- * /api/onboarding/brand-verification, which only triggers registration after
- * the real slug is set. This throw is a backstop so a race condition cannot
- * silently leak a placeholder slug to Telnyx.
+ * /api/onboarding/brand-verification before compliance fields are saved.
+ * This throw is a backstop so a race condition cannot silently leak a
+ * placeholder slug to Telnyx at final campaign submission.
  */
 
 // Inlined to match brand.ts / campaign.ts / messagingProfile.ts /

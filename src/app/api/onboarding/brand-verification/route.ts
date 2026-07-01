@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { runFullRegistration } from "@/lib/messaging/registration";
 import { generateSlug, ensureUniqueSlug, isPendingSlug } from "@/lib/util/slug";
 import {
   resolveLegalUrls,
@@ -14,9 +13,6 @@ import {
   serializeError,
 } from "@/lib/messaging/registration/audit";
 import { normalizeUsStateCode } from "@/lib/usStates";
-
-const REGISTRATION_FAILURE_MESSAGE =
-  "Couldn't register your business with carriers right now. Please try again or contact support.";
 
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings → Compliance, then try again.";
@@ -191,15 +187,12 @@ export async function POST(request: NextRequest) {
 
   // Race-safe first-submit transition: when compliance_info_completed_at is
   // null, the conditional UPDATE only succeeds for the one request that wins
-  // the null→timestamp flip. Subsequent concurrent requests get 0 rows back
-  // and skip the Phase 3 trigger. Matches the Phase 4/5 pattern documented
-  // in project_post_isv_roadmap.md.
+  // the null→timestamp flip. Subsequent concurrent requests get 0 rows back.
   //
   // On subsequent edits (compliance_info_completed_at already set), do a
-  // plain UPDATE without changing the timestamp, slug, or firing Phase 3 —
-  // the customer is just amending their info post-registration. If the
-  // initial Phase 3 attempt failed, retries are out of scope for this flow.
-  let shouldFirePhase3 = false;
+  // plain UPDATE without changing the timestamp or slug. Telnyx registration
+  // intentionally happens later from the final review step, after an active
+  // SimplAssist number exists for the campaign CTA.
 
   if (isFirstSubmit) {
     const completedAt = new Date().toISOString();
@@ -225,11 +218,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (updated && updated.length > 0) {
-      shouldFirePhase3 = true;
-    } else {
-      // Another concurrent request won the race and already fired Phase 3.
-      // Return success — duplicate submits should be no-ops, not errors.
+    if (!updated || updated.length === 0) {
+      // Another concurrent request won the race and already saved the first
+      // submit state. Return success — duplicate submits should be no-ops.
       return NextResponse.json({ success: true });
     }
   } else {
@@ -248,23 +239,6 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-  }
-
-  if (!shouldFirePhase3) {
-    return NextResponse.json({ success: true });
-  }
-
-  try {
-    await runFullRegistration(data.businessId);
-  } catch (err) {
-    console.error(
-      `[onboarding:brand-verification] Registration failed for ${data.businessId}:`,
-      err
-    );
-    return NextResponse.json(
-      { error: REGISTRATION_FAILURE_MESSAGE },
-      { status: 500 }
-    );
   }
 
   return NextResponse.json({ success: true });
