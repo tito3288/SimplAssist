@@ -207,6 +207,8 @@ A2P verification often checks the customer's OWN website for an SMS-related Priv
 - **Rejected brand/campaign correction + resubmission** — required before real customer launch. Current app stores rejection reasons and shows "Needs update," but does not yet provide a complete flow to edit rejected brand/campaign fields and send the correct Telnyx recovery action. This is distinct from initial technical retry:
   - brand rejection may require updating the existing Telnyx brand, revetting, or support/manual intervention depending on Telnyx/TCR response;
   - campaign rejection may require updating editable fields (notably samples/message flow), submitting a campaign appeal, or creating a replacement campaign because many campaign attributes are immutable after submit;
+  - v1 product recommendation after the Alpha Dog rejection: if the rejection requires changing full compliance content (opt-in/opt-out messages, keywords, privacy/terms links, or other fields not cleanly exposed by the Telnyx update API), create a replacement campaign under the already-verified brand, update the business to point at the new `telnyx_campaign_id`, and leave the rejected campaign as audit history;
+  - a later optimization can use edit/appeal for narrow rejections only if the affected fields are confirmed editable via Telnyx API and the behavior is reliable;
   - Phase 7 should include the customer UX for rejected states, but the first controlled Alpha Dog EIN test can proceed without this so any real rejection teaches which recovery path matters first.
 - **Backfill of pre-Phase-6 campaigns** — manual via Mission Control if needed.
 - **zod deprecation cleanup** — `z.string().email()` and `parsed.error.flatten()` are deprecated in zod 4.x types, used across many files. Codebase-wide tech debt, dedicated pass.
@@ -527,6 +529,27 @@ The "email 10dlcquestions@telnyx.com" workflow in some docs is a **manual fallba
 **Implementation cost:** supporting both paths is ~1.5x the work (not 2x). Shared: form skeleton, status UI, webhook handlers, schema. Diverging: brand registration call shape, OTP collection step, rejection handling, limit messaging.
 
 **On startup, grep `telnyx_registration_events` for `audit_only_phase_11_otp` rows** — `BRAND_OTP_VERIFIED` events that arrived before Phase 11 was built are waiting there (Phase 4 note).
+
+---
+
+## Post-MVP Add-ons
+
+### SimpleAssist Mobile Inbox
+
+Business owners cannot text from their Telnyx/SimpleAssist number through their native iPhone or Android Messages app because the number lives in Telnyx, not on their SIM/carrier account.
+
+Long-term, SimpleAssist should provide a mobile-friendly inbox or native app where owners can:
+- receive notifications for new SMS conversations;
+- read full conversation history;
+- reply manually from the SimpleAssist/Telnyx number;
+- review or approve AI-drafted replies;
+- manage missed-call follow-up conversations;
+- keep all customer messaging inside SimpleAssist.
+
+Product framing:
+> "Use your SimpleAssist number as your public business number. Calls forward to you, missed calls get automatic follow-up, and texts are managed inside SimpleAssist."
+
+This is not required before launch. Prioritize campaign approval, number assignment, SMS send/receive reliability, onboarding, billing, and usage caps first.
 
 ---
 
