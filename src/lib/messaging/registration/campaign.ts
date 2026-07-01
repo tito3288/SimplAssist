@@ -17,27 +17,72 @@ const HELP_KEYWORDS = "HELP,INFO";
 const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
 const CAMPAIGN_USECASE = "CUSTOMER_CARE";
-const HELP_MESSAGE =
-  "Reply with your question and we'll get back to you during business hours, or call us directly.";
-const OPTOUT_MESSAGE =
-  "You have been unsubscribed and will not receive any more messages. Reply START to opt back in.";
-const OPTIN_MESSAGE =
-  "You're subscribed and will receive messages from this business. Msg & data rates may apply. Reply HELP for help, STOP to opt out.";
+
+function cleanText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+function supportContact(business: {
+  email: string | null;
+  phone_number: string | null;
+}): string {
+  return (
+    cleanText(business.email) ??
+    cleanText(business.phone_number) ??
+    "the business directly"
+  );
+}
+
+function optInPath(business: { phone_number: string | null }): string {
+  const phone = cleanText(business.phone_number);
+  if (phone) {
+    return `by texting or calling ${phone} and requesting an SMS response`;
+  }
+  return "by texting the business number or requesting an SMS response during a phone conversation";
+}
+
+function buildCampaignComplianceCopy(
+  business: {
+    name: string;
+    email: string | null;
+    phone_number: string | null;
+  },
+  privacyUrl: string
+) {
+  const brandName = business.name.trim();
+  const contact = supportContact(business);
+
+  return {
+    messageFlow: [
+      `Customers opt in to ${brandName} SMS ${optInPath(business)}.`,
+      `${brandName} uses SMS for customer care only, including responses to customer questions, missed-call follow-ups, and service coordination.`,
+      "Message frequency varies by conversation. Message and data rates may apply.",
+      "Reply HELP for help or STOP to opt out.",
+      `Privacy Policy: ${privacyUrl}.`,
+    ].join(" "),
+    optinMessage: `${brandName}: You are subscribed to customer care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`,
+    optoutMessage: `${brandName}: You are unsubscribed. No further messages will be sent. Reply START to opt back in.`,
+    helpMessage: `${brandName}: For help, contact ${contact}. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out.`,
+  };
+}
 
 export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, opt_in_description, slug, privacy_terms_mode, privacy_url_override, terms_url_override"
+      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override"
     )
     .eq("id", businessId)
     .single<{
       id: string;
+      name: string;
+      email: string | null;
+      phone_number: string | null;
       telnyx_brand_id: string | null;
       telnyx_campaign_id: string | null;
       use_case_description: string | null;
       sample_messages: string[] | null;
-      opt_in_description: string | null;
       slug: string;
       privacy_terms_mode: PrivacyTermsMode;
       privacy_url_override: string | null;
@@ -74,7 +119,6 @@ export async function registerCampaign(businessId: string): Promise<void> {
   }
 
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
-  const messageFlow = business.opt_in_description ?? OPTIN_MESSAGE;
 
   // Phase 6: privacy + terms URLs submitted to Telnyx. Resolved BEFORE the
   // try/catch so a placeholder slug or missing override URL fails fast and
@@ -83,6 +127,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
   // /api/onboarding/brand-verification is the primary safety net; this is
   // defense in depth.
   const { privacyUrl, termsUrl } = resolveLegalUrls(business);
+  const complianceCopy = buildCampaignComplianceCopy(business, privacyUrl);
   let campaignPreflightChecked = false;
 
   try {
@@ -128,16 +173,16 @@ export async function registerCampaign(businessId: string): Promise<void> {
       sample3: samples[2],
       sample4: samples[3],
       sample5: samples[4],
-      messageFlow,
+      messageFlow: complianceCopy.messageFlow,
       subscriberOptin: true,
       optinKeywords: OPTIN_KEYWORDS,
-      optinMessage: OPTIN_MESSAGE,
+      optinMessage: complianceCopy.optinMessage,
       subscriberOptout: true,
       optoutKeywords: OPTOUT_KEYWORDS,
-      optoutMessage: OPTOUT_MESSAGE,
+      optoutMessage: complianceCopy.optoutMessage,
       subscriberHelp: true,
       helpKeywords: HELP_KEYWORDS,
-      helpMessage: HELP_MESSAGE,
+      helpMessage: complianceCopy.helpMessage,
       // Boolean acceptance flag — REQUIRED by Telnyx, separate from the URL
       // fields below. Do not remove when refactoring URL handling.
       termsAndConditions: true,
@@ -187,6 +232,10 @@ export async function registerCampaign(businessId: string): Promise<void> {
         _submitted: {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
+          messageFlow: complianceCopy.messageFlow,
+          optinMessage: complianceCopy.optinMessage,
+          optoutMessage: complianceCopy.optoutMessage,
+          helpMessage: complianceCopy.helpMessage,
         },
       },
     });
@@ -214,6 +263,10 @@ export async function registerCampaign(businessId: string): Promise<void> {
         _submitted: {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
+          messageFlow: complianceCopy.messageFlow,
+          optinMessage: complianceCopy.optinMessage,
+          optoutMessage: complianceCopy.optoutMessage,
+          helpMessage: complianceCopy.helpMessage,
         },
       },
     });

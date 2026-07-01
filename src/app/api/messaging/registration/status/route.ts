@@ -169,6 +169,7 @@ async function handleEvent(event: unknown): Promise<void> {
               "submissionStatus",
               "submission_status",
             ]),
+            status: pickString(payload, ["status"]),
           });
 
     const rejectionReason =

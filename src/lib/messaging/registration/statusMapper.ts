@@ -14,6 +14,7 @@ export interface BrandStatusInput {
 export interface CampaignStatusInput {
   campaignStatus?: string | null;
   submissionStatus?: string | null;
+  status?: string | null;
 }
 
 // Brand mapping. Telnyx enums (verified against
@@ -62,9 +63,22 @@ export function mapBrandStatus(input: BrandStatusInput): MappedStatus {
 //                   MNO_ACCEPTED | MNO_REJECTED | MNO_PROVISIONED |
 //                   MNO_PROVISIONING_FAILED
 //   submissionStatus: CREATED | FAILED | PENDING
+// Real 10DLC campaign webhooks can also send high-level status:
+//   status: ACCEPTED | REJECTED
 export function mapCampaignStatus(input: CampaignStatusInput): MappedStatus {
   const campaign = input.campaignStatus ?? null;
   const submission = input.submissionStatus ?? null;
+  const status = input.status ?? null;
+
+  if (status === "REJECTED" || status === "FAILED") {
+    return { dbStatus: "rejected", isTerminal: true };
+  }
+
+  if (status === "ACCEPTED") {
+    // Telnyx can emit ACCEPTED before MNO review is final. Keep this as an
+    // intermediate state until a stronger MNO approval/rejection arrives.
+    return { dbStatus: null, isTerminal: false };
+  }
 
   switch (campaign) {
     case "MNO_PROVISIONED":
@@ -108,6 +122,7 @@ export function extractRejectionReason(
   if (!payload) return null;
 
   const direct = pickString(payload, [
+    "description",
     "rejectionReason",
     "rejection_reason",
     "failureReason",

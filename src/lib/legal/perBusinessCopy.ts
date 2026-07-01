@@ -77,7 +77,7 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
   const phone = phoneClause(b);
   const optIn =
     b.opt_in_description?.trim() ||
-    `${name} sends text messages in response to inquiries received by phone, text, or our web chat — including answers to your questions, appointment confirmations, and follow-up communications.`;
+    `${name} sends customer-care text messages when customers text us or call us and request an SMS response. Typical messages include answers to customer questions, missed-call follow-ups, and service coordination.`;
 
   return {
     lastUpdated: LAST_UPDATED,
@@ -106,9 +106,9 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
       {
         title: "4. SMS / Text Messaging",
         paragraphs: [
-          `By providing your phone number to ${name} — whether by texting us ${phone}, agreeing to receive a reply during a phone or web chat conversation, or otherwise opting in — you consent to receive automated and AI-assisted text messages from ${name} at the mobile number you provided. These messages may include responses to your questions, appointment confirmations, follow-up communications, and other messages related to our services. Consent is not a condition of any purchase.`,
+          `By providing your phone number to ${name} — whether by texting us ${phone}, calling us ${phone} and requesting a text response, or otherwise opting in — you consent to receive automated and AI-assisted customer-care text messages from ${name} at the mobile number you provided. These messages may include responses to your questions, missed-call follow-ups, service coordination, and other messages related to a conversation you started with us. Consent is not a condition of any purchase.`,
           `Message frequency varies based on your conversation and our follow-up needs. Message and data rates may apply depending on your mobile plan. You are responsible for any charges from your wireless carrier.`,
-          `You can opt out of SMS messages at any time by replying STOP to any message from us. After you opt out, you will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP and we will share our contact information.`,
+          `You can opt out of SMS messages at any time by replying STOP to any message from us. After you opt out, you will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP or contact us at ${email}.`,
           `Mobile information, including your phone number and the contents of any text messages you send to us, will not be shared with third parties or affiliates for marketing or promotional purposes. We share this information only with our messaging service provider (Telnyx), our technology platform provider (SimplAssist), and other service providers strictly necessary to deliver and respond to your messages.`,
         ],
       },
@@ -160,7 +160,7 @@ export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
       {
         title: "1. Overview",
         paragraphs: [
-          `These Terms of Service ("Terms") govern your use of the SMS text messaging program operated by ${name}. By texting or calling us ${phone}, or by agreeing to receive messages during a conversation, you agree to these Terms.`,
+          `These Terms of Service ("Terms") govern your use of the SMS text messaging program operated by ${name}. By texting us ${phone}, calling us ${phone} and requesting a text response, or otherwise agreeing to receive messages during a conversation, you agree to these Terms.`,
           `SimplAssist provides the technology platform and AI-assisted reply infrastructure that powers this messaging program on our behalf. ${name} is the business responsible for the program and these Terms.`,
         ],
       },
@@ -173,15 +173,15 @@ export function buildTermsContent(b: LegalTemplateBusiness): LegalDoc {
       {
         title: "3. The Messaging Program",
         paragraphs: [
-          `Our SMS messaging program is intended for customer service and operational communications related to ${name}. Typical messages include responses to your inquiries, appointment confirmations, follow-up communications, and other messages related to a conversation you started with us. Responses may be drafted with the help of AI; a human team member may also reply.`,
+          `Our SMS messaging program is intended for customer service and operational communications related to ${name}. Typical messages include responses to your inquiries, missed-call follow-ups, service coordination, and other messages related to a conversation you started with us. Responses may be drafted with the help of AI; a human team member may also reply.`,
           `Message frequency varies based on your conversation and our follow-up needs. Message and data rates may apply depending on your mobile plan.`,
         ],
       },
       {
         title: "4. Opting In and Opting Out",
         paragraphs: [
-          `You opt in by texting us, calling us, or agreeing to receive a reply during a conversation. Consent is not a condition of any purchase.`,
-          `You can opt out at any time by replying STOP to any message from us. You will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP.`,
+          `You opt in by texting us ${phone}, calling us ${phone} and requesting a text response, or otherwise agreeing to receive customer-care SMS during a conversation. Consent is not a condition of any purchase.`,
+          `You can opt out at any time by replying STOP to any message from us. You will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP or contact us at ${email}.`,
         ],
       },
       {
