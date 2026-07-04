@@ -1,6 +1,7 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getActivePhoneNumberForBusiness } from "@/lib/messaging/numbers";
+import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { appendRegistrationEvent, serializeError } from "./audit";
 import { resolveLegalUrls, type PrivacyTermsMode } from "./legalUrls";
 
@@ -18,49 +19,6 @@ const HELP_KEYWORDS = "HELP,INFO";
 const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
 const CAMPAIGN_USECASE = "CUSTOMER_CARE";
-
-function cleanText(value: string | null | undefined): string | null {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : null;
-}
-
-function supportContact(business: {
-  email: string | null;
-  phone_number: string | null;
-}): string {
-  return (
-    cleanText(business.email) ??
-    cleanText(business.phone_number) ??
-    "the business directly"
-  );
-}
-
-function buildCampaignComplianceCopy(
-  business: {
-    name: string;
-    email: string | null;
-    phone_number: string | null;
-  },
-  privacyUrl: string,
-  smsPhoneNumber: string
-) {
-  const brandName = business.name.trim();
-  const contact = supportContact(business);
-
-  return {
-    messageFlow: [
-      `Customers opt in to ${brandName} SMS by calling or texting ${smsPhoneNumber}, the ${brandName} SMS number.`,
-      `Calls to this number may be forwarded to ${brandName}, and missed calls may receive an SMS follow-up.`,
-      `${brandName} uses SMS for customer care only, including responses to customer questions, missed-call follow-ups, and service coordination.`,
-      "Message frequency varies by conversation. Message and data rates may apply.",
-      "Reply HELP for help or STOP to opt out.",
-      `Privacy Policy: ${privacyUrl}.`,
-    ].join(" "),
-    optinMessage: `${brandName}: You are subscribed to customer care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`,
-    optoutMessage: `${brandName}: You are unsubscribed. No further messages will be sent. Reply START to opt back in.`,
-    helpMessage: `${brandName}: For help, contact ${contact}. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out.`,
-  };
-}
 
 export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
@@ -129,11 +87,11 @@ export async function registerCampaign(businessId: string): Promise<void> {
     );
   }
 
-  const complianceCopy = buildCampaignComplianceCopy(
-    business,
+  const complianceCopy = buildSmsComplianceCopy({
     privacyUrl,
-    smsPhoneNumber
-  );
+    smsPhoneNumber,
+    business,
+  });
   let campaignPreflightChecked = false;
 
   try {

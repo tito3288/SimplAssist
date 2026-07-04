@@ -3,6 +3,7 @@ import { telnyx } from "@/lib/messaging/client";
 import { markProcessedOnce } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
+import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
 // We act on a small subset to drive the missed-call voicemail flow:
@@ -23,6 +24,9 @@ interface VoiceState {
   businessId: string;
   from: string;
   businessName: string;
+  businessEmail?: string | null;
+  businessPhoneNumber?: string | null;
+  smsPhoneNumber?: string;
 }
 
 function encodeState(state: VoiceState): string {
@@ -136,12 +140,20 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
   const businessId = phoneNumberRow.business_id;
   const { data: business } = await supabaseAdmin
     .from("businesses")
-    .select("name")
+    .select("name, email, phone_number")
     .eq("id", businessId)
     .single();
   const businessName = business?.name ?? "us";
 
-  const state = encodeState({ callControlId, businessId, from, businessName });
+  const state = encodeState({
+    callControlId,
+    businessId,
+    from,
+    businessName,
+    businessEmail: business?.email ?? null,
+    businessPhoneNumber: business?.phone_number ?? null,
+    smsPhoneNumber: to,
+  });
   console.log(
     `[messaging:voice] Answering call for businessId=${businessId} (name='${businessName}')`
   );
@@ -156,7 +168,15 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
     return;
   }
 
-  const greeting = `Thanks for calling ${state.businessName}. We're unavailable right now but we'll text you right back with assistance. If you prefer not to receive messages, reply STOP to opt out. Please leave a message after the beep.`;
+  const greeting = buildSmsComplianceCopy({
+    business: {
+      name: state.businessName,
+      email: state.businessEmail ?? null,
+      phone_number: state.businessPhoneNumber ?? null,
+    },
+    smsPhoneNumber: state.smsPhoneNumber ?? "this business number",
+    privacyUrl: "the business privacy policy",
+  }).voicemailGreeting;
 
   console.log(
     `[messaging:voice] call.answered, speaking greeting for ${state.businessName}`

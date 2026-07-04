@@ -268,8 +268,59 @@ Phase 7 implementation requirements:
 
 ## Phase 8 — Use Case Screening + AI Guardrails ⏳
 
-- Reject prohibited use cases at signup via a single checkbox. **Locked-in 9 prohibited categories:** cannabis/CBD, adult content/escort/dating, gambling/sports betting, payday loans/debt collection, crypto/get-rich-quick, political messaging, firearms, MLM, prescription drugs/pharmacy.
+- Reject prohibited/high-risk use cases during onboarding before paid Telnyx/TCR submission. The original "single checkbox" idea is superseded by a stronger two-layer screen: automatic website/content scan plus a plain-English customer checklist.
 - Tighten `src/lib/ai/prompt.ts` so the AI never drifts into promotional/marketing messaging — must stay within the registered Customer Care use case, or campaigns get pulled.
+
+### Prohibited website/use-case screening before paid submit
+
+The Alpha Dog EIN test exposed a real carrier-review rule: a campaign can be rejected even when SimplAssist submits the right Customer Care use case if the customer's public website advertises carrier-prohibited services. In that test, the campaign moved past the earlier CTA/autoresponder rejection, then failed because the website referenced lead generation and SEO services. Treat this as a Phase 8 product requirement, not a one-off support note.
+
+Phase 8 must screen both the customer's declared use case **and** the public website before paid campaign submission. This should happen before charging/resubmitting Telnyx/TCR review fees whenever possible.
+
+Screening sources to re-check during implementation:
+- Telnyx carrier error explanations: `https://support.telnyx.com/en/articles/10547022-10dlc-carrier-error-codes-explanations`
+- Telnyx message-flow guidance: `https://support.telnyx.com/en/articles/10562019-guide-to-10dlc-message-flow-field`
+- Telnyx/TCR prohibited-use guidance available at implementation time. Carrier rules change, so do not rely only on this roadmap.
+
+Initial website/use-case blocklist for Phase 8:
+- lead generation, lead sales, buying/selling leads, third-party lead sourcing, prospect lists, cold outreach, affiliate lead offers;
+- SEO services or marketing-agency pages that advertise lead-generation/SEO outcomes in a way carriers classify as prohibited or high-risk;
+- affiliate marketing, referral/affiliate offers, "make money online," get-rich-quick, passive-income, MLM/network marketing;
+- high-risk financial services: payday loans, short-term loans, debt relief, debt collection, credit repair, loan brokering, investment/crypto promises, trading signals;
+- cannabis, CBD, marijuana, controlled substances, drug paraphernalia;
+- prescription drugs, pharmacy, telemedicine prescriptions, health products requiring special approval;
+- gambling, casinos, sports betting, sweepstakes/lottery-style promotions;
+- adult content, escort services, sexual content, dating/hookup services;
+- firearms, weapons, ammunition;
+- political messaging, donations, polling, advocacy campaigns;
+- alcohol, tobacco, vaping, age-gated products;
+- hate, harassment, profanity-heavy content, illegal products/services, deceptive/phishing/scam-like content.
+
+Direct Telnyx error-code categories to preserve in the checklist/scan rules:
+- Code 701: cannabis/CBD/hemp and derivatives;
+- Code 702: guns/ammunition sales without compliant controls;
+- Code 703: explicit sexual content;
+- Code 704: gambling/sports betting/lottery-style games of chance;
+- Code 705: hate speech, inappropriate content, profanity;
+- Code 706: alcohol without compliant age-gating;
+- Code 707: tobacco/vape without compliant age-gating;
+- Code 708: lead generation/affiliate marketing, including any website mention of lead generation or SEO;
+- Code 709: high-risk financial services, including payday loans, non-direct lenders, debt collection, credit repair, debt forgiveness, crypto-related traffic, and stock-trading traffic.
+
+Other Telnyx rejection categories are not business-service blocklist items, but Phase 8/7 should still validate them where possible: website/sample-message consistency, opt-in language on website/contact forms, accessible CTA/legal links, non-compliant privacy policy, repeated EIN use, misleading registrations, large companies using non-official email domains, and inauthentic/incomplete websites.
+
+Implementation requirements:
+- Add a pre-submit risk scan for `website_url`, `business_type`, `business_type_other`, services, FAQs, use-case text, sample messages, and opt-in copy.
+- Add an onboarding question/checklist that plainly asks whether the business offers carrier-restricted services. Do not use one vague checkbox; show examples customers can recognize, including lead generation, SEO services, affiliate marketing, payday loans/debt relief, cannabis/CBD, gambling/sports betting, adult/dating, firearms/weapons, political messaging, MLM/get-rich-quick, crypto/investment promises, prescription/pharmacy, alcohol/tobacco/vape, and other regulated or deceptive services.
+- Make the checklist a required gate before paid campaign submission. The user must either select "None of these apply to my business or website" or choose a restricted/uncertain option such as "I'm not sure / please review this." Do not let the user skip this step with no answer.
+- Present automatic scan results in onboarding before final submit. Example: "We found SEO/lead-generation language on your website. Carriers may reject SMS registration for this business. Please update the website or contact support before submitting."
+- Use the scan to block clearly prohibited categories before Telnyx submission. Do not spend the customer/setup fee on a campaign that the visible website makes ineligible.
+- For ambiguous categories, show a plain-English warning and require admin/manual review before submission. Example: "Carriers may reject SMS registration because this website advertises lead generation or SEO services."
+- If the user selects a restricted category, "I'm not sure," or the automatic scan finds an ambiguous risk, pause submission and create a support/admin review path instead of calling Telnyx. Notify the configured SimplAssist admin/support email, show the customer a calm "we need to review this before submitting" state, and keep the account out of paid carrier review until an admin clears it or the customer updates the website/details.
+- Marketing agencies are not automatically blocked, but agencies advertising lead generation, SEO, affiliate marketing, bought leads, cold outreach, or mass marketing should be blocked or routed to admin review.
+- Store risk findings in a support-visible/audit-friendly way when the schema exists. Do not store private EIN/SSN/rep data in public or customer-facing pages.
+- Keep the customer-facing explanation beginner-friendly: "Carriers do not allow SMS registration for some business types and website content. We need to review this before submitting so you do not pay a fee for a likely rejection."
+- Let an admin override only after explicitly acknowledging the Telnyx review fee/rejection risk. Never auto-submit blocked or high-risk categories.
 
 ### Customer Care campaign text generator
 

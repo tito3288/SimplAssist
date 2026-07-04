@@ -7,12 +7,12 @@ import { useState } from 'react';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
+import { defaultOnboardingOptInDescription } from '@/lib/messaging/complianceCopy';
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
 
-const DEFAULT_OPT_IN_DESCRIPTION =
-  'Customers opt in by texting this business number or by calling the business and requesting a text response. This business uses SMS for customer care, including answering questions, missed-call follow-ups, and service coordination. Message frequency varies. Message and data rates may apply. Reply HELP for help or STOP to opt out. The SMS privacy policy is available on the business privacy page.';
+const DEFAULT_OPT_IN_DESCRIPTION = defaultOnboardingOptInDescription();
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;

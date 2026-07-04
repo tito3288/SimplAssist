@@ -4,33 +4,8 @@ import { insertPausedSystemMessageIfNeeded } from "./pausedNotice";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
+import { renderMissedCallSms } from "@/lib/messaging/complianceCopy";
 import type { Language, SmsBlockReason } from "@/types/database";
-
-// Static templates indexed by ai_settings.language. Missed-call SMS is a
-// transactional, time-sensitive, near-identical-every-time message — using
-// the AI for it isn't earning its cost, and routing through the customer
-// conversation engine caused two bugs:
-//   (1) the LLM occasionally leaked reasoning text into the SMS body
-//       ("I appreciate the request, but I need to let you know that...")
-//   (2) the prompt-instruction string got persisted as a role:"customer"
-//       row in the messages table, polluting conversation history.
-// Static templates eliminate both. Bilingual subsequent turns (when the
-// customer replies via SMS) are still handled by the conversation engine
-// based on ai_settings.language.
-const MISSED_CALL_TEMPLATES = {
-  en: (businessName: string) =>
-    `Hi! This is ${businessName}. We missed your call — how can we help? Reply STOP to opt out.`,
-  es: (businessName: string) =>
-    `¡Hola! Somos ${businessName}. No pudimos contestar — ¿en qué le ayudamos? Responda STOP para cancelar.`,
-};
-
-// "both" defaults to English on first contact since we don't yet know the
-// caller's preferred language. The conversation engine adapts on subsequent
-// turns once the customer replies.
-function renderTemplate(businessName: string, language: Language): string {
-  if (language === "es") return MISSED_CALL_TEMPLATES.es(businessName);
-  return MISSED_CALL_TEMPLATES.en(businessName);
-}
 
 export async function sendMissedCallSMS(
   callerPhone: string,
@@ -44,7 +19,7 @@ export async function sendMissedCallSMS(
     ] = await Promise.all([
       supabaseAdmin
         .from("businesses")
-        .select("name")
+        .select("name, email, phone_number")
         .eq("id", businessId)
         .single(),
       supabaseAdmin
@@ -73,7 +48,11 @@ export async function sendMissedCallSMS(
     }
 
     const language: Language = (aiSettings?.language as Language) ?? "en";
-    const smsBody = renderTemplate(business.name, language);
+    const smsBody = renderMissedCallSms({
+      business,
+      smsPhoneNumber: phoneNumberRow.phone_number,
+      language,
+    });
 
     const sendContext = await getOutboundSendContext(phoneNumberRow.phone_number);
 
