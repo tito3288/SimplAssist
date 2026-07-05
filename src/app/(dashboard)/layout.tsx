@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import Sidebar from "./_components/sidebar";
 
 export default async function DashboardLayout({
@@ -16,14 +17,15 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  // Dashboard unlocks only after the final Step 7 SMS registration submit.
+  // Dashboard unlocks only after SMS is actually ready: approved campaign plus
+  // the active phone number assigned to that campaign.
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type, website_url, deleted_at, telnyx_campaign_id")
+    .select("id, website_url, deleted_at")
     .eq("owner_id", user.id)
     .single();
 
-  if (!business || business.business_type === "general") {
+  if (!business) {
     redirect("/onboarding");
   }
 
@@ -31,7 +33,8 @@ export default async function DashboardLayout({
     redirect("/account-deleted");
   }
 
-  if (!business.telnyx_campaign_id) {
+  const onboardingState = await getOnboardingStateForBusinessId(business.id);
+  if (!onboardingState?.dashboardReady) {
     redirect("/onboarding");
   }
 

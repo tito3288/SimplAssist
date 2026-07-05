@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getOnboardingStateForOwner } from "@/lib/onboarding/state";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -13,16 +14,21 @@ export default async function HomePage() {
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("business_type, deleted_at")
+    .select("deleted_at")
     .eq("owner_id", user.id)
     .single();
 
-  if (!business || business.business_type === "general") {
+  if (!business) {
     redirect("/onboarding");
   }
 
   if (business.deleted_at) {
     redirect("/account-deleted");
+  }
+
+  const onboardingState = await getOnboardingStateForOwner(user.id);
+  if (!onboardingState?.dashboardReady) {
+    redirect("/onboarding");
   }
 
   redirect("/dashboard");

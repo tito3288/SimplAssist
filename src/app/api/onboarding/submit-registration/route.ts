@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { runFullRegistration } from "@/lib/messaging/registration";
+import {
+  claimRegistrationAttempt,
+  markRegistrationFailed,
+  markRegistrationSubmitted,
+} from "@/lib/onboarding/registrationAttempt";
+import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 
 const MISSING_NUMBER_MESSAGE =
   "Choose your SimplAssist number before submitting SMS registration.";
@@ -70,21 +76,48 @@ export async function POST() {
   }
 
   if (business.telnyx_campaign_id) {
-    return NextResponse.json({ success: true });
+    await markRegistrationSubmitted(business.id);
+    const state = await getOnboardingStateForBusinessId(business.id);
+    return NextResponse.json({ success: true, state });
+  }
+
+  const claim = await claimRegistrationAttempt(business.id);
+  if (!claim.claimed) {
+    const state = await getOnboardingStateForBusinessId(business.id);
+    if (claim.reason === "already_submitted") {
+      return NextResponse.json({ success: true, state });
+    }
+    if (claim.reason === "already_submitting") {
+      return NextResponse.json({ success: true, inProgress: true, state });
+    }
+    return NextResponse.json(
+      { error: REGISTRATION_FAILURE_MESSAGE, state },
+      { status: 409 }
+    );
   }
 
   try {
     await runFullRegistration(business.id);
+    await markRegistrationSubmitted(business.id);
   } catch (err) {
     console.error(
       `[onboarding:submit-registration] Registration failed for ${business.id}:`,
       err
     );
+    await markRegistrationFailed(business.id, REGISTRATION_FAILURE_MESSAGE).catch(
+      (markError) =>
+        console.error(
+          `[onboarding:submit-registration] Failed to persist retryable failure for ${business.id}:`,
+          markError
+        )
+    );
+    const state = await getOnboardingStateForBusinessId(business.id);
     return NextResponse.json(
-      { error: REGISTRATION_FAILURE_MESSAGE },
+      { error: REGISTRATION_FAILURE_MESSAGE, code: "registration_failed", state },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ success: true });
+  const state = await getOnboardingStateForBusinessId(business.id);
+  return NextResponse.json({ success: true, state });
 }

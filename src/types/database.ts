@@ -6,6 +6,11 @@ export type BusinessType =
   | "salon"
   | "hvac"
   | "auto_shop"
+  | "real_estate"
+  | "legal"
+  | "financial"
+  | "insurance"
+  | "retail"
   | "general"
   | "other";
 
@@ -48,6 +53,24 @@ export type BusinessEntityType =
 export type TaxIdType = "ein" | "ssn_last_4";
 
 export type RegistrationStatus = "pending" | "approved" | "rejected";
+
+export type OnboardingStep =
+  | "business_info"
+  | "business_hours"
+  | "services_faqs"
+  | "ai_settings"
+  | "legal_verification"
+  | "sms_use_case"
+  | "phone_number"
+  | "review_submit"
+  | "carrier_review"
+  | "complete";
+
+export type OnboardingRegistrationStatus =
+  | "not_started"
+  | "submitting"
+  | "failed"
+  | "submitted";
 
 export type CampaignAssignmentStatus =
   | "unassigned"
@@ -122,6 +145,13 @@ export interface Business {
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
   compliance_info_completed_at: string | null;
+  onboarding_step: OnboardingStep;
+  onboarding_completed_at: string | null;
+  onboarding_last_saved_at: string | null;
+  onboarding_registration_status: OnboardingRegistrationStatus;
+  onboarding_registration_started_at: string | null;
+  onboarding_registration_submitted_at: string | null;
+  onboarding_registration_error: string | null;
   slug: string;
   privacy_terms_mode: PrivacyTermsMode;
   privacy_url_override: string | null;

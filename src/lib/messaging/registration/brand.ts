@@ -12,10 +12,18 @@ type TelnyxEntityType =
   | "GOVERNMENT"
   | "SOLE_PROPRIETOR";
 
-// Subset of the Telnyx `Vertical` enum we actually map to. Sourced from
+// Subset of the Telnyx `Vertical` enum we map to. Sourced from
 // node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
-// Full enum has 23 values; we use 4. Extend as new business_type values land.
-type TelnyxVertical = "CONSTRUCTION" | "HEALTHCARE" | "HOSPITALITY" | "PROFESSIONAL";
+type TelnyxVertical =
+  | "CONSTRUCTION"
+  | "FINANCIAL"
+  | "HEALTHCARE"
+  | "HOSPITALITY"
+  | "INSURANCE"
+  | "LEGAL"
+  | "PROFESSIONAL"
+  | "REAL_ESTATE"
+  | "RETAIL";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -57,6 +65,16 @@ function toTelnyxVertical(businessType: BusinessType): TelnyxVertical {
       return "HEALTHCARE";
     case "restaurant":
       return "HOSPITALITY";
+    case "real_estate":
+      return "REAL_ESTATE";
+    case "legal":
+      return "LEGAL";
+    case "financial":
+      return "FINANCIAL";
+    case "insurance":
+      return "INSURANCE";
+    case "retail":
+      return "RETAIL";
     case "car_wash":
     case "salon":
     case "auto_shop":

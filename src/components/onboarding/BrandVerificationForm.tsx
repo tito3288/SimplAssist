@@ -1,18 +1,14 @@
 'use client';
 
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
-import { defaultOnboardingOptInDescription } from '@/lib/messaging/complianceCopy';
 
-const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
-
-const DEFAULT_OPT_IN_DESCRIPTION = defaultOnboardingOptInDescription();
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
@@ -41,33 +37,6 @@ const brandVerificationSchema = z.object({
   authorized_rep_title: z.string().min(1, 'Representative title is required'),
   authorized_rep_email: z.string().email('Enter a valid email address'),
   authorized_rep_phone: z.string().min(10, 'Enter a valid phone number'),
-  use_case_description: z
-    .string()
-    .min(40, 'Describe the use case in at least 40 characters'),
-  estimated_monthly_volume: z.enum(['under_1k', '1k_10k', '10k_100k', 'over_100k'] as const, {
-    message: 'Select an estimated volume',
-  }),
-  sample_messages: z
-    .array(
-      z.object({
-        value: z
-          .string()
-          .min(1, 'Sample message cannot be empty')
-          .refine(
-            (v) => v.trim().length > 0,
-            'Sample message cannot be empty'
-          )
-          .refine(
-            (v) => !PLACEHOLDER_PATTERN.test(v),
-            'Sample messages cannot contain placeholders like [Business Name] -- TCR rejects these'
-          ),
-      })
-    )
-    .min(3, 'Provide at least 3 sample messages')
-    .max(5, 'Provide at most 5 sample messages'),
-  opt_in_description: z
-    .string()
-    .min(40, 'Describe how customers opt in (at least 40 characters)'),
 });
 
 type BrandVerificationData = z.infer<typeof brandVerificationSchema>;
@@ -102,13 +71,6 @@ const ENTITY_TYPE_OPTIONS: { value: Exclude<BusinessEntityType, 'sole_proprietor
   { value: 'nonprofit', label: 'Nonprofit' },
 ];
 
-const VOLUME_OPTIONS: { value: BrandVerificationData['estimated_monthly_volume']; label: string }[] = [
-  { value: 'under_1k', label: 'Under 1,000 messages / month' },
-  { value: '1k_10k', label: '1,000 – 10,000 messages / month' },
-  { value: '10k_100k', label: '10,000 – 100,000 messages / month' },
-  { value: 'over_100k', label: 'Over 100,000 messages / month' },
-];
-
 const INPUT_CLASS =
   'w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30';
 
@@ -125,14 +87,8 @@ export default function BrandVerificationForm({
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  const initialSampleMessages =
-    initialData?.sample_messages && initialData.sample_messages.length >= 3
-      ? initialData.sample_messages.map((value) => ({ value }))
-      : [{ value: '' }, { value: '' }, { value: '' }];
-
   const {
     register,
-    control,
     handleSubmit,
     formState: { errors },
   } = useForm<BrandVerificationData>({
@@ -149,20 +105,8 @@ export default function BrandVerificationForm({
       authorized_rep_title: initialData?.authorized_rep_title || '',
       authorized_rep_email: initialData?.authorized_rep_email || '',
       authorized_rep_phone: initialData?.authorized_rep_phone || '',
-      use_case_description: initialData?.use_case_description || '',
-      estimated_monthly_volume:
-        (initialData?.estimated_monthly_volume as BrandVerificationData['estimated_monthly_volume']) ||
-        undefined,
-      sample_messages: initialSampleMessages,
-      opt_in_description: initialData?.opt_in_description || DEFAULT_OPT_IN_DESCRIPTION,
     },
   });
-
-  const {
-    fields: sampleFields,
-    append: appendSample,
-    remove: removeSample,
-  } = useFieldArray({ control, name: 'sample_messages' });
 
   const onSubmit = async (data: BrandVerificationData) => {
     setSaving(true);
@@ -181,10 +125,6 @@ export default function BrandVerificationForm({
           authorized_rep_title: data.authorized_rep_title,
           authorized_rep_email: data.authorized_rep_email,
           authorized_rep_phone: data.authorized_rep_phone,
-          use_case_description: data.use_case_description,
-          estimated_monthly_volume: data.estimated_monthly_volume,
-          sample_messages: data.sample_messages.map((m) => m.value.trim()),
-          opt_in_description: data.opt_in_description,
         }),
       });
 
@@ -217,7 +157,7 @@ export default function BrandVerificationForm({
       <div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Brand verification info</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Carriers (AT&amp;T, T-Mobile, Verizon) require this information before we can send SMS on your behalf. We register your brand with The Campaign Registry using these details.
+          Carriers require this exact business identity before we can activate SMS for your account. Use the legal details that match your EIN.
         </p>
       </div>
 
@@ -334,110 +274,6 @@ export default function BrandVerificationForm({
         </div>
       </div>
 
-      {/* Use case */}
-      <div className="space-y-4">
-        <h3 className={SECTION_HEADER_CLASS}>Use case</h3>
-
-        <div>
-          <label className={LABEL_CLASS}>Describe how you&apos;ll use SMS *</label>
-          <textarea
-            {...register('use_case_description')}
-            rows={4}
-            placeholder="e.g. Reply to customer inquiries, send missed-call follow-ups, and coordinate service requests."
-            className={INPUT_CLASS}
-          />
-          {errors.use_case_description && (
-            <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.use_case_description.message}</p>
-          )}
-          <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
-            At least 40 characters. Carriers read this directly when reviewing your campaign.
-          </p>
-        </div>
-
-        <div>
-          <label className={LABEL_CLASS}>Estimated monthly message volume *</label>
-          <select {...register('estimated_monthly_volume')} className={INPUT_CLASS} defaultValue="">
-            <option value="" disabled>Select an estimate</option>
-            {VOLUME_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          {errors.estimated_monthly_volume && (
-            <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.estimated_monthly_volume.message}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Sample messages */}
-      <div className="space-y-3">
-        <h3 className={SECTION_HEADER_CLASS}>Sample messages (3-5)</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Real examples of messages you&apos;ll send. Carriers reject placeholders like <code className="text-xs">[Business Name]</code> -- write out the actual business name and details.
-        </p>
-
-        <div className="space-y-3">
-          {sampleFields.map((field, index) => (
-            <div key={field.id} className="p-3 border border-slate-200 dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg">
-              <div className="flex gap-2">
-                <textarea
-                  {...register(`sample_messages.${index}.value`)}
-                  rows={2}
-                  placeholder={`Sample message ${index + 1}`}
-                  className="flex-1 px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] text-sm resize-none"
-                />
-                {sampleFields.length > 3 && (
-                  <button
-                    type="button"
-                    onClick={() => removeSample(index)}
-                    className="text-red-400 dark:text-red-400/70 hover:text-red-600 dark:hover:text-red-400 px-2"
-                    aria-label={`Remove sample message ${index + 1}`}
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              {errors.sample_messages?.[index]?.value && (
-                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                  {errors.sample_messages[index]?.value?.message}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {errors.sample_messages && typeof errors.sample_messages.message === 'string' && (
-          <p className="text-sm text-red-600 dark:text-red-400">{errors.sample_messages.message}</p>
-        )}
-
-        {sampleFields.length < 5 && (
-          <button
-            type="button"
-            onClick={() => appendSample({ value: '' })}
-            className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
-          >
-            + Add sample message
-          </button>
-        )}
-      </div>
-
-      {/* Consent / opt-in */}
-      <div className="space-y-3">
-        <h3 className={SECTION_HEADER_CLASS}>Opt-in description</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Tell carriers how your customers agree to receive SMS from your business. We&apos;ve drafted a default below -- edit if needed.
-        </p>
-        <textarea
-          {...register('opt_in_description')}
-          rows={4}
-          className={INPUT_CLASS}
-        />
-        {errors.opt_in_description && (
-          <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.opt_in_description.message}</p>
-        )}
-      </div>
-
       {submitError && (
         <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
       )}
@@ -458,7 +294,7 @@ export default function BrandVerificationForm({
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving…
+              Saving...
             </>
           ) : (
             'Next'

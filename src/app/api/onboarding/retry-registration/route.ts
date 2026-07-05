@@ -2,9 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runFullRegistration } from "@/lib/messaging/registration";
+import {
+  claimRegistrationAttempt,
+  markRegistrationFailed,
+  markRegistrationSubmitted,
+} from "@/lib/onboarding/registrationAttempt";
+import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
+
+const MISSING_NUMBER_MESSAGE =
+  "Choose your SimplAssist number before retrying SMS registration.";
 
 const retrySchema = z.object({
   businessId: z.string().uuid(),
@@ -37,7 +46,7 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id, compliance_info_completed_at")
+    .select("id, compliance_info_completed_at, telnyx_campaign_id")
     .eq("id", businessId)
     .eq("owner_id", user.id)
     .single();
@@ -56,18 +65,76 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { data: phoneNumberRow, error: phoneNumberError } = await supabase
+    .from("phone_numbers")
+    .select("id, phone_number")
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (phoneNumberError) {
+    console.error(
+      `[onboarding:retry-registration] Failed to read active number for ${businessId}:`,
+      phoneNumberError
+    );
+    return NextResponse.json(
+      { error: "Failed to check your phone number" },
+      { status: 500 }
+    );
+  }
+
+  if (!phoneNumberRow?.phone_number) {
+    return NextResponse.json(
+      { error: MISSING_NUMBER_MESSAGE, code: "missing_phone_number" },
+      { status: 400 }
+    );
+  }
+
+  if (business.telnyx_campaign_id) {
+    await markRegistrationSubmitted(businessId);
+    const state = await getOnboardingStateForBusinessId(businessId);
+    return NextResponse.json({ success: true, state });
+  }
+
+  const claim = await claimRegistrationAttempt(businessId);
+  if (!claim.claimed) {
+    const state = await getOnboardingStateForBusinessId(businessId);
+    if (claim.reason === "already_submitted") {
+      return NextResponse.json({ success: true, state });
+    }
+    if (claim.reason === "already_submitting") {
+      return NextResponse.json({ success: true, inProgress: true, state });
+    }
+    return NextResponse.json(
+      { error: REGISTRATION_FAILURE_MESSAGE, state },
+      { status: 409 }
+    );
+  }
+
   try {
     await runFullRegistration(businessId);
+    await markRegistrationSubmitted(businessId);
   } catch (err) {
     console.error(
       `[onboarding:retry-registration] Registration failed for ${businessId}:`,
       err
     );
+    await markRegistrationFailed(businessId, REGISTRATION_FAILURE_MESSAGE).catch(
+      (markError) =>
+        console.error(
+          `[onboarding:retry-registration] Failed to persist retryable failure for ${businessId}:`,
+          markError
+        )
+    );
+    const state = await getOnboardingStateForBusinessId(businessId);
     return NextResponse.json(
-      { error: REGISTRATION_FAILURE_MESSAGE },
+      { error: REGISTRATION_FAILURE_MESSAGE, code: "registration_failed", state },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ success: true });
+  const state = await getOnboardingStateForBusinessId(businessId);
+  return NextResponse.json({ success: true, state });
 }

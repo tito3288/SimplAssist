@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
 import { glassCard } from '@/lib/glass';
 import { ThemeToggle } from '@/components/theme-toggle';
 
@@ -18,27 +19,19 @@ export default async function OnboardingLayout({
     redirect('/login');
   }
 
-  // Check if user already completed onboarding through final SMS submission.
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, business_type, telnyx_campaign_id')
+    .select('id, deleted_at')
     .eq('owner_id', user.id)
     .single();
 
-  if (
-    business &&
-    business.business_type !== 'general' &&
-    business.telnyx_campaign_id
-  ) {
-    const { data: aiSettings } = await supabase
-      .from('ai_settings')
-      .select('id')
-      .eq('business_id', business.id)
-      .single();
+  if (business?.deleted_at) {
+    redirect('/account-deleted');
+  }
 
-    if (aiSettings) {
-      redirect('/dashboard');
-    }
+  const onboardingState = await getOnboardingStateForOwner(user.id);
+  if (onboardingState?.dashboardReady) {
+    redirect('/dashboard');
   }
 
   return (

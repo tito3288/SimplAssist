@@ -51,6 +51,10 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
         }))
       );
       if (error) throw error;
+      await supabase.from('businesses').update({
+        onboarding_step: 'services_faqs',
+        onboarding_last_saved_at: new Date().toISOString(),
+      }).eq('id', businessId);
       onNext(hours);
     } catch {
       // Silently handle
@@ -129,7 +133,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving…
+              Saving...
             </>
           ) : (
             'Next'

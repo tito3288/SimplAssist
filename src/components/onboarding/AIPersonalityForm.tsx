@@ -101,6 +101,12 @@ export default function AIPersonalityForm({
           welcome_message: data.web_greeting,
         }, { onConflict: 'business_id' });
       }
+
+      await supabase.from('businesses').update({
+        onboarding_step: 'legal_verification',
+        onboarding_last_saved_at: new Date().toISOString(),
+      }).eq('id', businessId);
+
       onNext(data);
     } catch {
       // Silently handle
@@ -291,7 +297,7 @@ export default function AIPersonalityForm({
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving…
+              Saving...
             </>
           ) : (
             'Next'

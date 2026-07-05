@@ -1,6 +1,6 @@
 # Per-Customer A2P 10DLC Roadmap (Telnyx)
 
-**Status as of 2026-06-18:** Phases 1–6 shipped to production, plus a post-Phase-6 "readiness safeguards" layer (informally "6.5"). Phase 7 (onboarding flow restructure) is next.
+**Status as of 2026-07-05:** Phases 1–7 shipped to production, plus a post-Phase-6 "readiness safeguards" layer (informally "6.5"). Phase 8 (use case screening + AI guardrails) is next.
 
 This is the shared source of truth for the per-customer A2P (Application-to-Person) 10DLC compliance initiative. It is the canonical reference for any agent or human working on Phase 7+. Compare implementation against this document rather than reconstructing context from scattered code comments.
 
@@ -58,13 +58,13 @@ For per-customer compliance — required by TCR (The Campaign Registry) rules to
 | 5 | Dashboard status UI + send-path gates | ✅ Shipped |
 | 6 | Per-business privacy/terms pages + compliance modes | ✅ Shipped |
 | 6.5 | 10DLC readiness safeguards | ✅ Shipped |
-| 7 | Onboarding flow restructure | ⏳ Next |
+| 7 | Onboarding flow restructure | ✅ Shipped |
 | 8 | Use case screening + AI guardrails | ⏳ Pending |
 | 9 | Cost handling | 🔒 Decisions locked, implementation pending |
 | 10 | Number purchasing timing | 🔒 Decision locked, implementation pending |
 | 11 | EIN vs Sole Proprietor branching + SMS OTP | ⏳ Pending |
 
-**Migrations applied:** `012`–`016` cover Phases 1–6.5. See `supabase/migrations/`.
+**Migrations applied:** `012`–`017` cover Phases 1–7. See `supabase/migrations/`.
 
 ---
 
@@ -126,7 +126,7 @@ After this, the shared `TELNYX_MESSAGING_PROFILE_ID` (and `TELNYX_CONNECTION_ID`
 ### Phase 3 implementation notes & known gaps
 
 - **`mock: true` SDK parameter** exists on `messaging10dlc.brand.create` and propagates through `campaignBuilder.submit`. Behavioral details (fee waiver, TCR-review skip) are implied by SDK comments but NOT in public Telnyx docs. **Verify with Telnyx support before relying on it.** Also exposed as a dashboard checkbox ("Create as a mock brand to test 10DLC"). Preserved as an emergency tool, not a primary workflow. Potential use: Phase 11 OTP testing (mock brands can use non-US/CA numbers).
-- **Business-type → Telnyx vertical mapping gap** (Phase 7/8 follow-up). `toTelnyxVertical(businessType)` in `brand.ts` maps our `business_type` enum to Telnyx's 23-value Vertical taxonomy. Current coverage: `plumber`/`hvac`→CONSTRUCTION, `dentist`→HEALTHCARE, `restaurant`→HOSPITALITY, `car_wash`/`auto_shop`/`salon`/`general`/`other`→PROFESSIONAL. **Gap:** real estate, legal, financial, insurance, retail fall back to PROFESSIONAL, which can trigger MNO review friction (especially T-Mobile). Fix options: expand the Step 1 dropdown + mapping, OR add a vertical-override question in Step 5 shown only when `business_type='other'`.
+- **Business-type → Telnyx vertical mapping gap closed in Phase 7.** `toTelnyxVertical(businessType)` in `brand.ts` maps our `business_type` enum to Telnyx's 23-value Vertical taxonomy. Current coverage: `plumber`/`hvac`→CONSTRUCTION, `dentist`→HEALTHCARE, `restaurant`→HOSPITALITY, `real_estate`→REAL_ESTATE, `legal`→LEGAL, `financial`→FINANCIAL, `insurance`→INSURANCE, `retail`→RETAIL, `car_wash`/`auto_shop`/`salon`/`general`/`other`→PROFESSIONAL.
 
 ---
 
@@ -230,17 +230,19 @@ Not in the original 11-phase plan — added after Phase 6 to close runtime-readi
 
 ---
 
-## Phase 7 — Onboarding Flow Restructure ⏳ (NEXT)
+## Phase 7 — Onboarding Flow Restructure ✅
 
-- **Current:** signup → business info → pick number → done.
-- **New:** signup → basic info → detailed business info + rep → use case + sample messages → pay → status/waiting screen → pick number when brand approved → activation when campaign approved.
+Shipped 2026-07-05. Migration `017`.
+
+- **Original pre-Phase-7 flow:** signup → business info → pick number → done.
+- **Shipped Phase-7 flow:** signup → business info → hours → services/FAQs → AI settings → legal business verification → SMS use case → phone number → review/submit → carrier review → dashboard only after SMS readiness.
 - Telnyx has no "profile approval" stage — two stages only (brand approval, then campaign approval).
 
 ### Partial onboarding + resume requirements
 
-The current onboarding saves data only when each step's Next/Submit button is clicked, and the resume flow is not robust. Phase 7 must make partial setup safe for real users who close the tab, lose signal, or stop midway.
+The previous onboarding saved data only when each step's Next/Submit button was clicked, and the resume flow was not robust. Phase 7 made partial setup safe for real users who close the tab, lose signal, or stop midway.
 
-Current behavior to fix:
+Pre-Phase-7 behavior fixed:
 - Signup immediately creates a placeholder `businesses` row.
 - Step 1 business info saves on Next.
 - Step 2 business hours saves on Next.
@@ -251,7 +253,7 @@ Current behavior to fix:
 - On reload, the app does not reliably reconstruct every completed step from the database.
 - The onboarding layout can redirect to `/dashboard` once `ai_settings` exists, even when brand verification / phone setup / launch status are not complete. This can make an incomplete user look "done" too early.
 
-Phase 7 implementation requirements:
+Phase 7 implementation requirements shipped:
 - Add an explicit onboarding progress state, e.g. `onboarding_step`, `onboarding_completed_at`, or equivalent derived status that cannot confuse "started" with "finished."
 - Resume users at the next incomplete step, not always Step 1 and not dashboard unless onboarding is truly complete.
 - Load saved business hours, services, FAQs, AI settings, brand verification fields, and purchased phone number when rebuilding the onboarding state.
@@ -262,7 +264,16 @@ Phase 7 implementation requirements:
 
 **Carry-forward constraints:**
 - Keep the `A2pStatusCard` null-gate (Phase 5) — onboarding has its own step-by-step status UX.
-- Consider closing the business-type/vertical mapping gap here (Phase 3 note).
+
+### Implementation notes
+
+- **Explicit onboarding progress state** (migration `017`): new `businesses` columns track `onboarding_step`, `onboarding_completed_at`, `onboarding_last_saved_at`, `onboarding_registration_status`, `onboarding_registration_started_at`, `onboarding_registration_submitted_at`, and `onboarding_registration_error`. Dashboard access now requires true SMS readiness, not merely `telnyx_campaign_id`.
+- **Attempt-gate pattern:** final submit and retry share `claimRegistrationAttempt()`. `not_started`, `failed`, or stale `submitting` rows can claim the lock; duplicate clicks return the current state. `onboarding_registration_submitted_at` is a success marker only, set after `runFullRegistration()` completes. Failed attempts set `status='failed'`, keep Telnyx IDs already created, and remain retryable through helper early returns.
+- **Resolver is authoritative:** `/api/onboarding/state` rebuilds the onboarding snapshot from live DB facts (business info, hours, services, FAQs, AI settings, legal/SMS fields, phone number, carrier statuses, assignment readiness). Stored `onboarding_step` is advisory/resumable metadata and can be corrected downward if required facts are missing.
+- **Legal boundary preserved:** brand/legal representative fields and SMS use-case/sample-message fields are split into separate steps. Slug generation, legal URL reachability preflight, and the `compliance_info_completed_at` flip stay in the compliance-completion route (`/api/onboarding/sms-use-case`), before number purchase and final registration.
+- **Number purchase timing:** number purchase remains before carrier approval per the Phase 10 locked decision. `/api/messaging/numbers/purchase` still creates the per-customer messaging profile and voice application before ordering the number, so the purchased number attaches to the correct profile/voice app at order time.
+- **Backfill behavior:** migration `017` marks existing `telnyx_brand_id` accounts as `onboarding_registration_status='submitted'`, and only marks accounts `complete` when SMS is actually ready: approved campaign, per-customer messaging profile, active number, and assignment to the current campaign.
+- **Known production state after rollout:** Alpha Dog Agency remains `carrier_review` / `submitted` by design because production currently has `campaign_status='rejected'` and the active number is not assigned to the current campaign. It should not be backfilled to `complete` until SMS readiness is true.
 
 ---
 

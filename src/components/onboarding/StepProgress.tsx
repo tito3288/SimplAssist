@@ -4,10 +4,12 @@ const STEP_LABELS = [
   'Business Info',
   'Business Hours',
   'Services & FAQs',
-  'AI Personality',
-  'Verification',
+  'AI Settings',
+  'Business Verification',
+  'SMS Use Case',
   'Phone Number',
   'Review & Submit',
+  'Carrier Review',
 ];
 
 interface StepProgressProps {
@@ -15,18 +17,20 @@ interface StepProgressProps {
 }
 
 export default function StepProgress({ currentStep }: StepProgressProps) {
+  const safeStep = Math.min(Math.max(currentStep, 1), STEP_LABELS.length);
+
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-slate-700 dark:text-[#d4d4d8]">
-          Step {currentStep} of {STEP_LABELS.length}
+          Step {safeStep} of {STEP_LABELS.length}
         </span>
-        <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{STEP_LABELS[currentStep - 1]}</span>
+        <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{STEP_LABELS[safeStep - 1]}</span>
       </div>
       <div className="w-full bg-slate-200 dark:bg-white/[0.08] rounded-full h-2">
         <div
           className="bg-[#ff914d] h-2 rounded-full transition-all duration-300"
-          style={{ width: `${(currentStep / STEP_LABELS.length) * 100}%` }}
+          style={{ width: `${(safeStep / STEP_LABELS.length) * 100}%` }}
         />
       </div>
       <div className="flex justify-between mt-3">
@@ -34,14 +38,14 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
           <div key={label} className="flex flex-col items-center">
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                i + 1 < currentStep
+                i + 1 < safeStep
                   ? 'bg-[#ff914d] text-white'
-                  : i + 1 === currentStep
+                  : i + 1 === safeStep
                   ? 'bg-[#ff914d] text-white ring-4 ring-[rgba(255,145,77,.25)]'
                   : 'bg-slate-200 dark:bg-white/[0.08] text-slate-500 dark:text-[#666]'
               }`}
             >
-              {i + 1 < currentStep ? (
+              {i + 1 < safeStep ? (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
@@ -50,7 +54,7 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
               )}
             </div>
             <span className={`text-xs mt-1 hidden sm:block ${
-              i + 1 <= currentStep ? 'text-[#ff914d] font-medium' : 'text-slate-400 dark:text-[#666]'
+              i + 1 <= safeStep ? 'text-[#ff914d] font-medium' : 'text-slate-400 dark:text-[#666]'
             }`}>
               {label}
             </span>

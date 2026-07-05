@@ -64,6 +64,31 @@ const SUGGESTED_FAQS: Record<string, { question: string; answer: string }[]> = {
     { question: 'Do you work on all makes and models?', answer: '' },
     { question: 'Do you provide loaner vehicles?', answer: '' },
   ],
+  real_estate: [
+    { question: 'What areas do you serve?', answer: '' },
+    { question: 'Do you help buyers and sellers?', answer: '' },
+    { question: 'How can I schedule a consultation?', answer: '' },
+  ],
+  legal: [
+    { question: 'What practice areas do you handle?', answer: '' },
+    { question: 'Do you offer consultations?', answer: '' },
+    { question: 'What should I bring to an appointment?', answer: '' },
+  ],
+  financial: [
+    { question: 'What services do you provide?', answer: '' },
+    { question: 'Do you offer consultations?', answer: '' },
+    { question: 'How can I get started?', answer: '' },
+  ],
+  insurance: [
+    { question: 'What types of coverage do you offer?', answer: '' },
+    { question: 'Can I request a quote?', answer: '' },
+    { question: 'How do I update my policy?', answer: '' },
+  ],
+  retail: [
+    { question: 'What products do you carry?', answer: '' },
+    { question: 'Do you offer pickup or delivery?', answer: '' },
+    { question: 'What is your return policy?', answer: '' },
+  ],
   general: [
     { question: 'What are your hours of operation?', answer: '' },
     { question: 'How can I contact you?', answer: '' },
@@ -158,6 +183,11 @@ export default function ServicesAndFaqsForm({
         );
         if (fErr) throw fErr;
       }
+
+      await supabase.from('businesses').update({
+        onboarding_step: 'ai_settings',
+        onboarding_last_saved_at: new Date().toISOString(),
+      }).eq('id', businessId);
 
       onNext(data);
     } catch {
@@ -296,7 +326,7 @@ export default function ServicesAndFaqsForm({
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving…
+              Saving...
             </>
           ) : (
             'Next'

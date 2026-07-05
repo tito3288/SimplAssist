@@ -12,7 +12,8 @@ import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
   business_type: z.enum([
-    'plumber', 'dentist', 'restaurant', 'car_wash', 'salon', 'hvac', 'auto_shop', 'general', 'other',
+    'plumber', 'dentist', 'restaurant', 'car_wash', 'salon', 'hvac', 'auto_shop',
+    'real_estate', 'legal', 'financial', 'insurance', 'retail', 'general', 'other',
   ] as const),
   business_type_other: z.string().optional(),
   website: z.string().url('Enter a valid URL').optional().or(z.literal('')),
@@ -56,6 +57,11 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
   { value: 'salon', label: 'Salon' },
   { value: 'hvac', label: 'HVAC' },
   { value: 'auto_shop', label: 'Auto Shop' },
+  { value: 'real_estate', label: 'Real Estate' },
+  { value: 'legal', label: 'Legal Services' },
+  { value: 'financial', label: 'Financial Services' },
+  { value: 'insurance', label: 'Insurance' },
+  { value: 'retail', label: 'Retail' },
   { value: 'general', label: 'General' },
   { value: 'other', label: 'Other' },
 ];
@@ -129,6 +135,8 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           state: normalizeUsStateCode(data.state),
           zip: data.zip,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          onboarding_step: 'business_hours',
+          onboarding_last_saved_at: new Date().toISOString(),
         })
         .eq('id', businessId);
       if (error) throw error;
@@ -198,7 +206,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
               {scanning ? (
                 <span className="flex items-center gap-2.5">
                   <PulsingDot inline />
-                  Scanning…
+                  Scanning...
                 </span>
               ) : (
                 'Scan Website'
@@ -287,7 +295,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving…
+              Saving...
             </>
           ) : (
             'Next'

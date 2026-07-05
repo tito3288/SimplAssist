@@ -56,11 +56,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (existingNumber) {
+      const now = new Date().toISOString();
       await supabase
         .from("businesses")
         .update({
           sms_consent_agreed: true,
-          sms_consent_agreed_at: new Date().toISOString(),
+          sms_consent_agreed_at: now,
+          onboarding_step: "review_submit",
+          onboarding_last_saved_at: now,
         })
         .eq("id", business.id);
 
@@ -116,9 +119,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const now = new Date().toISOString();
     await supabase.from("businesses").update({
       sms_consent_agreed: true,
-      sms_consent_agreed_at: new Date().toISOString(),
+      sms_consent_agreed_at: now,
+      onboarding_step: "review_submit",
+      onboarding_last_saved_at: now,
     }).eq("id", business.id);
 
     try {

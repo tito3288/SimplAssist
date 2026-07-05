@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { getUsStateName } from '@/lib/usStates';
+import type { OnboardingState } from '@/lib/onboarding/types';
 
 interface ReviewData {
   businessInfo: {
@@ -50,6 +50,7 @@ interface ReviewAndLaunchProps {
   data: ReviewData;
   onEditStep: (step: number) => void;
   onBack: () => void;
+  onSubmitted: (state: OnboardingState | null) => void;
 }
 
 const TONE_LABELS: Record<string, string> = {
@@ -72,6 +73,11 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   salon: 'Salon',
   hvac: 'HVAC',
   auto_shop: 'Auto Shop',
+  real_estate: 'Real Estate',
+  legal: 'Legal Services',
+  financial: 'Financial Services',
+  insurance: 'Insurance',
+  retail: 'Retail',
   general: 'General',
   other: 'Other',
 };
@@ -87,8 +93,8 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
 
 const VOLUME_LABELS: Record<string, string> = {
   under_1k: 'Under 1,000 / month',
-  '1k_10k': '1,000 – 10,000 / month',
-  '10k_100k': '10,000 – 100,000 / month',
+  '1k_10k': '1,000 - 10,000 / month',
+  '10k_100k': '10,000 - 100,000 / month',
   over_100k: 'Over 100,000 / month',
 };
 
@@ -97,8 +103,7 @@ function maskEin(ein: string): string {
   return `${ein.slice(0, 2)}-***-${ein.slice(-4)}`;
 }
 
-export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
-  const router = useRouter();
+export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted }: ReviewAndLaunchProps) {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,7 +111,7 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
     setError(null);
 
     if (!data.phoneNumber) {
-      onEditStep(6);
+      onEditStep(7);
       return;
     }
 
@@ -116,17 +121,26 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
       const res = await fetch('/api/onboarding/submit-registration', {
         method: 'POST',
       });
-      const response = await res.json().catch(() => ({}));
+      const response = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        state?: OnboardingState | null;
+      };
 
       if (!res.ok) {
+        if (response.state?.registration.status === 'failed') {
+          onSubmitted(response.state);
+          return;
+        }
+
         setError(response.error || 'Could not submit SMS registration right now.');
         if (response.code === 'missing_phone_number') {
-          onEditStep(6);
+          onEditStep(7);
         }
         return;
       }
 
-      router.push('/dashboard');
+      onSubmitted(response.state ?? null);
     } catch {
       setError('Could not submit SMS registration right now.');
     } finally {
@@ -199,9 +213,9 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         <SummaryRow label="Booking" value={data.aiSettings.booking_enabled ? 'Enabled' : 'Disabled'} />
       </Section>
 
-      {/* Brand Verification */}
+      {/* Legal Verification */}
       {data.brandVerification && (
-        <Section title="Brand Verification" onEdit={() => onEditStep(5)}>
+        <Section title="Business Verification" onEdit={() => onEditStep(5)}>
           {data.brandVerification.legal_business_name && (
             <SummaryRow label="Legal name" value={data.brandVerification.legal_business_name} />
           )}
@@ -227,6 +241,12 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
               }
             />
           )}
+        </Section>
+      )}
+
+      {/* SMS Use Case */}
+      {data.brandVerification && (
+        <Section title="SMS Use Case" onEdit={() => onEditStep(6)}>
           {data.brandVerification.estimated_monthly_volume && (
             <SummaryRow
               label="Est. volume"
@@ -241,7 +261,7 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
               label="Use case"
               value={
                 data.brandVerification.use_case_description.length > 80
-                  ? `${data.brandVerification.use_case_description.slice(0, 80)}…`
+                  ? `${data.brandVerification.use_case_description.slice(0, 80)}...`
                   : data.brandVerification.use_case_description
               }
             />
@@ -256,14 +276,14 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
       )}
 
       {/* Phone Number */}
-      <Section title="Phone Number" onEdit={() => onEditStep(6)}>
+      <Section title="Phone Number" onEdit={() => onEditStep(7)}>
         {data.phoneNumber ? (
           <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
         ) : (
           <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>
             <p className="text-xs text-slate-400 dark:text-[#666] mt-1">
-              Choose a SimpleAssist number before submitting SMS registration.
+              Choose a SimplAssist number before submitting SMS registration.
             </p>
           </div>
         )}
