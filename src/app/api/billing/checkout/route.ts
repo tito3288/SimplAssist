@@ -9,6 +9,18 @@ import type { SubscriptionPlan } from "@/types/database";
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
 const VALID_MODES = ["onboarding", "billing"] as const;
 
+type CheckoutBusinessRow = {
+  id: string;
+  billing_pilot: boolean;
+  billing_comped: boolean;
+  billing_exempt: boolean;
+};
+
+type CheckoutSubscriptionRow = {
+  status: string;
+  setup_fee_paid_at: string | null;
+};
+
 export async function POST(request: NextRequest) {
   try {
     const { plan, mode: requestedMode } = await request.json();
@@ -34,9 +46,9 @@ export async function POST(request: NextRequest) {
 
     const { data: business, error: bizError } = await supabase
       .from("businesses")
-      .select("id")
+      .select("id, billing_pilot, billing_comped, billing_exempt")
       .eq("owner_id", user.id)
-      .single();
+      .single<CheckoutBusinessRow>();
 
     if (bizError || !business) {
       return NextResponse.json(
@@ -45,7 +57,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (mode === "onboarding") {
+    if (
+      mode === "onboarding" &&
+      (await hasSatisfiedOnboardingBilling(supabase, business))
+    ) {
       const launch = await attemptPaidLaunch(business.id, "onboarding_retry");
       if (launch.status !== "billing_required") {
         const state = await getOnboardingStateForBusinessId(business.id);
@@ -100,4 +115,29 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function hasSatisfiedOnboardingBilling(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  business: CheckoutBusinessRow
+): Promise<boolean> {
+  if (business.billing_pilot || business.billing_comped || business.billing_exempt) {
+    return true;
+  }
+
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("status, setup_fee_paid_at")
+    .eq("business_id", business.id)
+    .maybeSingle<CheckoutSubscriptionRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data || !data.setup_fee_paid_at) {
+    return false;
+  }
+
+  return data.status !== "past_due" && data.status !== "canceled";
 }
