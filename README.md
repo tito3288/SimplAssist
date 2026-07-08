@@ -16,6 +16,14 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Railway Environment
+
+Phase 8 A2P screening uses these deployment variables:
+
+- `FIRECRAWL_API_KEY` - optional website scanner key. If missing or unavailable, the app falls back to a safe direct website fetch.
+- `A2P_REVIEW_EMAIL` - comma-separated support recipients for manual A2P review alerts. Falls back to `SUPPORT_EMAIL`, then `support@simplassist.com`.
+- `A2P_REVIEW_ADMIN_TOKEN` - bearer token required for the manual A2P review override endpoint.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

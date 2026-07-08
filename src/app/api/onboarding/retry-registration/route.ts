@@ -8,6 +8,7 @@ import {
   markRegistrationSubmitted,
 } from "@/lib/onboarding/registrationAttempt";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
@@ -96,6 +97,20 @@ export async function POST(request: NextRequest) {
     await markRegistrationSubmitted(businessId);
     const state = await getOnboardingStateForBusinessId(businessId);
     return NextResponse.json({ success: true, state });
+  }
+
+  const riskClearance = await getA2pRiskClearanceForBusiness(businessId);
+  if (!riskClearance.cleared) {
+    const state = await getOnboardingStateForBusinessId(businessId);
+    return NextResponse.json(
+      {
+        error: riskClearance.message,
+        code: "a2p_risk_review_required",
+        riskReview: riskClearance,
+        state,
+      },
+      { status: 400 }
+    );
   }
 
   const claim = await claimRegistrationAttempt(businessId);

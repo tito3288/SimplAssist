@@ -1,46 +1,85 @@
 'use client';
 
-import { useFieldArray, useForm } from 'react-hook-form';
+import { useFieldArray, useForm, type UseFormRegister } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState } from 'react';
-import { defaultOnboardingOptInDescription } from '@/lib/messaging/complianceCopy';
+import { useMemo, useState } from 'react';
+import {
+  A2P_RISK_SELECTION_LABELS,
+  A2P_RISK_SELECTIONS,
+  type A2pRiskSelection,
+} from '@/lib/messaging/registration/riskCategories';
+import {
+  buildCustomerCareTemplateCopy,
+  validateCustomerCareCopy,
+} from '@/lib/messaging/registration/customerCareTemplates';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import type {
+  A2pRiskChecklistAnswer,
+  A2pRiskFinding,
+  A2pRiskReviewStatus,
+  BusinessType,
+} from '@/types/database';
+import type { OnboardingRiskReviewSnapshot } from '@/lib/onboarding/types';
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const STOP_PATTERN = /\bstop\b/i;
-const DEFAULT_OPT_IN_DESCRIPTION = defaultOnboardingOptInDescription();
 
-const smsUseCaseSchema = z.object({
-  use_case_description: z
-    .string()
-    .min(40, 'Describe the use case in at least 40 characters'),
-  estimated_monthly_volume: z.enum(['under_1k', '1k_10k', '10k_100k', 'over_100k'] as const, {
-    message: 'Select an estimated volume',
-  }),
-  sample_messages: z
-    .array(
-      z.object({
-        value: z
-          .string()
-          .min(1, 'Sample message cannot be empty')
-          .refine((value) => value.trim().length > 0, 'Sample message cannot be empty')
-          .refine(
-            (value) => !PLACEHOLDER_PATTERN.test(value),
-            'Sample messages cannot contain placeholders like [Business Name] -- carriers reject these'
-          ),
-      })
-    )
-    .min(3, 'Provide at least 3 sample messages')
-    .max(5, 'Provide at most 5 sample messages')
-    .refine(
-      (messages) => messages.some((message) => STOP_PATTERN.test(message.value)),
-      'At least one sample message must include STOP opt-out wording'
-    ),
-  opt_in_description: z
-    .string()
-    .min(40, 'Describe how customers opt in (at least 40 characters)'),
-});
+const smsUseCaseSchema = z
+  .object({
+    use_case_description: z
+      .string()
+      .min(40, 'Describe the use case in at least 40 characters'),
+    estimated_monthly_volume: z.enum(['under_1k', '1k_10k', '10k_100k', 'over_100k'] as const, {
+      message: 'Select an estimated volume',
+    }),
+    sample_messages: z
+      .array(
+        z.object({
+          value: z
+            .string()
+            .min(1, 'Sample message cannot be empty')
+            .refine((value) => value.trim().length > 0, 'Sample message cannot be empty')
+            .refine(
+              (value) => !PLACEHOLDER_PATTERN.test(value),
+              'Sample messages cannot contain placeholders like [Business Name] -- carriers reject these'
+            ),
+        })
+      )
+      .min(3, 'Provide at least 3 sample messages')
+      .max(5, 'Provide at most 5 sample messages')
+      .refine(
+        (messages) => messages.some((message) => STOP_PATTERN.test(message.value)),
+        'At least one sample message must include STOP opt-out wording'
+      ),
+    opt_in_description: z
+      .string()
+      .min(40, 'Describe how customers opt in (at least 40 characters)'),
+    a2p_risk_checklist_answer: z.enum(['none', 'restricted', 'not_sure'] as const, {
+      message: 'Choose one eligibility answer',
+    }),
+    a2p_risk_checklist_selections: z.array(z.string()),
+  })
+  .refine(
+    (data) => validateCustomerCareCopy({
+      useCaseDescription: data.use_case_description,
+      sampleMessages: data.sample_messages.map((message) => message.value),
+      optInDescription: data.opt_in_description,
+    }).length === 0,
+    {
+      message: 'Keep this limited to customer care. Remove marketing, blasts, coupons, cold outreach, or unsupported automation.',
+      path: ['use_case_description'],
+    }
+  )
+  .refine(
+    (data) =>
+      data.a2p_risk_checklist_answer !== 'restricted' ||
+      data.a2p_risk_checklist_selections.length > 0,
+    {
+      message: 'Select at least one category',
+      path: ['a2p_risk_checklist_selections'],
+    }
+  );
 
 export type SmsUseCaseData = z.infer<typeof smsUseCaseSchema>;
 
@@ -53,9 +92,21 @@ interface SmsUseCaseInitialData {
 
 interface SmsUseCaseFormProps {
   businessId: string;
+  businessName: string;
+  businessType: BusinessType;
+  businessTypeOther?: string | null;
+  services?: { name: string; description?: string | null }[];
+  riskReview?: OnboardingRiskReviewSnapshot | null;
   initialData?: SmsUseCaseInitialData | null;
   onNext: (data: SmsUseCaseData) => void;
   onBack: () => void;
+}
+
+interface RiskReviewResponse {
+  status: A2pRiskReviewStatus;
+  message: string;
+  reason: string | null;
+  findings: A2pRiskFinding[];
 }
 
 const VOLUME_OPTIONS: { value: SmsUseCaseData['estimated_monthly_volume']; label: string }[] = [
@@ -73,43 +124,82 @@ const SECTION_HEADER_CLASS = 'text-base font-semibold text-slate-900 dark:text-[
 
 export default function SmsUseCaseForm({
   businessId,
+  businessName,
+  businessType,
+  businessTypeOther,
+  services = [],
+  riskReview,
   initialData,
   onNext,
   onBack,
 }: SmsUseCaseFormProps) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [heldRiskReview, setHeldRiskReview] = useState<RiskReviewResponse | null>(
+    riskReview && (riskReview.status === 'blocked' || riskReview.status === 'pending_review')
+      ? {
+          status: riskReview.status,
+          message: riskReview.message ?? '',
+          reason: riskReview.reason,
+          findings: riskReview.findings,
+        }
+      : null
+  );
+  const template = useMemo(
+    () =>
+      buildCustomerCareTemplateCopy({
+        businessName,
+        businessType,
+        businessTypeOther,
+        services,
+      }),
+    [businessName, businessType, businessTypeOther, services]
+  );
   const initialSampleMessages =
     initialData?.sample_messages && initialData.sample_messages.length >= 3
       ? initialData.sample_messages.map((value) => ({ value }))
-      : [{ value: '' }, { value: '' }, { value: '' }];
+      : template.sampleMessages.map((value) => ({ value }));
 
   const {
     register,
     control,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<SmsUseCaseData>({
     resolver: zodResolver(smsUseCaseSchema),
     defaultValues: {
-      use_case_description: initialData?.use_case_description || '',
+      use_case_description: initialData?.use_case_description || template.useCaseDescription,
       estimated_monthly_volume:
         (initialData?.estimated_monthly_volume as SmsUseCaseData['estimated_monthly_volume']) ||
         undefined,
       sample_messages: initialSampleMessages,
-      opt_in_description: initialData?.opt_in_description || DEFAULT_OPT_IN_DESCRIPTION,
+      opt_in_description: initialData?.opt_in_description || template.optInDescription,
+      a2p_risk_checklist_answer: riskReview?.checklistAnswer || undefined,
+      a2p_risk_checklist_selections: riskReview?.checklistSelections || [],
     },
   });
+
+  const selectedChecklistAnswer = watch('a2p_risk_checklist_answer');
 
   const {
     fields: sampleFields,
     append: appendSample,
     remove: removeSample,
+    replace: replaceSamples,
   } = useFieldArray({ control, name: 'sample_messages' });
+
+  function applyDraft() {
+    setValue('use_case_description', template.useCaseDescription, { shouldValidate: true });
+    setValue('opt_in_description', template.optInDescription, { shouldValidate: true });
+    replaceSamples(template.sampleMessages.map((value) => ({ value })));
+  }
 
   const onSubmit = async (data: SmsUseCaseData) => {
     setSaving(true);
     setSubmitError('');
+    setHeldRiskReview(null);
 
     try {
       const response = await fetch('/api/onboarding/sms-use-case', {
@@ -121,14 +211,23 @@ export default function SmsUseCaseForm({
           estimated_monthly_volume: data.estimated_monthly_volume,
           sample_messages: data.sample_messages.map((message) => message.value.trim()),
           opt_in_description: data.opt_in_description,
+          a2p_risk_checklist_answer: data.a2p_risk_checklist_answer,
+          a2p_risk_checklist_selections: data.a2p_risk_checklist_selections,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
         error?: string;
+        riskReview?: RiskReviewResponse;
       };
 
       if (!response.ok) {
         setSubmitError(payload.error ?? 'Could not save SMS use case details. Please try again.');
+        return;
+      }
+
+      if (payload.success === false && payload.riskReview) {
+        setHeldRiskReview(payload.riskReview);
         return;
       }
 
@@ -153,6 +252,19 @@ export default function SmsUseCaseForm({
         </p>
       </div>
 
+      <div className="rounded-[18px] border border-orange-200 bg-orange-50/70 px-4 py-3 text-sm text-orange-900 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-100">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>We drafted carrier-safe Customer Care text for {businessName || 'your business'}.</span>
+          <button
+            type="button"
+            onClick={applyDraft}
+            className="self-start rounded-[18px] border border-orange-300 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100 dark:border-orange-300/40 dark:text-orange-100 dark:hover:bg-orange-300/10"
+          >
+            Use recommended draft
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-4">
         <h3 className={SECTION_HEADER_CLASS}>Use case</h3>
 
@@ -161,7 +273,7 @@ export default function SmsUseCaseForm({
           <textarea
             {...register('use_case_description')}
             rows={4}
-            placeholder="e.g. Reply to customer inquiries, send missed-call follow-ups, and coordinate service requests."
+            placeholder="Reply to customer inquiries, send missed-call follow-ups, and coordinate service requests."
             className={INPUT_CLASS}
           />
           {errors.use_case_description && (
@@ -186,7 +298,7 @@ export default function SmsUseCaseForm({
       <div className="space-y-3">
         <h3 className={SECTION_HEADER_CLASS}>Sample messages (3-5)</h3>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Write real examples with your actual business name. At least one sample must include STOP opt-out wording.
+          Use real examples with your actual business name. At least one sample must include STOP opt-out wording.
         </p>
 
         <div className="space-y-3">
@@ -239,7 +351,7 @@ export default function SmsUseCaseForm({
       <div className="space-y-3">
         <h3 className={SECTION_HEADER_CLASS}>Opt-in description</h3>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Tell carriers how customers agree to receive customer-care texts from your business. We drafted a default you can adjust.
+          Tell carriers how customers agree to receive customer-care texts from your business.
         </p>
         <textarea
           {...register('opt_in_description')}
@@ -250,6 +362,65 @@ export default function SmsUseCaseForm({
           <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.opt_in_description.message}</p>
         )}
       </div>
+
+      <div className="space-y-4">
+        <div>
+          <h3 className={SECTION_HEADER_CLASS}>Restricted services check</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+            Carriers block or manually review some business types and website content before SMS can be submitted.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <ChecklistRadio
+            register={register}
+            value="none"
+            title="None of these apply to my business or website"
+            description="Use this when your business does not offer restricted services listed below."
+          />
+          <ChecklistRadio
+            register={register}
+            value="restricted"
+            title="One or more restricted categories may apply"
+            description="Choose the category below so SimplAssist can prevent a likely carrier rejection."
+          />
+          <ChecklistRadio
+            register={register}
+            value="not_sure"
+            title="I'm not sure / please review this"
+            description="SimplAssist will review before submitting carrier registration."
+          />
+        </div>
+
+        {selectedChecklistAnswer === 'restricted' && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {A2P_RISK_SELECTIONS.map((selection) => (
+              <label
+                key={selection}
+                className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white/70 p-3 text-sm text-slate-700 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#d4d4d8]"
+              >
+                <input
+                  type="checkbox"
+                  value={selection}
+                  {...register('a2p_risk_checklist_selections')}
+                  className="mt-0.5 h-4 w-4 rounded accent-[#ff914d]"
+                />
+                <span>{A2P_RISK_SELECTION_LABELS[selection as A2pRiskSelection]}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {errors.a2p_risk_checklist_answer && (
+          <p className="text-sm text-red-600 dark:text-red-400">{errors.a2p_risk_checklist_answer.message}</p>
+        )}
+        {errors.a2p_risk_checklist_selections && (
+          <p className="text-sm text-red-600 dark:text-red-400">{errors.a2p_risk_checklist_selections.message}</p>
+        )}
+      </div>
+
+      {heldRiskReview && (
+        <RiskReviewNotice review={heldRiskReview} />
+      )}
 
       {submitError && (
         <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
@@ -271,7 +442,7 @@ export default function SmsUseCaseForm({
           {saving ? (
             <>
               <PulsingDot inline />
-              Saving...
+              Checking...
             </>
           ) : (
             'Next'
@@ -279,5 +450,56 @@ export default function SmsUseCaseForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function ChecklistRadio({
+  register,
+  value,
+  title,
+  description,
+}: {
+  register: UseFormRegister<SmsUseCaseData>;
+  value: A2pRiskChecklistAnswer;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white/70 p-3 dark:border-white/[0.10] dark:bg-white/[0.04]">
+      <input
+        type="radio"
+        value={value}
+        {...register('a2p_risk_checklist_answer')}
+        className="mt-1 h-4 w-4 accent-[#ff914d]"
+      />
+      <span>
+        <span className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</span>
+        <span className="block text-xs text-slate-500 dark:text-[#bdbdbf]">{description}</span>
+      </span>
+    </label>
+  );
+}
+
+function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
+  const isBlocked = review.status === 'blocked';
+  return (
+    <div className={`rounded-[18px] border px-4 py-3 text-sm ${
+      isBlocked
+        ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
+        : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
+    }`}>
+      <p className="font-medium">
+        {isBlocked ? 'SMS registration cannot be submitted yet.' : 'SimplAssist needs to review this before submitting.'}
+      </p>
+      <p className="mt-1">{review.message}</p>
+      {review.reason && <p className="mt-1 text-xs opacity-90">{review.reason}</p>}
+      {review.findings.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs">
+          {review.findings.slice(0, 3).map((finding) => (
+            <li key={finding.ruleId}>{finding.label}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

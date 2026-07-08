@@ -3,6 +3,9 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
 import type {
+  A2pRiskChecklistAnswer,
+  A2pRiskFinding,
+  A2pRiskReviewStatus,
   AITone,
   BusinessEntityType,
   BusinessType,
@@ -14,6 +17,10 @@ import type {
   PrivacyTermsMode,
   RegistrationStatus,
 } from "@/types/database";
+import {
+  hashA2pRiskInput,
+  registrationHasStartedForRisk,
+} from "@/lib/messaging/registration/riskScreening";
 import {
   ONBOARDING_STEPS,
   onboardingStepNumber,
@@ -71,6 +78,18 @@ type BusinessRow = {
   onboarding_registration_started_at: string | null;
   onboarding_registration_submitted_at: string | null;
   onboarding_registration_error: string | null;
+  a2p_risk_review_status: A2pRiskReviewStatus | null;
+  a2p_risk_review_input_hash: string | null;
+  a2p_risk_review_message: string | null;
+  a2p_risk_review_reason: string | null;
+  a2p_risk_review_findings: A2pRiskFinding[] | null;
+  a2p_risk_review_customer_answer: A2pRiskChecklistAnswer | null;
+  a2p_risk_review_customer_selections: string[] | null;
+  a2p_risk_review_scanned_at: string | null;
+  a2p_risk_review_notified_at: string | null;
+  a2p_risk_review_reviewed_at: string | null;
+  a2p_risk_review_reviewed_by: string | null;
+  a2p_risk_review_override_note: string | null;
   privacy_terms_mode: PrivacyTermsMode;
   telnyx_brand_id: string | null;
   telnyx_campaign_id: string | null;
@@ -162,6 +181,18 @@ export async function getOnboardingStateForOwner(
         "onboarding_registration_started_at",
         "onboarding_registration_submitted_at",
         "onboarding_registration_error",
+        "a2p_risk_review_status",
+        "a2p_risk_review_input_hash",
+        "a2p_risk_review_message",
+        "a2p_risk_review_reason",
+        "a2p_risk_review_findings",
+        "a2p_risk_review_customer_answer",
+        "a2p_risk_review_customer_selections",
+        "a2p_risk_review_scanned_at",
+        "a2p_risk_review_notified_at",
+        "a2p_risk_review_reviewed_at",
+        "a2p_risk_review_reviewed_by",
+        "a2p_risk_review_override_note",
         "privacy_terms_mode",
         "telnyx_brand_id",
         "telnyx_campaign_id",
@@ -225,6 +256,18 @@ export async function getOnboardingStateForBusinessId(
         "onboarding_registration_started_at",
         "onboarding_registration_submitted_at",
         "onboarding_registration_error",
+        "a2p_risk_review_status",
+        "a2p_risk_review_input_hash",
+        "a2p_risk_review_message",
+        "a2p_risk_review_reason",
+        "a2p_risk_review_findings",
+        "a2p_risk_review_customer_answer",
+        "a2p_risk_review_customer_selections",
+        "a2p_risk_review_scanned_at",
+        "a2p_risk_review_notified_at",
+        "a2p_risk_review_reviewed_at",
+        "a2p_risk_review_reviewed_by",
+        "a2p_risk_review_override_note",
         "privacy_terms_mode",
         "telnyx_brand_id",
         "telnyx_campaign_id",
@@ -312,6 +355,13 @@ async function getOnboardingStateForBusiness(
     business.name ?? "Your Business"
   );
   const brandVerification = normalizeBrandVerification(business);
+  const registrationStarted = registrationHasStarted(business);
+  const riskReview = normalizeRiskReview({
+    business,
+    services: normalizedServices,
+    faqs: normalizedFaqs,
+    registrationStarted,
+  });
   const phone = smsReadiness.phoneNumber ?? phoneNumber?.phone_number ?? null;
   const derivedStep = deriveOnboardingStep({
     business,
@@ -320,6 +370,8 @@ async function getOnboardingStateForBusiness(
     aiSettings: normalizedAiSettings,
     phoneNumber: phone,
     smsReady: smsReadiness.smsReady,
+    riskCleared:
+      riskReview.status === "passed" || riskReview.status === "admin_approved",
   });
   const completedAt =
     smsReadiness.smsReady && !business.onboarding_completed_at
@@ -372,6 +424,7 @@ async function getOnboardingStateForBusiness(
         null,
       smsReady: smsReadiness.smsReady,
       smsBlockReason: smsReadiness.blockReason,
+      riskReview,
     },
   };
 }
@@ -468,6 +521,62 @@ function normalizeBrandVerification(
   };
 }
 
+function normalizeRiskReview(args: {
+  business: BusinessRow;
+  services: OnboardingService[];
+  faqs: OnboardingFaq[];
+  registrationStarted: boolean;
+}) {
+  const { business, services, faqs, registrationStarted } = args;
+  const currentInputHash = hashA2pRiskInput({
+    businessId: business.id,
+    businessName: business.name ?? "Your Business",
+    businessType: business.business_type,
+    businessTypeOther: business.business_type_other,
+    websiteUrl: business.website_url,
+    services: services.map((service) => ({
+      name: service.name,
+      description: service.description ?? null,
+    })),
+    faqs: faqs.map((faq) => ({
+      question: faq.question,
+      answer: faq.answer,
+    })),
+    useCaseDescription: business.use_case_description ?? "",
+    sampleMessages: business.sample_messages ?? [],
+    optInDescription: business.opt_in_description ?? "",
+    checklistAnswer: business.a2p_risk_review_customer_answer,
+    checklistSelections: business.a2p_risk_review_customer_selections ?? [],
+  });
+  const storedStatus = business.a2p_risk_review_status;
+  const hashMatches =
+    Boolean(business.a2p_risk_review_input_hash) &&
+    business.a2p_risk_review_input_hash === currentInputHash;
+  const effectiveStatus: A2pRiskReviewStatus = registrationStarted
+    ? (storedStatus ?? "not_started")
+    : hashMatches
+      ? (storedStatus ?? "not_started")
+      : "not_started";
+
+  return {
+    status: effectiveStatus,
+    storedStatus,
+    inputHash: business.a2p_risk_review_input_hash,
+    currentInputHash,
+    message: hashMatches ? business.a2p_risk_review_message : null,
+    reason: hashMatches ? business.a2p_risk_review_reason : null,
+    findings: hashMatches ? business.a2p_risk_review_findings ?? [] : [],
+    checklistAnswer: business.a2p_risk_review_customer_answer,
+    checklistSelections: business.a2p_risk_review_customer_selections ?? [],
+    scannedAt: hashMatches ? business.a2p_risk_review_scanned_at : null,
+    notifiedAt: hashMatches ? business.a2p_risk_review_notified_at : null,
+    reviewedAt: hashMatches ? business.a2p_risk_review_reviewed_at : null,
+    reviewedBy: hashMatches ? business.a2p_risk_review_reviewed_by : null,
+    overrideNote: hashMatches ? business.a2p_risk_review_override_note : null,
+    registrationStarted,
+  };
+}
+
 function deriveOnboardingStep(args: {
   business: BusinessRow;
   hours: OnboardingHours[];
@@ -475,8 +584,17 @@ function deriveOnboardingStep(args: {
   aiSettings: OnboardingAiSettings | null;
   phoneNumber: string | null;
   smsReady: boolean;
+  riskCleared: boolean;
 }): OnboardingStep {
-  const { business, hours, services, aiSettings, phoneNumber, smsReady } = args;
+  const {
+    business,
+    hours,
+    services,
+    aiSettings,
+    phoneNumber,
+    smsReady,
+    riskCleared,
+  } = args;
 
   if (smsReady || business.onboarding_completed_at) return "complete";
 
@@ -489,7 +607,7 @@ function deriveOnboardingStep(args: {
   if (services.length === 0) return "services_faqs";
   if (!aiSettings) return "ai_settings";
   if (!hasLegalVerification(business)) return "legal_verification";
-  if (!hasCompletedComplianceInfo(business)) return "sms_use_case";
+  if (!hasCompletedComplianceInfo(business, riskCleared)) return "sms_use_case";
   if (!phoneNumber) return "phone_number";
 
   return "review_submit";
@@ -522,9 +640,13 @@ function hasLegalVerification(business: BusinessRow): boolean {
   );
 }
 
-function hasCompletedComplianceInfo(business: BusinessRow): boolean {
+function hasCompletedComplianceInfo(
+  business: BusinessRow,
+  riskCleared: boolean
+): boolean {
   return Boolean(
-    business.compliance_info_completed_at &&
+    riskCleared &&
+      business.compliance_info_completed_at &&
       business.use_case_description &&
       business.estimated_monthly_volume &&
       business.opt_in_description &&
@@ -534,12 +656,7 @@ function hasCompletedComplianceInfo(business: BusinessRow): boolean {
 }
 
 function registrationHasStarted(business: BusinessRow): boolean {
-  return Boolean(
-    business.telnyx_brand_id ||
-      business.brand_status ||
-      business.campaign_status ||
-      normalizeRegistrationStatus(business) !== "not_started"
-  );
+  return registrationHasStartedForRisk(business);
 }
 
 function normalizeRegistrationStatus(

@@ -12,6 +12,16 @@ import {
   appendRegistrationEvent,
   serializeError,
 } from "@/lib/messaging/registration/audit";
+import {
+  A2P_RISK_CHECKLIST_ANSWERS,
+  isA2pRiskSelection,
+} from "@/lib/messaging/registration/riskCategories";
+import {
+  screenA2pRiskForBusiness,
+  type A2pRiskReviewResult,
+} from "@/lib/messaging/registration/riskScreening";
+import { validateCustomerCareCopy } from "@/lib/messaging/registration/customerCareTemplates";
+import type { A2pRiskChecklistAnswer } from "@/types/database";
 
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings > Compliance, then try again.";
@@ -60,7 +70,18 @@ const smsUseCaseSchema = z
       .min(3)
       .max(5),
     opt_in_description: z.string().min(40),
+    a2p_risk_checklist_answer: z.enum(A2P_RISK_CHECKLIST_ANSWERS),
+    a2p_risk_checklist_selections: z.array(z.string()).default([]),
   })
+  .refine(
+    (data) =>
+      data.a2p_risk_checklist_answer !== "restricted" ||
+      data.a2p_risk_checklist_selections.some(isA2pRiskSelection),
+    {
+      message: "Select at least one restricted category, or choose a different answer",
+      path: ["a2p_risk_checklist_selections"],
+    }
+  )
   .refine(
     (data) => data.sample_messages.some((sample) => STOP_PATTERN.test(sample)),
     {
@@ -96,6 +117,21 @@ export async function POST(request: NextRequest) {
   }
 
   const data = parsed.data;
+  const customerCareErrors = validateCustomerCareCopy({
+    useCaseDescription: data.use_case_description,
+    sampleMessages: data.sample_messages,
+    optInDescription: data.opt_in_description,
+  });
+  if (customerCareErrors.length > 0) {
+    return NextResponse.json(
+      {
+        error: customerCareErrors[0],
+        details: customerCareErrors,
+      },
+      { status: 400 }
+    );
+  }
+
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
     .select(
@@ -163,50 +199,110 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (isFirstSubmit) {
-    const resolvedSlug = slugForUpdate ?? business.slug;
-    const preflightBusiness = {
-      slug: resolvedSlug,
-      privacy_terms_mode: (business.privacy_terms_mode ??
-        "hosted") as PrivacyTermsMode,
-      privacy_url_override: business.privacy_url_override,
-      terms_url_override: business.terms_url_override,
-    };
+  const resolvedSlug = slugForUpdate ?? business.slug;
+  const preflightBusiness = {
+    slug: resolvedSlug,
+    privacy_terms_mode: (business.privacy_terms_mode ??
+      "hosted") as PrivacyTermsMode,
+    privacy_url_override: business.privacy_url_override,
+    terms_url_override: business.terms_url_override,
+  };
 
-    try {
-      resolveLegalUrls(preflightBusiness);
-      const trimmedWebsite = business.website_url?.trim();
-      if (!trimmedWebsite) {
-        buildBusinessLandingUrl(resolvedSlug);
-      }
-    } catch (err) {
-      console.error(
-        `[onboarding:sms-use-case] Pre-flight failed for ${data.businessId}:`,
-        err
-      );
-      await appendRegistrationEvent({
-        businessId: data.businessId,
-        eventType: "brand_submitted",
-        resourceType: "brand",
-        status: "error",
-        rawPayload: { preflight_failure: serializeError(err) },
-      });
-      return NextResponse.json(
-        { error: PREFLIGHT_FAILURE_MESSAGE },
-        { status: 400 }
-      );
+  try {
+    resolveLegalUrls(preflightBusiness);
+    const trimmedWebsite = business.website_url?.trim();
+    if (!trimmedWebsite) {
+      buildBusinessLandingUrl(resolvedSlug);
     }
+  } catch (err) {
+    console.error(
+      `[onboarding:sms-use-case] Pre-flight failed for ${data.businessId}:`,
+      err
+    );
+    await appendRegistrationEvent({
+      businessId: data.businessId,
+      eventType: "brand_submitted",
+      resourceType: "brand",
+      status: "error",
+      rawPayload: { preflight_failure: serializeError(err) },
+    });
+    return NextResponse.json(
+      { error: PREFLIGHT_FAILURE_MESSAGE },
+      { status: 400 }
+    );
   }
 
   const now = new Date().toISOString();
+  const trimmedSamples = data.sample_messages.map((sample) => sample.trim());
+  const checklistSelections = data.a2p_risk_checklist_selections.filter(
+    isA2pRiskSelection
+  );
   const editablePayload = {
     use_case_description: data.use_case_description,
     estimated_monthly_volume: data.estimated_monthly_volume,
-    sample_messages: data.sample_messages.map((sample) => sample.trim()),
+    sample_messages: trimmedSamples,
     opt_in_description: data.opt_in_description,
-    onboarding_step: "phone_number" as const,
+    a2p_risk_review_customer_answer:
+      data.a2p_risk_checklist_answer as A2pRiskChecklistAnswer,
+    a2p_risk_review_customer_selections: checklistSelections,
     onboarding_last_saved_at: now,
   };
+
+  let riskResult: A2pRiskReviewResult;
+  try {
+    riskResult = await screenA2pRiskForBusiness(data.businessId, {
+      useCaseDescription: data.use_case_description,
+      sampleMessages: trimmedSamples,
+      optInDescription: data.opt_in_description,
+      checklistAnswer: data.a2p_risk_checklist_answer,
+      checklistSelections,
+    });
+  } catch (err) {
+    console.error(
+      `[onboarding:sms-use-case] A2P risk scan failed for ${data.businessId}:`,
+      err
+    );
+    return NextResponse.json(
+      {
+        error:
+          "Couldn't complete SMS eligibility review right now. Please try again.",
+      },
+      { status: 500 }
+    );
+  }
+
+  const riskCleared =
+    riskResult.registrationStarted ||
+    riskResult.status === "passed" ||
+    riskResult.status === "admin_approved";
+
+  if (!riskCleared) {
+    const { error: draftError } = await supabaseAdmin
+      .from("businesses")
+      .update({
+        ...editablePayload,
+        ...(slugForUpdate ? { slug: slugForUpdate } : {}),
+        compliance_info_completed_at: null,
+        onboarding_step: "sms_use_case" as const,
+      })
+      .eq("id", data.businessId);
+
+    if (draftError) {
+      console.error(
+        `[onboarding:sms-use-case] Failed to persist held SMS fields for ${data.businessId}:`,
+        draftError
+      );
+      return NextResponse.json(
+        { error: "Failed to save SMS use case details" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: false,
+      riskReview: riskResult,
+    });
+  }
 
   if (isFirstSubmit) {
     const { data: updated, error: updateError } = await supabaseAdmin
@@ -215,6 +311,7 @@ export async function POST(request: NextRequest) {
         ...editablePayload,
         ...(slugForUpdate ? { slug: slugForUpdate } : {}),
         compliance_info_completed_at: now,
+        onboarding_step: "phone_number" as const,
       })
       .eq("id", data.businessId)
       .is("compliance_info_completed_at", null)
@@ -232,12 +329,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (!updated || updated.length === 0) {
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, riskReview: riskResult });
     }
   } else {
     const { error: updateError } = await supabaseAdmin
       .from("businesses")
-      .update(editablePayload)
+      .update({
+        ...editablePayload,
+        compliance_info_completed_at: business.compliance_info_completed_at ?? now,
+        onboarding_step: "phone_number" as const,
+      })
       .eq("id", data.businessId);
 
     if (updateError) {
@@ -252,5 +353,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, riskReview: riskResult });
 }

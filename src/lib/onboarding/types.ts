@@ -1,4 +1,7 @@
 import type {
+  A2pRiskChecklistAnswer,
+  A2pRiskFinding,
+  A2pRiskReviewStatus,
   AITone,
   BusinessEntityType,
   BusinessType,
@@ -115,6 +118,25 @@ export interface OnboardingRegistrationSnapshot {
   assignmentFailureReason: string | null;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
+  riskReview: OnboardingRiskReviewSnapshot;
+}
+
+export interface OnboardingRiskReviewSnapshot {
+  status: A2pRiskReviewStatus;
+  storedStatus: A2pRiskReviewStatus | null;
+  inputHash: string | null;
+  currentInputHash: string | null;
+  message: string | null;
+  reason: string | null;
+  findings: A2pRiskFinding[];
+  checklistAnswer: A2pRiskChecklistAnswer | null;
+  checklistSelections: string[];
+  scannedAt: string | null;
+  notifiedAt: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  overrideNote: string | null;
+  registrationStarted: boolean;
 }
 
 export interface OnboardingState {

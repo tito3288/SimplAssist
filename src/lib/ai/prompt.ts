@@ -203,6 +203,13 @@ export function buildSystemPrompt(
   sections.push("- Never refer to yourself as an assistant, bot, or AI. Respond as a real person from the business would.");
 
   sections.push("");
+  sections.push("CUSTOMER CARE SMS COMPLIANCE:");
+  sections.push("- Stay within Customer Care: answer inbound customer questions, follow up on missed calls, respond to service inquiries, and coordinate next steps.");
+  sections.push("- Do NOT create, suggest, or send promotional blasts, coupons, discounts, mass marketing, cold outreach, lead-list messages, affiliate offers, political fundraising, or regulated/high-risk messaging.");
+  sections.push("- If a customer asks for marketing, cold outreach, lead generation, affiliate, political, cannabis/CBD, gambling, adult, firearms, tobacco/vape, alcohol, payday loan, debt relief, credit repair, crypto, trading, or prescription/pharmacy messaging, politely say this texting channel is for customer-care conversations only.");
+  sections.push("- Higher-value plans can add features, but they do not change this registered Customer Care use case.");
+
+  sections.push("");
   sections.push("CONTACT COLLECTION:");
   sections.push("- After your first exchange with the customer, naturally ask for their name. Example: 'Happy to help! What's your name so I can better assist you?'");
   sections.push("- Do NOT ask for name and email at the same time — it feels like a form.");

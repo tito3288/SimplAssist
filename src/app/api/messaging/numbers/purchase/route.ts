@@ -4,6 +4,7 @@ import { purchaseNumber } from "@/lib/messaging/numbers";
 import { createMessagingProfile } from "@/lib/messaging/registration/messagingProfile";
 import { createVoiceApplication } from "@/lib/messaging/registration/voiceApplication";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
+import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -34,6 +35,28 @@ export async function POST(request: NextRequest) {
   if (!phoneNumber) {
     return NextResponse.json(
       { error: "Phone number is required" },
+      { status: 400 }
+    );
+  }
+
+  if (!business.compliance_info_completed_at) {
+    return NextResponse.json(
+      {
+        error:
+          "Finish business verification before choosing your SimplAssist number",
+      },
+      { status: 400 }
+    );
+  }
+
+  const riskClearance = await getA2pRiskClearanceForBusiness(business.id);
+  if (!riskClearance.cleared) {
+    return NextResponse.json(
+      {
+        error: riskClearance.message,
+        code: "a2p_risk_review_required",
+        riskReview: riskClearance,
+      },
       { status: 400 }
     );
   }
@@ -80,16 +103,6 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ number: existingNumber });
-    }
-
-    if (!business.compliance_info_completed_at) {
-      return NextResponse.json(
-        {
-          error:
-            "Finish business verification before choosing your SimplAssist number",
-        },
-        { status: 400 }
-      );
     }
 
     await createMessagingProfile(business.id);

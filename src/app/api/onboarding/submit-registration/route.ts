@@ -7,6 +7,7 @@ import {
   markRegistrationSubmitted,
 } from "@/lib/onboarding/registrationAttempt";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 
 const MISSING_NUMBER_MESSAGE =
   "Choose your SimplAssist number before submitting SMS registration.";
@@ -79,6 +80,20 @@ export async function POST() {
     await markRegistrationSubmitted(business.id);
     const state = await getOnboardingStateForBusinessId(business.id);
     return NextResponse.json({ success: true, state });
+  }
+
+  const riskClearance = await getA2pRiskClearanceForBusiness(business.id);
+  if (!riskClearance.cleared) {
+    const state = await getOnboardingStateForBusinessId(business.id);
+    return NextResponse.json(
+      {
+        error: riskClearance.message,
+        code: "a2p_risk_review_required",
+        riskReview: riskClearance,
+        state,
+      },
+      { status: 400 }
+    );
   }
 
   const claim = await claimRegistrationAttempt(business.id);

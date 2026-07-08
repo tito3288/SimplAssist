@@ -136,6 +136,8 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
         setError(response.error || 'Could not submit SMS registration right now.');
         if (response.code === 'missing_phone_number') {
           onEditStep(7);
+        } else if (response.code === 'a2p_risk_review_required') {
+          onEditStep(6);
         }
         return;
       }

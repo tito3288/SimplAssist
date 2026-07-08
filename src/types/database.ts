@@ -72,6 +72,15 @@ export type OnboardingRegistrationStatus =
   | "failed"
   | "submitted";
 
+export type A2pRiskReviewStatus =
+  | "not_started"
+  | "pending_review"
+  | "blocked"
+  | "passed"
+  | "admin_approved";
+
+export type A2pRiskChecklistAnswer = "none" | "restricted" | "not_sure";
+
 export type CampaignAssignmentStatus =
   | "unassigned"
   | "pending"
@@ -152,6 +161,19 @@ export interface Business {
   onboarding_registration_started_at: string | null;
   onboarding_registration_submitted_at: string | null;
   onboarding_registration_error: string | null;
+  a2p_risk_review_status: A2pRiskReviewStatus | null;
+  a2p_risk_review_input_hash: string | null;
+  a2p_risk_review_message: string | null;
+  a2p_risk_review_reason: string | null;
+  a2p_risk_review_findings: A2pRiskFinding[] | null;
+  a2p_risk_review_customer_answer: A2pRiskChecklistAnswer | null;
+  a2p_risk_review_customer_selections: string[] | null;
+  a2p_risk_review_scanned_at: string | null;
+  a2p_risk_review_notified_at: string | null;
+  a2p_risk_review_reviewed_at: string | null;
+  a2p_risk_review_reviewed_by: string | null;
+  a2p_risk_review_override_note: string | null;
+  a2p_risk_review_updated_at: string | null;
   slug: string;
   privacy_terms_mode: PrivacyTermsMode;
   privacy_url_override: string | null;
@@ -180,6 +202,27 @@ export interface TelnyxRegistrationEvent {
   telnyx_resource_id: string | null;
   status: string | null;
   rejection_reason: string | null;
+  raw_payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface A2pRiskFinding {
+  ruleId: string;
+  category: string;
+  severity: "block" | "review";
+  label: string;
+  evidence: string[];
+  source: string;
+}
+
+export interface A2pRiskReviewEvent {
+  id: string;
+  business_id: string;
+  event_type: string;
+  status: A2pRiskReviewStatus | null;
+  input_hash: string | null;
+  message: string | null;
+  findings: A2pRiskFinding[] | null;
   raw_payload: Record<string, unknown> | null;
   created_at: string;
 }

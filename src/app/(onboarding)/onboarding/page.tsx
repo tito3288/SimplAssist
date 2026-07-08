@@ -160,6 +160,11 @@ export default function OnboardingPage() {
         {step === 'sms_use_case' && (
           <SmsUseCaseForm
             businessId={state.businessId}
+            businessName={state.businessInfo.name || 'Your Business'}
+            businessType={(state.businessInfo.business_type || 'general') as BusinessType}
+            businessTypeOther={state.businessInfo.business_type_other}
+            services={state.servicesAndFaqs.services}
+            riskReview={state.registration.riskReview}
             initialData={state.brandVerification}
             onNext={() => refreshState()}
             onBack={() => setStep('legal_verification')}
