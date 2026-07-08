@@ -6,6 +6,11 @@ import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
 import { renderMissedCallSms } from "@/lib/messaging/complianceCopy";
 import type { Language, SmsBlockReason } from "@/types/database";
+import {
+  preflightOutboundSms,
+  recordOutboundSmsUsage,
+  type UsageBlockReason,
+} from "@/lib/billing/usage";
 
 export async function sendMissedCallSMS(
   callerPhone: string,
@@ -92,6 +97,21 @@ export async function sendMissedCallSMS(
       );
     }
 
+    const usage = await preflightOutboundSms({ businessId, text: smsBody });
+    if (!usage.allowed) {
+      console.warn(
+        `[missed-call] send blocked by usage gate: reason=${usage.reason} for business ${businessId}`
+      );
+      await insertPausedSystemMessageIfNeeded({
+        conversationId: conversation.id,
+        businessId,
+        channel: "sms",
+        context: "missed_call",
+        reason: usageToPausedReason(usage.reason),
+      });
+      return;
+    }
+
     const result = await telnyx.messages.send({
       from: phoneNumberRow.phone_number,
       to: callerPhone,
@@ -108,6 +128,16 @@ export async function sendMissedCallSMS(
     // SMS failure in the outer catch. The customer already got the text.
     try {
       await addMessage(conversation.id, businessId, "assistant", smsBody, "sms");
+      await recordOutboundSmsUsage({
+        businessId,
+        text: smsBody,
+        source: "missed_call_sms",
+        providerMessageId: result.data?.id ?? null,
+        idempotencyKey: result.data?.id
+          ? `outbound:missed_call:${result.data.id}`
+          : undefined,
+        metadata: { to: callerPhone, from: phoneNumberRow.phone_number },
+      });
     } catch (logErr) {
       console.error(
         `[missed-call] SMS sent (telnyxId=${result.data?.id}) but failed to persist to messages table — manual reconciliation may be needed:`,
@@ -125,4 +155,12 @@ function toPausedReason(
   if (reason === "assignment_failed") return "assignment_failed";
   if (reason === "assignment_pending") return "assignment_pending";
   return "campaign_not_approved";
+}
+
+function usageToPausedReason(
+  reason: UsageBlockReason
+): "usage_limit_reached" | "billing_paused" | "submission_disabled" {
+  if (reason === "usage_limit_reached") return "usage_limit_reached";
+  if (reason === "telnyx_submission_disabled") return "submission_disabled";
+  return "billing_paused";
 }

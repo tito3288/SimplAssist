@@ -139,7 +139,8 @@ export async function processIncomingMessage(
   contactEmail: string | null,
   message: string,
   channel: Channel,
-  sessionId: string | null = null
+  sessionId: string | null = null,
+  options: { persistAssistant?: boolean } = {}
 ): Promise<string> {
   try {
     const contact = await findOrCreateContact(
@@ -297,13 +298,15 @@ export async function processIncomingMessage(
     );
     const responseText = textBlock?.text || FALLBACK_MESSAGE;
 
-    await addMessage(
-      conversation.id,
-      businessId,
-      "assistant",
-      responseText,
-      channel
-    );
+    if (options.persistAssistant !== false) {
+      await addMessage(
+        conversation.id,
+        businessId,
+        "assistant",
+        responseText,
+        channel
+      );
+    }
 
     const leadScoreIncrease = scoreMessage(message);
     if (leadScoreIncrease > 0) {

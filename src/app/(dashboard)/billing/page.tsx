@@ -27,8 +27,22 @@ export default async function BillingPage() {
     .eq("business_id", business.id)
     .single();
 
+  const { data: usagePeriod } = await supabase
+    .from("billing_usage_periods")
+    .select("*")
+    .eq("business_id", business.id)
+    .order("period_start", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const hasActiveSubscription =
     subscription && subscription.status !== "canceled";
+  const usedSmsParts = usagePeriod
+    ? usagePeriod.inbound_sms_parts + usagePeriod.outbound_sms_parts
+    : 0;
+  const includedSmsParts = usagePeriod?.included_sms_parts ?? 0;
+  const usagePercent =
+    includedSmsParts > 0 ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100)) : 0;
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -128,6 +142,43 @@ export default async function BillingPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {hasActiveSubscription && (
+        <div className={`mt-6 p-6 ${glassCard}`}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5]">
+                SMS usage
+              </h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+                Current billing period usage counts inbound and outbound SMS parts.
+              </p>
+            </div>
+            <div className="text-sm font-medium text-slate-700 dark:text-[#d8d8d8]">
+              {usedSmsParts.toLocaleString()} / {includedSmsParts.toLocaleString()} parts
+            </div>
+          </div>
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-white/[0.10]">
+            <div
+              className={`h-full rounded-full ${
+                usagePercent >= 100
+                  ? "bg-red-500"
+                  : usagePercent >= 80
+                    ? "bg-amber-500"
+                    : "bg-green-500"
+              }`}
+              style={{ width: `${usagePercent}%` }}
+            />
+          </div>
+          <p className="mt-3 text-sm text-slate-500 dark:text-[#bdbdbf]">
+            {usagePercent >= 100
+              ? "Outbound SMS is paused until you upgrade or enable overages."
+              : usagePercent >= 80
+                ? "You are close to your included SMS parts for this period."
+                : "Your SMS usage is within the included amount."}
+          </p>
         </div>
       )}
     </div>
