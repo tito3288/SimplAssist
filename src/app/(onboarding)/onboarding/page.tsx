@@ -246,6 +246,8 @@ export default function OnboardingPage() {
               phoneNumber: state.phoneNumber,
               brandVerification: state.brandVerification,
             }}
+            billing={state.billing}
+            registration={state.registration}
             onEditStep={(targetStep) => setStep(numberToStep(targetStep))}
             onBack={() => setStep('phone_number')}
             onSubmitted={(nextState) => {

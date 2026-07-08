@@ -12,6 +12,8 @@ import type {
   OnboardingStep,
   RegistrationStatus,
   SmsBlockReason,
+  SubscriptionPlan,
+  SubscriptionStatus,
 } from "@/types/database";
 
 export type { OnboardingStep } from "@/types/database";
@@ -121,6 +123,14 @@ export interface OnboardingRegistrationSnapshot {
   riskReview: OnboardingRiskReviewSnapshot;
 }
 
+export interface OnboardingBillingSnapshot {
+  plan: SubscriptionPlan | null;
+  status: SubscriptionStatus | null;
+  setupFeePaidAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+}
+
 export interface OnboardingRiskReviewSnapshot {
   status: A2pRiskReviewStatus;
   storedStatus: A2pRiskReviewStatus | null;
@@ -157,6 +167,7 @@ export interface OnboardingState {
   pendingPhoneNumber: string | null;
   pendingPhoneNumberFailureReason: string | null;
   smsConsentAgreed: boolean;
+  billing: OnboardingBillingSnapshot;
   registration: OnboardingRegistrationSnapshot;
 }
 

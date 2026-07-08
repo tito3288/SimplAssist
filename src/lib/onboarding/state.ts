@@ -16,6 +16,8 @@ import type {
   OnboardingStep,
   PrivacyTermsMode,
   RegistrationStatus,
+  SubscriptionPlan,
+  SubscriptionStatus,
 } from "@/types/database";
 import {
   hashA2pRiskInput,
@@ -143,6 +145,14 @@ type PhoneNumberRow = {
   phone_number: string;
   telnyx_campaign_assignment_status: CampaignAssignmentStatus;
   telnyx_campaign_assignment_failure_reason: string | null;
+};
+
+type SubscriptionRow = {
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  setup_fee_paid_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
 };
 
 export async function getOnboardingStateForOwner(
@@ -315,6 +325,7 @@ async function getOnboardingStateForBusiness(
     { data: aiSettings },
     { data: widgetConfig },
     { data: phoneNumber },
+    { data: subscription },
   ] = await Promise.all([
     supabaseAdmin
       .from("business_hours")
@@ -358,6 +369,11 @@ async function getOnboardingStateForBusiness(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle<PhoneNumberRow>(),
+    supabaseAdmin
+      .from("subscriptions")
+      .select("plan, status, setup_fee_paid_at, current_period_start, current_period_end")
+      .eq("business_id", business.id)
+      .maybeSingle<SubscriptionRow>(),
   ]);
 
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
@@ -422,6 +438,13 @@ async function getOnboardingStateForBusiness(
     pendingPhoneNumber: business.pending_phone_number,
     pendingPhoneNumberFailureReason: business.pending_phone_number_failure_reason,
     smsConsentAgreed: Boolean(business.sms_consent_agreed),
+    billing: {
+      plan: subscription?.plan ?? null,
+      status: subscription?.status ?? null,
+      setupFeePaidAt: subscription?.setup_fee_paid_at ?? null,
+      currentPeriodStart: subscription?.current_period_start ?? null,
+      currentPeriodEnd: subscription?.current_period_end ?? null,
+    },
     registration: {
       status: normalizeRegistrationStatus(business),
       startedAt: business.onboarding_registration_started_at,
