@@ -9,11 +9,13 @@ interface AvailableNumber {
 
 interface PurchasedNumber {
   phone_number: string;
+  pending?: boolean;
 }
 
 interface PhoneNumberSelectorProps {
   initialPhoneNumber?: string | null;
   initialConsentAgreed?: boolean;
+  initialFailureReason?: string | null;
   onConsentChange?: (agreed: boolean) => void;
   onNumberPurchased?: (phoneNumber: string) => void;
 }
@@ -21,6 +23,7 @@ interface PhoneNumberSelectorProps {
 export default function PhoneNumberSelector({
   initialPhoneNumber,
   initialConsentAgreed = false,
+  initialFailureReason = null,
   onConsentChange,
   onNumberPurchased,
 }: PhoneNumberSelectorProps) {
@@ -34,12 +37,13 @@ export default function PhoneNumberSelector({
 
   useEffect(() => {
     if (initialPhoneNumber) {
-      setPurchased({ phone_number: initialPhoneNumber });
+      setPurchased({ phone_number: initialPhoneNumber, pending: true });
     }
 
     setConsented(initialConsentAgreed);
+    setError(initialFailureReason);
     onConsentChange?.(initialConsentAgreed);
-  }, [initialPhoneNumber, initialConsentAgreed, onConsentChange]);
+  }, [initialPhoneNumber, initialConsentAgreed, initialFailureReason, onConsentChange]);
 
   function handleConsentToggle(checked: boolean) {
     setConsented(checked);
@@ -92,7 +96,7 @@ export default function PhoneNumberSelector({
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Failed to purchase number");
+        setError(data.error || "Failed to select number");
         return;
       }
 
@@ -100,7 +104,7 @@ export default function PhoneNumberSelector({
       onNumberPurchased?.(data.number.phone_number);
       setNumbers([]);
     } catch {
-      setError("Failed to purchase number");
+      setError("Failed to select number");
     } finally {
       setPurchasing(null);
     }
@@ -110,14 +114,15 @@ export default function PhoneNumberSelector({
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
         <h3 className="text-lg font-semibold text-green-800">
-          Number Purchased!
+          Number Selected
         </h3>
         <p className="mt-2 text-2xl font-bold text-green-900">
           {purchased.phone_number}
         </p>
         <p className="mt-1 text-sm text-green-600">
-          SMS activation is pending registration and carrier approval.
+          We will activate this number after checkout. If it becomes unavailable, you can choose another number without paying again.
         </p>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
       </div>
     );
   }

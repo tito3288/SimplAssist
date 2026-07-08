@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { getUsStateName } from '@/lib/usStates';
+import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import type { OnboardingState } from '@/lib/onboarding/types';
+import type { SubscriptionPlan } from '@/types/database';
 
 interface ReviewData {
   businessInfo: {
@@ -103,9 +105,10 @@ function maskEin(ein: string): string {
   return `${ein.slice(0, 2)}-***-${ein.slice(-4)}`;
 }
 
-export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted }: ReviewAndLaunchProps) {
+export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('sms_and_chat');
 
   const handleLaunch = async () => {
     setError(null);
@@ -118,33 +121,31 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
     setLaunching(true);
 
     try {
-      const res = await fetch('/api/onboarding/submit-registration', {
+      const res = await fetch('/api/billing/checkout', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: selectedPlan, mode: 'onboarding' }),
       });
       const response = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
         state?: OnboardingState | null;
+        url?: string;
       };
 
       if (!res.ok) {
-        if (response.state?.registration.status === 'failed') {
-          onSubmitted(response.state);
-          return;
-        }
-
-        setError(response.error || 'Could not submit SMS registration right now.');
-        if (response.code === 'missing_phone_number') {
-          onEditStep(7);
-        } else if (response.code === 'a2p_risk_review_required') {
-          onEditStep(6);
-        }
+        setError(response.error || 'Could not start checkout right now.');
         return;
       }
 
-      onSubmitted(response.state ?? null);
+      if (response.url) {
+        window.location.href = response.url;
+        return;
+      }
+
+      setError('Could not start checkout right now.');
     } catch {
-      setError('Could not submit SMS registration right now.');
+      setError('Could not start checkout right now.');
     } finally {
       setLaunching(false);
     }
@@ -161,11 +162,51 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Submit</h2>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Pay</h2>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Submit your SMS registration for carrier review.
+          Choose your plan and pay before we submit your SMS registration for carrier review.
         </p>
       </div>
+
+      <Section title="Plan & Setup Fee">
+        <div className="space-y-3">
+          {(Object.entries(SUBSCRIPTION_PLANS) as [SubscriptionPlan, (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan]][]).map(([key, plan]) => {
+            const today = plan.price + 25;
+            return (
+              <label
+                key={key}
+                className={`block cursor-pointer rounded-lg border p-3 text-sm ${
+                  selectedPlan === key
+                    ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
+                    : 'border-slate-200 dark:border-white/[0.10]'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="subscription-plan"
+                  value={key}
+                  checked={selectedPlan === key}
+                  onChange={() => setSelectedPlan(key)}
+                  className="sr-only"
+                />
+                <span className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-slate-900 dark:text-[#f5f5f5]">{plan.name}</span>
+                  <span className="text-slate-700 dark:text-[#d8d8d8]">${today} today</span>
+                </span>
+                <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+                  Then ${plan.price}/month. Includes {plan.includedSmsParts.toLocaleString()} SMS parts/month.
+                </span>
+              </label>
+            );
+          })}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
+            <p className="font-medium text-slate-800 dark:text-[#f5f5f5]">$25 one-time setup and SMS activation fee</p>
+            <p className="mt-1">
+              We use this to verify your business, register your SMS sending with carriers, activate your phone number, and set up compliance pages so your messages can be delivered reliably.
+            </p>
+          </div>
+        </div>
+      </Section>
 
       {/* Business Info */}
       <Section title="Business Info" onEdit={() => onEditStep(1)}>
@@ -311,9 +352,9 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
           className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
         >
           {launching
-            ? 'Submitting...'
+            ? 'Opening checkout...'
             : data.phoneNumber
-              ? 'Submit SMS registration'
+              ? 'Pay & submit SMS registration'
               : 'Choose number to submit'}
         </button>
       </div>
@@ -321,17 +362,19 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
   );
 }
 
-function Section({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) {
+function Section({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {
   return (
     <div className="rounded-[22px] bg-white/50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] p-4">
       <div className="flex justify-between items-center mb-3">
         <h3 className="font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</h3>
-        <button
-          onClick={onEdit}
-          className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
-        >
-          Edit
-        </button>
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
+          >
+            Edit
+          </button>
+        )}
       </div>
       <div className="space-y-2">{children}</div>
     </div>

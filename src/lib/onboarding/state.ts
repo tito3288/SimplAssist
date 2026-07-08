@@ -71,6 +71,11 @@ type BusinessRow = {
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
   compliance_info_completed_at: string | null;
+  pending_phone_number: string | null;
+  pending_phone_number_area_code: string | null;
+  pending_phone_number_selected_at: string | null;
+  pending_phone_number_failure_reason: string | null;
+  telnyx_submission_disabled: boolean | null;
   onboarding_step: OnboardingStep | null;
   onboarding_completed_at: string | null;
   onboarding_last_saved_at: string | null;
@@ -174,6 +179,11 @@ export async function getOnboardingStateForOwner(
         "estimated_monthly_volume",
         "opt_in_description",
         "compliance_info_completed_at",
+        "pending_phone_number",
+        "pending_phone_number_area_code",
+        "pending_phone_number_selected_at",
+        "pending_phone_number_failure_reason",
+        "telnyx_submission_disabled",
         "onboarding_step",
         "onboarding_completed_at",
         "onboarding_last_saved_at",
@@ -249,6 +259,11 @@ export async function getOnboardingStateForBusinessId(
         "estimated_monthly_volume",
         "opt_in_description",
         "compliance_info_completed_at",
+        "pending_phone_number",
+        "pending_phone_number_area_code",
+        "pending_phone_number_selected_at",
+        "pending_phone_number_failure_reason",
+        "telnyx_submission_disabled",
         "onboarding_step",
         "onboarding_completed_at",
         "onboarding_last_saved_at",
@@ -362,7 +377,8 @@ async function getOnboardingStateForBusiness(
     faqs: normalizedFaqs,
     registrationStarted,
   });
-  const phone = smsReadiness.phoneNumber ?? phoneNumber?.phone_number ?? null;
+  const activePhone = smsReadiness.phoneNumber ?? phoneNumber?.phone_number ?? null;
+  const phone = activePhone ?? business.pending_phone_number ?? null;
   const derivedStep = deriveOnboardingStep({
     business,
     hours: normalizedHours,
@@ -402,6 +418,9 @@ async function getOnboardingStateForBusiness(
     aiSettings: normalizedAiSettings,
     brandVerification,
     phoneNumber: phone,
+    activePhoneNumber: activePhone,
+    pendingPhoneNumber: business.pending_phone_number,
+    pendingPhoneNumberFailureReason: business.pending_phone_number_failure_reason,
     smsConsentAgreed: Boolean(business.sms_consent_agreed),
     registration: {
       status: normalizeRegistrationStatus(business),
@@ -597,6 +616,13 @@ function deriveOnboardingStep(args: {
   } = args;
 
   if (smsReady || business.onboarding_completed_at) return "complete";
+
+  if (
+    business.onboarding_registration_status === "failed" &&
+    business.pending_phone_number_failure_reason
+  ) {
+    return "phone_number";
+  }
 
   if (registrationHasStarted(business)) {
     return "carrier_review";

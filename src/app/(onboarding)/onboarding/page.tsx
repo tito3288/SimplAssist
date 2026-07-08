@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Clock, Phone, RefreshCcw, AlertTriangle } from 'lucide-react';
 import StepProgress from '@/components/onboarding/StepProgress';
 import BusinessInfoForm from '@/components/onboarding/BusinessInfoForm';
@@ -30,9 +30,12 @@ type StateResponse = {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const finalizedSessionRef = useRef<string | null>(null);
   const [state, setState] = useState<OnboardingState | null>(null);
   const [step, setStep] = useState<OnboardingStep>('business_info');
   const [loading, setLoading] = useState(true);
+  const [finalizingCheckout, setFinalizingCheckout] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -75,6 +78,43 @@ export default function OnboardingPage() {
   }, [refreshState]);
 
   useEffect(() => {
+    const checkout = searchParams.get('checkout');
+    const sessionId = searchParams.get('session_id');
+    if (
+      checkout !== 'success' ||
+      !sessionId ||
+      finalizingCheckout ||
+      finalizedSessionRef.current === sessionId
+    ) {
+      return;
+    }
+
+    finalizedSessionRef.current = sessionId;
+    setFinalizingCheckout(true);
+    fetch('/api/billing/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    })
+      .then(async (res) => {
+        const payload = (await res.json().catch(() => ({}))) as StateResponse;
+        if (payload.state) {
+          setState(payload.state);
+          setStep(payload.state.currentStep === 'complete' ? 'carrier_review' : payload.state.currentStep);
+        } else {
+          await refreshState();
+        }
+        router.replace('/onboarding');
+      })
+      .catch(() => {
+        setLoadError('Checkout succeeded, but we could not finish setup automatically. Please refresh to continue.');
+      })
+      .finally(() => {
+        setFinalizingCheckout(false);
+      });
+  }, [finalizingCheckout, refreshState, router, searchParams]);
+
+  useEffect(() => {
     if (state?.dashboardReady && state.currentStep === 'complete') {
       router.prefetch('/dashboard');
     }
@@ -108,7 +148,7 @@ export default function OnboardingPage() {
   return (
     <div>
       <StepProgress currentStep={currentStepNumber} />
-      <ProgressNote state={state} refreshing={refreshing} step={step} />
+      <ProgressNote state={state} refreshing={refreshing || finalizingCheckout} step={step} />
 
       <div className="transition-opacity duration-200">
         {step === 'business_info' && (
@@ -284,6 +324,7 @@ function PhoneNumberStep({
       <PhoneNumberSelector
         initialPhoneNumber={state.phoneNumber}
         initialConsentAgreed={state.smsConsentAgreed}
+        initialFailureReason={state.pendingPhoneNumberFailureReason}
         onNumberPurchased={onPurchased}
       />
 

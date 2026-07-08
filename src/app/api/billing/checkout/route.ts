@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createCheckoutSession } from "@/lib/stripe/checkout";
-import { STRIPE_PRICE_IDS } from "@/lib/stripe/config";
+import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
+const VALID_MODES = ["onboarding", "billing"] as const;
 
 export async function POST(request: NextRequest) {
   try {
-    const { plan } = await request.json();
+    const { plan, mode: requestedMode } = await request.json();
 
     if (!VALID_PLANS.includes(plan)) {
       return NextResponse.json(
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "billing";
 
     const supabase = await createClient();
     const {
@@ -40,14 +43,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const priceId = STRIPE_PRICE_IDS[plan as SubscriptionPlan];
+    const priceId = stripePriceIds()[plan as SubscriptionPlan];
+    const setupFeePriceId = stripeSetupFeePriceId();
     const origin = request.nextUrl.origin;
+    const successPath =
+      mode === "onboarding"
+        ? "/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}"
+        : "/billing?success=true&session_id={CHECKOUT_SESSION_ID}";
+    const cancelPath =
+      mode === "onboarding"
+        ? "/onboarding?checkout=canceled"
+        : "/billing?canceled=true";
 
     const checkoutUrl = await createCheckoutSession(
       business.id,
+      plan as SubscriptionPlan,
       priceId,
-      `${origin}/billing?success=true`,
-      `${origin}/billing?canceled=true`
+      setupFeePriceId,
+      `${origin}${successPath}`,
+      `${origin}${cancelPath}`,
+      mode
     );
 
     return NextResponse.json({ url: checkoutUrl });

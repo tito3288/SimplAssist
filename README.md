@@ -24,6 +24,17 @@ Phase 8 A2P screening uses these deployment variables:
 - `A2P_REVIEW_EMAIL` - comma-separated support recipients for manual A2P review alerts. Falls back to `SUPPORT_EMAIL`, then `support@simplassist.com`.
 - `A2P_REVIEW_ADMIN_TOKEN` - bearer token required for the manual A2P review override endpoint.
 
+Phase 9 billing and admin use these deployment variables:
+
+- `STRIPE_SECRET_KEY` - Stripe test-mode secret key only (`sk_test_...`). Live-mode keys are intentionally rejected until SimplAssist explicitly switches billing live.
+- `STRIPE_WEBHOOK_SECRET` - Stripe test-mode webhook signing secret for `/api/stripe/webhook`.
+- `STRIPE_PRICE_SMS_ONLY` - Stripe test-mode recurring Price ID for Starter / SMS Only.
+- `STRIPE_PRICE_SMS_AND_CHAT` - Stripe test-mode recurring Price ID for Growth / SMS + Web Chat.
+- `STRIPE_PRICE_FULL` - Stripe test-mode recurring Price ID for Pro / Full Suite.
+- `STRIPE_PRICE_SETUP_FEE` - Stripe test-mode one-time Price ID for the $25 setup and SMS activation fee.
+- `STRIPE_PRICE_SMS_OVERAGE_PART` - Stripe test-mode Price ID for $0.03 per extra SMS part after opt-in.
+- `SIMPLASSIST_ADMIN_USER_IDS` - comma-separated Supabase auth user IDs allowed into `/admin`; unset or empty means nobody is admin.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

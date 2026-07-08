@@ -1,20 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { runFullRegistration } from "@/lib/messaging/registration";
-import {
-  claimRegistrationAttempt,
-  markRegistrationFailed,
-  markRegistrationSubmitted,
-} from "@/lib/onboarding/registrationAttempt";
+import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
-import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
-
-const MISSING_NUMBER_MESSAGE =
-  "Choose your SimplAssist number before retrying SMS registration.";
 
 const retrySchema = z.object({
   businessId: z.string().uuid(),
@@ -47,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id, compliance_info_completed_at, telnyx_campaign_id")
+    .select("id, compliance_info_completed_at")
     .eq("id", businessId)
     .eq("owner_id", user.id)
     .single();
@@ -66,90 +57,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: phoneNumberRow, error: phoneNumberError } = await supabase
-    .from("phone_numbers")
-    .select("id, phone_number")
-    .eq("business_id", businessId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (phoneNumberError) {
-    console.error(
-      `[onboarding:retry-registration] Failed to read active number for ${businessId}:`,
-      phoneNumberError
-    );
-    return NextResponse.json(
-      { error: "Failed to check your phone number" },
-      { status: 500 }
-    );
-  }
-
-  if (!phoneNumberRow?.phone_number) {
-    return NextResponse.json(
-      { error: MISSING_NUMBER_MESSAGE, code: "missing_phone_number" },
-      { status: 400 }
-    );
-  }
-
-  if (business.telnyx_campaign_id) {
-    await markRegistrationSubmitted(businessId);
-    const state = await getOnboardingStateForBusinessId(businessId);
+  const launch = await attemptPaidLaunch(businessId, "onboarding_retry");
+  const state = await getOnboardingStateForBusinessId(businessId);
+  if (launch.status === "submitted" || launch.status === "already_submitted") {
     return NextResponse.json({ success: true, state });
   }
-
-  const riskClearance = await getA2pRiskClearanceForBusiness(businessId);
-  if (!riskClearance.cleared) {
-    const state = await getOnboardingStateForBusinessId(businessId);
-    return NextResponse.json(
-      {
-        error: riskClearance.message,
-        code: "a2p_risk_review_required",
-        riskReview: riskClearance,
-        state,
-      },
-      { status: 400 }
-    );
+  if (launch.status === "in_progress") {
+    return NextResponse.json({ success: true, inProgress: true, state });
   }
 
-  const claim = await claimRegistrationAttempt(businessId);
-  if (!claim.claimed) {
-    const state = await getOnboardingStateForBusinessId(businessId);
-    if (claim.reason === "already_submitted") {
-      return NextResponse.json({ success: true, state });
-    }
-    if (claim.reason === "already_submitting") {
-      return NextResponse.json({ success: true, inProgress: true, state });
-    }
-    return NextResponse.json(
-      { error: REGISTRATION_FAILURE_MESSAGE, state },
-      { status: 409 }
-    );
-  }
+  const code =
+    launch.status === "risk_review_required"
+      ? "a2p_risk_review_required"
+      : launch.status === "missing_phone_number"
+        ? "missing_phone_number"
+        : launch.status === "number_unavailable"
+          ? "phone_number_unavailable"
+          : launch.status === "billing_required"
+            ? "billing_required"
+            : "registration_failed";
 
-  try {
-    await runFullRegistration(businessId);
-    await markRegistrationSubmitted(businessId);
-  } catch (err) {
-    console.error(
-      `[onboarding:retry-registration] Registration failed for ${businessId}:`,
-      err
-    );
-    await markRegistrationFailed(businessId, REGISTRATION_FAILURE_MESSAGE).catch(
-      (markError) =>
-        console.error(
-          `[onboarding:retry-registration] Failed to persist retryable failure for ${businessId}:`,
-          markError
-        )
-    );
-    const state = await getOnboardingStateForBusinessId(businessId);
-    return NextResponse.json(
-      { error: REGISTRATION_FAILURE_MESSAGE, code: "registration_failed", state },
-      { status: 500 }
-    );
-  }
-
-  const state = await getOnboardingStateForBusinessId(businessId);
-  return NextResponse.json({ success: true, state });
+  return NextResponse.json(
+    { error: launch.message || REGISTRATION_FAILURE_MESSAGE, code, state },
+    { status: code === "billing_required" ? 402 : 400 }
+  );
 }

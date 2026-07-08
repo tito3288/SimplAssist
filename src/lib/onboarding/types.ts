@@ -36,7 +36,7 @@ export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   legal_verification: "Business Verification",
   sms_use_case: "SMS Use Case",
   phone_number: "Phone Number",
-  review_submit: "Review & Submit",
+  review_submit: "Review & Pay",
   carrier_review: "Carrier Review",
   complete: "Complete",
 };
@@ -153,6 +153,9 @@ export interface OnboardingState {
   aiSettings: OnboardingAiSettings | null;
   brandVerification: OnboardingBrandVerification | null;
   phoneNumber: string | null;
+  activePhoneNumber: string | null;
+  pendingPhoneNumber: string | null;
+  pendingPhoneNumberFailureReason: string | null;
   smsConsentAgreed: boolean;
   registration: OnboardingRegistrationSnapshot;
 }
