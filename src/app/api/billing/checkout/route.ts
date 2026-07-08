@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { attemptPaidLaunch } from "@/lib/billing/launch";
+import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { createCheckoutSession } from "@/lib/stripe/checkout";
 import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
@@ -41,6 +43,31 @@ export async function POST(request: NextRequest) {
         { error: "Business not found" },
         { status: 404 }
       );
+    }
+
+    if (mode === "onboarding") {
+      const launch = await attemptPaidLaunch(business.id, "onboarding_retry");
+      if (launch.status !== "billing_required") {
+        const state = await getOnboardingStateForBusinessId(business.id);
+        if (
+          launch.status === "submitted" ||
+          launch.status === "already_submitted"
+        ) {
+          return NextResponse.json({ success: true, state });
+        }
+        if (launch.status === "in_progress") {
+          return NextResponse.json({ success: true, inProgress: true, state });
+        }
+
+        return NextResponse.json(
+          {
+            error: launch.message,
+            code: launch.status,
+            state,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const priceId = stripePriceIds()[plan as SubscriptionPlan];

@@ -198,17 +198,24 @@ export default function OnboardingPage() {
         )}
 
         {step === 'sms_use_case' && (
-          <SmsUseCaseForm
-            businessId={state.businessId}
-            businessName={state.businessInfo.name || 'Your Business'}
-            businessType={(state.businessInfo.business_type || 'general') as BusinessType}
-            businessTypeOther={state.businessInfo.business_type_other}
-            services={state.servicesAndFaqs.services}
-            riskReview={state.registration.riskReview}
-            initialData={state.brandVerification}
-            onNext={() => refreshState()}
-            onBack={() => setStep('legal_verification')}
-          />
+          <div className="space-y-4">
+            {state.registration.status === 'failed' && state.registration.error && (
+              <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                {state.registration.error}
+              </div>
+            )}
+            <SmsUseCaseForm
+              businessId={state.businessId}
+              businessName={state.businessInfo.name || 'Your Business'}
+              businessType={(state.businessInfo.business_type || 'general') as BusinessType}
+              businessTypeOther={state.businessInfo.business_type_other}
+              services={state.servicesAndFaqs.services}
+              riskReview={state.registration.riskReview}
+              initialData={state.brandVerification}
+              onNext={() => refreshState()}
+              onBack={() => setStep('legal_verification')}
+            />
+          </div>
         )}
 
         {step === 'phone_number' && (
@@ -245,6 +252,11 @@ export default function OnboardingPage() {
               if (nextState) setState(nextState);
               setStep('carrier_review');
               refreshState({ keepStep: true });
+            }}
+            onLaunchBlocked={(nextState) => {
+              if (!nextState) return;
+              setState(nextState);
+              setStep(nextState.currentStep === 'complete' ? 'carrier_review' : nextState.currentStep);
             }}
           />
         )}

@@ -87,6 +87,7 @@ export async function attemptPaidLaunch(
 
   const riskClearance = await getA2pRiskClearanceForBusiness(businessId);
   if (!riskClearance.cleared) {
+    await persistRiskReviewRequired(businessId, riskClearance.message);
     return {
       status: "risk_review_required",
       message: riskClearance.message,
@@ -301,6 +302,28 @@ async function persistNumberFailure(
   if (error) {
     console.error(
       `[billing:launch] Failed to persist number failure for ${businessId}:`,
+      error
+    );
+  }
+}
+
+async function persistRiskReviewRequired(
+  businessId: string,
+  message: string
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("businesses")
+    .update({
+      onboarding_registration_status: "failed",
+      onboarding_registration_error: message,
+      onboarding_step: "sms_use_case",
+      onboarding_last_saved_at: new Date().toISOString(),
+    })
+    .eq("id", businessId);
+
+  if (error) {
+    console.error(
+      `[billing:launch] Failed to persist risk review hold for ${businessId}:`,
       error
     );
   }

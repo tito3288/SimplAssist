@@ -53,6 +53,7 @@ interface ReviewAndLaunchProps {
   onEditStep: (step: number) => void;
   onBack: () => void;
   onSubmitted: (state: OnboardingState | null) => void;
+  onLaunchBlocked: (state: OnboardingState | null) => void;
 }
 
 const TONE_LABELS: Record<string, string> = {
@@ -105,7 +106,13 @@ function maskEin(ein: string): string {
   return `${ein.slice(0, 2)}-***-${ein.slice(-4)}`;
 }
 
-export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndLaunchProps) {
+export default function ReviewAndLaunch({
+  data,
+  onEditStep,
+  onBack,
+  onSubmitted,
+  onLaunchBlocked,
+}: ReviewAndLaunchProps) {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('sms_and_chat');
@@ -127,14 +134,24 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack }: ReviewAndL
         body: JSON.stringify({ plan: selectedPlan, mode: 'onboarding' }),
       });
       const response = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
         error?: string;
         code?: string;
+        inProgress?: boolean;
         state?: OnboardingState | null;
         url?: string;
       };
 
       if (!res.ok) {
         setError(response.error || 'Could not start checkout right now.');
+        if (response.state) {
+          onLaunchBlocked(response.state);
+        }
+        return;
+      }
+
+      if (response.success) {
+        onSubmitted(response.state ?? null);
         return;
       }
 
