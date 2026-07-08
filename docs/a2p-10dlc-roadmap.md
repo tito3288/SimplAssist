@@ -586,9 +586,9 @@ Migration requirements:
 
 ---
 
-## Phase 10 — Number Purchasing Timing 🔒 (decision locked, implementation pending)
+## Phase 10 — Number Purchasing Timing 🔒 (decision superseded by Phase 9)
 
-**Locked decision:** number purchased immediately during onboarding (current flow). SimplAssist eats ~$1.20/customer in wasted phone cost during the 1–5 day approval window — acceptable tradeoff for onboarding momentum vs forcing a "pick number after approval" wait.
+**Updated decision:** number purchase now happens at paid launch, after checkout succeeds and after brand/campaign submission, but still before carrier approval. This supersedes the earlier "immediately during onboarding" timing while preserving onboarding momentum and avoiding any paid Telnyx number purchase before payment.
 
 ---
 
