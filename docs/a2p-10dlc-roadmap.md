@@ -1,6 +1,6 @@
 # Per-Customer A2P 10DLC Roadmap (Telnyx)
 
-**Status as of 2026-07-05:** Phases 1–7 shipped to production, plus a post-Phase-6 "readiness safeguards" layer (informally "6.5"). Phase 8 (use case screening + AI guardrails) is next.
+**Status as of 2026-07-08:** Phase 9 (cost handling) is next; Phase 8.5 (internal admin console) can be built anytime after Phase 8.
 
 This is the shared source of truth for the per-customer A2P (Application-to-Person) 10DLC compliance initiative. It is the canonical reference for any agent or human working on Phase 7+. Compare implementation against this document rather than reconstructing context from scattered code comments.
 
@@ -59,12 +59,13 @@ For per-customer compliance — required by TCR (The Campaign Registry) rules to
 | 6 | Per-business privacy/terms pages + compliance modes | ✅ Shipped |
 | 6.5 | 10DLC readiness safeguards | ✅ Shipped |
 | 7 | Onboarding flow restructure | ✅ Shipped |
-| 8 | Use case screening + AI guardrails | ⏳ Pending |
+| 8 | Use case screening + AI guardrails | ✅ Shipped |
+| 8.5 | Internal admin console | ⏳ Pending |
 | 9 | Cost handling | 🔒 Decisions locked, implementation pending |
 | 10 | Number purchasing timing | 🔒 Decision locked, implementation pending |
 | 11 | EIN vs Sole Proprietor branching + SMS OTP | ⏳ Pending |
 
-**Migrations applied:** `012`–`017` cover Phases 1–7. See `supabase/migrations/`.
+**Migrations applied:** `012`–`018` cover Phases 1–8. See `supabase/migrations/`.
 
 ---
 
@@ -384,7 +385,53 @@ These templates must describe what SimplAssist actually does: inbound customer c
 
 ---
 
+## Phase 8.5 — Internal Admin Console ⏳
+
+**Status:** Phase 9 (cost handling) is next; Phase 8.5 (internal admin console) can be built anytime after Phase 8.
+
+### Purpose
+
+- One internal `/admin` area inside the existing SimplAssist app for SimplAssist staff (currently only Bryan). Not customer-facing.
+- Designed to grow: v1 ships A2P review approvals; Phase 9 adds billing/usage pages into the same area; later phases add more rooms behind the same door.
+
+### Access control (locked decisions)
+
+- Reuse existing Supabase auth. No new login system. No hardcoded credentials or passwords anywhere in code or roadmap.
+- Admin = authenticated user whose Supabase auth user ID appears in env var `SIMPLASSIST_ADMIN_USER_IDS` (comma-separated). Document the var name only, never values.
+- Every admin route handler AND server component re-verifies admin status server-side. Client-side hiding, layout checks, or middleware alone are insufficient — a logged-in customer must never reach admin routes directly.
+- Non-admins receive 404 (not 403) so the area's existence is not revealed.
+- Fail closed: env var unset/empty = nobody is admin.
+- Admin accounts are normal Supabase logins that may never complete onboarding. Admin routes must be reachable regardless of onboarding state — the admin check runs independently of the onboarding resolver/redirects. The placeholder business row auto-created at signup is expected and ignored.
+
+### v1 scope — A2P risk review approvals
+
+This replaces the curl workflow while keeping the token endpoint as a backup path.
+
+- Queue view: businesses with `a2p_risk_review_status = pending_review` or `blocked`, plus recently approved/rejected for audit context.
+- Detail view: customer-safe scan findings, checklist answer/selections, use-case/sample/opt-in text, website URL, current status, and whether stored clearance matches the current input hash.
+- Approve action: requires a note (min 8 chars) + explicit fee-risk acknowledgement, applies to the current input hash only, writes to the existing audit trail.
+- MUST reuse the same server-side approval logic as `POST /api/admin/a2p-risk-review` via a shared function — no duplicated approval code. The token endpoint remains as a backup path.
+
+### Phase 9 additions
+
+- Per-account usage and gross-margin visibility (Phase 9 implementation requirement) lives here.
+- Marking accounts pilot / comped / billing_exempt (Phase 9 pilot-migration requirement) lives here.
+- High-usage account visibility before launch lives here.
+
+### PII rules
+
+- Never render `ein`, `last_4_ssn`, `registrant_mobile`, `authorized_rep_*`, or `tax_id_type` in the admin UI. Customer-safe/sanitized fields only, same boundary as the Phase 6/8 projection rules.
+
+### Build notes
+
+- v1 expects no schema changes; any proposed migration must be flagged and justified at planning time.
+- When implementation starts, follow the standard workflow: plan → review → implement.
+
+---
+
 ## Phase 9 — Cost Handling 🔒 (decisions locked, implementation pending)
+
+Phase 9's internal/admin visibility work builds on Phase 8.5. Billing, usage, gross-margin, pilot/comped account controls, and high-usage visibility should live inside the same `/admin` area rather than creating a separate staff surface.
 
 Brand registration costs by tier:
 - Sole Proprietor brand: free or ~$2 one-time
@@ -519,7 +566,7 @@ These are planning estimates, not accounting truth. The implementation should st
 - Usage gates must apply to every customer-facing send path: manual dashboard sends, AI replies, MMS fallback text, and missed-call SMS.
 - Add customer-visible usage UI: current billing period, included SMS parts, used SMS parts, warning at 80%, hard stop or upgrade/overage prompt at 100%.
 - At 100% usage, default to pausing outbound sends until upgrade/overage opt-in. Do not silently continue unbounded usage.
-- Add internal/admin visibility for gross margin and high-usage accounts before launch.
+- Add internal/admin visibility for gross margin and high-usage accounts before launch. This lives in the Phase 8.5 `/admin` area.
 - Update plan copy so "unlimited conversations" cannot be interpreted as unlimited SMS/MMS/AI usage.
 - Keep account notifications / billing emails separate from customer-to-consumer SMS usage.
 
@@ -533,7 +580,7 @@ Migration requirements:
 - Create or attach a Stripe customer + subscription to the existing business when the pilot becomes paid.
 - Decide manually whether to waive the $25 setup fee for pilot accounts. Default recommendation: waive it or comp it if SimplAssist already absorbed the setup during testing.
 - Start included usage/message caps from the first paid billing period, not retroactively from the free pilot period.
-- Add an internal/admin way to mark accounts as `pilot`, `comped`, or `billing_exempt` until billing starts, so free tests do not look like broken subscriptions.
+- Add an internal/admin way to mark accounts as `pilot`, `comped`, or `billing_exempt` until billing starts, so free tests do not look like broken subscriptions. This lives in the Phase 8.5 `/admin` area.
 - Once converted to paid, enforce the same tier entitlements, SMS/MMS caps, overage rules, and past-due behavior as every other account.
 - Avoid surprising the pilot customer with back charges. Any first invoice should be clearly agreed to before Stripe billing is attached.
 
