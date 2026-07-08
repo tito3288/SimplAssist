@@ -52,11 +52,19 @@ interface ReviewAndLaunchProps {
   data: ReviewData;
   billing: OnboardingState["billing"];
   registration: OnboardingState["registration"];
+  pendingPhoneNumberFailureReason: string | null;
   onEditStep: (step: number) => void;
   onBack: () => void;
   onSubmitted: (state: OnboardingState | null) => void;
   onLaunchBlocked: (state: OnboardingState | null) => void;
 }
+
+type PaidLaunchHold = {
+  message: string;
+  action: "none" | "choose_number" | "retry";
+  buttonLabel?: string;
+  helper?: string;
+};
 
 const TONE_LABELS: Record<string, string> = {
   friendly: 'Friendly & Casual',
@@ -112,6 +120,7 @@ export default function ReviewAndLaunch({
   data,
   billing,
   registration,
+  pendingPhoneNumberFailureReason,
   onEditStep,
   onBack,
   onSubmitted,
@@ -124,13 +133,20 @@ export default function ReviewAndLaunch({
   );
   const subscribedPlan =
     billing.plan && billing.status !== 'canceled' ? billing.plan : null;
-  const isPaidSubscription =
-    subscribedPlan && (billing.status === 'active' || billing.status === 'trialing');
+  const isPaidSubscription = Boolean(
+    subscribedPlan && (billing.status === 'active' || billing.status === 'trialing')
+  );
   const paidPlan = subscribedPlan ? SUBSCRIPTION_PLANS[subscribedPlan] : null;
-  const launchHeldMessage =
-    isPaidSubscription && registration.status === 'failed'
-      ? registration.error
-      : null;
+  const launchHold = isPaidSubscription
+    ? classifyPaidLaunchHold(registration, pendingPhoneNumberFailureReason)
+    : null;
+  const primaryButtonLabel = primaryLaunchButtonLabel({
+    data,
+    isPaidSubscription,
+    launchHold,
+    launching,
+  });
+  const showPrimaryButton = !launchHold || launchHold.action !== 'none';
 
   useEffect(() => {
     if (billing.plan) {
@@ -222,10 +238,13 @@ export default function ReviewAndLaunch({
                 Status: {billing.status}. Setup fee {billing.setupFeePaidAt ? 'paid' : 'not recorded'}.
               </p>
             </div>
-            {launchHeldMessage && (
+            {launchHold && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                 <p className="font-medium">SMS setup is paused</p>
-                <p className="mt-1">{launchHeldMessage}</p>
+                <p className="mt-1">{launchHold.message}</p>
+                {launchHold.helper && (
+                  <p className="mt-2 text-xs">{launchHold.helper}</p>
+                )}
               </div>
             )}
           </div>
@@ -408,23 +427,100 @@ export default function ReviewAndLaunch({
         >
           Back
         </button>
-        <button
-          onClick={handleLaunch}
-          disabled={launching}
-          className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
-        >
-          {launching
-            ? isPaidSubscription
-              ? 'Checking setup...'
-              : 'Opening checkout...'
-            : data.phoneNumber
-              ? isPaidSubscription
-                ? 'Retry SMS setup'
-                : 'Pay & submit SMS registration'
-              : 'Choose number to submit'}
-        </button>
+        {showPrimaryButton && (
+          <button
+            onClick={
+              launchHold?.action === 'choose_number'
+                ? () => onEditStep(7)
+                : handleLaunch
+            }
+            disabled={launching && launchHold?.action !== 'choose_number'}
+            className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
+          >
+            {primaryButtonLabel}
+          </button>
+        )}
       </div>
     </div>
+  );
+}
+
+function classifyPaidLaunchHold(
+  registration: OnboardingState["registration"],
+  pendingPhoneNumberFailureReason: string | null
+): PaidLaunchHold | null {
+  if (pendingPhoneNumberFailureReason || isNumberUnavailable(registration.error)) {
+    return {
+      message:
+        "The number you selected is no longer available. Choose a new number to continue.",
+      action: "choose_number",
+      buttonLabel: "Choose a new number",
+    };
+  }
+
+  if (isSubmissionDisabled(registration.error)) {
+    return {
+      message: "SMS setup is paused. Contact SimplAssist support to continue.",
+      action: "none",
+    };
+  }
+
+  if (
+    registration.riskReview.status === "pending_review" ||
+    registration.riskReview.status === "blocked" ||
+    isRiskReviewHold(registration.error)
+  ) {
+    return {
+      message:
+        "We're reviewing your setup before submitting to carriers. No action needed. We'll email you.",
+      action: "none",
+    };
+  }
+
+  if (registration.status !== "failed") {
+    return null;
+  }
+
+  return {
+    message:
+      registration.error ??
+      "SMS setup could not finish automatically. You can continue setup when ready.",
+    action: "retry",
+    buttonLabel: "Continue SMS setup",
+    helper: "You won't be charged again.",
+  };
+}
+
+function primaryLaunchButtonLabel(args: {
+  data: ReviewData;
+  isPaidSubscription: boolean;
+  launchHold: PaidLaunchHold | null;
+  launching: boolean;
+}): string {
+  const { data, isPaidSubscription, launchHold, launching } = args;
+  if (launchHold?.buttonLabel) return launchHold.buttonLabel;
+  if (launching) {
+    return isPaidSubscription ? "Checking setup..." : "Opening checkout...";
+  }
+  if (!data.phoneNumber) return "Choose number to submit";
+  return isPaidSubscription ? "Continue SMS setup" : "Pay & submit SMS registration";
+}
+
+function isSubmissionDisabled(message: string | null): boolean {
+  return /sms registration is disabled|submission disabled|telnyx submission disabled/i.test(
+    message ?? ""
+  );
+}
+
+function isNumberUnavailable(message: string | null): boolean {
+  return /number.*(no longer available|unavailable|taken)|choose another number/i.test(
+    message ?? ""
+  );
+}
+
+function isRiskReviewHold(message: string | null): boolean {
+  return /sms use-case review|a2p.*review|reviewing your setup|manual review/i.test(
+    message ?? ""
   );
 }
 

@@ -248,6 +248,7 @@ export default function OnboardingPage() {
             }}
             billing={state.billing}
             registration={state.registration}
+            pendingPhoneNumberFailureReason={state.pendingPhoneNumberFailureReason}
             onEditStep={(targetStep) => setStep(numberToStep(targetStep))}
             onBack={() => setStep('phone_number')}
             onSubmitted={(nextState) => {
