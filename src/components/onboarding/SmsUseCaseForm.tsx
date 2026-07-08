@@ -182,6 +182,15 @@ export default function SmsUseCaseForm({
   });
 
   const selectedChecklistAnswer = watch('a2p_risk_checklist_answer');
+  const watchedUseCaseDescription = watch('use_case_description');
+  const watchedOptInDescription = watch('opt_in_description');
+  const watchedSampleMessages = watch('sample_messages');
+  const textDiffersFromTemplate =
+    normalizeDraftText(watchedUseCaseDescription) !== normalizeDraftText(template.useCaseDescription) ||
+    normalizeDraftText(watchedOptInDescription) !== normalizeDraftText(template.optInDescription) ||
+    normalizeSampleMessages(watchedSampleMessages) !== normalizeSampleMessages(
+      template.sampleMessages.map((value) => ({ value }))
+    );
 
   const {
     fields: sampleFields,
@@ -254,14 +263,18 @@ export default function SmsUseCaseForm({
 
       <div className="rounded-[18px] border border-orange-200 bg-orange-50/70 px-4 py-3 text-sm text-orange-900 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-100">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <span>We drafted carrier-safe Customer Care text for {businessName || 'your business'}.</span>
-          <button
-            type="button"
-            onClick={applyDraft}
-            className="self-start rounded-[18px] border border-orange-300 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100 dark:border-orange-300/40 dark:text-orange-100 dark:hover:bg-orange-300/10"
-          >
-            Use recommended draft
-          </button>
+          <span>
+            We prefilled this step with carrier-safe Customer Care wording to improve approval chances. Review it and edit anything that does not match {businessName || 'your business'}.
+          </span>
+          {textDiffersFromTemplate && (
+            <button
+              type="button"
+              onClick={applyDraft}
+              className="self-start shrink-0 rounded-[18px] border border-orange-300 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100 dark:border-orange-300/40 dark:text-orange-100 dark:hover:bg-orange-300/10"
+            >
+              Restore recommended draft
+            </button>
+          )}
         </div>
       </div>
 
@@ -369,6 +382,9 @@ export default function SmsUseCaseForm({
           <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
             Carriers block or manually review some business types and website content before SMS can be submitted.
           </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-[#888]">
+            Examples include lead generation, SEO services, affiliate marketing, cannabis/CBD, gambling, payday loans or debt relief, adult/dating, firearms, political messaging, and other regulated services.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -453,6 +469,18 @@ export default function SmsUseCaseForm({
   );
 }
 
+function normalizeDraftText(value: string | null | undefined): string {
+  return (value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeSampleMessages(
+  samples: { value: string }[] | null | undefined
+): string {
+  return (samples ?? [])
+    .map((sample) => normalizeDraftText(sample.value))
+    .join('\n');
+}
+
 function ChecklistRadio({
   register,
   value,
@@ -482,6 +510,7 @@ function ChecklistRadio({
 
 function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
   const isBlocked = review.status === 'blocked';
+  const visibleFindings = dedupeRiskFindingsByCategory(review.findings).slice(0, 3);
   return (
     <div className={`rounded-[18px] border px-4 py-3 text-sm ${
       isBlocked
@@ -493,13 +522,25 @@ function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
       </p>
       <p className="mt-1">{review.message}</p>
       {review.reason && <p className="mt-1 text-xs opacity-90">{review.reason}</p>}
-      {review.findings.length > 0 && (
+      {visibleFindings.length > 0 && (
         <ul className="mt-2 space-y-1 text-xs">
-          {review.findings.slice(0, 3).map((finding) => (
-            <li key={finding.ruleId}>{finding.label}</li>
+          {visibleFindings.map((finding) => (
+            <li key={finding.category || finding.ruleId}>{finding.label}</li>
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+function dedupeRiskFindingsByCategory(
+  findings: A2pRiskFinding[]
+): A2pRiskFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    const key = finding.category || finding.label || finding.ruleId;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
