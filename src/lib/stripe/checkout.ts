@@ -1,11 +1,15 @@
 import { stripe } from "./client";
 import { createClient } from "@/lib/supabase/server";
+import type { SubscriptionPlan } from "@/types/database";
 
 export async function createCheckoutSession(
   businessId: string,
-  priceId: string,
+  plan: SubscriptionPlan,
+  planPriceId: string,
+  setupFeePriceId: string,
   successUrl: string,
-  cancelUrl: string
+  cancelUrl: string,
+  mode: "onboarding" | "billing" = "billing"
 ): Promise<string | null> {
   const supabase = await createClient();
 
@@ -33,13 +37,33 @@ export async function createCheckoutSession(
     customerId = customer.id;
   }
 
+  await Promise.all([
+    assertTestModePrice(planPriceId),
+    assertTestModePrice(setupFeePriceId),
+  ]);
+
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
     mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [
+      { price: planPriceId, quantity: 1 },
+      { price: setupFeePriceId, quantity: 1 },
+    ],
     success_url: successUrl,
     cancel_url: cancelUrl,
-    metadata: { business_id: businessId },
+    subscription_data: {
+      metadata: {
+        business_id: businessId,
+        plan,
+        mode,
+      },
+    },
+    metadata: {
+      business_id: businessId,
+      plan,
+      mode,
+      setup_fee_price_id: setupFeePriceId,
+    },
   });
 
   return session.url;
@@ -55,4 +79,13 @@ export async function createBillingPortalSession(
   });
 
   return session.url;
+}
+
+async function assertTestModePrice(priceId: string): Promise<void> {
+  const price = await stripe.prices.retrieve(priceId);
+  if (price.livemode) {
+    throw new Error(
+      `Stripe live-mode price ${priceId} is disabled for Phase 9. Use test-mode prices until live mode is explicitly enabled.`
+    );
+  }
 }

@@ -17,8 +17,8 @@ export async function runFullRegistration(businessId: string): Promise<void> {
     );
   }
 
-  await createMessagingProfile(businessId);
-  await createVoiceApplication(businessId);
   await registerBrand(businessId);
   await registerCampaign(businessId);
+  await createMessagingProfile(businessId);
+  await createVoiceApplication(businessId);
 }

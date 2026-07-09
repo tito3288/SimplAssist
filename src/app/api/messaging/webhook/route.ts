@@ -8,6 +8,12 @@ import { processIncomingMessage } from "@/lib/ai/engine";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
 import type { SmsBlockReason } from "@/types/database";
+import {
+  preflightOutboundSms,
+  recordInboundMessagingUsage,
+  recordOutboundSmsUsage,
+  type UsageBlockReason,
+} from "@/lib/billing/usage";
 
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
@@ -87,7 +93,11 @@ export async function POST(request: NextRequest) {
   // Threshold of 5 chars treats one-emoji or one-word captions as "no text".
   if (media.length > 0 && text.trim().length < 5) {
     console.log("[messaging:webhook] MMS without substantive text, sending fallback");
-    sendFallbackReply(to, from).catch((err) => {
+    sendFallbackReply(to, from, {
+      inboundText: text,
+      mediaCount: media.length,
+      eventId,
+    }).catch((err) => {
       console.error("[messaging:webhook] Failed to send MMS fallback:", err);
     });
     return new NextResponse("OK", { status: 200 });
@@ -109,6 +119,16 @@ export async function POST(request: NextRequest) {
   }
 
   const businessId = phoneNumberRow.business_id;
+  await recordInboundMessagingUsage({
+    businessId,
+    text,
+    mediaCount: media.length,
+    source: "telnyx_message_received",
+    providerEventId: eventId ?? null,
+    metadata: { from, to },
+  }).catch((err) =>
+    console.error("[messaging:webhook] Failed to record inbound usage:", err)
+  );
   console.log(`[messaging:webhook] Resolved businessId=${businessId}, dispatching AI reply`);
 
   // Detached background work: ack now, do AI + reply send in the background.
@@ -122,8 +142,22 @@ export async function POST(request: NextRequest) {
 // `from` here is the business's own number (the webhook's `to`); `to` is the
 // customer who sent the MMS (the webhook's `from`). See call site line 86
 // where the args are intentionally swapped.
-async function sendFallbackReply(from: string, to: string) {
+async function sendFallbackReply(
+  from: string,
+  to: string,
+  inbound: { inboundText: string; mediaCount: number; eventId?: string }
+) {
   const sendContext = await getOutboundSendContext(from);
+  await recordInboundMessagingUsage({
+    businessId: sendContext.businessId,
+    text: inbound.inboundText,
+    mediaCount: inbound.mediaCount,
+    source: "telnyx_mms_received",
+    providerEventId: inbound.eventId ?? null,
+    metadata: { from: to, to: from },
+  }).catch((err) =>
+    console.error("[messaging:webhook] Failed to record MMS inbound usage:", err)
+  );
 
   if (!sendContext.smsReady) {
     console.warn(
@@ -150,6 +184,35 @@ async function sendFallbackReply(from: string, to: string) {
     return;
   }
 
+  const usage = await preflightOutboundSms({
+    businessId: sendContext.businessId,
+    text: MMS_FALLBACK_MESSAGE,
+  });
+  if (!usage.allowed) {
+    console.warn(
+      `[messaging:webhook] MMS fallback blocked by usage gate: reason=${usage.reason} for business ${sendContext.businessId}`
+    );
+    const contact = await findOrCreateContact(
+      sendContext.businessId,
+      to,
+      null,
+      "sms"
+    );
+    const conversation = await getOrCreateConversation(
+      sendContext.businessId,
+      contact.id,
+      "sms"
+    );
+    await insertPausedSystemMessageIfNeeded({
+      conversationId: conversation.id,
+      businessId: sendContext.businessId,
+      channel: "sms",
+      context: "mms_fallback",
+      reason: usageToPausedReason(usage.reason),
+    });
+    return;
+  }
+
   if (!sendContext.messagingProfileId) {
     throw new Error(
       `[messaging:webhook] Missing messaging profile for ${from}`
@@ -164,6 +227,16 @@ async function sendFallbackReply(from: string, to: string) {
     type: "SMS",
   });
   console.log(`[messaging:webhook] MMS fallback sent, telnyxId=${result.data?.id}`);
+  await recordOutboundSmsUsage({
+    businessId: sendContext.businessId,
+    text: MMS_FALLBACK_MESSAGE,
+    source: "mms_fallback",
+    providerMessageId: result.data?.id ?? null,
+    idempotencyKey: result.data?.id
+      ? `outbound:mms_fallback:${result.data.id}`
+      : undefined,
+    metadata: { from, to },
+  });
 }
 
 async function processAndReply(
@@ -223,7 +296,9 @@ async function processAndReply(
     from,
     null,
     text,
-    "sms"
+    "sms",
+    null,
+    { persistAssistant: false }
   );
   console.log(`[messaging:webhook] AI reply generated (length=${aiResponse.length})`);
 
@@ -243,6 +318,30 @@ async function processAndReply(
     ? `${aiResponse}\n\nReply STOP to opt out.`
     : aiResponse;
 
+  const usage = await preflightOutboundSms({
+    businessId,
+    text: finalReply,
+  });
+  if (!usage.allowed) {
+    console.warn(
+      `[messaging:webhook] AI reply blocked by usage gate: reason=${usage.reason} for business ${businessId}`
+    );
+    const contact = await findOrCreateContact(businessId, from, null, "sms");
+    const conversation = await getOrCreateConversation(
+      businessId,
+      contact.id,
+      "sms"
+    );
+    await insertPausedSystemMessageIfNeeded({
+      conversationId: conversation.id,
+      businessId,
+      channel: "sms",
+      context: "ai_reply",
+      reason: usageToPausedReason(usage.reason),
+    });
+    return;
+  }
+
   console.log(`[messaging:webhook] Sending reply via Telnyx`);
   const result = await telnyx.messages.send({
     from: to,
@@ -252,6 +351,23 @@ async function processAndReply(
     type: "SMS",
   });
   console.log(`[messaging:webhook] Reply sent, telnyxId=${result.data?.id}`);
+  const contact = await findOrCreateContact(businessId, from, null, "sms");
+  const conversation = await getOrCreateConversation(
+    businessId,
+    contact.id,
+    "sms"
+  );
+  await addMessage(conversation.id, businessId, "assistant", finalReply, "sms");
+  await recordOutboundSmsUsage({
+    businessId,
+    text: finalReply,
+    source: "ai_reply",
+    providerMessageId: result.data?.id ?? null,
+    idempotencyKey: result.data?.id
+      ? `outbound:ai_reply:${result.data.id}`
+      : undefined,
+    metadata: { from: to, to: from },
+  });
 }
 
 function toPausedReason(
@@ -260,4 +376,12 @@ function toPausedReason(
   if (reason === "assignment_failed") return "assignment_failed";
   if (reason === "assignment_pending") return "assignment_pending";
   return "campaign_not_approved";
+}
+
+function usageToPausedReason(
+  reason: UsageBlockReason
+): "usage_limit_reached" | "billing_paused" | "submission_disabled" {
+  if (reason === "usage_limit_reached") return "usage_limit_reached";
+  if (reason === "telnyx_submission_disabled") return "submission_disabled";
+  return "billing_paused";
 }

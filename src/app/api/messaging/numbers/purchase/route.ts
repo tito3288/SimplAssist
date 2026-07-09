@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { purchaseNumber } from "@/lib/messaging/numbers";
-import { createMessagingProfile } from "@/lib/messaging/registration/messagingProfile";
-import { createVoiceApplication } from "@/lib/messaging/registration/voiceApplication";
-import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 
 export async function POST(request: NextRequest) {
@@ -85,78 +81,51 @@ export async function POST(request: NextRequest) {
         .update({
           sms_consent_agreed: true,
           sms_consent_agreed_at: now,
+          pending_phone_number: null,
+          pending_phone_number_area_code: null,
+          pending_phone_number_selected_at: null,
+          pending_phone_number_failure_reason: null,
           onboarding_step: "review_submit",
           onboarding_last_saved_at: now,
         })
         .eq("id", business.id);
 
-      try {
-        await ensureCampaignAssignmentForBusiness(business.id, {
-          force: true,
-          reason: "number_purchase_existing",
-        });
-      } catch (assignmentError) {
-        console.error(
-          `[purchase] Existing number ${existingNumber.phone_number} found but assignment helper failed:`,
-          assignmentError
-        );
-      }
-
       return NextResponse.json({ number: existingNumber });
     }
 
-    await createMessagingProfile(business.id);
-    await createVoiceApplication(business.id);
-
-    const purchased = await purchaseNumber(phoneNumber, business.id);
-    console.log(
-      `[purchase] Telnyx order for ${purchased.phoneNumber} status=${purchased.status} id=${purchased.phoneNumberId}`
-    );
-
-    const { data: record, error: insertError } = await supabase
-      .from("phone_numbers")
-      .insert({
-        business_id: business.id,
-        phone_number: purchased.phoneNumber,
-        telnyx_phone_number_id: purchased.phoneNumberId,
-        is_active: true,
+    const now = new Date().toISOString();
+    const areaCode = phoneNumber.replace(/^\+?1?/, "").slice(0, 3);
+    const { data: record, error: updateError } = await supabase
+      .from("businesses")
+      .update({
+        sms_consent_agreed: true,
+        sms_consent_agreed_at: now,
+        pending_phone_number: phoneNumber,
+        pending_phone_number_area_code: areaCode,
+        pending_phone_number_selected_at: now,
+        pending_phone_number_failure_reason: null,
+        onboarding_step: "review_submit",
+        onboarding_last_saved_at: now,
       })
-      .select()
+      .eq("id", business.id)
+      .select("pending_phone_number")
       .single();
 
-    if (insertError) {
-      console.error("Error saving number:", insertError);
+    if (updateError || !record?.pending_phone_number) {
+      console.error("Error saving selected number:", updateError);
       return NextResponse.json(
-        { error: "Number purchased but failed to save" },
+        { error: "Failed to save selected number" },
         { status: 500 }
       );
     }
 
-    const now = new Date().toISOString();
-    await supabase.from("businesses").update({
-      sms_consent_agreed: true,
-      sms_consent_agreed_at: now,
-      onboarding_step: "review_submit",
-      onboarding_last_saved_at: now,
-    }).eq("id", business.id);
-
-    try {
-      await ensureCampaignAssignmentForBusiness(business.id, {
-        force: true,
-        reason: "number_purchase",
-      });
-    } catch (assignmentError) {
-      console.error(
-        `[purchase] Number ${purchased.phoneNumber} saved but assignment helper failed:`,
-        assignmentError
-      );
-    }
-
-    return NextResponse.json({ number: record });
+    return NextResponse.json({
+      number: { phone_number: record.pending_phone_number, pending: true },
+    });
   } catch (error) {
-    console.error("Error purchasing number:", error);
+    console.error("Error selecting number:", error);
     return NextResponse.json(
-      { error: "Failed to purchase number" },
+      { error: "Failed to select number" },
       { status: 500 }
     );
   }

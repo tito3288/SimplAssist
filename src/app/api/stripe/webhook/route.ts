@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe/client";
-import { createClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
-
-// Use service role client since webhooks don't have user auth
-function getServiceClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
+import { stripe } from "@/lib/stripe/client";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  syncCheckoutSession,
+  syncStripeSubscription,
+} from "@/lib/stripe/subscriptionSync";
+import { attemptPaidLaunch } from "@/lib/billing/launch";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
@@ -23,7 +20,6 @@ export async function POST(request: NextRequest) {
   }
 
   let event: Stripe.Event;
-
   try {
     event = stripe.webhooks.constructEvent(
       body,
@@ -32,105 +28,137 @@ export async function POST(request: NextRequest) {
     );
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
-    return NextResponse.json(
-      { error: "Invalid signature" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  const supabase = getServiceClient();
+  const claimed = await claimStripeEvent(event);
+  if (!claimed) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
 
   try {
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const businessId = session.metadata?.business_id;
-        const customerId = session.customer as string;
-        const subscriptionId = session.subscription as string;
-
-        if (!businessId) break;
-
-        // Retrieve subscription to get plan details and period
-        const sub = await stripe.subscriptions.retrieve(subscriptionId);
-        const priceId = sub.items.data[0]?.price.id;
-
-        // Determine plan from price ID
-        const { STRIPE_PRICE_IDS } = await import("@/lib/stripe/config");
-        let plan: string = "sms_only";
-        for (const [key, value] of Object.entries(STRIPE_PRICE_IDS)) {
-          if (value === priceId) {
-            plan = key;
-            break;
-          }
-        }
-
-        await supabase.from("subscriptions").upsert(
-          {
-            business_id: businessId,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
-            plan,
-            status: "active",
-            current_period_start: new Date(
-              sub.items.data[0].current_period_start * 1000
-            ).toISOString(),
-            current_period_end: new Date(
-              sub.items.data[0].current_period_end * 1000
-            ).toISOString(),
-          },
-          { onConflict: "business_id" }
-        );
-        break;
-      }
-
-      case "customer.subscription.updated": {
-        const sub = event.data.object as Stripe.Subscription;
-        const customerId = sub.customer as string;
-
-        await supabase
-          .from("subscriptions")
-          .update({
-            status: sub.status === "active" ? "active" : sub.status,
-            current_period_start: new Date(
-              sub.items.data[0].current_period_start * 1000
-            ).toISOString(),
-            current_period_end: new Date(
-              sub.items.data[0].current_period_end * 1000
-            ).toISOString(),
-          })
-          .eq("stripe_customer_id", customerId);
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-        const customerId = sub.customer as string;
-
-        await supabase
-          .from("subscriptions")
-          .update({ status: "canceled" })
-          .eq("stripe_customer_id", customerId);
-        break;
-      }
-
-      case "invoice.payment_failed": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-
-        await supabase
-          .from("subscriptions")
-          .update({ status: "past_due" })
-          .eq("stripe_customer_id", customerId);
-        break;
-      }
-    }
-
+    await processStripeEvent(event);
+    await markStripeEventProcessed(event.id);
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Webhook handler error:", error);
+    await markStripeEventFailed(event.id, errorMessage(error));
     return NextResponse.json(
       { error: "Webhook handler failed" },
       { status: 500 }
     );
   }
+}
+
+async function processStripeEvent(event: Stripe.Event): Promise<void> {
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (!session.id.startsWith("cs_test_")) {
+        throw new Error("Live-mode Checkout Sessions are disabled for Phase 9");
+      }
+      const synced = await syncCheckoutSession(session);
+      if (synced) {
+        await attemptPaidLaunch(synced.businessId, "stripe_webhook");
+      }
+      return;
+    }
+
+    case "customer.subscription.created":
+    case "customer.subscription.updated": {
+      await syncStripeSubscription(event.data.object as Stripe.Subscription);
+      return;
+    }
+
+    case "customer.subscription.deleted": {
+      await syncStripeSubscription(event.data.object as Stripe.Subscription);
+      return;
+    }
+
+    case "invoice.payment_succeeded": {
+      const invoice = event.data.object as Stripe.Invoice;
+      const subscriptionId = resolveInvoiceSubscriptionId(invoice);
+      if (!subscriptionId) return;
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      await syncStripeSubscription(subscription);
+      return;
+    }
+
+    case "invoice.payment_failed": {
+      const invoice = event.data.object as Stripe.Invoice;
+      const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+      if (!customerId) return;
+      const { error } = await supabaseAdmin
+        .from("subscriptions")
+        .update({ status: "past_due", updated_at: new Date().toISOString() })
+        .eq("stripe_customer_id", customerId);
+      if (error) {
+        throw new Error(
+          `[stripe:webhook] Failed to mark customer ${customerId} past_due: ${error.message}`
+        );
+      }
+      return;
+    }
+
+    default:
+      return;
+  }
+}
+
+async function claimStripeEvent(event: Stripe.Event): Promise<boolean> {
+  const { error } = await supabaseAdmin.from("stripe_webhook_events").insert({
+    id: event.id,
+    event_type: event.type,
+  });
+
+  if (!error) return true;
+  if (error.code === "23505") return false;
+  throw new Error(
+    `[stripe:webhook] Failed to claim event ${event.id}: ${error.message}`
+  );
+}
+
+async function markStripeEventProcessed(eventId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("stripe_webhook_events")
+    .update({ processed_at: new Date().toISOString(), processing_error: null })
+    .eq("id", eventId);
+
+  if (error) {
+    console.error(
+      `[stripe:webhook] Failed to mark event ${eventId} processed:`,
+      error
+    );
+  }
+}
+
+async function markStripeEventFailed(
+  eventId: string,
+  message: string
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("stripe_webhook_events")
+    .update({ processing_error: message })
+    .eq("id", eventId);
+
+  if (error) {
+    console.error(`[stripe:webhook] Failed to mark event ${eventId} failed:`, error);
+  }
+}
+
+function resolveInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const legacySubscription = (invoice as Stripe.Invoice & { subscription?: unknown })
+    .subscription;
+  const id =
+    typeof legacySubscription === "string"
+      ? legacySubscription
+      : typeof invoice.parent?.subscription_details?.subscription === "string"
+        ? invoice.parent.subscription_details.subscription
+        : null;
+  return id;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

@@ -1,8 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from "react";
 import { getUsStateName } from '@/lib/usStates';
+import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import type { OnboardingState } from '@/lib/onboarding/types';
+import type { SubscriptionPlan } from '@/types/database';
 
 interface ReviewData {
   businessInfo: {
@@ -48,10 +50,21 @@ interface ReviewData {
 
 interface ReviewAndLaunchProps {
   data: ReviewData;
+  billing: OnboardingState["billing"];
+  registration: OnboardingState["registration"];
+  pendingPhoneNumberFailureReason: string | null;
   onEditStep: (step: number) => void;
   onBack: () => void;
   onSubmitted: (state: OnboardingState | null) => void;
+  onLaunchBlocked: (state: OnboardingState | null) => void;
 }
+
+type PaidLaunchHold = {
+  message: string;
+  action: "none" | "choose_number" | "retry";
+  buttonLabel?: string;
+  helper?: string;
+};
 
 const TONE_LABELS: Record<string, string> = {
   friendly: 'Friendly & Casual',
@@ -103,9 +116,43 @@ function maskEin(ein: string): string {
   return `${ein.slice(0, 2)}-***-${ein.slice(-4)}`;
 }
 
-export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted }: ReviewAndLaunchProps) {
+export default function ReviewAndLaunch({
+  data,
+  billing,
+  registration,
+  pendingPhoneNumberFailureReason,
+  onEditStep,
+  onBack,
+  onSubmitted,
+  onLaunchBlocked,
+}: ReviewAndLaunchProps) {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(
+    billing.plan ?? 'sms_and_chat'
+  );
+  const subscribedPlan =
+    billing.plan && billing.status !== 'canceled' ? billing.plan : null;
+  const isPaidSubscription = Boolean(
+    subscribedPlan && (billing.status === 'active' || billing.status === 'trialing')
+  );
+  const paidPlan = subscribedPlan ? SUBSCRIPTION_PLANS[subscribedPlan] : null;
+  const launchHold = isPaidSubscription
+    ? classifyPaidLaunchHold(registration, pendingPhoneNumberFailureReason)
+    : null;
+  const primaryButtonLabel = primaryLaunchButtonLabel({
+    data,
+    isPaidSubscription,
+    launchHold,
+    launching,
+  });
+  const showPrimaryButton = !launchHold || launchHold.action !== 'none';
+
+  useEffect(() => {
+    if (billing.plan) {
+      setSelectedPlan(billing.plan);
+    }
+  }, [billing.plan]);
 
   const handleLaunch = async () => {
     setError(null);
@@ -118,33 +165,41 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
     setLaunching(true);
 
     try {
-      const res = await fetch('/api/onboarding/submit-registration', {
+      const res = await fetch('/api/billing/checkout', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: subscribedPlan ?? selectedPlan, mode: 'onboarding' }),
       });
       const response = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
         error?: string;
         code?: string;
+        inProgress?: boolean;
         state?: OnboardingState | null;
+        url?: string;
       };
 
       if (!res.ok) {
-        if (response.state?.registration.status === 'failed') {
-          onSubmitted(response.state);
-          return;
-        }
-
-        setError(response.error || 'Could not submit SMS registration right now.');
-        if (response.code === 'missing_phone_number') {
-          onEditStep(7);
-        } else if (response.code === 'a2p_risk_review_required') {
-          onEditStep(6);
+        setError(response.error || 'Could not start checkout right now.');
+        if (response.state) {
+          onLaunchBlocked(response.state);
         }
         return;
       }
 
-      onSubmitted(response.state ?? null);
+      if (response.success) {
+        onSubmitted(response.state ?? null);
+        return;
+      }
+
+      if (response.url) {
+        window.location.href = response.url;
+        return;
+      }
+
+      setError('Could not start checkout right now.');
     } catch {
-      setError('Could not submit SMS registration right now.');
+      setError('Could not start checkout right now.');
     } finally {
       setLaunching(false);
     }
@@ -161,11 +216,78 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Review & Submit</h2>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">
+          {isPaidSubscription ? 'Review & Setup Status' : 'Review & Pay'}
+        </h2>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Submit your SMS registration for carrier review.
+          {isPaidSubscription
+            ? 'Payment is complete. We will finish SMS setup from here without charging you again.'
+            : 'Choose your plan and pay before we submit your SMS registration for carrier review.'}
         </p>
       </div>
+
+      <Section title={isPaidSubscription ? 'Paid Plan' : 'Plan & Setup Fee'}>
+        {isPaidSubscription && paidPlan ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+              <p className="font-medium">{paidPlan.name}</p>
+              <p className="mt-1">
+                ${paidPlan.price}/month · {paidPlan.includedSmsParts.toLocaleString()} included SMS parts/month
+              </p>
+              <p className="mt-1 text-xs">
+                Status: {billing.status}. Setup fee {billing.setupFeePaidAt ? 'paid' : 'not recorded'}.
+              </p>
+            </div>
+            {launchHold && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                <p className="font-medium">SMS setup is paused</p>
+                <p className="mt-1">{launchHold.message}</p>
+                {launchHold.helper && (
+                  <p className="mt-2 text-xs">{launchHold.helper}</p>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {(Object.entries(SUBSCRIPTION_PLANS) as [SubscriptionPlan, (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan]][]).map(([key, plan]) => {
+              const today = plan.price + 25;
+              return (
+                <label
+                  key={key}
+                  className={`block cursor-pointer rounded-lg border p-3 text-sm ${
+                    selectedPlan === key
+                      ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
+                      : 'border-slate-200 dark:border-white/[0.10]'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="subscription-plan"
+                    value={key}
+                    checked={selectedPlan === key}
+                    onChange={() => setSelectedPlan(key)}
+                    className="sr-only"
+                  />
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-slate-900 dark:text-[#f5f5f5]">{plan.name}</span>
+                    <span className="text-slate-700 dark:text-[#d8d8d8]">${today} today</span>
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+                    Then ${plan.price}/month. Includes {plan.includedSmsParts.toLocaleString()} SMS parts/month.
+                  </span>
+                </label>
+              );
+            })}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
+              <p className="font-medium text-slate-800 dark:text-[#f5f5f5]">$25 one-time setup and SMS activation fee</p>
+              <p className="mt-1">
+                We use this to verify your business, register your SMS sending with carriers, activate your phone number, and set up compliance pages so your messages can be delivered reliably.
+              </p>
+            </div>
+          </div>
+        )}
+      </Section>
 
       {/* Business Info */}
       <Section title="Business Info" onEdit={() => onEditStep(1)}>
@@ -305,33 +427,116 @@ export default function ReviewAndLaunch({ data, onEditStep, onBack, onSubmitted 
         >
           Back
         </button>
-        <button
-          onClick={handleLaunch}
-          disabled={launching}
-          className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
-        >
-          {launching
-            ? 'Submitting...'
-            : data.phoneNumber
-              ? 'Submit SMS registration'
-              : 'Choose number to submit'}
-        </button>
+        {showPrimaryButton && (
+          <button
+            onClick={
+              launchHold?.action === 'choose_number'
+                ? () => onEditStep(7)
+                : handleLaunch
+            }
+            disabled={launching && launchHold?.action !== 'choose_number'}
+            className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
+          >
+            {primaryButtonLabel}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function Section({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) {
+function classifyPaidLaunchHold(
+  registration: OnboardingState["registration"],
+  pendingPhoneNumberFailureReason: string | null
+): PaidLaunchHold | null {
+  if (pendingPhoneNumberFailureReason || isNumberUnavailable(registration.error)) {
+    return {
+      message:
+        "The number you selected is no longer available. Choose a new number to continue.",
+      action: "choose_number",
+      buttonLabel: "Choose a new number",
+    };
+  }
+
+  if (isSubmissionDisabled(registration.error)) {
+    return {
+      message: "SMS setup is paused. Contact SimplAssist support to continue.",
+      action: "none",
+    };
+  }
+
+  if (
+    registration.riskReview.status === "pending_review" ||
+    registration.riskReview.status === "blocked" ||
+    isRiskReviewHold(registration.error)
+  ) {
+    return {
+      message:
+        "We're reviewing your setup before submitting to carriers. No action needed. We'll email you.",
+      action: "none",
+    };
+  }
+
+  if (registration.status !== "failed") {
+    return null;
+  }
+
+  return {
+    message:
+      registration.error ??
+      "SMS setup could not finish automatically. You can continue setup when ready.",
+    action: "retry",
+    buttonLabel: "Continue SMS setup",
+    helper: "You won't be charged again.",
+  };
+}
+
+function primaryLaunchButtonLabel(args: {
+  data: ReviewData;
+  isPaidSubscription: boolean;
+  launchHold: PaidLaunchHold | null;
+  launching: boolean;
+}): string {
+  const { data, isPaidSubscription, launchHold, launching } = args;
+  if (launchHold?.buttonLabel) return launchHold.buttonLabel;
+  if (launching) {
+    return isPaidSubscription ? "Checking setup..." : "Opening checkout...";
+  }
+  if (!data.phoneNumber) return "Choose number to submit";
+  return isPaidSubscription ? "Continue SMS setup" : "Pay & submit SMS registration";
+}
+
+function isSubmissionDisabled(message: string | null): boolean {
+  return /sms registration is disabled|submission disabled|telnyx submission disabled/i.test(
+    message ?? ""
+  );
+}
+
+function isNumberUnavailable(message: string | null): boolean {
+  return /number.*(no longer available|unavailable|taken)|choose another number/i.test(
+    message ?? ""
+  );
+}
+
+function isRiskReviewHold(message: string | null): boolean {
+  return /sms use-case review|a2p.*review|reviewing your setup|manual review/i.test(
+    message ?? ""
+  );
+}
+
+function Section({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {
   return (
     <div className="rounded-[22px] bg-white/50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] p-4">
       <div className="flex justify-between items-center mb-3">
         <h3 className="font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</h3>
-        <button
-          onClick={onEdit}
-          className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
-        >
-          Edit
-        </button>
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
+          >
+            Edit
+          </button>
+        )}
       </div>
       <div className="space-y-2">{children}</div>
     </div>

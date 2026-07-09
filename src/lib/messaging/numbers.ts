@@ -113,6 +113,43 @@ export async function purchaseNumber(
   };
 }
 
+export async function attachOwnedNumberToCustomerProfile(
+  businessId: string,
+  phoneNumberId: string
+): Promise<void> {
+  const { data: business, error: readError } = await supabaseAdmin
+    .from("businesses")
+    .select("telnyx_messaging_profile_id, telnyx_voice_application_id")
+    .eq("id", businessId)
+    .single();
+
+  if (readError || !business) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} not found: ${readError?.message ?? "not found"}`
+    );
+  }
+
+  if (!business.telnyx_messaging_profile_id) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} has no telnyx_messaging_profile_id — cannot attach owned number`
+    );
+  }
+
+  if (!business.telnyx_voice_application_id) {
+    throw new Error(
+      `[messaging:numbers] Business ${businessId} has no telnyx_voice_application_id — cannot attach owned number`
+    );
+  }
+
+  await telnyx.phoneNumbers.update(phoneNumberId, {
+    connection_id: business.telnyx_voice_application_id,
+    customer_reference: businessId,
+  });
+  await telnyx.phoneNumbers.messaging.update(phoneNumberId, {
+    messaging_profile_id: business.telnyx_messaging_profile_id,
+  });
+}
+
 export async function releaseNumber(phoneNumberId: string): Promise<void> {
   await telnyx.phoneNumbers.delete(phoneNumberId);
 }

@@ -6,6 +6,10 @@ import {
   smsBlockCode,
   smsBlockMessage,
 } from "@/lib/messaging/lookup";
+import {
+  preflightOutboundSms,
+  recordOutboundSmsUsage,
+} from "@/lib/billing/usage";
 
 export async function POST(request: NextRequest) {
   try {
@@ -79,12 +83,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const usage = await preflightOutboundSms({ businessId, text: message });
+    if (!usage.allowed) {
+      return NextResponse.json(
+        { error: usage.reason, message: usage.message },
+        { status: 403 }
+      );
+    }
+
     const result = await telnyx.messages.send({
       to,
       from: phoneNumberRow.phone_number,
       text: message,
       messaging_profile_id: sendContext.messagingProfileId,
       type: "SMS",
+    });
+
+    await recordOutboundSmsUsage({
+      businessId,
+      text: message,
+      source: "manual_dashboard_send",
+      providerMessageId: result.data?.id ?? null,
+      idempotencyKey: result.data?.id
+        ? `outbound:manual:${result.data.id}`
+        : undefined,
+      metadata: { to, from: phoneNumberRow.phone_number },
     });
 
     return NextResponse.json({ success: true, id: result.data?.id });

@@ -275,6 +275,14 @@ export async function POST(request: NextRequest) {
     riskResult.registrationStarted ||
     riskResult.status === "passed" ||
     riskResult.status === "admin_approved";
+  const preSubmissionRecoveryPayload = !riskResult.registrationStarted
+    ? {
+        onboarding_registration_status: "not_started" as const,
+        onboarding_registration_error: null,
+        onboarding_registration_started_at: null,
+        onboarding_registration_submitted_at: null,
+      }
+    : {};
 
   if (!riskCleared) {
     const { error: draftError } = await supabaseAdmin
@@ -310,6 +318,7 @@ export async function POST(request: NextRequest) {
       .update({
         ...editablePayload,
         ...(slugForUpdate ? { slug: slugForUpdate } : {}),
+        ...preSubmissionRecoveryPayload,
         compliance_info_completed_at: now,
         onboarding_step: "phone_number" as const,
       })
@@ -336,6 +345,7 @@ export async function POST(request: NextRequest) {
       .from("businesses")
       .update({
         ...editablePayload,
+        ...preSubmissionRecoveryPayload,
         compliance_info_completed_at: business.compliance_info_completed_at ?? now,
         onboarding_step: "phone_number" as const,
       })

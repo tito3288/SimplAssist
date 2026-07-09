@@ -433,6 +433,8 @@ This replaces the curl workflow while keeping the token endpoint as a backup pat
 
 Phase 9's internal/admin visibility work builds on Phase 8.5. Billing, usage, gross-margin, pilot/comped account controls, and high-usage visibility should live inside the same `/admin` area rather than creating a separate staff surface.
 
+Before switching billing live or onboarding a real customer, complete the **Pre-Launch Checklist** after Phase 11.
+
 Brand registration costs by tier:
 - Sole Proprietor brand: free or ~$2 one-time
 - Low Volume Standard brand: ~$4 one-time (**confirmed actual cost** — earlier $15 estimates were wrong; most SimplAssist customers land here)
@@ -586,9 +588,9 @@ Migration requirements:
 
 ---
 
-## Phase 10 — Number Purchasing Timing 🔒 (decision locked, implementation pending)
+## Phase 10 — Number Purchasing Timing 🔒 (decision superseded by Phase 9)
 
-**Locked decision:** number purchased immediately during onboarding (current flow). SimplAssist eats ~$1.20/customer in wasted phone cost during the 1–5 day approval window — acceptable tradeoff for onboarding momentum vs forcing a "pick number after approval" wait.
+**Updated decision:** number purchase now happens at paid launch, after checkout succeeds and after brand/campaign submission, but still before carrier approval. This supersedes the earlier "immediately during onboarding" timing while preserving onboarding momentum and avoiding any paid Telnyx number purchase before payment.
 
 ---
 
@@ -638,6 +640,26 @@ The "email 10dlcquestions@telnyx.com" workflow in some docs is a **manual fallba
 **Implementation cost:** supporting both paths is ~1.5x the work (not 2x). Shared: form skeleton, status UI, webhook handlers, schema. Diverging: brand registration call shape, OTP collection step, rejection handling, limit messaging.
 
 **On startup, grep `telnyx_registration_events` for `audit_only_phase_11_otp` rows** — `BRAND_OTP_VERIFIED` events that arrived before Phase 11 was built are waiting there (Phase 4 note).
+
+After Phase 11 is complete and tested, complete the **Pre-Launch Checklist** before the first real customer.
+
+---
+
+## Pre-Launch Checklist 🔒
+
+Required steps between "Phase 11 complete and tested" and "first real customer":
+
+1. [ ] **Stripe LIVE mode setup:** recreate all 5 products/prices in live mode: 3 monthly plans at $25 / $45 / $65, the $25 one-time setup fee, and the $0.03 SMS overage part. Put the live price IDs plus the `sk_live_...` secret key in Railway.
+2. [ ] **Live webhook endpoint:** create a Stripe Dashboard webhook endpoint in live mode for the production domain at `/api/stripe/webhook`. Subscribe it to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, and `invoice.payment_failed`. Put its `whsec_...` signing secret in Railway.
+3. [ ] **Code change:** remove the test-mode-only guard (`sk_live` rejection plus test-price `livemode` assertion). This must be a deliberate commit via the standard plan → review → implement flow.
+4. [ ] **Regenerate `A2P_REVIEW_ADMIN_TOKEN` in Railway.** The current value was exposed in screenshots.
+5. [ ] **Alpha Dog recovery:** create a replacement campaign under its approved brand, repoint `telnyx_campaign_id`, and keep the rejected campaign as history. This follows the locked strategy from 2026-07-05.
+5b. [ ] **Build call forwarding feature (plan → review → implement):** call forwarding is confirmed to require implementation, not configuration. Portal forwarding is unavailable for numbers attached to voice applications. Build it programmatically: answer inbound → bridge to the owner's number with a short ring timeout → on no-answer, existing missed-call flow takes over. Add a per-business dashboard setting (toggle + forward-to number), voicemail-steal mitigation via short timeout, and a margin note because both call legs are billed per minute.
+6. [ ] **Fresh clean-account EIN test on REAL Telnyx:** create a new account with a real EIN, real payment, and `telnyx_submission_disabled = false`; run the full pipeline through carrier review to SMS-ready. Expect roughly $14 in real fees. This is the locked end-to-end validation before any customer.
+6b. [ ] **Post-approval product validation on the real EIN account:** verify inbound SMS gets an AI reply using that business's real context; missed call triggers the auto-text and AI follow-up conversation; STOP opt-out is honored; conversations and usage are recorded in the dashboard/meter; and call forwarding from the Telnyx number to the owner's real phone is working.
+7. [ ] **Re-verify pricing before launch:** re-check Telnyx SMS/MMS/number costs, Stripe fees, and margin math from the Phase 9 pricing note.
+8. [ ] **Production smoke pass:** verify the admin console, checkout with a real card (refund after), and customer-visible usage display.
+9. [ ] **Only after all above:** onboard the first real customer. Do not onboard many customers before validating billing behavior on the first ones.
 
 ---
 

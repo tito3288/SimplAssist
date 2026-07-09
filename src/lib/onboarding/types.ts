@@ -12,6 +12,8 @@ import type {
   OnboardingStep,
   RegistrationStatus,
   SmsBlockReason,
+  SubscriptionPlan,
+  SubscriptionStatus,
 } from "@/types/database";
 
 export type { OnboardingStep } from "@/types/database";
@@ -36,7 +38,7 @@ export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   legal_verification: "Business Verification",
   sms_use_case: "SMS Use Case",
   phone_number: "Phone Number",
-  review_submit: "Review & Submit",
+  review_submit: "Review & Pay",
   carrier_review: "Carrier Review",
   complete: "Complete",
 };
@@ -121,6 +123,14 @@ export interface OnboardingRegistrationSnapshot {
   riskReview: OnboardingRiskReviewSnapshot;
 }
 
+export interface OnboardingBillingSnapshot {
+  plan: SubscriptionPlan | null;
+  status: SubscriptionStatus | null;
+  setupFeePaidAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+}
+
 export interface OnboardingRiskReviewSnapshot {
   status: A2pRiskReviewStatus;
   storedStatus: A2pRiskReviewStatus | null;
@@ -153,7 +163,11 @@ export interface OnboardingState {
   aiSettings: OnboardingAiSettings | null;
   brandVerification: OnboardingBrandVerification | null;
   phoneNumber: string | null;
+  activePhoneNumber: string | null;
+  pendingPhoneNumber: string | null;
+  pendingPhoneNumberFailureReason: string | null;
   smsConsentAgreed: boolean;
+  billing: OnboardingBillingSnapshot;
   registration: OnboardingRegistrationSnapshot;
 }
 

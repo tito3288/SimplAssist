@@ -32,23 +32,31 @@ function supportContact(business: SmsComplianceBusiness): string {
 export function buildSmsComplianceCopy({
   business,
   smsPhoneNumber,
+  smsEntryPoint,
   privacyUrl,
 }: {
   business: SmsComplianceBusiness;
-  smsPhoneNumber: string;
+  smsPhoneNumber?: string | null;
+  smsEntryPoint?: string | null;
   privacyUrl: string;
 }): SmsComplianceCopy {
   const brandName = business.name.trim();
   const contact = supportContact(business);
+  const smsNumberDescription =
+    cleanText(smsPhoneNumber) ??
+    "the business's published SimplAssist SMS number";
+  const entryPointDescription =
+    cleanText(smsEntryPoint) ??
+    "the business's SimplAssist contact page";
 
   const optinPaths = [
     `${brandName} offers two customer-initiated SMS opt-in paths.`,
-    `Inbound SMS opt-in: customers text ${smsPhoneNumber}, the ${brandName} SMS number, to ask a question or request service.`,
-    `Verbal call opt-in: customers call ${smsPhoneNumber}, hear a voicemail disclosure that leaving a message permits a customer-care SMS follow-up, and then leave a voicemail message after the disclosure.`,
+    `Inbound SMS opt-in: customers text ${smsNumberDescription}, which is published at ${entryPointDescription}, to ask a question or request service.`,
+    `Verbal call opt-in: customers call ${smsNumberDescription}, hear a voicemail disclosure that leaving a message permits a customer-care SMS follow-up, and then leave a voicemail message after the disclosure.`,
   ].join(" ");
 
   const programDetails = [
-    `Calls to ${smsPhoneNumber} may be forwarded to ${brandName}.`,
+    `Calls to ${smsNumberDescription} may be forwarded to ${brandName}.`,
     `${brandName} uses SMS for customer care only, including responses to customer questions, missed-call follow-ups, and service coordination.`,
     "Message frequency varies by conversation. Message and data rates may apply.",
     "Reply HELP for help or STOP to opt out.",
@@ -92,6 +100,7 @@ export function renderMissedCallSms({
   const copy = buildSmsComplianceCopy({
     business,
     smsPhoneNumber,
+    smsEntryPoint: smsPhoneNumber,
     privacyUrl: "the business privacy policy",
   });
 

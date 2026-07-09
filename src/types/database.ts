@@ -94,6 +94,13 @@ export type SmsBlockReason =
   | "missing_messaging_profile"
   | "missing_phone_number";
 
+export type BillingLaunchBlockReason =
+  | "not_paid"
+  | "past_due"
+  | "canceled"
+  | "telnyx_submission_disabled"
+  | "usage_limit_reached";
+
 // Matches the CHECK constraint on businesses.privacy_terms_mode in
 // supabase/migrations/015_business_slug_and_compliance_mode.sql. Phase 6.
 export type PrivacyTermsMode = "hosted" | "self_hosted" | "existing";
@@ -154,6 +161,20 @@ export interface Business {
   estimated_monthly_volume: string | null;
   opt_in_description: string | null;
   compliance_info_completed_at: string | null;
+  pending_phone_number: string | null;
+  pending_phone_number_area_code: string | null;
+  pending_phone_number_selected_at: string | null;
+  pending_phone_number_failure_reason: string | null;
+  billing_pilot: boolean;
+  billing_comped: boolean;
+  billing_exempt: boolean;
+  telnyx_submission_disabled: boolean;
+  sms_overage_opt_in: boolean;
+  sms_overage_opted_in_at: string | null;
+  sms_overage_opted_in_by: string | null;
+  billing_admin_notes: string | null;
+  billing_flags_updated_at: string | null;
+  billing_flags_updated_by: string | null;
   onboarding_step: OnboardingStep;
   onboarding_completed_at: string | null;
   onboarding_last_saved_at: string | null;
@@ -327,6 +348,47 @@ export interface Subscription {
   status: SubscriptionStatus;
   current_period_start: string;
   current_period_end: string;
+  stripe_price_id: string | null;
+  stripe_setup_fee_price_id: string | null;
+  stripe_checkout_session_id: string | null;
+  setup_fee_paid_at: string | null;
+  cancel_at_period_end: boolean;
+  pending_plan: SubscriptionPlan | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BillingUsagePeriod {
+  id: string;
+  business_id: string;
+  period_start: string;
+  period_end: string;
+  plan: SubscriptionPlan;
+  included_sms_parts: number;
+  inbound_sms_parts: number;
+  outbound_sms_parts: number;
+  inbound_mms_events: number;
+  outbound_mms_events: number;
+  ai_input_tokens: number;
+  ai_output_tokens: number;
+  warning_80_sent_at: string | null;
+  hard_limit_reached_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BillingUsageEvent {
+  id: string;
+  business_id: string;
+  usage_period_id: string;
+  idempotency_key: string;
+  direction: "inbound" | "outbound";
+  channel: "sms" | "mms";
+  source: string;
+  sms_parts: number;
+  mms_events: number;
+  provider_message_id: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
 }
 

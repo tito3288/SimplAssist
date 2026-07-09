@@ -1,6 +1,5 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getActivePhoneNumberForBusiness } from "@/lib/messaging/numbers";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { appendRegistrationEvent, serializeError } from "./audit";
 import { resolveLegalUrls, type PrivacyTermsMode } from "./legalUrls";
@@ -80,16 +79,12 @@ export async function registerCampaign(businessId: string): Promise<void> {
   // /api/onboarding/brand-verification is the primary safety net; this is
   // defense in depth.
   const { privacyUrl, termsUrl } = resolveLegalUrls(business);
-  const smsPhoneNumber = await getActivePhoneNumberForBusiness(businessId);
-  if (!smsPhoneNumber) {
-    throw new Error(
-      `[registration:campaign] Business ${businessId} must have an active purchased phone number before campaign submission`
-    );
-  }
+  const smsEntryPoint = `${appBaseUrl()}/c/${business.slug}`;
 
   const complianceCopy = buildSmsComplianceCopy({
     privacyUrl,
-    smsPhoneNumber,
+    smsPhoneNumber: null,
+    smsEntryPoint,
     business,
   });
   let campaignPreflightChecked = false;
@@ -208,7 +203,8 @@ export async function registerCampaign(businessId: string): Promise<void> {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
           messageFlow: complianceCopy.messageFlow,
-          smsPhoneNumber,
+          smsPhoneNumber: "number_agnostic_pending_paid_launch",
+          smsEntryPoint,
           optinMessage: complianceCopy.optinMessage,
           optoutMessage: complianceCopy.optoutMessage,
           helpMessage: complianceCopy.helpMessage,
@@ -240,7 +236,8 @@ export async function registerCampaign(businessId: string): Promise<void> {
           privacyPolicyLink: privacyUrl,
           termsAndConditionsLink: termsUrl,
           messageFlow: complianceCopy.messageFlow,
-          smsPhoneNumber,
+          smsPhoneNumber: "number_agnostic_pending_paid_launch",
+          smsEntryPoint,
           optinMessage: complianceCopy.optinMessage,
           optoutMessage: complianceCopy.optoutMessage,
           helpMessage: complianceCopy.helpMessage,

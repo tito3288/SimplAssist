@@ -16,7 +16,7 @@ export type PausedContext = "missed_call" | "ai_reply" | "mms_fallback";
 export type PausedReason = Extract<
   SmsBlockReason,
   "campaign_not_approved" | "assignment_pending" | "assignment_failed"
->;
+> | "usage_limit_reached" | "billing_paused" | "submission_disabled";
 
 const DEDUPE_WINDOW_MINUTES = 30;
 
@@ -94,6 +94,12 @@ function pausedCopy(context: PausedContext, reason: PausedReason): string {
       return `${prefix} - ${PAUSED_MARKER} while Telnyx links this phone number to the approved SMS campaign.`;
     case "assignment_failed":
       return `${prefix} - ${PAUSED_MARKER} because Telnyx phone number assignment needs attention.`;
+    case "usage_limit_reached":
+      return `${prefix} - ${PAUSED_MARKER} because this account has used all included SMS parts for the current billing period.`;
+    case "billing_paused":
+      return `${prefix} - ${PAUSED_MARKER} because the subscription needs attention.`;
+    case "submission_disabled":
+      return `${prefix} - ${PAUSED_MARKER} because SMS registration is disabled for this account.`;
     case "campaign_not_approved":
     default:
       return `${prefix} - ${PAUSED_MARKER} while your SMS campaign is awaiting carrier approval.`;
