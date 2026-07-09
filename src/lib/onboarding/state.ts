@@ -6,12 +6,14 @@ import type {
   A2pRiskChecklistAnswer,
   A2pRiskFinding,
   A2pRiskReviewStatus,
+  A2pBrandTier,
   AITone,
   BusinessEntityType,
   BusinessType,
   BusinessVoice,
   CampaignAssignmentStatus,
   Language,
+  NoEinHoldStatus,
   OnboardingRegistrationStatus,
   OnboardingStep,
   PrivacyTermsMode,
@@ -63,6 +65,10 @@ type BusinessRow = {
   business_entity_type: BusinessEntityType | null;
   business_registration_state: string | null;
   tax_id_type: string | null;
+  has_ein: boolean | null;
+  a2p_brand_tier: A2pBrandTier | null;
+  no_ein_hold_status: NoEinHoldStatus | null;
+  no_ein_waitlist_requested_at: string | null;
   ein: string | null;
   authorized_rep_name: string | null;
   authorized_rep_title: string | null;
@@ -179,6 +185,10 @@ export async function getOnboardingStateForOwner(
         "business_entity_type",
         "business_registration_state",
         "tax_id_type",
+        "has_ein",
+        "a2p_brand_tier",
+        "no_ein_hold_status",
+        "no_ein_waitlist_requested_at",
         "ein",
         "authorized_rep_name",
         "authorized_rep_title",
@@ -259,6 +269,10 @@ export async function getOnboardingStateForBusinessId(
         "business_entity_type",
         "business_registration_state",
         "tax_id_type",
+        "has_ein",
+        "a2p_brand_tier",
+        "no_ein_hold_status",
+        "no_ein_waitlist_requested_at",
         "ein",
         "authorized_rep_name",
         "authorized_rep_title",
@@ -447,6 +461,7 @@ async function getOnboardingStateForBusiness(
     },
     registration: {
       status: normalizeRegistrationStatus(business),
+      holdReason: business.has_ein === true ? null : "held_no_ein",
       startedAt: business.onboarding_registration_started_at,
       submittedAt: business.onboarding_registration_submitted_at,
       error: business.onboarding_registration_error,
@@ -539,6 +554,7 @@ function normalizeBrandVerification(
   business: BusinessRow
 ): OnboardingBrandVerification | null {
   if (
+    business.has_ein === null &&
     !business.legal_business_name &&
     !business.ein &&
     !business.authorized_rep_name &&
@@ -548,6 +564,10 @@ function normalizeBrandVerification(
   }
 
   return {
+    has_ein: business.has_ein,
+    a2p_brand_tier: business.a2p_brand_tier,
+    no_ein_hold_status: business.no_ein_hold_status ?? "none",
+    no_ein_waitlist_requested_at: business.no_ein_waitlist_requested_at,
     legal_business_name: business.legal_business_name ?? "",
     business_entity_type: business.business_entity_type,
     business_registration_state: business.business_registration_state ?? "",
@@ -678,7 +698,8 @@ function hasBusinessInfo(business: BusinessRow): boolean {
 
 function hasLegalVerification(business: BusinessRow): boolean {
   return Boolean(
-    business.legal_business_name &&
+    business.has_ein === true &&
+      business.legal_business_name &&
       business.business_entity_type &&
       business.business_registration_state &&
       business.ein &&

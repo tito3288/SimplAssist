@@ -9,39 +9,104 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
+const IRS_EIN_URL =
+  'https://www.irs.gov/businesses/small-businesses-self-employed/get-an-employer-identification-number';
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
 }
 
-const brandVerificationSchema = z.object({
-  legal_business_name: z.string().min(1, 'Legal business name is required'),
-  business_entity_type: z.enum(['llc', 'c_corp', 's_corp', 'nonprofit', 'partnership'] as const, {
-    message: 'Select an entity type',
-  }),
-  business_registration_state: z
-    .string()
-    .min(2, 'Select the state of registration')
-    .refine((value) => Boolean(normalizeUsStateCode(value)), 'Select a valid state'),
-  ein: z
-    .string()
-    .min(1, 'EIN is required')
-    .regex(EIN_PATTERN, 'EIN must be in the format XX-XXXXXXX'),
-  authorized_rep_name: z
-    .string()
-    .min(1, 'Representative name is required')
-    .refine(
-      hasFirstAndLastName,
-      'Enter the authorized representative\'s first and last name'
-    ),
-  authorized_rep_title: z.string().min(1, 'Representative title is required'),
-  authorized_rep_email: z.string().email('Enter a valid email address'),
-  authorized_rep_phone: z.string().min(10, 'Enter a valid phone number'),
-});
+const brandVerificationSchema = z
+  .object({
+    has_ein: z.enum(['yes', 'no'] as const, {
+      message: 'Choose whether you have an EIN',
+    }),
+    legal_business_name: z.string(),
+    business_entity_type: z
+      .enum(['llc', 'c_corp', 's_corp', 'nonprofit', 'partnership'] as const)
+      .or(z.literal(''))
+      .optional(),
+    business_registration_state: z.string(),
+    ein: z.string(),
+    authorized_rep_name: z.string(),
+    authorized_rep_title: z.string(),
+    authorized_rep_email: z.string(),
+    authorized_rep_phone: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.has_ein !== 'yes') return;
+
+    if (!data.legal_business_name.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['legal_business_name'],
+        message: 'Legal business name is required',
+      });
+    }
+
+    if (!data.business_entity_type) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['business_entity_type'],
+        message: 'Select an entity type',
+      });
+    }
+
+    if (!normalizeUsStateCode(data.business_registration_state)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['business_registration_state'],
+        message: 'Select a valid state',
+      });
+    }
+
+    if (!EIN_PATTERN.test(data.ein)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ein'],
+        message: 'EIN must be in the format XX-XXXXXXX',
+      });
+    }
+
+    if (!hasFirstAndLastName(data.authorized_rep_name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authorized_rep_name'],
+        message: 'Enter the authorized representative\'s first and last name',
+      });
+    }
+
+    if (!data.authorized_rep_title.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authorized_rep_title'],
+        message: 'Representative title is required',
+      });
+    }
+
+    if (!z.string().email().safeParse(data.authorized_rep_email).success) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authorized_rep_email'],
+        message: 'Enter a valid email address',
+      });
+    }
+
+    if (data.authorized_rep_phone.trim().length < 10) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authorized_rep_phone'],
+        message: 'Enter a valid phone number',
+      });
+    }
+  });
 
 type BrandVerificationData = z.infer<typeof brandVerificationSchema>;
 
 export interface BrandVerificationInitialData {
+  has_ein?: boolean | null;
+  no_ein_hold_status?: string;
+  no_ein_waitlist_requested_at?: string | null;
   legal_business_name?: string;
   business_entity_type?: BusinessEntityType | null;
   business_registration_state?: string;
@@ -78,6 +143,12 @@ const LABEL_CLASS = 'block text-sm font-medium text-slate-700 dark:text-[#d4d4d8
 
 const SECTION_HEADER_CLASS = 'text-base font-semibold text-slate-900 dark:text-[#f5f5f5]';
 
+function initialHasEin(initialData?: BrandVerificationInitialData): BrandVerificationData['has_ein'] | undefined {
+  if (initialData?.has_ein === false) return 'no';
+  if (initialData?.has_ein === true || initialData?.ein) return 'yes';
+  return undefined;
+}
+
 export default function BrandVerificationForm({
   businessId,
   initialData,
@@ -86,14 +157,19 @@ export default function BrandVerificationForm({
 }: BrandVerificationFormProps) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [waitlistSaved, setWaitlistSaved] = useState(
+    initialData?.no_ein_hold_status === 'waitlisted'
+  );
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<BrandVerificationData>({
     resolver: zodResolver(brandVerificationSchema),
     defaultValues: {
+      has_ein: initialHasEin(initialData),
       legal_business_name: initialData?.legal_business_name || '',
       business_entity_type:
         initialData?.business_entity_type && initialData.business_entity_type !== 'sole_proprietor'
@@ -107,16 +183,43 @@ export default function BrandVerificationForm({
       authorized_rep_phone: initialData?.authorized_rep_phone || '',
     },
   });
+  const hasEinAnswer = watch('has_ein');
 
   const onSubmit = async (data: BrandVerificationData) => {
     setSaving(true);
     setSubmitError('');
     try {
+      if (data.has_ein === 'no') {
+        const response = await fetch('/api/onboarding/brand-verification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            businessId,
+            has_ein: false,
+            join_waitlist: true,
+          }),
+        });
+
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          success?: boolean;
+        };
+
+        if (!response.ok) {
+          setSubmitError(payload.error ?? 'Could not save EIN status. Please try again.');
+          return;
+        }
+
+        setWaitlistSaved(true);
+        return;
+      }
+
       const response = await fetch('/api/onboarding/brand-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessId,
+          has_ein: true,
           legal_business_name: data.legal_business_name,
           business_entity_type: data.business_entity_type,
           business_registration_state: normalizeUsStateCode(data.business_registration_state),
@@ -157,10 +260,89 @@ export default function BrandVerificationForm({
       <div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Brand verification info</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Carriers require this exact business identity before we can activate SMS for your account. Use the legal details that match your EIN.
+          Carriers require this exact business identity before we can activate SMS for your account.
         </p>
       </div>
 
+      <div className="space-y-3">
+        <h3 className={SECTION_HEADER_CLASS}>Do you have an EIN?</h3>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label
+            className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
+              hasEinAnswer === 'yes'
+                ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
+                : 'border-slate-200 bg-white/60 dark:border-white/[0.10] dark:bg-white/[0.04]'
+            }`}
+          >
+            <input
+              {...register('has_ein')}
+              type="radio"
+              value="yes"
+              className="sr-only"
+            />
+            <span className="block font-medium text-slate-900 dark:text-[#f5f5f5]">
+              Yes, I have an EIN
+            </span>
+            <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+              Use your legal business identity for Standard Brand registration.
+            </span>
+          </label>
+
+          <label
+            className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
+              hasEinAnswer === 'no'
+                ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
+                : 'border-slate-200 bg-white/60 dark:border-white/[0.10] dark:bg-white/[0.04]'
+            }`}
+          >
+            <input
+              {...register('has_ein')}
+              type="radio"
+              value="no"
+              className="sr-only"
+            />
+            <span className="block font-medium text-slate-900 dark:text-[#f5f5f5]">
+              No, I need one
+            </span>
+            <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+              We will hold setup here and show the free IRS EIN link.
+            </span>
+          </label>
+        </div>
+        {errors.has_ein && (
+          <p className="text-sm text-red-600 dark:text-red-400">{errors.has_ein.message}</p>
+        )}
+      </div>
+
+      {hasEinAnswer === 'no' && (
+        <div className="space-y-3 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <p className="font-medium">Get an EIN before SMS launch</p>
+          <p>
+            Don&apos;t have an EIN? You can get one free from the IRS in about 15 minutes —{' '}
+            <a
+              href={IRS_EIN_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium underline"
+            >
+              Get an EIN
+            </a>
+            . This unlocks higher message limits and faster approval.
+          </p>
+          <p className="text-xs">
+            Sole Proprietor registration is not open yet. Join the waitlist here, then come back
+            and choose &quot;Yes&quot; after you have your EIN.
+          </p>
+          {waitlistSaved && (
+            <p className="rounded-[14px] border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+              You&apos;re on the no-EIN waitlist. No email will be sent in this phase.
+            </p>
+          )}
+        </div>
+      )}
+
+      {hasEinAnswer === 'yes' && (
+        <>
       {/* Legal entity */}
       <div className="space-y-4">
         <h3 className={SECTION_HEADER_CLASS}>Legal entity</h3>
@@ -216,7 +398,7 @@ export default function BrandVerificationForm({
           />
           {errors.ein && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.ein.message}</p>}
           <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
-            Don&apos;t have an EIN? You can get one free from the IRS in about 15 minutes. Sole Proprietor flow coming soon.
+            Use the EIN that matches your legal business records.
           </p>
         </div>
       </div>
@@ -273,6 +455,8 @@ export default function BrandVerificationForm({
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {submitError && (
         <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
@@ -288,7 +472,7 @@ export default function BrandVerificationForm({
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || (hasEinAnswer === 'no' && waitlistSaved)}
           className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 font-medium rounded-[22px] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
         >
           {saving ? (
@@ -296,6 +480,10 @@ export default function BrandVerificationForm({
               <PulsingDot inline />
               Saving...
             </>
+          ) : hasEinAnswer === 'no' && waitlistSaved ? (
+            'Waitlist saved'
+          ) : hasEinAnswer === 'no' ? (
+            'Join waitlist'
           ) : (
             'Next'
           )}

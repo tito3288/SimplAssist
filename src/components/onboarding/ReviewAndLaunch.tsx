@@ -61,7 +61,7 @@ interface ReviewAndLaunchProps {
 
 type PaidLaunchHold = {
   message: string;
-  action: "none" | "choose_number" | "retry";
+  action: "none" | "choose_number" | "add_ein" | "retry";
   buttonLabel?: string;
   helper?: string;
 };
@@ -432,9 +432,11 @@ export default function ReviewAndLaunch({
             onClick={
               launchHold?.action === 'choose_number'
                 ? () => onEditStep(7)
+                : launchHold?.action === 'add_ein'
+                  ? () => onEditStep(5)
                 : handleLaunch
             }
-            disabled={launching && launchHold?.action !== 'choose_number'}
+            disabled={launching && launchHold?.action !== 'choose_number' && launchHold?.action !== 'add_ein'}
             className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
           >
             {primaryButtonLabel}
@@ -449,6 +451,15 @@ function classifyPaidLaunchHold(
   registration: OnboardingState["registration"],
   pendingPhoneNumberFailureReason: string | null
 ): PaidLaunchHold | null {
+  if (registration.holdReason === "held_no_ein" || isNoEinHold(registration.error)) {
+    return {
+      message: "Add your EIN before SMS setup can continue.",
+      action: "add_ein",
+      buttonLabel: "Add your EIN",
+      helper: "You won't be charged again.",
+    };
+  }
+
   if (pendingPhoneNumberFailureReason || isNumberUnavailable(registration.error)) {
     return {
       message:
@@ -522,6 +533,10 @@ function isRiskReviewHold(message: string | null): boolean {
   return /sms use-case review|a2p.*review|reviewing your setup|manual review/i.test(
     message ?? ""
   );
+}
+
+function isNoEinHold(message: string | null): boolean {
+  return /held_no_ein|add your ein|before .*ein/i.test(message ?? "");
 }
 
 function Section({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {

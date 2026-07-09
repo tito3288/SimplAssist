@@ -8,8 +8,9 @@ function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
 }
 
-const brandVerificationServerSchema = z.object({
+const einPathSchema = z.object({
   businessId: z.string().uuid(),
+  has_ein: z.literal(true),
   legal_business_name: z.string().min(1),
   business_entity_type: z.enum(["llc", "c_corp", "s_corp", "nonprofit", "partnership"]),
   business_registration_state: z
@@ -28,6 +29,17 @@ const brandVerificationServerSchema = z.object({
   authorized_rep_email: z.string().email(),
   authorized_rep_phone: z.string().min(10),
 });
+
+const noEinPathSchema = z.object({
+  businessId: z.string().uuid(),
+  has_ein: z.literal(false),
+  join_waitlist: z.boolean().optional(),
+});
+
+const brandVerificationServerSchema = z.discriminatedUnion("has_ein", [
+  einPathSchema,
+  noEinPathSchema,
+]);
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -55,18 +67,10 @@ export async function POST(request: NextRequest) {
     );
   }
   const data = parsed.data;
-  const registrationStateCode = normalizeUsStateCode(data.business_registration_state);
-
-  if (!registrationStateCode) {
-    return NextResponse.json(
-      { error: "Invalid state of registration" },
-      { status: 400 }
-    );
-  }
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id")
+    .select("id, no_ein_hold_status")
     .eq("id", data.businessId)
     .eq("owner_id", user.id)
     .single();
@@ -79,9 +83,56 @@ export async function POST(request: NextRequest) {
   }
 
   const now = new Date().toISOString();
+  if (data.has_ein === false) {
+    const { error: updateError } = await supabaseAdmin
+      .from("businesses")
+      .update({
+        has_ein: false,
+        a2p_brand_tier: null,
+        no_ein_hold_status: data.join_waitlist ? "waitlisted" : "ein_encouraged",
+        no_ein_waitlist_requested_at: data.join_waitlist ? now : null,
+        onboarding_step: "legal_verification",
+        onboarding_last_saved_at: now,
+      })
+      .eq("id", data.businessId);
+
+    if (updateError) {
+      console.error(
+        `[onboarding:brand-verification] Failed to save No-EIN hold for ${data.businessId}:`,
+        updateError
+      );
+      return NextResponse.json(
+        { error: "Failed to save EIN status" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      held: true,
+      code: "held_no_ein",
+    });
+  }
+
+  const registrationStateCode = normalizeUsStateCode(data.business_registration_state);
+
+  if (!registrationStateCode) {
+    return NextResponse.json(
+      { error: "Invalid state of registration" },
+      { status: 400 }
+    );
+  }
+
+  const convertedFromNoEin =
+    business.no_ein_hold_status === "ein_encouraged" ||
+    business.no_ein_hold_status === "waitlisted";
+
   const { error: updateError } = await supabaseAdmin
     .from("businesses")
     .update({
+      has_ein: true,
+      a2p_brand_tier: "low_volume_standard",
+      no_ein_hold_status: convertedFromNoEin ? "converted_to_ein" : "none",
       legal_business_name: data.legal_business_name,
       business_entity_type: data.business_entity_type,
       business_registration_state: registrationStateCode,

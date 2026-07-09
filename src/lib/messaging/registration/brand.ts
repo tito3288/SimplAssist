@@ -106,7 +106,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, slug, legal_business_name, business_entity_type, business_type, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
+      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
     )
     .eq("id", businessId)
     .single();
@@ -136,6 +136,12 @@ export async function registerBrand(businessId: string): Promise<void> {
   if (!business.legal_business_name) {
     throw new Error(
       `[registration:brand] Business ${businessId} is missing legal_business_name`
+    );
+  }
+
+  if (business.has_ein !== true) {
+    throw new Error(
+      `[registration:brand] Business ${businessId} has not confirmed EIN status`
     );
   }
 

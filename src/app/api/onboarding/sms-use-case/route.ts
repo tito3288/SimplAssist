@@ -40,6 +40,7 @@ type SmsUseCaseBusinessRow = {
   legal_business_name: string | null;
   business_entity_type: string | null;
   business_registration_state: string | null;
+  has_ein: boolean | null;
   ein: string | null;
   authorized_rep_name: string | null;
   authorized_rep_title: string | null;
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest) {
         "legal_business_name",
         "business_entity_type",
         "business_registration_state",
+        "has_ein",
         "ein",
         "authorized_rep_name",
         "authorized_rep_title",
@@ -168,6 +170,7 @@ export async function POST(request: NextRequest) {
     !business.legal_business_name ||
     !business.business_entity_type ||
     !business.business_registration_state ||
+    business.has_ein !== true ||
     !business.ein ||
     !business.authorized_rep_name ||
     !business.authorized_rep_title ||

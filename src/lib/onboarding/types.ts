@@ -2,14 +2,17 @@ import type {
   A2pRiskChecklistAnswer,
   A2pRiskFinding,
   A2pRiskReviewStatus,
+  A2pBrandTier,
   AITone,
   BusinessEntityType,
   BusinessType,
   BusinessVoice,
   CampaignAssignmentStatus,
   Language,
+  NoEinHoldStatus,
   OnboardingRegistrationStatus,
   OnboardingStep,
+  RegistrationHoldReason,
   RegistrationStatus,
   SmsBlockReason,
   SubscriptionPlan,
@@ -91,6 +94,10 @@ export interface OnboardingAiSettings {
 }
 
 export interface OnboardingBrandVerification {
+  has_ein?: boolean | null;
+  a2p_brand_tier?: A2pBrandTier | null;
+  no_ein_hold_status?: NoEinHoldStatus;
+  no_ein_waitlist_requested_at?: string | null;
   legal_business_name?: string;
   business_entity_type?: BusinessEntityType | null;
   business_registration_state?: string;
@@ -107,6 +114,7 @@ export interface OnboardingBrandVerification {
 
 export interface OnboardingRegistrationSnapshot {
   status: OnboardingRegistrationStatus;
+  holdReason: RegistrationHoldReason | null;
   startedAt: string | null;
   submittedAt: string | null;
   error: string | null;

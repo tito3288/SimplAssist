@@ -52,6 +52,14 @@ export type BusinessEntityType =
 
 export type TaxIdType = "ein" | "ssn_last_4";
 
+export type A2pBrandTier = "low_volume_standard" | "sole_proprietor";
+
+export type NoEinHoldStatus =
+  | "none"
+  | "ein_encouraged"
+  | "waitlisted"
+  | "converted_to_ein";
+
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 
 export type OnboardingStep =
@@ -99,7 +107,10 @@ export type BillingLaunchBlockReason =
   | "past_due"
   | "canceled"
   | "telnyx_submission_disabled"
-  | "usage_limit_reached";
+  | "usage_limit_reached"
+  | "held_no_ein";
+
+export type RegistrationHoldReason = "held_no_ein";
 
 // Matches the CHECK constraint on businesses.privacy_terms_mode in
 // supabase/migrations/015_business_slug_and_compliance_mode.sql. Phase 6.
@@ -149,6 +160,10 @@ export interface Business {
   business_entity_type: BusinessEntityType | null;
   business_registration_state: string | null;
   tax_id_type: TaxIdType | null;
+  has_ein: boolean | null;
+  a2p_brand_tier: A2pBrandTier | null;
+  no_ein_hold_status: NoEinHoldStatus;
+  no_ein_waitlist_requested_at: string | null;
   ein: string | null;
   last_4_ssn: string | null;
   registrant_mobile: string | null;

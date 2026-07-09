@@ -8,9 +8,12 @@ import type { SubscriptionPlan } from "@/types/database";
 
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
 const VALID_MODES = ["onboarding", "billing"] as const;
+const NO_EIN_HELD_MESSAGE =
+  "Add your EIN before choosing a paid SMS plan.";
 
 type CheckoutBusinessRow = {
   id: string;
+  has_ein: boolean | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
@@ -46,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     const { data: business, error: bizError } = await supabase
       .from("businesses")
-      .select("id, billing_pilot, billing_comped, billing_exempt")
+      .select("id, has_ein, billing_pilot, billing_comped, billing_exempt")
       .eq("owner_id", user.id)
       .single<CheckoutBusinessRow>();
 
@@ -54,6 +57,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Business not found" },
         { status: 404 }
+      );
+    }
+
+    if (business.has_ein !== true) {
+      const state = await getOnboardingStateForBusinessId(business.id);
+      return NextResponse.json(
+        {
+          error: NO_EIN_HELD_MESSAGE,
+          code: "held_no_ein",
+          state,
+        },
+        { status: 400 }
       );
     }
 

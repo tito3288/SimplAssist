@@ -50,7 +50,9 @@ export async function POST() {
   }
 
   const code =
-    launch.status === "risk_review_required"
+    launch.status === "held_no_ein"
+      ? "held_no_ein"
+      : launch.status === "risk_review_required"
       ? "a2p_risk_review_required"
       : launch.status === "missing_phone_number"
         ? "missing_phone_number"

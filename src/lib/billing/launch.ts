@@ -29,6 +29,9 @@ const BILLING_REQUIRED_MESSAGE =
 const SUBMISSION_DISABLED_MESSAGE =
   "SMS registration is disabled for this account. Contact SimplAssist support if this looks wrong.";
 
+const NO_EIN_HELD_MESSAGE =
+  "Add your EIN before SMS registration can continue.";
+
 type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry";
 
 type LaunchResult =
@@ -36,6 +39,7 @@ type LaunchResult =
   | {
       status:
         | "billing_required"
+        | "held_no_ein"
         | "risk_review_required"
         | "submission_disabled"
         | "missing_phone_number"
@@ -46,6 +50,7 @@ type LaunchResult =
 
 interface BusinessLaunchRow {
   id: string;
+  has_ein: boolean | null;
   pending_phone_number: string | null;
   telnyx_submission_disabled: boolean;
   telnyx_brand_id: string | null;
@@ -73,6 +78,10 @@ export async function attemptPaidLaunch(
   const business = await readLaunchBusiness(businessId);
   if (!business) {
     return { status: "failed", message: "Business not found." };
+  }
+
+  if (business.has_ein !== true) {
+    return { status: "held_no_ein", message: NO_EIN_HELD_MESSAGE };
   }
 
   if (business.telnyx_submission_disabled) {
@@ -170,7 +179,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt"
+      "id, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();

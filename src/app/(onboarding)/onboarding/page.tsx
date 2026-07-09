@@ -380,6 +380,8 @@ function CarrierReviewStatus({
   const registration = state.registration;
   const title = registration.smsReady
     ? 'SMS is active'
+    : registration.holdReason === 'held_no_ein'
+      ? 'Add your EIN to continue'
     : registration.status === 'failed'
       ? 'Registration needs another try'
       : registration.brandStatus === 'rejected' || registration.campaignStatus === 'rejected'
@@ -454,7 +456,7 @@ function CarrierReviewStatus({
           <Button type="button" onClick={onDashboard}>
             Go to dashboard
           </Button>
-        ) : registration.status === 'failed' ? (
+        ) : registration.holdReason === 'held_no_ein' ? null : registration.status === 'failed' ? (
           <Button type="button" onClick={handleRetry} loading={retrying}>
             Retry registration
           </Button>
@@ -488,6 +490,10 @@ function statusCopy(state: OnboardingState): string {
 
   if (registration.smsReady) {
     return 'Your number is approved and linked. Your AI assistant can now send and reply to customer texts.';
+  }
+
+  if (registration.holdReason === 'held_no_ein') {
+    return 'SMS setup is paused until you add an EIN in Business Verification.';
   }
 
   if (registration.status === 'failed') {
