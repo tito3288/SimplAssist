@@ -37,11 +37,6 @@ export async function createCheckoutSession(
     customerId = customer.id;
   }
 
-  await Promise.all([
-    assertTestModePrice(planPriceId),
-    assertTestModePrice(setupFeePriceId),
-  ]);
-
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
     mode: "subscription",
@@ -79,13 +74,4 @@ export async function createBillingPortalSession(
   });
 
   return session.url;
-}
-
-async function assertTestModePrice(priceId: string): Promise<void> {
-  const price = await stripe.prices.retrieve(priceId);
-  if (price.livemode) {
-    throw new Error(
-      `Stripe live-mode price ${priceId} is disabled for Phase 9. Use test-mode prices until live mode is explicitly enabled.`
-    );
-  }
 }

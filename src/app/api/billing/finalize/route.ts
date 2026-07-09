@@ -20,9 +20,9 @@ export async function POST(request: NextRequest) {
     sessionId?: string;
   };
 
-  if (!sessionId || !sessionId.startsWith("cs_test_")) {
+  if (!sessionId || !sessionId.startsWith("cs_")) {
     return NextResponse.json(
-      { error: "A valid test-mode checkout session is required" },
+      { error: "A valid checkout session is required" },
       { status: 400 }
     );
   }

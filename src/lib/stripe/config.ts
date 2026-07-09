@@ -53,18 +53,18 @@ const PLAN_PRICE_ENV: Record<SubscriptionPlan, string> = {
 
 export function stripePriceIds(): Record<SubscriptionPlan, string> {
   return {
-    sms_only: readTestPriceId(PLAN_PRICE_ENV.sms_only),
-    sms_and_chat: readTestPriceId(PLAN_PRICE_ENV.sms_and_chat),
-    full: readTestPriceId(PLAN_PRICE_ENV.full),
+    sms_only: readPriceId(PLAN_PRICE_ENV.sms_only),
+    sms_and_chat: readPriceId(PLAN_PRICE_ENV.sms_and_chat),
+    full: readPriceId(PLAN_PRICE_ENV.full),
   };
 }
 
 export function stripeSetupFeePriceId(): string {
-  return readTestPriceId("STRIPE_PRICE_SETUP_FEE");
+  return readPriceId("STRIPE_PRICE_SETUP_FEE");
 }
 
 export function stripeSmsOveragePriceId(): string {
-  return readTestPriceId("STRIPE_PRICE_SMS_OVERAGE_PART");
+  return readPriceId("STRIPE_PRICE_SMS_OVERAGE_PART");
 }
 
 export function planFromStripePriceId(priceId: string | null | undefined): SubscriptionPlan | null {
@@ -76,19 +76,14 @@ export function planFromStripePriceId(priceId: string | null | undefined): Subsc
   return match?.[0] ?? null;
 }
 
-export function validateStripeTestModeEnv(): void {
+export function validateStripeEnv(): void {
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret) {
     throw new Error("STRIPE_SECRET_KEY is required");
   }
-  if (!secret.startsWith("sk_test_")) {
-    throw new Error(
-      "Stripe live-mode keys are disabled for Phase 9. Use STRIPE_SECRET_KEY=sk_test_... until live mode is explicitly enabled."
-    );
-  }
 }
 
-function readTestPriceId(envName: string): string {
+function readPriceId(envName: string): string {
   const value = process.env[envName];
   if (!value) {
     throw new Error(`${envName} is required`);
