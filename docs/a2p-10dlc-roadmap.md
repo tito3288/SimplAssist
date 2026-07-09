@@ -1,6 +1,6 @@
 # Per-Customer A2P 10DLC Roadmap (Telnyx)
 
-**Status as of 2026-07-08:** Phase 9 (cost handling) is next; Phase 8.5 (internal admin console) can be built anytime after Phase 8.
+**Status as of 2026-07-09:** Phase 11 Option B is shipped: EIN-only launch with No-EIN waitlist hold. Sole Proprietor/OTP support is deferred to a future Option A phase. Stripe remains intentionally test-mode until the Pre-Launch Checklist live-mode switch.
 
 This is the shared source of truth for the per-customer A2P (Application-to-Person) 10DLC compliance initiative. It is the canonical reference for any agent or human working on Phase 7+. Compare implementation against this document rather than reconstructing context from scattered code comments.
 
@@ -60,12 +60,12 @@ For per-customer compliance — required by TCR (The Campaign Registry) rules to
 | 6.5 | 10DLC readiness safeguards | ✅ Shipped |
 | 7 | Onboarding flow restructure | ✅ Shipped |
 | 8 | Use case screening + AI guardrails | ✅ Shipped |
-| 8.5 | Internal admin console | ⏳ Pending |
-| 9 | Cost handling | 🔒 Decisions locked, implementation pending |
+| 8.5 | Internal admin console | ✅ Shipped |
+| 9 | Cost handling | ✅ Shipped |
 | 10 | Number purchasing timing | 🔒 Decision locked, implementation pending |
-| 11 | EIN vs Sole Proprietor branching + SMS OTP | ⏳ Pending |
+| 11 | EIN vs Sole Proprietor branching + SMS OTP | ✅ Shipped (Option B: EIN-only launch; Sole Prop/OTP deferred) |
 
-**Migrations applied:** `012`–`018` cover Phases 1–8. See `supabase/migrations/`.
+**Migrations applied:** `012`–`021` cover Phases 1–11 Option B. See `supabase/migrations/`.
 
 ---
 
@@ -385,9 +385,9 @@ These templates must describe what SimplAssist actually does: inbound customer c
 
 ---
 
-## Phase 8.5 — Internal Admin Console ⏳
+## Phase 8.5 — Internal Admin Console ✅
 
-**Status:** Phase 9 (cost handling) is next; Phase 8.5 (internal admin console) can be built anytime after Phase 8.
+**Status:** Shipped on 2026-07-09 as the internal `/admin` shell with A2P review approvals and billing/test flags.
 
 ### Purpose
 
@@ -429,7 +429,7 @@ This replaces the curl workflow while keeping the token endpoint as a backup pat
 
 ---
 
-## Phase 9 — Cost Handling 🔒 (decisions locked, implementation pending)
+## Phase 9 — Cost Handling ✅
 
 Phase 9's internal/admin visibility work builds on Phase 8.5. Billing, usage, gross-margin, pilot/comped account controls, and high-usage visibility should live inside the same `/admin` area rather than creating a separate staff surface.
 
@@ -594,11 +594,20 @@ Migration requirements:
 
 ---
 
-## Phase 11 — EIN vs Sole Proprietor Branching + SMS OTP ⏳
+## Phase 11 — EIN vs Sole Proprietor Branching + SMS OTP ✅
+
+**Status:** Shipped as **Option B: EIN-only launch** on 2026-07-09.
+
+Migration `021_phase11_ein_branching.sql` has been applied to production. It adds:
+- `has_ein` — fail-closed branch answer; launch requires `has_ein IS TRUE`.
+- `a2p_brand_tier` — TCR/A2P brand classification, currently `low_volume_standard` for EIN brands; not a SimplAssist subscription tier.
+- `no_ein_hold_status` and `no_ein_waitlist_requested_at` — DB-only No-EIN waitlist/hold state.
+
+Option B asks the branch question in the **Brand Verification onboarding step**. EIN customers continue through the existing Standard Brand path. No-EIN customers can create accounts and join a DB-only waitlist, but cannot checkout or launch SMS registration until they add an EIN.
 
 Customers may not have an EIN. TCR supports a Sole Proprietor brand tier. Onboarding must handle both.
 
-**Branching question at signup:** "Do you have an EIN (federal Tax ID)?"
+**Branching question in Brand Verification:** "Do you have an EIN (federal Tax ID)?"
 
 ### EIN path → Standard Brand
 - Most customers (est. 80–85%): med spas, dental offices, car washes, established roofers — almost all LLC/Corp with EIN.
@@ -607,6 +616,9 @@ Customers may not have an EIN. TCR supports a Sole Proprietor brand tier. Onboar
 - No OTP step — TCR validates EIN against IRS data.
 
 ### No-EIN path → Sole Proprietor Brand
+
+**Deferred to future Option A.** Phase 11 Option B does **not** ship Sole Proprietor registration code.
+
 - Est. 15–20%: solo cleaners, photographers, trainers, side-hustle freelancers.
 - Collect: personal legal name (no LLC/Corp), home/business address, mobile phone, last 4 SSN.
 - TCR sends OTP via SMS to registrant's mobile (24-hour window).
@@ -616,7 +628,24 @@ Customers may not have an EIN. TCR supports a Sole Proprietor brand tier. Onboar
 **Encourage EIN with UX copy on the No-EIN path:**
 > "Don't have an EIN? You can get one free from the IRS in about 15 minutes — [Get an EIN]. This unlocks higher message limits and faster approval. Or continue without one (limited mode)."
 
+Phase 11 Option B uses the IRS EIN link:
+`https://www.irs.gov/businesses/small-businesses-self-employed/get-an-employer-identification-number`
+
+No-EIN waitlist behavior in Option B:
+- On-screen confirmation only.
+- Stored in `businesses.no_ein_hold_status = 'waitlisted'` and `no_ein_waitlist_requested_at`.
+- No email notification.
+- No admin UI.
+- Paid launch hold reason: `held_no_ein`, non-retryable, with "Add your EIN" CTA.
+
+Fail-closed server gates in Option B:
+- `/api/billing/checkout` blocks Checkout unless `has_ein IS TRUE`.
+- `attemptPaidLaunch()` blocks before `telnyx_submission_disabled`, billing readiness, risk clearance, registration-attempt claim, Telnyx calls, profile creation, voice app creation, number purchase/attach, or assignment unless `has_ein IS TRUE`.
+- `null` and `false` are both blocked.
+
 ### Sole Prop OTP flow — VERIFIED programmatic via Telnyx API (no manual email)
+
+**Future Option A scope. Nothing in this subsection shipped in Option B.**
 
 Three Telnyx 10DLC API endpoints:
 1. `POST /v2/10dlc/brand` — submits Sole Prop info, returns `brandId` with `identityStatus: PENDING`.
@@ -641,7 +670,20 @@ The "email 10dlcquestions@telnyx.com" workflow in some docs is a **manual fallba
 
 **On startup, grep `telnyx_registration_events` for `audit_only_phase_11_otp` rows** — `BRAND_OTP_VERIFIED` events that arrived before Phase 11 was built are waiting there (Phase 4 note).
 
-After Phase 11 is complete and tested, complete the **Pre-Launch Checklist** before the first real customer.
+**Deferred Sole Proprietor / Option A scope:**
+- Sole Prop brand registration payload and Telnyx `POST /v2/10dlc/brand` shape.
+- Telnyx `smsOtp`, `smsOtp/verify`, and OTP status handling.
+- Inline OTP onboarding step.
+- Customer-initiated resend only; no auto-resend.
+- Incorrect vs expired vs network error handling.
+- 3–5 retry limit before forcing a re-trigger.
+- Last-4 SSN and registrant mobile collection.
+- VoIP mobile validation at form submit.
+- Sole Prop rejection handling.
+- 1-number / 1-campaign / throughput enforcement.
+- Mock-brand OTP testing after Telnyx support confirms mock behavior.
+
+After Phase 11 Option B is complete and tested, complete the **Pre-Launch Checklist** before the first real customer. Future Sole Prop/OTP support remains a separate Option A phase.
 
 ---
 
