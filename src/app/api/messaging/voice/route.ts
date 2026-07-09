@@ -4,20 +4,27 @@ import { markProcessedOnce } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import { isE164PhoneNumber } from "@/lib/phone/e164";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
-// We act on a small subset to drive the missed-call voicemail flow:
+// We act on a small subset to drive forwarding and the missed-call voicemail flow:
 //
 //   call.initiated      -> answer (or reject if number isn't configured)
-//   call.answered       -> speak greeting
+//   call.answered       -> forward if enabled, otherwise speak greeting
+//   call.bridged        -> mark a forwarding attempt connected
 //   call.speak.ended    -> start recording
 //   call.recording.saved -> hangup + trigger missed-call SMS
 //   call.recording.error -> log + still trigger missed-call SMS so customer hears back
-//   call.hangup         -> log + ack (terminal)
+//   call.hangup         -> forwarding fallback or terminal log
 //
 // State (callControlId, businessId, from, businessName) is threaded through every
 // command via Base64-encoded client_state because some later events (notably
 // call.recording.saved) don't include call_control_id in their payload.
+
+const CALL_FORWARD_TIMEOUT_SECS = 18;
+
+type ForwardingRole = "inbound" | "forward_target";
+type ForwardingTerminalStatus = "abandoned" | "fallback_triggered" | "error";
 
 interface VoiceState {
   callControlId: string;
@@ -27,6 +34,24 @@ interface VoiceState {
   businessEmail?: string | null;
   businessPhoneNumber?: string | null;
   smsPhoneNumber?: string;
+  telnyxVoiceApplicationId?: string | null;
+  callForwardingEnabled?: boolean;
+  forwardToNumber?: string | null;
+  forwardingRole?: ForwardingRole;
+  forwardingAttemptId?: string;
+  outboundCallControlId?: string | null;
+}
+
+interface ForwardingAttempt {
+  id: string;
+  business_id: string;
+  inbound_call_control_id: string;
+  outbound_call_control_id: string | null;
+  call_session_id: string;
+  caller_phone: string;
+  forward_to_number: string;
+  status: string;
+  fallback_triggered_at: string | null;
 }
 
 function encodeState(state: VoiceState): string {
@@ -86,6 +111,9 @@ export async function POST(request: NextRequest) {
       case "call.answered":
         await handleCallAnswered(payload);
         break;
+      case "call.bridged":
+        await handleCallBridged(payload);
+        break;
       case "call.speak.ended":
         await handleSpeakEnded(payload);
         break;
@@ -96,9 +124,7 @@ export async function POST(request: NextRequest) {
         await handleRecordingError(payload);
         break;
       case "call.hangup":
-        console.log(
-          `[messaging:voice] call.hangup leg=${payload.call_leg_id} session=${payload.call_session_id}`
-        );
+        await handleCallHangup(payload);
         break;
       default:
         console.log(`[messaging:voice] Ignoring event type: ${eventType}`);
@@ -140,7 +166,9 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
   const businessId = phoneNumberRow.business_id;
   const { data: business } = await supabaseAdmin
     .from("businesses")
-    .select("name, email, phone_number")
+    .select(
+      "name, email, phone_number, telnyx_voice_application_id, call_forwarding_enabled, forward_to_number"
+    )
     .eq("id", businessId)
     .single();
   const businessName = business?.name ?? "us";
@@ -153,6 +181,9 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     businessEmail: business?.email ?? null,
     businessPhoneNumber: business?.phone_number ?? null,
     smsPhoneNumber: to,
+    telnyxVoiceApplicationId: business?.telnyx_voice_application_id ?? null,
+    callForwardingEnabled: business?.call_forwarding_enabled ?? false,
+    forwardToNumber: business?.forward_to_number ?? null,
   });
   console.log(
     `[messaging:voice] Answering call for businessId=${businessId} (name='${businessName}')`
@@ -168,6 +199,59 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
     return;
   }
 
+  if (state.forwardingRole === "forward_target") {
+    console.log(
+      `[messaging:voice] forward target answered attempt=${state.forwardingAttemptId}`
+    );
+    if (state.forwardingAttemptId) {
+      await markForwardingConnected(state.forwardingAttemptId, "target_answered");
+    }
+    return;
+  }
+
+  if (shouldAttemptForwarding(state)) {
+    await startCallForwarding(payload, state);
+    return;
+  }
+
+  await speakVoicemailGreeting(state, stateB64);
+}
+
+function shouldAttemptForwarding(state: VoiceState): boolean {
+  if (!state.callForwardingEnabled) return false;
+
+  if (!state.forwardToNumber || !isE164PhoneNumber(state.forwardToNumber)) {
+    console.warn(
+      `[messaging:voice] forwarding enabled for businessId=${state.businessId} but forward_to_number is missing or invalid; using missed-call voicemail flow`
+    );
+    return false;
+  }
+
+  if (!state.telnyxVoiceApplicationId) {
+    console.warn(
+      `[messaging:voice] forwarding enabled for businessId=${state.businessId} but telnyx_voice_application_id is missing; using missed-call voicemail flow`
+    );
+    return false;
+  }
+
+  if (!state.smsPhoneNumber) {
+    console.warn(
+      `[messaging:voice] forwarding enabled for businessId=${state.businessId} but smsPhoneNumber is missing; using missed-call voicemail flow`
+    );
+    return false;
+  }
+
+  if (state.forwardToNumber === state.smsPhoneNumber) {
+    console.warn(
+      `[messaging:voice] forwarding enabled for businessId=${state.businessId} but forward_to_number equals the SimplAssist number; using missed-call voicemail flow`
+    );
+    return false;
+  }
+
+  return true;
+}
+
+async function speakVoicemailGreeting(state: VoiceState, stateB64: string | undefined) {
   const greeting = buildSmsComplianceCopy({
     business: {
       name: state.businessName,
@@ -187,6 +271,197 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
     language: "en-US",
     client_state: stateB64,
   });
+}
+
+async function startCallForwarding(
+  payload: Record<string, unknown>,
+  state: VoiceState
+) {
+  const callSessionId = payload.call_session_id as string | undefined;
+  const inboundCallLegId = payload.call_leg_id as string | undefined;
+  const forwardToNumber = state.forwardToNumber;
+  const voiceApplicationId = state.telnyxVoiceApplicationId;
+  const smsPhoneNumber = state.smsPhoneNumber;
+
+  if (!callSessionId || !forwardToNumber || !voiceApplicationId || !smsPhoneNumber) {
+    console.warn(
+      `[messaging:voice] forwarding prerequisites missing for businessId=${state.businessId}; using missed-call voicemail flow`
+    );
+    await speakVoicemailGreeting(state, encodeState(state));
+    return;
+  }
+
+  const attempt = await createForwardingAttempt({
+    businessId: state.businessId,
+    inboundCallControlId: state.callControlId,
+    inboundCallLegId,
+    callSessionId,
+    callerPhone: state.from,
+    forwardToNumber,
+  });
+
+  let outboundCallControlId: string | null = null;
+
+  try {
+    const targetState = encodeState({
+      ...state,
+      forwardingRole: "forward_target",
+      forwardingAttemptId: attempt.id,
+      outboundCallControlId: null,
+    });
+
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} dialing owner=${forwardToNumber} timeout=${CALL_FORWARD_TIMEOUT_SECS}s`
+    );
+    const dialResponse = await telnyx.calls.dial({
+      connection_id: voiceApplicationId,
+      from: smsPhoneNumber,
+      to: forwardToNumber,
+      timeout_secs: CALL_FORWARD_TIMEOUT_SECS,
+      client_state: targetState,
+    });
+
+    outboundCallControlId = dialResponse.data?.call_control_id ?? null;
+    if (!outboundCallControlId) {
+      throw new Error("Telnyx dial returned no outbound call_control_id");
+    }
+
+    await updateForwardingAttemptOutbound(attempt.id, {
+      outboundCallControlId,
+      outboundCallLegId: dialResponse.data?.call_leg_id ?? null,
+    });
+
+    const latestAttempt = await getForwardingAttemptById(attempt.id);
+    if (latestAttempt?.fallback_triggered_at) {
+      console.log(
+        `[messaging:voice] attempt=${attempt.id} already fell back before bridge; canceling owner leg`
+      );
+      await bestEffortHangup(outboundCallControlId, "forward target after fallback");
+      return;
+    }
+
+    const inboundBridgeState = encodeState({
+      ...state,
+      forwardingRole: "inbound",
+      forwardingAttemptId: attempt.id,
+      outboundCallControlId,
+    });
+
+    await telnyx.calls.actions.bridge(state.callControlId, {
+      call_control_id_to_bridge_with: outboundCallControlId,
+      play_ringtone: true,
+      prevent_double_bridge: true,
+      client_state: inboundBridgeState,
+    });
+  } catch (err) {
+    console.error(
+      `[messaging:voice] forwarding attempt=${attempt.id} failed before connection:`,
+      err
+    );
+    await triggerForwardingFallback({
+      attemptId: attempt.id,
+      status: "error",
+      reason: err instanceof Error ? err.message : "forwarding dial/bridge error",
+      hangupInbound: true,
+      hangupOutbound: true,
+      outboundCallControlId,
+    });
+  }
+}
+
+async function handleCallBridged(payload: Record<string, unknown>) {
+  const state = decodeState(payload.client_state as string | undefined);
+  const attempt = await findForwardingAttempt(payload, state);
+
+  if (!attempt) {
+    console.log(
+      `[messaging:voice] call.bridged with no forwarding attempt session=${payload.call_session_id}`
+    );
+    return;
+  }
+
+  await markForwardingConnected(attempt.id, "call_bridged");
+}
+
+async function handleCallHangup(payload: Record<string, unknown>) {
+  const state = decodeState(payload.client_state as string | undefined);
+  const attempt = await findForwardingAttempt(payload, state);
+
+  if (!attempt) {
+    console.log(
+      `[messaging:voice] call.hangup leg=${payload.call_leg_id} session=${payload.call_session_id}`
+    );
+    return;
+  }
+
+  const callControlId = payload.call_control_id as string | undefined;
+  const cause =
+    (payload.hangup_cause as string | undefined) ??
+    (payload.cause as string | undefined) ??
+    "unknown";
+
+  if (attempt.status === "connected") {
+    await markForwardingEnded(attempt.id);
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} connected call ended cause=${cause}`
+    );
+    return;
+  }
+
+  if (attempt.status === "ended") {
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} already ended; ignoring additional hangup cause=${cause}`
+    );
+    return;
+  }
+
+  if (attempt.fallback_triggered_at) {
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} fallback already triggered; ignoring hangup cause=${cause}`
+    );
+    return;
+  }
+
+  const isInboundHangup =
+    callControlId === attempt.inbound_call_control_id ||
+    (state?.forwardingRole === "inbound" &&
+      state.forwardingAttemptId === attempt.id);
+  const isOutboundHangup =
+    callControlId === attempt.outbound_call_control_id ||
+    (state?.forwardingRole === "forward_target" &&
+      state.forwardingAttemptId === attempt.id);
+
+  if (isInboundHangup) {
+    console.log(
+      `[messaging:voice] caller abandoned forwarding attempt=${attempt.id}; canceling owner leg`
+    );
+    await triggerForwardingFallback({
+      attemptId: attempt.id,
+      status: "abandoned",
+      reason: `caller_hangup_before_bridge:${cause}`,
+      hangupInbound: false,
+      hangupOutbound: true,
+    });
+    return;
+  }
+
+  if (isOutboundHangup) {
+    console.log(
+      `[messaging:voice] owner leg ended before bridge attempt=${attempt.id} cause=${cause}; triggering missed-call fallback`
+    );
+    await triggerForwardingFallback({
+      attemptId: attempt.id,
+      status: "fallback_triggered",
+      reason: `owner_hangup_before_bridge:${cause}`,
+      hangupInbound: true,
+      hangupOutbound: false,
+    });
+    return;
+  }
+
+  console.log(
+    `[messaging:voice] forwarding attempt=${attempt.id} hangup did not match known leg cause=${cause}`
+  );
 }
 
 async function handleSpeakEnded(payload: Record<string, unknown>) {
@@ -275,3 +550,280 @@ async function handleRecordingError(payload: Record<string, unknown>) {
     console.error("[messaging:voice] sendMissedCallSMS failed:", err);
   });
 }
+
+async function createForwardingAttempt(args: {
+  businessId: string;
+  inboundCallControlId: string;
+  inboundCallLegId?: string;
+  callSessionId: string;
+  callerPhone: string;
+  forwardToNumber: string;
+}): Promise<ForwardingAttempt> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .insert({
+      business_id: args.businessId,
+      inbound_call_control_id: args.inboundCallControlId,
+      inbound_call_leg_id: args.inboundCallLegId ?? null,
+      outbound_call_control_id: null,
+      outbound_call_leg_id: null,
+      call_session_id: args.callSessionId,
+      caller_phone: args.callerPhone,
+      forward_to_number: args.forwardToNumber,
+      status: "dialing",
+      fallback_triggered_at: null,
+      abandoned_at: null,
+      connected_at: null,
+      ended_at: null,
+      error_message: null,
+    })
+    .select(forwardingAttemptSelect)
+    .single();
+
+  if (error?.code === "23505") {
+    const existing = await getForwardingAttemptByColumn(
+      "call_session_id",
+      args.callSessionId
+    );
+    if (existing) return existing;
+  }
+
+  if (error || !data) {
+    throw new Error(
+      `[messaging:voice] failed to create forwarding attempt: ${error?.message ?? "no row returned"}`
+    );
+  }
+
+  return data as ForwardingAttempt;
+}
+
+async function updateForwardingAttemptOutbound(
+  attemptId: string,
+  args: { outboundCallControlId: string; outboundCallLegId: string | null }
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update({
+      outbound_call_control_id: args.outboundCallControlId,
+      outbound_call_leg_id: args.outboundCallLegId,
+    })
+    .eq("id", attemptId);
+
+  if (error) {
+    throw new Error(
+      `[messaging:voice] failed to update forwarding outbound leg: ${error.message}`
+    );
+  }
+}
+
+async function getForwardingAttemptById(
+  attemptId: string
+): Promise<ForwardingAttempt | null> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .select(forwardingAttemptSelect)
+    .eq("id", attemptId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn(
+      `[messaging:voice] failed to read forwarding attempt ${attemptId}:`,
+      error
+    );
+    return null;
+  }
+
+  return (data as ForwardingAttempt | null) ?? null;
+}
+
+async function findForwardingAttempt(
+  payload: Record<string, unknown>,
+  state: VoiceState | null
+): Promise<ForwardingAttempt | null> {
+  if (state?.forwardingAttemptId) {
+    const attempt = await getForwardingAttemptById(state.forwardingAttemptId);
+    if (attempt) return attempt;
+  }
+
+  const callControlId = payload.call_control_id as string | undefined;
+  if (callControlId) {
+    const byInbound = await getForwardingAttemptByColumn(
+      "inbound_call_control_id",
+      callControlId
+    );
+    if (byInbound) return byInbound;
+
+    const byOutbound = await getForwardingAttemptByColumn(
+      "outbound_call_control_id",
+      callControlId
+    );
+    if (byOutbound) return byOutbound;
+  }
+
+  const callSessionId = payload.call_session_id as string | undefined;
+  if (callSessionId) {
+    return getForwardingAttemptByColumn("call_session_id", callSessionId);
+  }
+
+  return null;
+}
+
+async function getForwardingAttemptByColumn(
+  column:
+    | "inbound_call_control_id"
+    | "outbound_call_control_id"
+    | "call_session_id",
+  value: string
+): Promise<ForwardingAttempt | null> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .select(forwardingAttemptSelect)
+    .eq(column, value)
+    .maybeSingle();
+
+  if (error) {
+    console.warn(
+      `[messaging:voice] forwarding attempt lookup failed ${column}=${value}:`,
+      error
+    );
+    return null;
+  }
+
+  return (data as ForwardingAttempt | null) ?? null;
+}
+
+async function markForwardingConnected(
+  attemptId: string,
+  source: string
+): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update({
+      status: "connected",
+      connected_at: new Date().toISOString(),
+    })
+    .eq("id", attemptId)
+    .eq("status", "dialing")
+    .is("fallback_triggered_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.warn(
+      `[messaging:voice] failed to mark forwarding attempt=${attemptId} connected:`,
+      error
+    );
+    return;
+  }
+
+  if (!data) {
+    console.log(
+      `[messaging:voice] forwarding attempt=${attemptId} not marked connected; already fell back or ended`
+    );
+    return;
+  }
+
+  console.log(
+    `[messaging:voice] forwarding attempt=${attemptId} connected source=${source}`
+  );
+}
+
+async function markForwardingEnded(attemptId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update({
+      status: "ended",
+      ended_at: new Date().toISOString(),
+    })
+    .eq("id", attemptId)
+    .eq("status", "connected");
+
+  if (error) {
+    console.warn(
+      `[messaging:voice] failed to mark forwarding attempt=${attemptId} ended:`,
+      error
+    );
+  }
+}
+
+async function triggerForwardingFallback(args: {
+  attemptId: string;
+  status: ForwardingTerminalStatus;
+  reason: string;
+  hangupInbound: boolean;
+  hangupOutbound: boolean;
+  outboundCallControlId?: string | null;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const updateData: Record<string, string | null> = {
+    status: args.status,
+    fallback_triggered_at: now,
+    error_message: args.reason,
+  };
+
+  if (args.status === "abandoned") {
+    updateData.abandoned_at = now;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update(updateData)
+    .eq("id", args.attemptId)
+    .is("fallback_triggered_at", null)
+    .neq("status", "connected")
+    .select(forwardingAttemptSelect)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      `[messaging:voice] failed to claim forwarding fallback attempt=${args.attemptId}:`,
+      error
+    );
+    return;
+  }
+
+  const attempt = (data as ForwardingAttempt | null) ?? null;
+  if (!attempt) {
+    console.log(
+      `[messaging:voice] forwarding fallback already claimed or connected attempt=${args.attemptId}`
+    );
+    return;
+  }
+
+  const outboundCallControlId =
+    args.outboundCallControlId ?? attempt.outbound_call_control_id;
+
+  if (args.hangupOutbound && outboundCallControlId) {
+    await bestEffortHangup(outboundCallControlId, "forward target cleanup");
+  }
+  if (args.hangupInbound) {
+    await bestEffortHangup(
+      attempt.inbound_call_control_id,
+      "inbound forwarding cleanup"
+    );
+  }
+
+  console.log(
+    `[messaging:voice] forwarding fallback attempt=${attempt.id} status=${args.status} reason=${args.reason}; sending missed-call SMS`
+  );
+  sendMissedCallSMS(attempt.caller_phone, attempt.business_id).catch((err) => {
+    console.error("[messaging:voice] sendMissedCallSMS failed:", err);
+  });
+}
+
+async function bestEffortHangup(
+  callControlId: string,
+  label: string
+): Promise<void> {
+  try {
+    await telnyx.calls.actions.hangup(callControlId, {});
+  } catch (err) {
+    console.log(
+      `[messaging:voice] hangup skipped for ${label}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+const forwardingAttemptSelect =
+  "id, business_id, inbound_call_control_id, outbound_call_control_id, call_session_id, caller_phone, forward_to_number, status, fallback_triggered_at";

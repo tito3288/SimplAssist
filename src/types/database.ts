@@ -112,6 +112,14 @@ export type BillingLaunchBlockReason =
 
 export type RegistrationHoldReason = "held_no_ein";
 
+export type CallForwardingAttemptStatus =
+  | "dialing"
+  | "connected"
+  | "abandoned"
+  | "fallback_triggered"
+  | "ended"
+  | "error";
+
 // Matches the CHECK constraint on businesses.privacy_terms_mode in
 // supabase/migrations/015_business_slug_and_compliance_mode.sql. Phase 6.
 export type PrivacyTermsMode = "hosted" | "self_hosted" | "existing";
@@ -180,6 +188,8 @@ export interface Business {
   pending_phone_number_area_code: string | null;
   pending_phone_number_selected_at: string | null;
   pending_phone_number_failure_reason: string | null;
+  call_forwarding_enabled: boolean;
+  forward_to_number: string | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
@@ -224,6 +234,26 @@ export interface Business {
   campaign_status: RegistrationStatus | null;
   campaign_status_updated_at: string | null;
   campaign_rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CallForwardingAttempt {
+  id: string;
+  business_id: string;
+  inbound_call_control_id: string;
+  outbound_call_control_id: string | null;
+  inbound_call_leg_id: string | null;
+  outbound_call_leg_id: string | null;
+  call_session_id: string;
+  caller_phone: string;
+  forward_to_number: string;
+  status: CallForwardingAttemptStatus;
+  fallback_triggered_at: string | null;
+  abandoned_at: string | null;
+  connected_at: string | null;
+  ended_at: string | null;
+  error_message: string | null;
   created_at: string;
   updated_at: string;
 }

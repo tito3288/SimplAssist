@@ -2,13 +2,21 @@
 
 import { Phone } from 'lucide-react';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
+import CallForwardingForm from '@/components/settings/CallForwardingForm';
 
 interface PhoneNumberSectionProps {
   phoneNumber: string | null;
   isActive: boolean;
+  callForwardingEnabled: boolean;
+  forwardToNumber: string | null;
 }
 
-export default function PhoneNumberSection({ phoneNumber, isActive }: PhoneNumberSectionProps) {
+export default function PhoneNumberSection({
+  phoneNumber,
+  isActive,
+  callForwardingEnabled,
+  forwardToNumber,
+}: PhoneNumberSectionProps) {
   if (phoneNumber && isActive) {
     return (
       <div className="space-y-3">
@@ -32,6 +40,11 @@ export default function PhoneNumberSection({ phoneNumber, isActive }: PhoneNumbe
             bryan@simplassist.com
           </a>
         </p>
+        <CallForwardingForm
+          initialEnabled={callForwardingEnabled}
+          initialForwardToNumber={forwardToNumber}
+          smsPhoneNumber={phoneNumber}
+        />
       </div>
     );
   }

@@ -58,6 +58,8 @@ export default async function SettingsPage() {
         <PhoneNumberSection
           phoneNumber={phoneNumberRow?.phone_number || null}
           isActive={phoneNumberRow?.is_active || false}
+          callForwardingEnabled={business.call_forwarding_enabled ?? false}
+          forwardToNumber={business.forward_to_number ?? null}
         />
       </div>
 

@@ -1,0 +1,116 @@
+{
+  "description": "Synthetic Telnyx Voice API webhook scenarios for Phase 5b call forwarding. These fixtures document event order and expected side effects; real Telnyx signatures are intentionally omitted.",
+  "defaults": {
+    "businessId": "00000000-0000-0000-0000-000000000001",
+    "inboundCallControlId": "inbound-call-control-id",
+    "outboundCallControlId": "outbound-call-control-id",
+    "callSessionId": "call-session-id",
+    "caller": "+13175550100",
+    "simplassistNumber": "+13175550101",
+    "forwardToNumber": "+13175550102"
+  },
+  "scenarios": [
+    {
+      "name": "forwarding_off_regression",
+      "events": [
+        "call.initiated incoming",
+        "call.answered inbound",
+        "call.speak.ended completed",
+        "call.recording.saved"
+      ],
+      "expected": [
+        "answer inbound leg",
+        "speak compliance voicemail greeting",
+        "start recording",
+        "call existing sendMissedCallSMS once"
+      ]
+    },
+    {
+      "name": "forwarding_on_dial_bridge",
+      "events": [
+        "call.initiated incoming",
+        "call.answered inbound",
+        "call.bridged inbound",
+        "call.hangup after connected"
+      ],
+      "expected": [
+        "answer inbound leg",
+        "dial owner leg with timeout_secs=18",
+        "bridge inbound to owner with play_ringtone=true",
+        "mark attempt connected",
+        "do not call sendMissedCallSMS"
+      ]
+    },
+    {
+      "name": "owner_timeout_no_answer",
+      "events": [
+        "call.answered inbound",
+        "call.hangup owner leg hangup_cause=timeout before call.bridged"
+      ],
+      "expected": [
+        "mark fallback_triggered",
+        "hang up inbound leg",
+        "call existing sendMissedCallSMS once"
+      ]
+    },
+    {
+      "name": "owner_decline_or_busy",
+      "events": [
+        "call.answered inbound",
+        "call.hangup owner leg hangup_cause=user_busy before call.bridged"
+      ],
+      "expected": [
+        "mark fallback_triggered",
+        "hang up inbound leg",
+        "call existing sendMissedCallSMS once"
+      ]
+    },
+    {
+      "name": "dial_or_bridge_error",
+      "events": [
+        "call.answered inbound",
+        "Telnyx dial or bridge command throws"
+      ],
+      "expected": [
+        "mark error",
+        "best-effort hangup for any live leg",
+        "call existing sendMissedCallSMS once"
+      ]
+    },
+    {
+      "name": "duplicate_fallback_event",
+      "events": [
+        "call.hangup owner leg before call.bridged",
+        "call.hangup owner leg duplicate or retry"
+      ],
+      "expected": [
+        "first event sets fallback_triggered_at",
+        "second event observes fallback already claimed",
+        "call existing sendMissedCallSMS once total"
+      ]
+    },
+    {
+      "name": "caller_abandons_while_owner_ringing",
+      "events": [
+        "call.answered inbound",
+        "owner leg is dialing",
+        "call.hangup inbound leg before call.bridged"
+      ],
+      "expected": [
+        "mark abandoned",
+        "hang up/cancel owner leg so the owner's phone stops ringing",
+        "call existing sendMissedCallSMS once"
+      ]
+    },
+    {
+      "name": "recording_error_existing_path",
+      "events": [
+        "call.recording.error"
+      ],
+      "expected": [
+        "call existing sendMissedCallSMS once",
+        "do not use forwarding attempt state"
+      ]
+    }
+  ]
+}
