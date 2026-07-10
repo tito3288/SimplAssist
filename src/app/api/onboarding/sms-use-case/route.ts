@@ -17,6 +17,7 @@ import {
   isA2pRiskSelection,
 } from "@/lib/messaging/registration/riskCategories";
 import {
+  registrationHasStartedForRisk,
   screenA2pRiskForBusiness,
   type A2pRiskReviewResult,
 } from "@/lib/messaging/registration/riskScreening";
@@ -25,6 +26,9 @@ import type { A2pRiskChecklistAnswer } from "@/types/database";
 
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings > Compliance, then try again.";
+
+const REGISTRATION_LOCKED_MESSAGE =
+  "Your registration is in carrier review — these details are locked until review completes.";
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const STOP_PATTERN = /\bstop\b/i;
@@ -46,6 +50,15 @@ type SmsUseCaseBusinessRow = {
   authorized_rep_title: string | null;
   authorized_rep_email: string | null;
   authorized_rep_phone: string | null;
+  telnyx_brand_id: string | null;
+  brand_status: string | null;
+  campaign_status: string | null;
+  onboarding_registration_status:
+    | "not_started"
+    | "submitting"
+    | "failed"
+    | "submitted"
+    | null;
 };
 
 const smsUseCaseSchema = z
@@ -153,6 +166,10 @@ export async function POST(request: NextRequest) {
         "authorized_rep_title",
         "authorized_rep_email",
         "authorized_rep_phone",
+        "telnyx_brand_id",
+        "brand_status",
+        "campaign_status",
+        "onboarding_registration_status",
       ].join(", ")
     )
     .eq("id", data.businessId)
@@ -163,6 +180,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
       { status: 403 }
+    );
+  }
+
+  // Compliance content feeds the submitted Telnyx campaign, which can't be
+  // updated mid-review — edits would only drift the DB from the filed
+  // registration. The 'failed' state stays editable: fixing data before a
+  // retry is the designed recovery path.
+  if (
+    registrationHasStartedForRisk(business) &&
+    business.onboarding_registration_status !== "failed"
+  ) {
+    return NextResponse.json(
+      { error: REGISTRATION_LOCKED_MESSAGE },
+      { status: 409 }
     );
   }
 

@@ -69,6 +69,7 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
 
 export default function BusinessInfoForm({ businessId, initialData, onNext }: BusinessInfoFormProps) {
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -120,7 +121,34 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
 
   const onSubmit = async (data: BusinessInfoData) => {
     setSaving(true);
+    setSubmitError('');
     try {
+      // Submit-time lock check: business identity feeds the Telnyx brand,
+      // which can't be updated once a registration is awaiting carrier
+      // review. Step routing normally prevents reaching this form in that
+      // state, but a stale open tab bypasses it — re-check fresh state here.
+      // ('failed' stays editable: fixing data before retry is the designed
+      // recovery path. If the check itself fails, proceed — this is a
+      // best-effort client guard.)
+      try {
+        const stateRes = await fetch('/api/onboarding/state', { cache: 'no-store' });
+        const statePayload = (await stateRes.json().catch(() => ({}))) as {
+          state?: { registration?: { status?: string; riskReview?: { registrationStarted?: boolean } } };
+        };
+        const registration = statePayload.state?.registration;
+        if (
+          registration?.riskReview?.registrationStarted &&
+          registration.status !== 'failed'
+        ) {
+          setSubmitError(
+            'Your registration is in carrier review — these details are locked until review completes.'
+          );
+          return;
+        }
+      } catch {
+        // Lock check unavailable; fall through to the normal save path.
+      }
+
       const supabase = createClient();
       const { error } = await supabase
         .from('businesses')
@@ -143,7 +171,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       if (error) throw error;
       onNext(data, scrapedData);
     } catch {
-      // Error is shown via form state
+      setSubmitError('Could not save your business information. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -286,6 +314,10 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           {errors.zip && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.zip.message}</p>}
         </div>
       </div>
+
+      {submitError && (
+        <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+      )}
 
       <div className="flex justify-end pt-4">
         <button

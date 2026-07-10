@@ -436,13 +436,30 @@ function CarrierReviewStatus({
     (registration.status === 'failed' ||
       registration.status === 'submitted' ||
       staleSubmitting);
+  // The registration forms are locked server-side (a 409 from the brand-
+  // verification and sms-use-case routes) whenever a submitted registration
+  // is still with the carrier — only the 'failed' state stays editable, the
+  // designed retry-recovery path. This mirrors that guard exactly
+  // (riskReview.registrationStarted is the same predicate the API uses), so
+  // we never route to a fix form the save would reject: offer it only where
+  // the form is open; the locked states rely on support (and Retry where a
+  // claim can succeed).
+  const formsLocked =
+    registration.riskReview.registrationStarted &&
+    registration.status !== 'failed';
   const fixStep =
-    rejectionActionable && rejectionKind
+    rejectionActionable && rejectionKind && !formsLocked
       ? inferRejectionStep(rejectionKind, carrierReason)
       : null;
   const friendlyReason = rejectionKind
     ? mapReasonToFriendly(rejectionKind, carrierReason)
     : null;
+  // Every friendly explanation assumes the customer can edit something to fix
+  // it ("resubmit", "update your details"). While the forms are locked none
+  // of that is possible, so drop it and let the banner fall to its honest
+  // "carrier's wording + contact support" branch — the lock notice above
+  // already explains why editing is closed.
+  const displayFriendlyReason = formsLocked ? null : friendlyReason;
   // Support action for classes the customer can't finish self-serve:
   // opt-in/message-flow (we generate that text) and identity/brand
   // re-filing (retry reuses the existing carrier brand record). From
@@ -534,6 +551,13 @@ function CarrierReviewStatus({
         </div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">{title}</h2>
         <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">{copy}</p>
+        {registration.riskReview.registrationStarted &&
+          registration.status !== 'failed' &&
+          !registration.smsReady && (
+            <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">
+              Business and compliance details are locked until review completes. Contact support if you need to change them.
+            </p>
+          )}
       </div>
 
       <div className="space-y-3 rounded-[22px] border border-slate-200 bg-white/60 p-4 dark:border-white/[0.10] dark:bg-white/[0.04]">
@@ -547,9 +571,9 @@ function CarrierReviewStatus({
         <div className="space-y-2 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           {retryError && <p>{retryError}</p>}
           {rejectionKind && carrierReason && (
-            friendlyReason ? (
+            displayFriendlyReason ? (
               <>
-                <p>{friendlyReason}</p>
+                <p>{displayFriendlyReason}</p>
                 <p className="text-xs">
                   Carrier&apos;s exact wording: {carrierReason}
                 </p>
@@ -595,10 +619,9 @@ function CarrierReviewStatus({
           <div className="flex flex-col gap-3 sm:flex-row">
             {fixStep && (
               <Button type="button" onClick={() => onFixStep(fixStep)}>
-                {/* From 'submitted' nothing can actually resubmit (the
-                    attempt isn't claimable) — edits save for support to
-                    re-file, so don't promise a resubmission. */}
-                {registration.status === 'submitted' ? 'Update details' : 'Fix & resubmit'}
+                {/* fixStep is gated to the unlocked 'failed' state, so this
+                    always leads to a form the save will accept. */}
+                Fix &amp; resubmit
               </Button>
             )}
             {needsSupport && (

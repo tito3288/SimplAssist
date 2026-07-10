@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
 import { normalizeUsStateCode } from "@/lib/usStates";
+
+const REGISTRATION_LOCKED_MESSAGE =
+  "Your registration is in carrier review — these details are locked until review completes.";
 
 function hasFirstAndLastName(value: string): boolean {
   return value.trim().split(/\s+/).length >= 2;
@@ -70,7 +74,9 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id, no_ein_hold_status")
+    .select(
+      "id, no_ein_hold_status, telnyx_brand_id, brand_status, campaign_status, onboarding_registration_status"
+    )
     .eq("id", data.businessId)
     .eq("owner_id", user.id)
     .single();
@@ -79,6 +85,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
       { status: 403 }
+    );
+  }
+
+  // Legal identity is frozen while a submitted registration awaits carrier
+  // review — the Telnyx brand can't be updated, so edits would only drift the
+  // DB from the filed brand. The 'failed' state stays editable: fixing data
+  // before a retry is the designed recovery path.
+  if (
+    registrationHasStartedForRisk(business) &&
+    business.onboarding_registration_status !== "failed"
+  ) {
+    return NextResponse.json(
+      { error: REGISTRATION_LOCKED_MESSAGE },
+      { status: 409 }
     );
   }
 
