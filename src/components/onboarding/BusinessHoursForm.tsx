@@ -43,7 +43,8 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
     try {
       const supabase = createClient();
       // Delete existing hours then insert new ones
-      await supabase.from('business_hours').delete().eq('business_id', businessId);
+      const { error: deleteError } = await supabase.from('business_hours').delete().eq('business_id', businessId);
+      if (deleteError) throw deleteError;
       const { error } = await supabase.from('business_hours').insert(
         hours.map((h, i) => ({
           business_id: businessId,

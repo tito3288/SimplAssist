@@ -160,7 +160,8 @@ export default function ServicesAndFaqsForm({
       const supabase = createClient();
 
       // Delete existing then insert
-      await supabase.from('services').delete().eq('business_id', businessId);
+      const { error: sDelErr } = await supabase.from('services').delete().eq('business_id', businessId);
+      if (sDelErr) throw sDelErr;
       if (data.services.length > 0) {
         const { error: sErr } = await supabase.from('services').insert(
           data.services.map((s) => ({
@@ -173,7 +174,8 @@ export default function ServicesAndFaqsForm({
         if (sErr) throw sErr;
       }
 
-      await supabase.from('faqs').delete().eq('business_id', businessId);
+      const { error: fDelErr } = await supabase.from('faqs').delete().eq('business_id', businessId);
+      if (fDelErr) throw fDelErr;
       const answeredFaqs = data.faqs.filter((f) => f.question && f.answer);
       if (answeredFaqs.length > 0) {
         const { error: fErr } = await supabase.from('faqs').insert(
