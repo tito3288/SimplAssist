@@ -292,6 +292,18 @@ async function applyStatusTransition(args: {
           brand_status: args.newStatus,
           brand_status_updated_at: now,
           brand_rejection_reason: args.rejectionReason,
+          // A rejected brand maps to the retryable 'failed' state so the
+          // carrier-review panel can offer the routed fix path (mirrors the
+          // campaign-rejection mapping below).
+          ...(args.newStatus === "rejected"
+            ? {
+                onboarding_registration_status: "failed" as const,
+                onboarding_registration_submitted_at: null,
+                onboarding_registration_error:
+                  args.rejectionReason ??
+                  "Your business verification was rejected by the carrier.",
+              }
+            : {}),
         }
       : {
           campaign_status: args.newStatus,

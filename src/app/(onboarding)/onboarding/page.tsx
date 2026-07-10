@@ -22,6 +22,10 @@ import {
   type OnboardingState,
   type OnboardingStep,
 } from '@/lib/onboarding/types';
+import {
+  inferRejectionStep,
+  type RejectionKind,
+} from '@/lib/onboarding/rejectionGuidance';
 import type { BusinessType } from '@/types/database';
 
 type StateResponse = {
@@ -274,6 +278,7 @@ export default function OnboardingPage() {
               refreshState({ keepStep: true });
             }}
             onDashboard={() => router.push('/dashboard')}
+            onFixStep={(targetStep) => setStep(targetStep)}
           />
         )}
       </div>
@@ -370,15 +375,35 @@ function CarrierReviewStatus({
   onRefresh,
   onRetry,
   onDashboard,
+  onFixStep,
 }: {
   state: OnboardingState;
   onRefresh: () => Promise<OnboardingState | null>;
   onRetry: (state: OnboardingState | null) => void;
   onDashboard: () => void;
+  onFixStep: (step: OnboardingStep) => void;
 }) {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const registration = state.registration;
+
+  // Carrier rejection with a retryable status: offer a routed edit path.
+  // Best-effort keyword inference; the full raw reason stays visible below
+  // regardless of where we route.
+  const rejectionKind: RejectionKind | null =
+    registration.brandStatus === 'rejected'
+      ? 'brand'
+      : registration.campaignStatus === 'rejected'
+        ? 'campaign'
+        : null;
+  const rejectionReason =
+    (rejectionKind === 'brand'
+      ? registration.brandRejectionReason
+      : registration.campaignRejectionReason) ?? registration.error;
+  const fixStep =
+    registration.status === 'failed' && rejectionKind
+      ? inferRejectionStep(rejectionKind, rejectionReason)
+      : null;
   const title = registration.smsReady
     ? 'SMS is active'
     : registration.holdReason === 'held_no_ein'
@@ -458,9 +483,21 @@ function CarrierReviewStatus({
             Go to dashboard
           </Button>
         ) : registration.holdReason === 'held_no_ein' ? null : registration.status === 'failed' ? (
-          <Button type="button" onClick={handleRetry} loading={retrying}>
-            Retry registration
-          </Button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            {fixStep && (
+              <Button type="button" onClick={() => onFixStep(fixStep)}>
+                Fix &amp; resubmit
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant={fixStep ? 'secondary' : 'primary'}
+              onClick={handleRetry}
+              loading={retrying}
+            >
+              Retry registration
+            </Button>
+          </div>
         ) : null}
       </div>
     </div>
