@@ -99,16 +99,24 @@ export default function AIPersonalityForm({
 
       // Save welcome message to widget config
       if (data.web_greeting?.trim()) {
-        await supabase.from('widget_configs').upsert({
+        const { error: widgetError } = await supabase.from('widget_configs').upsert({
           business_id: businessId,
           welcome_message: data.web_greeting,
         }, { onConflict: 'business_id' });
+        if (widgetError) {
+          console.warn('Failed to save widget welcome message:', widgetError.message);
+        }
       }
 
-      await supabase.from('businesses').update({
+      const { error: markerError } = await supabase.from('businesses').update({
         onboarding_step: 'legal_verification',
         onboarding_last_saved_at: new Date().toISOString(),
       }).eq('id', businessId);
+      if (markerError) {
+        // Advisory resume marker only — the data write above succeeded, and
+        // the server re-derives the step from saved data on next load.
+        console.warn('Failed to update onboarding progress marker:', markerError.message);
+      }
 
       onNext(data);
     } catch {

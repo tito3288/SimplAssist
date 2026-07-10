@@ -56,10 +56,15 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
         { onConflict: 'business_id,day_of_week' }
       );
       if (error) throw error;
-      await supabase.from('businesses').update({
+      const { error: markerError } = await supabase.from('businesses').update({
         onboarding_step: 'services_faqs',
         onboarding_last_saved_at: new Date().toISOString(),
       }).eq('id', businessId);
+      if (markerError) {
+        // Advisory resume marker only — the data write above succeeded, and
+        // the server re-derives the step from saved data on next load.
+        console.warn('Failed to update onboarding progress marker:', markerError.message);
+      }
       onNext(hours);
     } catch {
       setSubmitError('Could not save your business hours. Please try again.');
