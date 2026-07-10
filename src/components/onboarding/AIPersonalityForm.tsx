@@ -50,6 +50,7 @@ export default function AIPersonalityForm({
   onBack,
 }: AIPersonalityFormProps) {
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const {
     register,
@@ -76,6 +77,7 @@ export default function AIPersonalityForm({
 
   const onSubmit = async (data: AIPersonalityData) => {
     setSaving(true);
+    setSubmitError('');
     try {
       const supabase = createClient();
 
@@ -92,7 +94,7 @@ export default function AIPersonalityForm({
         guardrails: guardrailLines,
         booking_enabled: data.booking_enabled,
         booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
-      });
+      }, { onConflict: 'business_id' });
       if (error) throw error;
 
       // Save welcome message to widget config
@@ -110,7 +112,7 @@ export default function AIPersonalityForm({
 
       onNext(data);
     } catch {
-      // Silently handle
+      setSubmitError('Could not save your AI settings. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -281,6 +283,10 @@ export default function AIPersonalityForm({
           </div>
         )}
       </div>
+
+      {submitError && (
+        <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+      )}
 
       <div className="flex justify-between pt-4">
         <button
