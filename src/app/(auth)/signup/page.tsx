@@ -8,14 +8,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Mail } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
-  authInputClass,
-  glassCardSubtle,
-  primaryCtaClass,
-  textPrimary,
-  textSecondary,
-} from "@/lib/glass";
-import { PulsingDot } from "@/components/ui/pulsing-dot";
-import { AuthPasswordField } from "@/components/auth/auth-password-field";
+  body,
+  btnPrimaryWide,
+  fieldLabel,
+  ink,
+  inlineLink,
+  inputField,
+  tile,
+} from "@/lib/theme-v2/theme";
+import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
 
 const signupSchema = z
   .object({
@@ -30,9 +31,6 @@ const signupSchema = z
   });
 
 type SignupForm = z.infer<typeof signupSchema>;
-
-const labelClass =
-  "mb-1.5 block text-sm font-medium text-slate-700 dark:text-[#d4d4d8]";
 
 export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
@@ -72,23 +70,23 @@ export default function SignupPage() {
     return (
       <div className="text-center">
         <div
-          className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${glassCardSubtle}`}
+          className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${tile}`}
         >
-          <Mail className="h-7 w-7 text-[#ff914d]" aria-hidden />
+          <Mail className="h-7 w-7 text-[#ea580c] dark:text-[#ff914d]" aria-hidden />
         </div>
-        <h1 className={`text-2xl font-bold tracking-tight ${textPrimary}`}>
+        <h1 className={`text-2xl font-bold tracking-tight ${ink}`}>
           Check your email
         </h1>
-        <p className={`mt-2 text-sm leading-relaxed ${textSecondary}`}>
+        <p className={`mt-2 text-sm leading-relaxed ${body}`}>
           We sent you a confirmation link. Open it to activate your account and
           start using SimplAssist.
         </p>
-        <p className={`mt-6 text-sm ${textSecondary}`}>
+        <p className={`mt-6 text-sm ${body}`}>
           Wrong address?{" "}
           <button
             type="button"
             onClick={() => setSuccess(false)}
-            className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
+            className={inlineLink}
           >
             Go back
           </button>
@@ -99,16 +97,16 @@ export default function SignupPage() {
 
   return (
     <div>
-      <h1 className={`text-center text-2xl font-bold tracking-tight ${textPrimary}`}>
+      <h1 className={`text-center text-2xl font-bold tracking-tight ${ink}`}>
         Create your account
       </h1>
-      <p className={`mt-1 text-center text-sm ${textSecondary}`}>
-        Free to try — no credit card required.
+      <p className={`mt-1 text-center text-sm ${body}`}>
+        Create your account to get started.
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
-          <label htmlFor="fullName" className={labelClass}>
+          <label htmlFor="fullName" className={fieldLabel}>
             Full name
           </label>
           <input
@@ -116,7 +114,7 @@ export default function SignupPage() {
             type="text"
             autoComplete="name"
             {...register("fullName")}
-            className={authInputClass}
+            className={inputField}
             placeholder="Bryan Arambula"
           />
           {errors.fullName && (
@@ -127,7 +125,7 @@ export default function SignupPage() {
         </div>
 
         <div>
-          <label htmlFor="email" className={labelClass}>
+          <label htmlFor="email" className={fieldLabel}>
             Email
           </label>
           <input
@@ -135,7 +133,7 @@ export default function SignupPage() {
             type="email"
             autoComplete="email"
             {...register("email")}
-            className={authInputClass}
+            className={inputField}
             placeholder="you@example.com"
           />
           {errors.email && (
@@ -145,7 +143,7 @@ export default function SignupPage() {
           )}
         </div>
 
-        <AuthPasswordField
+        <AuthPasswordFieldV2
           id="password"
           label="Password"
           autoComplete="new-password"
@@ -154,7 +152,7 @@ export default function SignupPage() {
           error={errors.password?.message}
         />
 
-        <AuthPasswordField
+        <AuthPasswordFieldV2
           id="confirmPassword"
           label="Confirm password"
           autoComplete="new-password"
@@ -166,7 +164,7 @@ export default function SignupPage() {
         {error && (
           <div
             className="
-              rounded-[22px] border border-red-200/80 bg-red-50/90 px-4 py-3
+              rounded-2xl border border-red-200/80 bg-red-50/90 px-4 py-3
               dark:border-red-500/25 dark:bg-red-500/10
             "
             role="alert"
@@ -178,11 +176,11 @@ export default function SignupPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className={primaryCtaClass}
+          className={btnPrimaryWide}
         >
           {isSubmitting ? (
             <>
-              <PulsingDot inline />
+              <LoadingDot />
               Creating account…
             </>
           ) : (
@@ -191,30 +189,27 @@ export default function SignupPage() {
         </button>
       </form>
 
-      <p className={`mt-6 text-center text-xs ${textSecondary}`}>
+      <p className={`mt-6 text-center text-xs ${body}`}>
         By signing up you agree to our{" "}
         <Link
           href="/terms"
-          className="font-medium text-[#ff914d] hover:text-[#ffb07a] underline-offset-2 hover:underline"
+          className={`${inlineLink} underline-offset-2 hover:underline`}
         >
           Terms
         </Link>{" "}
         and{" "}
         <Link
           href="/privacy"
-          className="font-medium text-[#ff914d] hover:text-[#ffb07a] underline-offset-2 hover:underline"
+          className={`${inlineLink} underline-offset-2 hover:underline`}
         >
           Privacy
         </Link>
         .
       </p>
 
-      <p className={`mt-4 text-center text-sm ${textSecondary}`}>
+      <p className={`mt-4 text-center text-sm ${body}`}>
         Already have an account?{" "}
-        <Link
-          href="/login"
-          className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
-        >
+        <Link href="/login" className={inlineLink}>
           Log in
         </Link>
       </p>

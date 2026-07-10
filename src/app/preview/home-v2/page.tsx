@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -27,6 +28,10 @@ import {
   pageShell,
   tile,
 } from "@/lib/theme-v2/theme";
+
+export const metadata: Metadata = {
+  title: "SimplAssist — Home (v2 preview)",
+};
 
 /* ── Data ── */
 
@@ -180,7 +185,7 @@ function SectionHeader({
 
 /* ── Page ── */
 
-export default function HomePage() {
+export default function HomeV2Page() {
   return (
     <div className={pageShell} style={{ fontFamily: fontStack }}>
       {/* Ambient backgrounds — light gets its own warm treatment */}
@@ -220,7 +225,7 @@ export default function HomePage() {
       {/* ── Navigation — frosted pill; must NOT be inside a transformed parent or fixed breaks ── */}
       <nav className={`${navShell} flex items-center justify-between gap-3 sm:gap-4 px-3 py-2 sm:px-6 sm:py-3`}>
         <div className="flex items-center gap-3.5 min-w-0">
-          <Link href="/home">
+          <Link href="/preview/home-v2">
             <Logo />
           </Link>
         </div>
@@ -239,10 +244,10 @@ export default function HomePage() {
 
         <div className="flex items-center gap-3">
           <ThemeToggleV2 />
-          <Link href="/login" className={`${btnSecondary} max-sm:hidden`}>
+          <Link href="/preview/auth-v2?view=login" className={`${btnSecondary} max-sm:hidden`}>
             Log In
           </Link>
-          <Link href="/signup" className={btnPrimary}>
+          <Link href="/preview/auth-v2" className={btnPrimary}>
             Get Started
           </Link>
         </div>
@@ -267,7 +272,7 @@ export default function HomePage() {
 
               {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
-                <Link href="/signup" className={btnPrimary}>
+                <Link href="/preview/auth-v2" className={btnPrimary}>
                   Get Started
                 </Link>
                 <a href="#how-it-works" className={btnSecondary}>
@@ -433,7 +438,7 @@ export default function HomePage() {
                     ))}
                   </ul>
                   <Link
-                    href="/signup"
+                    href="/preview/auth-v2"
                     className={plan.highlighted ? `${btnPrimary} w-full` : `${btnSecondary} w-full`}
                   >
                     Get Started
@@ -472,7 +477,7 @@ export default function HomePage() {
                   </li>
                 ))}
               </ul>
-              <Link href="/signup" className={btnPrimaryWide}>
+              <Link href="/preview/auth-v2" className={btnPrimaryWide}>
                 Get Started
               </Link>
             </div>
@@ -507,7 +512,7 @@ export default function HomePage() {
                 <a href="#pricing" className={navLink}>Pricing</a>
                 <Link href="/privacy" className={navLink}>Privacy</Link>
                 <Link href="/terms" className={navLink}>Terms</Link>
-                <Link href="/login" className={navLink}>Log In</Link>
+                <Link href="/preview/auth-v2?view=login" className={navLink}>Log In</Link>
               </div>
             </div>
           </Reveal>

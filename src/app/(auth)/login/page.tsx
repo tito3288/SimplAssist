@@ -8,13 +8,14 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
-  authInputClass,
-  primaryCtaClass,
-  textPrimary,
-  textSecondary,
-} from "@/lib/glass";
-import { PulsingDot } from "@/components/ui/pulsing-dot";
-import { AuthPasswordField } from "@/components/auth/auth-password-field";
+  body,
+  btnPrimaryWide,
+  fieldLabel,
+  ink,
+  inlineLink,
+  inputField,
+} from "@/lib/theme-v2/theme";
+import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -22,9 +23,6 @@ const loginSchema = z.object({
 });
 
 type LoginForm = z.infer<typeof loginSchema>;
-
-const labelClass =
-  "mb-1.5 block text-sm font-medium text-slate-700 dark:text-[#d4d4d8]";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -59,16 +57,16 @@ export default function LoginPage() {
 
   return (
     <div>
-      <h1 className={`text-center text-2xl font-bold tracking-tight ${textPrimary}`}>
+      <h1 className={`text-center text-2xl font-bold tracking-tight ${ink}`}>
         Log in
       </h1>
-      <p className={`mt-1 text-center text-sm ${textSecondary}`}>
+      <p className={`mt-1 text-center text-sm ${body}`}>
         Welcome back — pick up where you left off.
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
         <div>
-          <label htmlFor="email" className={labelClass}>
+          <label htmlFor="email" className={fieldLabel}>
             Email
           </label>
           <input
@@ -76,7 +74,7 @@ export default function LoginPage() {
             type="email"
             autoComplete="email"
             {...register("email")}
-            className={authInputClass}
+            className={inputField}
             placeholder="you@example.com"
           />
           {errors.email && (
@@ -86,7 +84,7 @@ export default function LoginPage() {
           )}
         </div>
 
-        <AuthPasswordField
+        <AuthPasswordFieldV2
           id="password"
           label="Password"
           autoComplete="current-password"
@@ -98,7 +96,7 @@ export default function LoginPage() {
         {error && (
           <div
             className="
-              rounded-[22px] border border-red-200/80 bg-red-50/90 px-4 py-3
+              rounded-2xl border border-red-200/80 bg-red-50/90 px-4 py-3
               dark:border-red-500/25 dark:bg-red-500/10
             "
             role="alert"
@@ -110,11 +108,11 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className={primaryCtaClass}
+          className={btnPrimaryWide}
         >
           {isSubmitting ? (
             <>
-              <PulsingDot inline />
+              <LoadingDot />
               Signing in…
             </>
           ) : (
@@ -123,12 +121,9 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className={`mt-8 text-center text-sm ${textSecondary}`}>
+      <p className={`mt-8 text-center text-sm ${body}`}>
         Don&apos;t have an account?{" "}
-        <Link
-          href="/signup"
-          className="font-semibold text-[#ff914d] hover:text-[#ffb07a] transition-colors"
-        >
+        <Link href="/signup" className={inlineLink}>
           Create one
         </Link>
       </p>
