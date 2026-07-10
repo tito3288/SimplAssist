@@ -80,7 +80,7 @@ export async function ensureCampaignAssignmentForBusiness(
   }
 
   const candidates = (numbers ?? []).filter((row) =>
-    shouldInspectAssignment(row, options.force ?? false)
+    shouldInspectAssignment(row, options.force ?? false, business.telnyx_campaign_id!)
   );
 
   const numbersNeedingAssignment: AssignmentPhoneNumberRow[] = [];
@@ -174,12 +174,29 @@ export async function ensureCampaignAssignmentForBusiness(
 
 function shouldInspectAssignment(
   row: AssignmentPhoneNumberRow,
-  force: boolean
+  force: boolean,
+  currentCampaignId: string
 ): boolean {
   if (force) return true;
+  // Assignment state referencing a DIFFERENT campaign than the business's
+  // current one is stale (e.g. a rejected campaign was replaced) — always
+  // re-inspect, even if it reads 'assigned' or previously failed with the
+  // different-campaign marker.
+  if (
+    row.telnyx_campaign_assignment_campaign_id &&
+    row.telnyx_campaign_assignment_campaign_id !== currentCampaignId
+  ) {
+    return true;
+  }
   if (row.telnyx_campaign_assignment_status === "assigned") return false;
   if (isDifferentCampaignFailure(row.telnyx_campaign_assignment_failure_reason)) {
-    return false;
+    // Cooldown rather than a permanent skip: after a campaign replacement
+    // whose Telnyx-side deactivation failed, the number can be stamped
+    // different-campaign against the NEW id; once the old campaign finally
+    // dies, re-inspection self-heals the assignment.
+    const updatedAt = row.telnyx_campaign_assignment_updated_at;
+    if (!updatedAt) return true;
+    return isOlderThan(updatedAt, FAILED_RETRY_COOLDOWN_MS);
   }
 
   const updatedAt = row.telnyx_campaign_assignment_updated_at;
