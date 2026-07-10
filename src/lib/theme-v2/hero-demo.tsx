@@ -1,10 +1,14 @@
 "use client";
 
 /**
- * Animated hero conversation demo: a missed call becomes a booked job.
- * Plays at reading pace with typing indicators, pauses on the finished
- * conversation, fades out, and loops. `prefers-reduced-motion` gets the
- * full static conversation instead.
+ * Animated hero conversation demo. Rotates through three industry
+ * conversations (plumbing → auto repair → lawn care → loop), each a missed
+ * call / website chat that becomes a booked job. Plays at reading pace with
+ * typing indicators, holds on the finished conversation, then cross-fades to
+ * the next business — the mockup header and the top "New Leads" row change
+ * with it, while "The Outcome" card stays constant.
+ *
+ * `prefers-reduced-motion` shows the static plumbing conversation, no loop.
  *
  * The chat area is fixed-height (messages pin to the bottom and older ones
  * scroll up out of view), so the surrounding page never shifts.
@@ -14,23 +18,68 @@ import { useEffect, useState } from "react";
 import { body, ink, tile, tileRow } from "@/lib/theme-v2/theme";
 
 type Sender = "banner" | "ai" | "customer";
+type Message = { from: Sender; text: string };
 
-const SCRIPT: { from: Sender; text: string }[] = [
-  { from: "banner", text: "Missed call from Sarah — new customer" },
+type Conversation = {
+  business: string;
+  script: Message[];
+  /** Active lead surfaced at the top of the New Leads list. */
+  lead: { name: string; pending: string; won: string };
+};
+
+const CONVERSATIONS: Conversation[] = [
   {
-    from: "ai",
-    text: "Hi Sarah! This is Acme Plumbing's assistant — sorry we missed your call. How can we help?",
+    business: "Acme Plumbing",
+    lead: { name: "Sarah M.", pending: "Hot Lead", won: "Booked ✅" },
+    script: [
+      { from: "banner", text: "Missed call from Sarah — new customer" },
+      {
+        from: "ai",
+        text: "Hi Sarah! This is Acme Plumbing's assistant — sorry we missed your call. How can we help?",
+      },
+      { from: "customer", text: "My water heater is leaking. Can someone come out this week?" },
+      {
+        from: "ai",
+        text: "We can help with that! We have Tuesday 9 AM or Wednesday 2 PM — which works better?",
+      },
+      { from: "customer", text: "Tuesday works!" },
+      { from: "ai", text: "You're booked for Tuesday at 9 AM ✅ We'll text you a reminder." },
+    ],
   },
-  { from: "customer", text: "My water heater is leaking. Can someone come out this week?" },
   {
-    from: "ai",
-    text: "We can help with that! We have Tuesday 9 AM or Wednesday 2 PM — which works better?",
+    business: "Summit Auto Repair",
+    lead: { name: "Mike R.", pending: "New Lead", won: "Booked ✅" },
+    script: [
+      { from: "banner", text: "Missed call from Mike — new customer" },
+      {
+        from: "ai",
+        text: "Hi Mike! Summit Auto Repair's assistant here — sorry we missed you. What can we help with?",
+      },
+      { from: "customer", text: "My check engine light came on. How much is a diagnostic?" },
+      {
+        from: "ai",
+        text: "Diagnostics are $89, applied to the repair if you book with us. Want to bring it in tomorrow morning?",
+      },
+      { from: "customer", text: "Yeah, 8 AM if you have it." },
+      { from: "ai", text: "You're set for 8 AM tomorrow ✅ We'll text a reminder tonight." },
+    ],
   },
-  { from: "customer", text: "Tuesday works!" },
-  { from: "ai", text: "You're booked for Tuesday at 9 AM ✅ We'll text you a reminder." },
+  {
+    business: "GreenScape Lawn Care",
+    lead: { name: "Jessica L.", pending: "New Lead", won: "Quote scheduled ✅" },
+    script: [
+      { from: "banner", text: "New website chat — Jessica, 7:42 PM" },
+      { from: "ai", text: "Hi! Thanks for reaching out to GreenScape 🌱 How can we help?" },
+      { from: "customer", text: "Do you do weekly mowing? I need someone starting this month." },
+      {
+        from: "ai",
+        text: "We do! We have weekly and biweekly plans. Can we schedule a free quote visit this week?",
+      },
+      { from: "customer", text: "Thursday afternoon?" },
+      { from: "ai", text: "Thursday between 1–4 PM it is ✅ Our team will confirm by text in the morning." },
+    ],
+  },
 ];
-
-const BOOKED_AT = SCRIPT.length; // Sarah flips to "Booked ✅" when the last message lands
 
 /* Matte bubble styles (match the static v2 mockup) */
 const customerBubble = `
@@ -48,6 +97,16 @@ const bannerPill = `
   bg-white border border-[#ece4d8] text-stone-500
   dark:bg-white/[0.06] dark:border-white/[0.10] dark:text-[#cfcfcf]
 `;
+
+/* Lead badge tones */
+const badgePending =
+  "bg-[#fcebdd] text-[#9a3412] border-[#f6d9c0] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
+const badgeWon =
+  "bg-green-50 text-green-700 border-green-200 dark:bg-[rgba(74,222,128,.12)] dark:text-[#bbf7d0] dark:border-[rgba(74,222,128,.25)]";
+const badgeBlue =
+  "bg-blue-50 text-blue-700 border-blue-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
+const badgePurple =
+  "bg-purple-50 text-purple-700 border-purple-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
 
 function Bubble({ from, children }: { from: Sender; children: React.ReactNode }) {
   if (from === "banner") {
@@ -75,10 +134,7 @@ function Enter({ animate, children }: { animate: boolean; children: React.ReactN
 
 function TypingBubble({ from }: { from: "ai" | "customer" }) {
   return (
-    <div
-      className={`${from === "customer" ? customerBubble : aiBubble} !py-3`}
-      aria-hidden
-    >
+    <div className={`${from === "customer" ? customerBubble : aiBubble} !py-3`} aria-hidden>
       <span className="flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
@@ -94,6 +150,7 @@ function TypingBubble({ from }: { from: "ai" | "customer" }) {
 
 export function HeroDemo() {
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [visible, setVisible] = useState(0);
   const [typing, setTyping] = useState<"ai" | "customer" | null>(null);
   const [faded, setFaded] = useState(false);
@@ -108,8 +165,9 @@ export function HeroDemo() {
 
   useEffect(() => {
     if (reduceMotion) {
-      // Static: show the whole finished conversation, no loop.
-      setVisible(SCRIPT.length);
+      // Static: the full plumbing conversation, booked, no rotation.
+      setActiveIndex(0);
+      setVisible(CONVERSATIONS[0].script.length);
       setTyping(null);
       setFaded(false);
       return;
@@ -123,19 +181,27 @@ export function HeroDemo() {
       });
 
     async function run() {
+      let index = 0;
       while (alive) {
+        // Swap in this conversation. On a transition we're still faded out
+        // from the previous one, so header/leads/messages change invisibly.
+        setActiveIndex(index);
         setVisible(0);
         setTyping(null);
-        setFaded(false);
-        await wait(600);
+        await wait(60); // paint the swap at opacity 0 before fading in
+        if (!alive) return;
+
+        setFaded(false); // fade in the new business
+        await wait(560);
         if (!alive) return;
         setVisible(1); // system banner — no typing indicator
 
-        for (let i = 1; i < SCRIPT.length; i++) {
+        const script = CONVERSATIONS[index].script;
+        for (let i = 1; i < script.length; i++) {
           // Reading pause scaled to the previous message's length
-          await wait(500 + Math.min(SCRIPT[i - 1].text.length * 10, 900));
+          await wait(500 + Math.min(script[i - 1].text.length * 10, 900));
           if (!alive) return;
-          const from = SCRIPT[i].from as "ai" | "customer";
+          const from = script[i].from as "ai" | "customer";
           setTyping(from);
           await wait(from === "ai" ? 1300 : 1050);
           if (!alive) return;
@@ -143,11 +209,12 @@ export function HeroDemo() {
           setVisible(i + 1);
         }
 
-        await wait(4000); // hold the completed conversation
+        await wait(3600); // hold the completed conversation
         if (!alive) return;
-        setFaded(true);
-        await wait(700); // fade out, then loop
+        setFaded(true); // fade out
+        await wait(720); // fade-out completes + brief pause
         if (!alive) return;
+        index = (index + 1) % CONVERSATIONS.length;
       }
     }
 
@@ -158,32 +225,23 @@ export function HeroDemo() {
     };
   }, [reduceMotion]);
 
-  const booked = visible >= BOOKED_AT;
+  const convo = CONVERSATIONS[activeIndex];
+  const booked = visible >= convo.script.length;
 
   const leads = [
     {
-      name: "Sarah M.",
-      badge: booked ? "Booked ✅" : "Hot Lead",
-      color: booked
-        ? "bg-green-50 text-green-700 border-green-200 dark:bg-[rgba(74,222,128,.12)] dark:text-[#bbf7d0] dark:border-[rgba(74,222,128,.25)]"
-        : "bg-[#fcebdd] text-[#9a3412] border-[#f6d9c0] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]",
+      name: convo.lead.name,
+      badge: booked ? convo.lead.won : convo.lead.pending,
+      color: booked ? badgeWon : badgePending,
     },
-    {
-      name: "James R.",
-      badge: "Website Chat",
-      color:
-        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]",
-    },
-    {
-      name: "Alicia T.",
-      badge: "Missed Call",
-      color:
-        "bg-purple-50 text-purple-700 border-purple-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]",
-    },
+    { name: "James R.", badge: "Website Chat", color: badgeBlue },
+    { name: "Alicia T.", badge: "Missed Call", color: badgePurple },
   ];
 
+  const fadeClass = `transition-opacity duration-700 ${faded ? "opacity-0" : "opacity-100"}`;
+
   return (
-    <div className={`transition-opacity duration-700 ${faded ? "opacity-0" : "opacity-100"}`}>
+    <div>
       <style>{`
         @keyframes sa-demo-grow {
           from { grid-template-rows: 0fr; opacity: 0; transform: translateY(8px); }
@@ -195,12 +253,12 @@ export function HeroDemo() {
         }
       `}</style>
 
-      {/* Chat window */}
-      <div className={`${tile} p-5`}>
+      {/* Chat window — cross-fades on each business change */}
+      <div className={`${tile} p-5 ${fadeClass}`}>
         {/* Window top bar */}
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className={`font-bold text-sm ${ink}`}>Acme Plumbing</span>
+            <span className={`font-bold text-sm ${ink}`}>{convo.business}</span>
             <span className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-[#9a9a9c] whitespace-nowrap">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500 dark:bg-green-400" />
               AI Assistant active
@@ -217,8 +275,8 @@ export function HeroDemo() {
             push upward as they arrive and older ones clip out the top */}
         <div className="relative h-[380px] overflow-hidden" aria-live="polite">
           <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3">
-            {SCRIPT.slice(0, visible).map((m, i) => (
-              <Enter key={i} animate={!reduceMotion}>
+            {convo.script.slice(0, visible).map((m, i) => (
+              <Enter key={`${activeIndex}-${i}`} animate={!reduceMotion}>
                 <Bubble from={m.from}>{m.text}</Bubble>
               </Enter>
             ))}
@@ -233,8 +291,8 @@ export function HeroDemo() {
 
       {/* Dashboard strip — single column on narrow screens, side-by-side from sm up */}
       <div className="grid grid-cols-1 sm:grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
-        {/* New Leads */}
-        <div className={`${tile} rounded-[20px] p-5`}>
+        {/* New Leads — fades with the conversation so the active person swaps unseen */}
+        <div className={`${tile} rounded-[20px] p-5 ${fadeClass}`}>
           <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
             New Leads
           </div>
@@ -252,7 +310,7 @@ export function HeroDemo() {
           </div>
         </div>
 
-        {/* The Outcome */}
+        {/* The Outcome — constant across all businesses (no fade) */}
         <div className={`${tile} rounded-[20px] p-5`}>
           <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
             The Outcome
