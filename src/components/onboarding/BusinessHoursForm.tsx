@@ -31,6 +31,7 @@ interface BusinessHoursFormProps {
 export default function BusinessHoursForm({ businessId, initialData, onNext, onBack }: BusinessHoursFormProps) {
   const [hours, setHours] = useState<DayHours[]>(initialData || DEFAULT_HOURS);
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const updateDay = (index: number, updates: Partial<DayHours>) => {
     setHours((prev) => prev.map((h, i) => (i === index ? { ...h, ...updates } : h)));
@@ -38,6 +39,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
 
   const handleSubmit = async () => {
     setSaving(true);
+    setSubmitError('');
     try {
       const supabase = createClient();
       // Delete existing hours then insert new ones
@@ -58,7 +60,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
       }).eq('id', businessId);
       onNext(hours);
     } catch {
-      // Silently handle
+      setSubmitError('Could not save your business hours. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -116,6 +118,10 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
           </div>
         ))}
       </div>
+
+      {submitError && (
+        <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+      )}
 
       <div className="flex justify-between pt-4">
         <button

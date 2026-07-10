@@ -117,6 +117,7 @@ export default function ServicesAndFaqsForm({
   onBack,
 }: ServicesAndFaqsFormProps) {
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const defaultServices = initialData?.services ||
     scrapedServices?.map((s) => ({ name: s.name, description: s.description || '', price: s.price || '' })) ||
@@ -154,6 +155,7 @@ export default function ServicesAndFaqsForm({
 
   const onSubmit = async (data: ServicesAndFaqsData) => {
     setSaving(true);
+    setSubmitError('');
     try {
       const supabase = createClient();
 
@@ -192,7 +194,7 @@ export default function ServicesAndFaqsForm({
 
       onNext(data);
     } catch {
-      // Silently handle
+      setSubmitError('Could not save your services and FAQs. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -310,6 +312,10 @@ export default function ServicesAndFaqsForm({
           + Add FAQ
         </button>
       </div>
+
+      {submitError && (
+        <p className="text-sm text-red-600 dark:text-red-400">{submitError}</p>
+      )}
 
       <div className="flex justify-between pt-4">
         <button
