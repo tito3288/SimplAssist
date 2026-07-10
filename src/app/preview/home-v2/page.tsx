@@ -10,7 +10,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
-import { HeroDemo } from "./hero-demo";
+import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import {
   accentText,
   body,
@@ -20,7 +20,6 @@ import {
   card,
   cardHover,
   darkAmbient,
-  eyebrow,
   fontStack,
   ink,
   lightAmbient,
@@ -34,7 +33,7 @@ export const metadata: Metadata = {
   title: "SimplAssist — Home (v2 preview)",
 };
 
-/* ── Data (copy identical to the production homepage) ── */
+/* ── Data ── */
 
 const features = [
   {
@@ -137,52 +136,49 @@ const plans = [
   },
 ];
 
+const heroStats = [
+  { stat: "24/7", label: "AI response coverage for calls and website visitors" },
+  { stat: "1 inbox", label: "SMS and web chat conversations in one place" },
+  { stat: "Fast setup", label: "Built for small teams that want results without complexity" },
+];
+
 /* ── Local pieces ── */
 
-function Eyebrow({ text }: { text: string }) {
+function HeroStatCards() {
   return (
-    <span className={eyebrow}>
-      <span
-        className="
-          h-2.5 w-2.5 shrink-0 rounded-full
-          bg-[#ea580c] dark:bg-[#ff914d]
-          dark:shadow-[0_0_14px_rgba(255,145,77,.55)]
-        "
-      />
-      {text}
-    </span>
+    <>
+      {heroStats.map((item) => (
+        <div key={item.stat} className={`p-5 ${card} ${cardHover}`}>
+          <strong className={`block text-[22px] mb-2 ${ink}`}>{item.stat}</strong>
+          <span className={`text-sm ${body}`}>{item.label}</span>
+        </div>
+      ))}
+    </>
   );
 }
 
-function Logo({ size = "md" }: { size?: "sm" | "md" }) {
-  const cls = size === "sm" ? "h-3.5 w-auto object-contain" : "h-8 w-auto object-contain";
-  const dims = size === "sm" ? { width: 56, height: 14 } : { width: 140, height: 34 };
+function Logo() {
   return (
     <>
-      <Image src="/logo-dark.png" alt="SimplAssist" {...dims} className={`hidden dark:block ${cls}`} />
-      <Image src="/logo-light.png" alt="SimplAssist" {...dims} className={`block dark:hidden ${cls}`} />
+      <Image src="/logo-dark.png" alt="SimplAssist" width={140} height={34} className="hidden dark:block h-8 w-auto object-contain" />
+      <Image src="/logo-light.png" alt="SimplAssist" width={140} height={34} className="block dark:hidden h-8 w-auto object-contain" />
     </>
   );
 }
 
 function SectionHeader({
-  eyebrowText,
   title,
   subtitle,
 }: {
-  eyebrowText: string;
   title: React.ReactNode;
   subtitle: string;
 }) {
   return (
     <Reveal className="mb-12 sm:mb-16">
-      <Eyebrow text={eyebrowText} />
-      <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
-        <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
-          {title}
-        </h2>
-        <p className={`${body} max-w-[600px] leading-[1.65] lg:text-right`}>{subtitle}</p>
-      </div>
+      <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
+        {title}
+      </h2>
+      <p className={`${body} mt-4 max-w-[60ch] leading-[1.65]`}>{subtitle}</p>
     </Reveal>
   );
 }
@@ -226,7 +222,7 @@ export default function HomeV2Page() {
         }}
       />
 
-      {/* ── Navigation — frosted pill, heavier blur + tint so scrolled text never bleeds through ── */}
+      {/* ── Navigation — frosted pill; must NOT be inside a transformed parent or fixed breaks ── */}
       <nav className={`${navShell} flex items-center justify-between gap-3 sm:gap-4 px-3 py-2 sm:px-6 sm:py-3`}>
         <div className="flex items-center gap-3.5 min-w-0">
           <Link href="/preview/home-v2">
@@ -263,11 +259,7 @@ export default function HomeV2Page() {
         <section className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
           <Reveal priority>
             <div className="flex flex-col items-start">
-              <div className="mt-12 sm:mt-0">
-                <Eyebrow text="AI assistant for small businesses" />
-              </div>
-
-              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 ${ink}`}>
+              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
                 Never miss a{" "}
                 <br className="hidden sm:block" />
                 <span className={accentText}>customer</span> again.
@@ -281,33 +273,24 @@ export default function HomeV2Page() {
               {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
                 <Link href="/preview/auth-v2" className={btnPrimary}>
-                  Get Started Free
+                  Get Started
                 </Link>
                 <a href="#how-it-works" className={btnSecondary}>
                   See How It Works
                 </a>
               </div>
 
-              {/* Mini stat cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-7 w-full">
-                {[
-                  { stat: "24/7", label: "AI response coverage for calls and website visitors" },
-                  { stat: "1 inbox", label: "SMS and web chat conversations in one place" },
-                  { stat: "Fast setup", label: "Built for small teams that want results without complexity" },
-                ].map((item) => (
-                  <div key={item.stat} className={`p-5 ${card} ${cardHover}`}>
-                    <strong className={`block text-[22px] mb-2 ${ink}`}>{item.stat}</strong>
-                    <span className={`text-sm ${body}`}>{item.label}</span>
-                  </div>
-                ))}
+              {/* Mini stat cards — desktop: in-column under the CTAs */}
+              <div className="hidden lg:grid lg:grid-cols-3 gap-3.5 mt-7 w-full">
+                <HeroStatCards />
               </div>
             </div>
           </Reveal>
 
-          {/* Hero panel — chat window + dashboard strip */}
-          <Reveal priority delayMs={140} className="hidden lg:block">
+          {/* Hero panel — animated conversation demo (all widths) */}
+          <Reveal priority delayMs={140}>
             <div className={`p-5 relative overflow-hidden ${card}`}>
-              {/* Ambient corner tint (dark only, kept from current design) */}
+              {/* Ambient corner tint (dark only) */}
               <div
                 className="absolute pointer-events-none hidden dark:block"
                 style={{
@@ -320,9 +303,14 @@ export default function HomeV2Page() {
                   filter: "blur(18px)",
                 }}
               />
-
-              {/* Animated conversation demo (chat window + dashboard strip) */}
               <HeroDemo />
+            </div>
+          </Reveal>
+
+          {/* Mini stat cards — mobile/tablet: after the demo */}
+          <Reveal className="lg:hidden">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 w-full">
+              <HeroStatCards />
             </div>
           </Reveal>
         </section>
@@ -330,7 +318,6 @@ export default function HomeV2Page() {
         {/* ── Features ── */}
         <section id="features" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="Everything you need"
             title={
               <>
                 Built for small businesses that want a{" "}
@@ -367,7 +354,6 @@ export default function HomeV2Page() {
         {/* ── How It Works ── */}
         <section id="how-it-works" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="How it works"
             title={
               <>
                 Three simple steps to keep every <span className={accentText}>lead</span>.
@@ -402,11 +388,10 @@ export default function HomeV2Page() {
         {/* ── Pricing ── */}
         <section id="pricing" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="Simple, transparent pricing"
             title={
               <>
-                Start free and upgrade as your{" "}
-                <span className={accentText}>business grows</span>.
+                Simple plans that grow with your{" "}
+                <span className={accentText}>business</span>.
               </>
             }
             subtitle="No contracts. Paid SMS activation includes a one-time $25 setup fee."
@@ -466,26 +451,25 @@ export default function HomeV2Page() {
 
         {/* ── CTA ── */}
         <Reveal>
-          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 items-center ${card}`}>
-            <div>
-              <h2 className={`text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.02] tracking-[-0.04em] mb-3 ${ink}`}>
-                Ready to stop losing customers?
+          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 items-start ${card}`}>
+            <div className="lg:pt-1.5">
+              <h2 className={`text-balance text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.05] tracking-[-0.04em] mb-3 ${ink}`}>
+                Your voicemail isn&apos;t closing deals.
               </h2>
-              <p className={`${body} leading-[1.7] max-w-[680px]`}>
-                Join hundreds of small businesses already using SimplAssist to respond
-                faster, capture more leads, and grow without hiring more staff.
+              <p className={`${body} leading-[1.7] max-w-[560px]`}>
+                SimplAssist texts customers back before they&apos;ve dialed your competitor.
               </p>
             </div>
             <div className={`${tile} p-6`}>
               <strong className={`block text-base mb-2.5 ${ink}`}>
-                What you get on day one:
+                What you get:
               </strong>
               <ul className="space-y-2.5 mb-5">
                 {[
                   "AI that texts back every missed call, day or night",
                   "Website chat widget — embed with one line of code",
-                  "Dashboard with every lead and conversation",
-                  "Free 14-day trial — no credit card required",
+                  "Every lead and conversation in one dashboard",
+                  "Live the same week, once your number's approved to send",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">
                     <span className="w-2 h-2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] shrink-0" />
@@ -494,7 +478,7 @@ export default function HomeV2Page() {
                 ))}
               </ul>
               <Link href="/preview/auth-v2" className={btnPrimaryWide}>
-                Start Free Trial
+                Get Started
               </Link>
             </div>
           </section>

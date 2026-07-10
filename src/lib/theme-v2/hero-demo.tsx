@@ -231,8 +231,8 @@ export function HeroDemo() {
         </div>
       </div>
 
-      {/* Dashboard strip */}
-      <div className="grid grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
+      {/* Dashboard strip — single column on narrow screens, side-by-side from sm up */}
+      <div className="grid grid-cols-1 sm:grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
         {/* New Leads */}
         <div className={`${tile} rounded-[20px] p-5`}>
           <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
