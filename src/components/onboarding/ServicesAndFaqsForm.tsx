@@ -159,40 +159,35 @@ export default function ServicesAndFaqsForm({
     try {
       const supabase = createClient();
 
-      // Delete existing then insert
-      const { error: sDelErr } = await supabase.from('services').delete().eq('business_id', businessId);
-      if (sDelErr) throw sDelErr;
-      if (data.services.length > 0) {
-        const { error: sErr } = await supabase.from('services').insert(
-          data.services.map((s) => ({
-            business_id: businessId,
-            name: s.name,
-            description: s.description || null,
-            price: s.price || null,
-          }))
-        );
-        if (sErr) throw sErr;
-      }
-
-      const { error: fDelErr } = await supabase.from('faqs').delete().eq('business_id', businessId);
-      if (fDelErr) throw fDelErr;
+      // Atomic replace via RPC (migration 023): both tables are replaced in
+      // one transaction, so a mid-save failure can never lose existing rows.
+      // Arrays are always passed explicitly (even when empty) — PostgREST
+      // resolves the function by its named arguments.
       const answeredFaqs = data.faqs.filter((f) => f.question && f.answer);
-      if (answeredFaqs.length > 0) {
-        const { error: fErr } = await supabase.from('faqs').insert(
-          answeredFaqs.map((f) => ({
-            business_id: businessId,
-            question: f.question,
-            answer: f.answer,
-            source: 'manual' as const,
-          }))
-        );
-        if (fErr) throw fErr;
-      }
+      const { error } = await supabase.rpc('replace_services_and_faqs', {
+        p_business_id: businessId,
+        p_services: data.services.map((s) => ({
+          name: s.name,
+          description: s.description || null,
+          price: s.price || null,
+        })),
+        p_faqs: answeredFaqs.map((f) => ({
+          question: f.question,
+          answer: f.answer,
+          source: 'manual' as const,
+        })),
+      });
+      if (error) throw error;
 
-      await supabase.from('businesses').update({
+      const { error: markerError } = await supabase.from('businesses').update({
         onboarding_step: 'ai_settings',
         onboarding_last_saved_at: new Date().toISOString(),
       }).eq('id', businessId);
+      if (markerError) {
+        // Advisory resume marker only — the data write above succeeded, and
+        // the server re-derives the step from saved data on next load.
+        console.warn('Failed to update onboarding progress marker:', markerError.message);
+      }
 
       onNext(data);
     } catch {
