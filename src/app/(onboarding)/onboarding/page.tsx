@@ -24,6 +24,9 @@ import {
 } from '@/lib/onboarding/types';
 import {
   inferRejectionStep,
+  mapReasonToFriendly,
+  rejectionNeedsSupport,
+  SUPPORT_EMAIL,
   type RejectionKind,
 } from '@/lib/onboarding/rejectionGuidance';
 import type { BusinessType } from '@/types/database';
@@ -370,6 +373,16 @@ function PhoneNumberStep({
   );
 }
 
+// A real anchor (mailto) styled to match Button's primary/secondary
+// variants: hover shows the address and right-click/long-press can copy it,
+// which a scripted window.location button can't offer.
+const SUPPORT_LINK_BASE =
+  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#ff914d]';
+const SUPPORT_LINK_PRIMARY =
+  'bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] hover:bg-orange-600 dark:hover:brightness-110 shadow-[0_14px_34px_rgba(255,145,77,.26)]';
+const SUPPORT_LINK_SECONDARY =
+  'bg-white dark:bg-transparent dark:bg-white/[0.08] text-slate-700 dark:text-white border border-slate-300 dark:border-white/[0.10] hover:bg-slate-50 dark:hover:bg-white/[0.12]';
+
 function CarrierReviewStatus({
   state,
   onRefresh,
@@ -396,22 +409,85 @@ function CarrierReviewStatus({
       : registration.campaignStatus === 'rejected'
         ? 'campaign'
         : null;
-  const rejectionReason =
-    (rejectionKind === 'brand'
+  // Only the carrier's own words feed classification and the friendly copy:
+  // registration.error can hold newer internal messages (risk holds, submit
+  // failures) that must never be diagnosed or labeled as carrier wording.
+  const carrierReason = rejectionKind
+    ? rejectionKind === 'brand'
       ? registration.brandRejectionReason
-      : registration.campaignRejectionReason) ?? registration.error;
+      : registration.campaignRejectionReason
+    : null;
+  // Mirrors the server's stale-submitting claim window
+  // (registrationAttempt.ts): a pipeline that died mid-claim strands the row
+  // in 'submitting' with no webhook coming, but it is claimable again — so
+  // Retry must be offered here or the customer is stuck on Refresh forever.
+  const staleSubmitting =
+    registration.status === 'submitting' &&
+    (!registration.startedAt ||
+      Date.now() - new Date(registration.startedAt).getTime() > 15 * 60 * 1000);
+  // A rejection stays actionable in the 'submitted' state too: a retry after
+  // a brand rejection re-submits without re-filing the brand, landing on
+  // submitted + brand_status 'rejected' with no webhook ever coming — the
+  // customer still needs the fix/support controls there (Retry itself is
+  // only offered where a claim can succeed: 'failed' or stale 'submitting').
+  const rejectionActionable =
+    rejectionKind !== null &&
+    !registration.smsReady &&
+    (registration.status === 'failed' ||
+      registration.status === 'submitted' ||
+      staleSubmitting);
   const fixStep =
-    registration.status === 'failed' && rejectionKind
-      ? inferRejectionStep(rejectionKind, rejectionReason)
+    rejectionActionable && rejectionKind
+      ? inferRejectionStep(rejectionKind, carrierReason)
+      : null;
+  const friendlyReason = rejectionKind
+    ? mapReasonToFriendly(rejectionKind, carrierReason)
+    : null;
+  // Support action for classes the customer can't finish self-serve:
+  // opt-in/message-flow (we generate that text) and identity/brand
+  // re-filing (retry reuses the existing carrier brand record). From
+  // 'submitted' NO rejection is self-serve — the attempt isn't claimable, so
+  // a re-run reports success without re-filing anything — hence support
+  // always shows there.
+  const needsSupport =
+    rejectionActionable &&
+    rejectionKind !== null &&
+    (registration.status === 'submitted' ||
+      rejectionNeedsSupport(rejectionKind, carrierReason));
+  const supportHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Help with my SMS registration')}`;
+  // When both brand and campaign are rejected, brand wins the headline slot;
+  // the campaign's own carrier verdict still has to stay visible.
+  const secondaryCarrierReason =
+    rejectionKind === 'brand' &&
+    registration.campaignStatus === 'rejected' &&
+    registration.campaignRejectionReason &&
+    registration.campaignRejectionReason !== carrierReason
+      ? registration.campaignRejectionReason
+      : null;
+  // The webhook usually copies the rejection reason into registration.error,
+  // and a failed retry returns the same message it persists; render each
+  // distinct string once.
+  const extraError =
+    registration.error &&
+    registration.error !== carrierReason &&
+    registration.error !== retryError &&
+    registration.error !== secondaryCarrierReason
+      ? registration.error
+      : null;
+  const assignmentNote =
+    registration.assignmentFailureReason &&
+    registration.assignmentFailureReason !== registration.error &&
+    registration.assignmentFailureReason !== retryError
+      ? registration.assignmentFailureReason
       : null;
   const title = registration.smsReady
     ? 'SMS is active'
     : registration.holdReason === 'held_no_ein'
       ? 'Add your EIN to continue'
-    : registration.status === 'failed'
-      ? 'Registration needs another try'
-      : registration.brandStatus === 'rejected' || registration.campaignStatus === 'rejected'
-        ? 'We need to update your registration'
+    : registration.brandStatus === 'rejected' || registration.campaignStatus === 'rejected'
+      ? 'We need to update your registration'
+      : registration.status === 'failed'
+        ? 'Registration needs another try'
         : 'Carrier review is underway';
 
   const copy = statusCopy(state);
@@ -467,9 +543,39 @@ function CarrierReviewStatus({
         <StatusLine label="SMS sending" value={registration.smsReady ? 'active' : 'paused'} />
       </div>
 
-      {(registration.error || retryError || registration.brandRejectionReason || registration.campaignRejectionReason || registration.assignmentFailureReason) && (
-        <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          {retryError ?? registration.error ?? registration.brandRejectionReason ?? registration.campaignRejectionReason ?? registration.assignmentFailureReason}
+      {(retryError || (rejectionKind && carrierReason) || secondaryCarrierReason || extraError || assignmentNote) && (
+        <div className="space-y-2 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          {retryError && <p>{retryError}</p>}
+          {rejectionKind && carrierReason && (
+            friendlyReason ? (
+              <>
+                <p>{friendlyReason}</p>
+                <p className="text-xs">
+                  Carrier&apos;s exact wording: {carrierReason}
+                </p>
+              </>
+            ) : (
+              <>
+                <p>{carrierReason}</p>
+                <p className="text-xs">
+                  Not sure what this means?{' '}
+                  <a href={supportHref} className="font-medium underline">
+                    Contact support
+                  </a>{' '}
+                  and we&apos;ll help you sort it out.
+                </p>
+              </>
+            )
+          )}
+          {secondaryCarrierReason && (
+            // Self-contained label (no "also"): in some reachable states this
+            // is the banner's only line. Small print only under a headline.
+            <p className={rejectionKind && carrierReason ? 'text-xs' : undefined}>
+              SMS campaign rejection: {secondaryCarrierReason}
+            </p>
+          )}
+          {extraError && <p>{extraError}</p>}
+          {assignmentNote && <p>{assignmentNote}</p>}
         </div>
       )}
 
@@ -482,21 +588,37 @@ function CarrierReviewStatus({
           <Button type="button" onClick={onDashboard}>
             Go to dashboard
           </Button>
-        ) : registration.holdReason === 'held_no_ein' ? null : registration.status === 'failed' ? (
+        ) : registration.holdReason === 'held_no_ein' ? null : registration.status === 'failed' ||
+          staleSubmitting ||
+          fixStep ||
+          needsSupport ? (
           <div className="flex flex-col gap-3 sm:flex-row">
             {fixStep && (
               <Button type="button" onClick={() => onFixStep(fixStep)}>
-                Fix &amp; resubmit
+                {/* From 'submitted' nothing can actually resubmit (the
+                    attempt isn't claimable) — edits save for support to
+                    re-file, so don't promise a resubmission. */}
+                {registration.status === 'submitted' ? 'Update details' : 'Fix & resubmit'}
               </Button>
             )}
-            <Button
-              type="button"
-              variant={fixStep ? 'secondary' : 'primary'}
-              onClick={handleRetry}
-              loading={retrying}
-            >
-              Retry registration
-            </Button>
+            {needsSupport && (
+              <a
+                href={supportHref}
+                className={`${SUPPORT_LINK_BASE} ${fixStep ? SUPPORT_LINK_SECONDARY : SUPPORT_LINK_PRIMARY}`}
+              >
+                Contact support
+              </a>
+            )}
+            {(registration.status === 'failed' || staleSubmitting) && (
+              <Button
+                type="button"
+                variant={fixStep || needsSupport ? 'secondary' : 'primary'}
+                onClick={handleRetry}
+                loading={retrying}
+              >
+                Retry registration
+              </Button>
+            )}
           </div>
         ) : null}
       </div>
@@ -534,16 +656,19 @@ function statusCopy(state: OnboardingState): string {
     return 'SMS setup is paused until you add an EIN in Business Verification.';
   }
 
-  if (registration.status === 'failed') {
-    return 'Something interrupted the registration submit. Any saved carrier IDs will be reused when you retry.';
-  }
-
+  // Rejection copy outranks the generic failed copy: carrier rejections also
+  // set status to 'failed' (webhook mapping), and "something interrupted the
+  // submit" would misdescribe a rejection.
   if (registration.brandStatus === 'rejected') {
     return 'Carriers need updated business verification details before SMS can continue.';
   }
 
   if (registration.campaignStatus === 'rejected') {
     return 'Carriers need updated SMS campaign details before SMS can continue.';
+  }
+
+  if (registration.status === 'failed') {
+    return 'Something interrupted the registration submit. Any saved carrier IDs will be reused when you retry.';
   }
 
   if (registration.campaignStatus === 'approved' && registration.assignmentStatus !== 'assigned') {
