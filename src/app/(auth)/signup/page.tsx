@@ -101,7 +101,7 @@ export default function SignupPage() {
         Create your account
       </h1>
       <p className={`mt-1 text-center text-sm ${body}`}>
-        Free to try — no credit card required.
+        Create your account to get started.
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">

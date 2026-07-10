@@ -251,7 +251,7 @@ export default function HomePage() {
               {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
                 <Link href="/signup" className={btnPrimary}>
-                  Get Started Free
+                  Get Started
                 </Link>
                 <a href="#how-it-works" className={btnSecondary}>
                   See How It Works
@@ -471,8 +471,8 @@ export default function HomePage() {
           <SectionHeader
             title={
               <>
-                Start free and upgrade as your{" "}
-                <span className={accentText}>business grows</span>.
+                Simple plans that grow with your{" "}
+                <span className={accentText}>business</span>.
               </>
             }
             subtitle="No contracts. Paid SMS activation includes a one-time $25 setup fee."
@@ -535,11 +535,10 @@ export default function HomePage() {
           <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 items-center ${card}`}>
             <div>
               <h2 className={`text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.02] tracking-[-0.04em] mb-3 ${ink}`}>
-                Ready to stop losing customers?
+                Your voicemail isn&apos;t closing deals.
               </h2>
               <p className={`${body} leading-[1.7] max-w-[680px]`}>
-                Join hundreds of small businesses already using SimplAssist to respond
-                faster, capture more leads, and grow without hiring more staff.
+                SimplAssist texts customers back before they&apos;ve dialed your competitor.
               </p>
             </div>
             <div className={`${tile} p-6`}>
@@ -551,7 +550,7 @@ export default function HomePage() {
                   "AI missed-call texting — live in minutes",
                   "Website chat widget — embed with one line of code",
                   "Dashboard with every lead and conversation",
-                  "Free 14-day trial — no credit card required",
+                  "Set up once — live the same week",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">
                     <span className="w-2 h-2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] shrink-0" />
@@ -560,7 +559,7 @@ export default function HomePage() {
                 ))}
               </ul>
               <Link href="/signup" className={btnPrimaryWide}>
-                Start Free Trial
+                Get Started
               </Link>
             </div>
           </section>
