@@ -10,6 +10,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
+import { HeroDemo } from "./hero-demo";
 import {
   accentText,
   body,
@@ -27,7 +28,6 @@ import {
   navShell,
   pageShell,
   tile,
-  tileRow,
 } from "@/lib/theme-v2/theme";
 
 export const metadata: Metadata = {
@@ -321,107 +321,8 @@ export default function HomeV2Page() {
                 }}
               />
 
-              {/* Chat window */}
-              <div className={`${tile} p-5`}>
-                {/* Window top bar */}
-                <div className="flex items-center justify-between gap-3 mb-5">
-                  <div className={`flex items-center gap-2.5 font-bold text-sm ${ink}`}>
-                    <Logo size="sm" />
-                    <span>SimplAssist Live</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
-                  </div>
-                </div>
-
-                {/* Messages — matte bubbles, no gradients */}
-                <div className="space-y-3">
-                  <div
-                    className="
-                      ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold
-                      bg-[#fcebdd] border border-[#f6d9c0] text-[#9a3412]
-                      dark:bg-[#ff914d] dark:border-transparent dark:text-[#16100b]
-                    "
-                  >
-                    Missed call from Sarah — new customer asking about booking.
-                  </div>
-                  <div
-                    className="
-                      w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed
-                      bg-white border border-[#ece4d8] text-stone-700
-                      dark:bg-white/[0.08] dark:border-white/[0.08] dark:text-[#f0f0f0]
-                    "
-                  >
-                    Hi Sarah! Thanks for calling Acme Plumbing. We missed your call, but
-                    we&apos;ve got your message and will follow up soon. Need help right away?
-                    You can reply here anytime.
-                  </div>
-                  <div
-                    className="
-                      ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold
-                      bg-[#fcebdd] border border-[#f6d9c0] text-[#9a3412]
-                      dark:bg-[#ff914d] dark:border-transparent dark:text-[#16100b]
-                    "
-                  >
-                    Can you also answer questions on my website?
-                  </div>
-                  <div
-                    className="
-                      w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed
-                      bg-white border border-[#ece4d8] text-stone-700
-                      dark:bg-white/[0.08] dark:border-white/[0.08] dark:text-[#f0f0f0]
-                    "
-                  >
-                    Yes — SimplAssist can chat with visitors, answer common questions, and
-                    help capture more leads even after hours.
-                  </div>
-                </div>
-              </div>
-
-              {/* Dashboard strip */}
-              <div className="grid grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
-                {/* New Leads */}
-                <div className={`${tile} rounded-[20px] p-5`}>
-                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
-                    New Leads
-                  </div>
-                  <div className="space-y-2.5">
-                    {[
-                      { name: "Sarah M.", badge: "Hot Lead", color: "bg-[#fcebdd] text-[#9a3412] border-[#f6d9c0] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
-                      { name: "James R.", badge: "Website Chat", color: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
-                      { name: "Alicia T.", badge: "Missed Call", color: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
-                    ].map((lead) => (
-                      <div key={lead.name} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
-                        <span className={`text-sm font-medium ${ink}`}>{lead.name}</span>
-                        <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-[12px] font-bold border ${lead.color}`}>
-                          {lead.badge}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* What You See */}
-                <div className={`${tile} rounded-[20px] p-5`}>
-                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
-                    What You See
-                  </div>
-                  <div className="space-y-2.5">
-                    {[
-                      { label: "Conversations", value: "128" },
-                      { label: "Response time", value: "< 10 sec" },
-                      { label: "Channels", value: "SMS + Web" },
-                    ].map((item) => (
-                      <div key={item.label} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
-                        <span className={`text-sm ${body}`}>{item.label}</span>
-                        <span className={`text-sm font-bold ${ink}`}>{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* Animated conversation demo (chat window + dashboard strip) */}
+              <HeroDemo />
             </div>
           </Reveal>
         </section>
