@@ -109,6 +109,8 @@ export interface A2pRiskClearanceResult {
   cleared: boolean;
   status: A2pRiskReviewStatus;
   inputHash: string;
+  /** Whether the stored screening hash matches the current inputs. */
+  hashMatches: boolean;
   message: string;
   reason: string | null;
   findings: A2pRiskFinding[];
@@ -461,12 +463,14 @@ export async function getA2pRiskClearanceForBusiness(
   const { input, business } = await buildA2pRiskInputForBusiness(businessId);
   const inputHash = hashA2pRiskInput(input);
   const registrationStarted = registrationHasStartedForRisk(business);
+  const currentHashMatches = business.a2p_risk_review_input_hash === inputHash;
 
   if (registrationStarted) {
     return {
       cleared: true,
       status: business.a2p_risk_review_status ?? "not_started",
       inputHash,
+      hashMatches: currentHashMatches,
       message: "Registration has already started.",
       reason: null,
       findings: [],
@@ -475,7 +479,6 @@ export async function getA2pRiskClearanceForBusiness(
   }
 
   const storedStatus = business.a2p_risk_review_status ?? "not_started";
-  const currentHashMatches = business.a2p_risk_review_input_hash === inputHash;
   const cleared =
     currentHashMatches &&
     (storedStatus === "passed" || storedStatus === "admin_approved");
@@ -484,6 +487,7 @@ export async function getA2pRiskClearanceForBusiness(
     cleared,
     status: currentHashMatches ? storedStatus : "not_started",
     inputHash,
+    hashMatches: currentHashMatches,
     message:
       currentHashMatches && business.a2p_risk_review_status === "blocked"
         ? A2P_RISK_BLOCKED_MESSAGE
@@ -501,7 +505,17 @@ export async function getA2pRiskClearanceForBusiness(
 
 export async function screenA2pRiskForBusiness(
   businessId: string,
-  candidate: A2pRiskCandidateFields
+  candidate: A2pRiskCandidateFields,
+  options: {
+    /**
+     * Run the screen even when registration has already started. Used by the
+     * retry path when the risk-input hash no longer matches the stored
+     * decision (content edited since the last screening) — the fresh result
+     * is persisted so flagged content routes to manual review instead of
+     * auto-clearing on resubmission.
+     */
+    force?: boolean;
+  } = {}
 ): Promise<A2pRiskReviewResult> {
   const { input, business } = await buildA2pRiskInputForBusiness(
     businessId,
@@ -510,7 +524,7 @@ export async function screenA2pRiskForBusiness(
   const inputHash = hashA2pRiskInput(input);
   const registrationStarted = registrationHasStartedForRisk(business);
 
-  if (registrationStarted) {
+  if (registrationStarted && !options.force) {
     return {
       status: business.a2p_risk_review_status ?? "not_started",
       inputHash,
@@ -538,11 +552,26 @@ export async function screenA2pRiskForBusiness(
     };
   }
 
-  const result = await withTimeout(
+  let result = await withTimeout(
     runDeterministicScan(input, inputHash),
     OVERALL_SCAN_TIMEOUT_MS,
     timeoutReviewResult(inputHash)
   );
+
+  if (
+    options.force &&
+    business.a2p_risk_review_status === "admin_approved" &&
+    result.status === "blocked"
+  ) {
+    // A previously admin-approved business must not be silently hard-blocked
+    // by an automated re-screen of edited content: route it back to manual
+    // review (which notifies the admin) so a human makes the final call.
+    result = {
+      ...result,
+      status: "pending_review",
+      message: A2P_RISK_CUSTOMER_REVIEW_MESSAGE,
+    };
+  }
 
   await persistRiskResult({
     businessId,

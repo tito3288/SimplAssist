@@ -11,8 +11,16 @@ import {
   registerBrand,
   registerCampaign,
 } from "@/lib/messaging/registration";
+import { archiveAndClearRejectedCampaign } from "@/lib/messaging/registration/campaign";
+import {
+  A2P_RISK_BLOCKED_MESSAGE,
+  A2P_RISK_CUSTOMER_REVIEW_MESSAGE,
+} from "@/lib/messaging/registration/riskCategories";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
-import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
+import {
+  getA2pRiskClearanceForBusiness,
+  screenA2pRiskForBusiness,
+} from "@/lib/messaging/registration/riskScreening";
 import {
   claimRegistrationAttempt,
   markRegistrationFailed,
@@ -128,7 +136,52 @@ export async function attemptPaidLaunch(
   try {
     // Exact Phase 9 order after checkout success:
     // risk -> attempt gate -> brand -> campaign -> profile -> voice -> owned attach / purchase.
+    // The retry-only risk gate lives INSIDE the try so a transient failure
+    // here funnels into the catch's markRegistrationFailed (immediately
+    // retryable) instead of stranding the claimed row in 'submitting'.
+    if (claim.claimedFrom === "failed" || claim.claimedFrom === "stale_submitting") {
+      // Run AFTER the claim so it keys on the atomic claim origin rather
+      // than a pre-claim snapshot (a rejection webhook landing mid-request
+      // cannot slip an unscreened resubmission through). Origin
+      // 'not_started' (first registration) never enters this branch.
+      const retryClearance = await getA2pRiskClearanceForBusiness(businessId);
+      let holdMessage: string | null = null;
+
+      if (!retryClearance.hashMatches) {
+        // Content changed since the stored decision, so re-run the Phase 8
+        // screen before resubmission; flagged content routes to manual
+        // review instead of auto-clearing. (registerCampaign restamps the
+        // hash after its opt_in_description rewrite, so machine-induced
+        // drift does not reach this branch — only real edits do.)
+        const rescreen = await screenA2pRiskForBusiness(businessId, {}, { force: true });
+        if (rescreen.status !== "passed" && rescreen.status !== "admin_approved") {
+          holdMessage = rescreen.message;
+        }
+      } else if (
+        retryClearance.status === "blocked" ||
+        retryClearance.status === "pending_review"
+      ) {
+        // Identical content with a standing negative decision must keep
+        // holding: a second Retry click is not a substitute for the manual
+        // review (approveA2pRiskReview stamps admin_approved with the
+        // current hash, which unlocks this gate).
+        holdMessage =
+          retryClearance.status === "blocked"
+            ? A2P_RISK_BLOCKED_MESSAGE
+            : A2P_RISK_CUSTOMER_REVIEW_MESSAGE;
+      }
+
+      if (holdMessage) {
+        await releaseClaimToRiskReview(businessId, claim.startedAt, holdMessage);
+        return { status: "risk_review_required", message: holdMessage };
+      }
+    }
+
     await registerBrand(businessId);
+    // Carrier-rejected campaign? Archive its history, deactivate it at
+    // Telnyx (best-effort), and clear the pointer so a replacement is
+    // created below. No-op in every other state.
+    await archiveAndClearRejectedCampaign(businessId);
     await registerCampaign(businessId);
     await createMessagingProfile(businessId);
     await createVoiceApplication(businessId);
@@ -328,12 +381,50 @@ async function persistRiskReviewRequired(
       onboarding_step: "sms_use_case",
       onboarding_last_saved_at: new Date().toISOString(),
     })
-    .eq("id", businessId);
+    .eq("id", businessId)
+    // Never demote a concurrently claimed/completed attempt: only
+    // pre-registration (not_started/null) and already-failed rows may be
+    // moved into the risk-review hold by this pre-claim path.
+    .or(
+      "onboarding_registration_status.is.null,onboarding_registration_status.in.(not_started,failed)"
+    );
 
   if (error) {
     console.error(
       `[billing:launch] Failed to persist risk review hold for ${businessId}:`,
       error
+    );
+  }
+}
+
+/**
+ * Release OUR claimed attempt into the risk-review hold. Guarded on both
+ * status='submitting' and the exact startedAt we wrote at claim time, so a
+ * concurrent attempt's claim (or a completed submission) is never clobbered.
+ */
+async function releaseClaimToRiskReview(
+  businessId: string,
+  startedAt: string,
+  message: string
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("businesses")
+    .update({
+      onboarding_registration_status: "failed",
+      onboarding_registration_error: message,
+      onboarding_step: "sms_use_case",
+      onboarding_last_saved_at: new Date().toISOString(),
+    })
+    .eq("id", businessId)
+    .eq("onboarding_registration_status", "submitting")
+    .eq("onboarding_registration_started_at", startedAt);
+
+  if (error) {
+    // Throw so the caller's catch runs markRegistrationFailed — a swallowed
+    // failure here would strand our claimed row in 'submitting' for the
+    // stale window while the caller reports risk_review_required.
+    throw new Error(
+      `[billing:launch] Failed to release claim to risk review for ${businessId}: ${error.message}`
     );
   }
 }

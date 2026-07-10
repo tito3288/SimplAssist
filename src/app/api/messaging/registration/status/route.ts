@@ -297,6 +297,20 @@ async function applyStatusTransition(args: {
           campaign_status: args.newStatus,
           campaign_status_updated_at: now,
           campaign_rejection_reason: args.rejectionReason,
+          // A rejected campaign is recoverable: map it into the retryable
+          // 'failed' state so the carrier-review panel offers Retry and
+          // claimRegistrationAttempt can claim the attempt. The retry
+          // pipeline archives + deactivates the rejected campaign and
+          // creates a replacement (archiveAndClearRejectedCampaign).
+          ...(args.newStatus === "rejected"
+            ? {
+                onboarding_registration_status: "failed" as const,
+                onboarding_registration_submitted_at: null,
+                onboarding_registration_error:
+                  args.rejectionReason ??
+                  "Your SMS campaign was rejected by the carrier. Retry to resubmit.",
+              }
+            : {}),
         };
 
   const statusColumn = args.kind === "brand" ? "brand_status" : "campaign_status";

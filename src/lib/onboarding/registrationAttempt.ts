@@ -12,8 +12,23 @@ interface AttemptRow {
   onboarding_registration_submitted_at: string | null;
 }
 
+export type RegistrationClaimOrigin =
+  | "not_started"
+  | "failed"
+  | "stale_submitting";
+
 export type RegistrationAttemptClaim =
-  | { claimed: true; startedAt: string }
+  | {
+      claimed: true;
+      startedAt: string;
+      /**
+       * The registration status the claim transitioned FROM, captured
+       * atomically (compare-and-swap). Callers use this to re-run
+       * retry-only gates (risk re-screen) against live state instead of a
+       * possibly-stale pre-claim snapshot.
+       */
+      claimedFrom: RegistrationClaimOrigin;
+    }
   | {
       claimed: false;
       reason: "already_submitted" | "already_submitting" | "not_claimable";
@@ -26,7 +41,37 @@ export async function claimRegistrationAttempt(
   const now = new Date().toISOString();
   const staleBefore = new Date(Date.now() - STALE_SUBMITTING_AFTER_MS).toISOString();
 
-  const { data, error } = await supabaseAdmin
+  // Read the current state, then claim via compare-and-swap on exactly the
+  // observed state. A concurrent transition (webhook, another attempt)
+  // between read and update makes the CAS match zero rows — never a claim
+  // from a state we didn't observe.
+  const observed = await readRegistrationAttempt(businessId);
+  const observedStatus = observed?.onboarding_registration_status ?? null;
+  const observedStartedAt = observed?.onboarding_registration_started_at ?? null;
+
+  let origin: RegistrationClaimOrigin | null = null;
+  if (observedStatus === "not_started") {
+    origin = "not_started";
+  } else if (observedStatus === "failed") {
+    origin = "failed";
+  } else if (
+    observedStatus === "submitting" &&
+    (observedStartedAt === null || observedStartedAt < staleBefore)
+  ) {
+    origin = "stale_submitting";
+  }
+
+  if (origin === null) {
+    if (observedStatus === "submitted") {
+      return { claimed: false, reason: "already_submitted", current: observed };
+    }
+    if (observedStatus === "submitting") {
+      return { claimed: false, reason: "already_submitting", current: observed };
+    }
+    return { claimed: false, reason: "not_claimable", current: observed };
+  }
+
+  let query = supabaseAdmin
     .from("businesses")
     .update({
       onboarding_registration_status: "submitting",
@@ -34,13 +79,16 @@ export async function claimRegistrationAttempt(
       onboarding_registration_error: null,
     })
     .eq("id", businessId)
-    .or(
-      [
-        "onboarding_registration_status.in.(not_started,failed)",
-        `and(onboarding_registration_status.eq.submitting,onboarding_registration_started_at.lt.${staleBefore})`,
-        "and(onboarding_registration_status.eq.submitting,onboarding_registration_started_at.is.null)",
-      ].join(",")
-    )
+    .eq("onboarding_registration_status", observedStatus);
+
+  if (origin === "stale_submitting") {
+    query =
+      observedStartedAt === null
+        ? query.is("onboarding_registration_started_at", null)
+        : query.eq("onboarding_registration_started_at", observedStartedAt);
+  }
+
+  const { data, error } = await query
     .select(
       "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at"
     )
@@ -53,9 +101,10 @@ export async function claimRegistrationAttempt(
   }
 
   if (data && data.length > 0) {
-    return { claimed: true, startedAt: now };
+    return { claimed: true, startedAt: now, claimedFrom: origin };
   }
 
+  // CAS missed: someone else transitioned the row between read and update.
   const current = await readRegistrationAttempt(businessId);
   if (current?.onboarding_registration_status === "submitted") {
     return { claimed: false, reason: "already_submitted", current };
@@ -80,7 +129,11 @@ export async function markRegistrationSubmitted(
       onboarding_step: "carrier_review",
       onboarding_last_saved_at: now,
     })
-    .eq("id", businessId);
+    .eq("id", businessId)
+    // Only complete the claimed attempt: if a rejection webhook landed
+    // mid-pipeline and set status to 'failed', don't clobber it back to
+    // 'submitted' (that would strand the business with no Retry offered).
+    .eq("onboarding_registration_status", "submitting");
 
   if (error) {
     throw new Error(
