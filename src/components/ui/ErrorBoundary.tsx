@@ -3,6 +3,7 @@
 import { Component, type ReactNode } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 
 interface Props {
   children: ReactNode;
@@ -41,13 +42,13 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => this.setState({ hasError: false })}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                className={`${primaryCtaInlineClass} text-sm`}
               >
                 Try Again
               </button>
               <Link
                 href="/dashboard"
-                className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
+                className={`${secondaryCtaClass} text-sm`}
               >
                 Go to Dashboard
               </Link>

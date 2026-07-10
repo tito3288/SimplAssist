@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
+import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
 const IRS_EIN_URL =
@@ -466,14 +467,14 @@ export default function BrandVerificationForm({
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-[22px] hover:bg-slate-100 dark:hover:bg-white/[0.06]"
+          className={secondaryCtaClass}
         >
           Back
         </button>
         <button
           type="submit"
           disabled={saving || (hasEinAnswer === 'no' && waitlistSaved)}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 font-medium rounded-[22px] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
+          className={primaryCtaInlineClass}
         >
           {saving ? (
             <>

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { AlertCircle, Check, PhoneForwarded } from 'lucide-react';
 import { isE164PhoneNumber, normalizeE164Input } from '@/lib/phone/e164';
+import { primaryCtaInlineClass } from '@/lib/glass';
 
 interface CallForwardingFormProps {
   initialEnabled: boolean;
@@ -139,7 +140,7 @@ export default function CallForwardingForm({
           type="button"
           onClick={handleSave}
           disabled={saving || Boolean(validationError)}
-          className="self-end rounded-lg bg-orange-500 px-4 py-2 font-medium text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+          className={`${primaryCtaInlineClass} self-end`}
         >
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
         </button>

@@ -9,6 +9,7 @@ import { X } from 'lucide-react';
 import type { AISettings } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import GoogleCalendarConnect from './GoogleCalendarConnect';
+import { primaryCtaInlineClass } from '@/lib/glass';
 
 const aiSettingsSchema = z.object({
   tone: z.enum(['friendly', 'professional', 'balanced'] as const),
@@ -339,7 +340,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-medium rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
+          className={primaryCtaInlineClass}
         >
           {saving ? (
             <>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SubscriptionPlan } from "@/types/database";
 import { PulsingDot } from "@/components/ui/pulsing-dot";
+import { primaryCtaInlineClass } from "@/lib/glass";
 
 export function BillingActions({
   mode,
@@ -54,7 +55,7 @@ export function BillingActions({
       <button
         onClick={handlePortal}
         disabled={loading}
-        className="rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:opacity-90 disabled:opacity-50"
+        className={`${primaryCtaInlineClass} text-sm`}
       >
         {loading ? "Loading..." : "Manage Subscription"}
       </button>
@@ -65,7 +66,7 @@ export function BillingActions({
     <button
       onClick={handleCheckout}
       disabled={loading}
-      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-4 py-2.5 text-sm font-medium text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:opacity-90 disabled:opacity-50"
+      className={`${primaryCtaInlineClass} w-full py-2.5 text-sm`}
     >
       {loading ? (
         <>

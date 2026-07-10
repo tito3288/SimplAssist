@@ -108,7 +108,7 @@ export default async function DashboardPage() {
             </div>
             <Link
               href="/settings"
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+              className="px-4 py-2 text-sm font-medium rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-colors whitespace-nowrap"
             >
               Connect Now
             </Link>

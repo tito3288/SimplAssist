@@ -50,7 +50,7 @@ export default function GoogleCalendarConnect({
           type="button"
           onClick={handleDisconnect}
           disabled={disconnecting}
-          className="px-4 py-2 text-sm rounded-lg border border-red-300 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
+          className="px-4 py-2 text-sm rounded-full border border-red-300 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
         >
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
         </button>
@@ -63,7 +63,7 @@ export default function GoogleCalendarConnect({
       <button
         type="button"
         onClick={handleConnect}
-        className="inline-flex items-center justify-center gap-3 px-5 py-3 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-[#f5f5f5] font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
+        className="inline-flex items-center justify-center gap-3 px-5 py-3 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-[#f5f5f5] font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>

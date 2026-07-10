@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Pencil, Trash2, Plus, ChevronUp } from 'lucide-react';
 import type { FAQ } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { primaryCtaCompactClass } from '@/lib/glass';
 
 interface FAQManagerProps {
   businessId: string;
@@ -212,7 +213,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                       type="button"
                       onClick={() => handleEdit(faq.id)}
                       disabled={saving === faq.id || !editQuestion.trim() || !editAnswer.trim()}
-                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
+                      className={primaryCtaCompactClass}
                     >
                       {saving === faq.id ? (
                         <>
@@ -258,7 +259,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
               type="button"
               onClick={handleAdd}
               disabled={saving === 'add' || !newQuestion.trim() || !newAnswer.trim()}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
+              className={primaryCtaCompactClass}
             >
               {saving === 'add' ? (
                 <>

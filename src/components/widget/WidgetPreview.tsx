@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { WidgetConfigFormValues } from '@/components/widget/WidgetConfigForm';
+import { secondaryCtaCompactClass } from '@/lib/glass';
 
 const PREVIEW_MSG_SOURCE = 'simplassist-widget-preview';
 const PREVIEW_MSG_TYPE = 'apply-preview';
@@ -59,7 +60,7 @@ export default function WidgetPreview({ businessId, refreshKey = 0, preview }: W
         </div>
         <button
           onClick={() => window.open(previewUrl, '_blank')}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.10] px-3 py-1.5 text-sm font-medium text-slate-500 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors"
+          className={secondaryCtaCompactClass}
         >
           <ExternalLink className="h-4 w-4" />
           Open in New Tab

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { primaryCtaInlineClass } from '@/lib/glass';
 
 interface BusinessEmailFormProps {
   businessId: string;
@@ -54,7 +55,7 @@ export default function BusinessEmailForm({ businessId, initialEmail }: Business
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded-lg bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 whitespace-nowrap"
+          className={`${primaryCtaInlineClass} whitespace-nowrap`}
         >
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
         </button>
