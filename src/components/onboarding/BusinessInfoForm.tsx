@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
+import { primaryCtaInlineClass } from '@/lib/glass';
 
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
@@ -201,7 +202,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
               type="button"
               onClick={handleScanWebsite}
               disabled={scanning}
-              className="px-4 py-2 bg-[#ff914d]/10 text-[#ff914d] border border-[#ff914d]/20 hover:bg-[#ff914d]/20 dark:bg-[#ff914d]/10 dark:text-[#ff914d] font-medium rounded-[22px] disabled:opacity-50 whitespace-nowrap"
+              className="px-4 py-2 bg-[#ff914d]/10 text-[#ff914d] border border-[#ff914d]/20 hover:bg-[#ff914d]/20 dark:bg-[#ff914d]/10 dark:text-[#ff914d] font-medium rounded-full disabled:opacity-50 whitespace-nowrap"
             >
               {scanning ? (
                 <span className="flex items-center gap-2.5">
@@ -290,7 +291,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 font-medium rounded-[22px] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
+          className={primaryCtaInlineClass}
         >
           {saving ? (
             <>

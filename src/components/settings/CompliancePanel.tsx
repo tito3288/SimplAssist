@@ -9,6 +9,7 @@ import {
   type LegalTemplateBusiness,
 } from '@/lib/legal/perBusinessCopy';
 import { isPendingSlug } from '@/lib/util/slug';
+import { primaryCtaInlineClass } from '@/lib/glass';
 
 type Mode = 'hosted' | 'self_hosted' | 'existing';
 
@@ -277,7 +278,7 @@ export default function CompliancePanel({
           type="button"
           onClick={handleSave}
           disabled={saveDisabled}
-          className="px-5 py-2.5 rounded-lg bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className={primaryCtaInlineClass}
         >
           {submitting
             ? mode === 'hosted'
@@ -359,7 +360,7 @@ function PreviewRow({ label, href }: { label: string; href: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+      className="inline-flex items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
     >
       <span>
         <span className="font-medium">{label}</span>
@@ -390,7 +391,7 @@ function GeneratedTextarea({
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
         >
           {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
           {copied ? 'Copied' : 'Copy'}

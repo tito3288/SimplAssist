@@ -57,3 +57,39 @@ export const primaryCtaClass = `
   focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff914d] focus-visible:ring-offset-2
   focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#0a0a0c]
 `;
+
+/* ── Pill CTA family — shared by onboarding, settings, widget, billing, admin ──
+   Shape/focus/disabled behavior once; primary/secondary colors once; two sizes.
+   Geometry matches the app's prevailing buttons so adopting these only changes
+   the corner radius. Layout utilities (w-full, self-end, …) compose at call site. */
+
+const ctaPillCore = `
+  inline-flex items-center justify-center rounded-full font-medium text-center transition-colors
+  focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2
+  disabled:opacity-50 disabled:cursor-not-allowed
+`;
+
+const ctaPrimaryColors = `
+  bg-orange-500 text-white
+  dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:text-[#111]
+  shadow-[0_14px_34px_rgba(255,145,77,.26)]
+  hover:bg-orange-600 dark:hover:brightness-110
+`;
+
+const ctaSecondaryColors = `
+  border border-slate-200 dark:border-white/[0.12]
+  text-slate-700 dark:text-[#bdbdbf]
+  hover:bg-slate-100 dark:hover:bg-white/[0.06]
+`;
+
+/** Standard inline primary pill (Next, Save, Launch, Subscribe, …) */
+export const primaryCtaInlineClass = `${ctaPillCore} ${ctaPrimaryColors} gap-2 py-2 px-6`;
+
+/** Standard inline secondary pill (Back, Cancel, quiet actions) */
+export const secondaryCtaClass = `${ctaPillCore} ${ctaSecondaryColors} gap-2 py-2 px-6`;
+
+/** Compact primary pill (row-level Save/Add, admin forms) */
+export const primaryCtaCompactClass = `${ctaPillCore} ${ctaPrimaryColors} gap-1.5 px-3 py-1.5 text-sm`;
+
+/** Compact secondary pill (small utility buttons) */
+export const secondaryCtaCompactClass = `${ctaPillCore} ${ctaSecondaryColors} gap-1.5 px-3 py-1.5 text-sm`;

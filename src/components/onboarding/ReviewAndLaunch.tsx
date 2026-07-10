@@ -5,6 +5,7 @@ import { getUsStateName } from '@/lib/usStates';
 import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import type { OnboardingState } from '@/lib/onboarding/types';
 import type { SubscriptionPlan } from '@/types/database';
+import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 
 interface ReviewData {
   businessInfo: {
@@ -423,7 +424,7 @@ export default function ReviewAndLaunch({
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.06]"
+          className={secondaryCtaClass}
         >
           Back
         </button>
@@ -437,7 +438,7 @@ export default function ReviewAndLaunch({
                 : handleLaunch
             }
             disabled={launching && launchHold?.action !== 'choose_number' && launchHold?.action !== 'add_ein'}
-            className="py-3 px-8 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-semibold rounded-lg shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50 text-lg"
+            className={`${primaryCtaInlineClass} py-3 px-8 text-lg font-semibold`}
           >
             {primaryButtonLabel}
           </button>

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 
 const servicesAndFaqsSchema = z.object({
   services: z
@@ -314,14 +315,14 @@ export default function ServicesAndFaqsForm({
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.06]"
+          className={secondaryCtaClass}
         >
           Back
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] font-medium rounded-lg hover:bg-orange-600 dark:hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2 disabled:opacity-50"
+          className={primaryCtaInlineClass}
         >
           {saving ? (
             <>

@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { secondaryCtaCompactClass } from '@/lib/glass';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -112,7 +113,7 @@ function LogoUpload({
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
+              className={secondaryCtaCompactClass}
             >
               {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
               Change
@@ -120,7 +121,7 @@ function LogoUpload({
             <button
               type="button"
               onClick={onRemoved}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Remove
@@ -415,7 +416,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
             <button
               type="button"
               onClick={() => setValue('quick_replies', [...quickReplies, ''])}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-slate-200 dark:border-white/[0.12] text-slate-500 dark:text-[#bdbdbf] hover:border-[#ff914d] hover:text-[#ff914d] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full border border-dashed border-slate-200 dark:border-white/[0.12] text-slate-500 dark:text-[#bdbdbf] hover:border-[#ff914d] hover:text-[#ff914d] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
             >
               <Plus className="h-4 w-4" />
               Add question
@@ -521,7 +522,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           type="submit"
           disabled={saving}
           className={cn(
-            'inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white transition-colors',
+            'inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-white transition-colors',
             saving
               ? 'bg-orange-400 dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:opacity-60 cursor-not-allowed'
               : 'bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600'

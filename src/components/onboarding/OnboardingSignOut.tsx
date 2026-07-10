@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
+import { secondaryCtaCompactClass } from '@/lib/glass';
 
 export default function OnboardingSignOut() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function OnboardingSignOut() {
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className="inline-flex min-h-10 items-center gap-2 rounded-[20px] border border-slate-200 bg-white/70 px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.12] dark:bg-white/[0.05] dark:text-[#bdbdbf] dark:hover:bg-white/[0.08] dark:hover:text-white"
+      className={`${secondaryCtaCompactClass} min-h-10 gap-2 bg-white/70 dark:bg-white/[0.05]`}
     >
       <LogOut className="h-4 w-4" />
       {signingOut ? 'Signing out...' : 'Sign out'}

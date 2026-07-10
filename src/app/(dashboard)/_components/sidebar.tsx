@@ -76,7 +76,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
               key={item.href}
               href={item.href}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[22px] text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-full text-sm font-medium transition-colors ${
                 isActive
                   ? "bg-[rgba(255,145,77,.12)] dark:bg-[rgba(255,145,77,.15)] text-[#ff914d] border border-[rgba(255,145,77,.20)]"
                   : "text-slate-600 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] hover:text-slate-900 dark:hover:text-white border border-transparent"

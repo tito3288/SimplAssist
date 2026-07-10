@@ -31,7 +31,7 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-gray-600 dark:bg-white/[0.08] dark:text-[#e8e8e8] dark:hover:bg-white/[0.12]"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-gray-600 dark:bg-white/[0.08] dark:text-[#e8e8e8] dark:hover:bg-white/[0.12]"
           >
             {copied ? (
               <>

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { primaryCtaCompactClass } from "@/lib/glass";
 
 interface AdminFlagFormProps {
   businessId: string;
@@ -88,7 +89,7 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
       <button
         type="submit"
         disabled={saving}
-        className="rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+        className={`${primaryCtaCompactClass} py-2`}
       >
         {saving ? "Saving..." : "Save flags"}
       </button>
