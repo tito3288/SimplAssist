@@ -1,7 +1,5 @@
 import Link from "next/link";
 import Image from "next/image";
-import { FadeIn } from "@/components/fade-in";
-import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Phone,
   MessageCircle,
@@ -10,7 +8,26 @@ import {
   Star,
   ArrowUpRight,
 } from "lucide-react";
-import { glassCard } from "@/lib/glass";
+import { Reveal, ThemeToggleV2 } from "@/app/preview/_v2/ui";
+import {
+  accentText,
+  body,
+  btnPrimary,
+  btnPrimaryWide,
+  btnSecondary,
+  card,
+  cardHover,
+  darkAmbient,
+  eyebrow,
+  fontStack,
+  ink,
+  lightAmbient,
+  navLink,
+  navShell,
+  pageShell,
+  tile,
+  tileRow,
+} from "@/app/preview/_v2/theme";
 
 /* ── Data ── */
 
@@ -115,20 +132,53 @@ const plans = [
   },
 ];
 
-/* ── Reusable eyebrow component ── */
+/* ── Local pieces ── */
+
 function Eyebrow({ text }: { text: string }) {
   return (
-    <span
-      className="
-        inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-full text-sm tracking-wide mb-5
-        bg-orange-50 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.05))]
-        text-orange-600 dark:text-[#ffd7bf]
-        border border-orange-200 dark:border-white/[0.14]
-      "
-    >
-      <span className="w-2.5 h-2.5 rounded-full bg-[#ff914d] shadow-[0_0_18px_rgba(255,145,77,.65)] shrink-0" />
+    <span className={eyebrow}>
+      <span
+        className="
+          h-2.5 w-2.5 shrink-0 rounded-full
+          bg-[#ea580c] dark:bg-[#ff914d]
+          dark:shadow-[0_0_14px_rgba(255,145,77,.55)]
+        "
+      />
       {text}
     </span>
+  );
+}
+
+function Logo({ size = "md" }: { size?: "sm" | "md" }) {
+  const cls = size === "sm" ? "h-3.5 w-auto object-contain" : "h-8 w-auto object-contain";
+  const dims = size === "sm" ? { width: 56, height: 14 } : { width: 140, height: 34 };
+  return (
+    <>
+      <Image src="/logo-dark.png" alt="SimplAssist" {...dims} className={`hidden dark:block ${cls}`} />
+      <Image src="/logo-light.png" alt="SimplAssist" {...dims} className={`block dark:hidden ${cls}`} />
+    </>
+  );
+}
+
+function SectionHeader({
+  eyebrowText,
+  title,
+  subtitle,
+}: {
+  eyebrowText: string;
+  title: React.ReactNode;
+  subtitle: string;
+}) {
+  return (
+    <Reveal className="mb-12 sm:mb-16">
+      <Eyebrow text={eyebrowText} />
+      <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
+        <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
+          {title}
+        </h2>
+        <p className={`${body} max-w-[600px] leading-[1.65] lg:text-right`}>{subtitle}</p>
+      </div>
+    </Reveal>
   );
 }
 
@@ -136,152 +186,99 @@ function Eyebrow({ text }: { text: string }) {
 
 export default function HomePage() {
   return (
-    <div
-      className="
-        min-h-screen text-slate-900 dark:text-[#f5f5f5] overflow-x-clip relative
-        bg-gradient-to-b from-slate-50 via-white to-slate-100
-        dark:bg-none dark:bg-[#050505]
-      "
-    >
-      {/* ── Dark-mode radial background gradient ── */}
+    <div className={pageShell} style={{ fontFamily: fontStack }}>
+      {/* Ambient backgrounds — light gets its own warm treatment */}
       <div
-        className="hidden dark:block fixed inset-0 pointer-events-none -z-10"
-        style={{
-          background:
-            "radial-gradient(circle at top right, rgba(255,145,77,.18), transparent 22%), radial-gradient(circle at 12% 18%, rgba(255,145,77,.10), transparent 20%), linear-gradient(180deg, #080808 0%, #050505 42%, #0a0a0c 100%)",
-        }}
+        className="fixed inset-0 -z-10 pointer-events-none dark:hidden"
+        style={{ background: lightAmbient }}
+      />
+      <div
+        className="fixed inset-0 -z-10 pointer-events-none hidden dark:block"
+        style={{ background: darkAmbient }}
       />
 
-      {/* ── Orbs ── */}
+      {/* Orbs */}
       <div
-        className="fixed rounded-full pointer-events-none z-0 opacity-30 dark:opacity-45"
+        className="fixed rounded-full pointer-events-none z-0 opacity-20 dark:opacity-45"
         style={{
           width: 640,
           height: 640,
-          background: "rgba(255,145,77,.20)",
+          background: "rgba(255,145,77,.18)",
           top: -70,
           right: -210,
-          filter: "blur(60px)",
+          filter: "blur(64px)",
         }}
       />
       <div
-        className="fixed rounded-full pointer-events-none z-0 opacity-20 dark:opacity-45"
+        className="fixed rounded-full pointer-events-none z-0 opacity-15 dark:opacity-45"
         style={{
           width: 260,
           height: 260,
           background: "rgba(255,145,77,.14)",
           left: -80,
           top: "40%",
-          filter: "blur(60px)",
+          filter: "blur(64px)",
         }}
       />
 
-      {/* ── Navigation — frosted floating bar; must NOT be inside a transformed parent or fixed breaks ── */}
-      <nav className="floating-nav flex items-center justify-between gap-3 sm:gap-4 px-3 sm:px-6 sm:py-3">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <Link href="/home">
-                  <Image
-                    src="/logo-dark.png"
-                    alt="SimplAssist"
-                    width={140}
-                    height={34}
-                    className="hidden dark:block h-8 w-auto object-contain"
-                  />
-                  <Image
-                    src="/logo-light.png"
-                    alt="SimplAssist"
-                    width={140}
-                    height={34}
-                    className="block dark:hidden h-8 w-auto object-contain"
-                  />
-                </Link>
-              </div>
+      {/* ── Navigation — frosted pill; must NOT be inside a transformed parent or fixed breaks ── */}
+      <nav className={`${navShell} flex items-center justify-between gap-3 sm:gap-4 px-3 py-2 sm:px-6 sm:py-3`}>
+        <div className="flex items-center gap-3.5 min-w-0">
+          <Link href="/home">
+            <Logo />
+          </Link>
+        </div>
 
-              <div className="hidden md:flex items-center gap-6">
-                <a href="#features" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors text-sm">
-                  Features
-                </a>
-                <a href="#how-it-works" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors text-sm">
-                  How It Works
-                </a>
-                <a href="#pricing" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors text-sm">
-                  Pricing
-                </a>
-              </div>
+        <div className="hidden md:flex items-center gap-6">
+          <a href="#features" className={navLink}>
+            Features
+          </a>
+          <a href="#how-it-works" className={navLink}>
+            How It Works
+          </a>
+          <a href="#pricing" className={navLink}>
+            Pricing
+          </a>
+        </div>
 
-              <div className="flex items-center gap-3">
-                <ThemeToggle />
-                <Link
-                  href="/login"
-                  className="
-                    hidden sm:inline-flex items-center justify-center rounded-full px-5 py-3.5 font-bold text-sm
-                    text-slate-700 dark:text-white bg-slate-100 dark:bg-transparent dark:bg-white/[0.08]
-                    border border-slate-200 dark:border-white/[0.10]
-                    hover:-translate-y-px transition-transform
-                  "
-                >
-                  Log In
-                </Link>
-                <Link
-                  href="/signup"
-                  className="
-                    inline-flex items-center justify-center rounded-full px-5 py-3.5 font-bold text-sm
-                    text-white dark:text-[#111]
-                    bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)]
-                    shadow-[0_14px_34px_rgba(255,145,77,.26)]
-                    hover:-translate-y-px transition-transform whitespace-nowrap
-                  "
-                >
-                  Get Started
-                </Link>
-              </div>
+        <div className="flex items-center gap-3">
+          <ThemeToggleV2 />
+          <Link href="/login" className={`${btnSecondary} max-sm:hidden`}>
+            Log In
+          </Link>
+          <Link href="/signup" className={btnPrimary}>
+            Get Started
+          </Link>
+        </div>
       </nav>
 
       {/* ── Container ── */}
       <div className="relative z-[1] w-[min(calc(100%-32px),1200px)] mx-auto pt-[5.25rem] sm:pt-24">
         {/* ── Hero ── */}
         <section className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
-          <FadeIn priority offset="md">
+          <Reveal priority>
             <div className="flex flex-col items-start">
               <div className="mt-12 sm:mt-0">
                 <Eyebrow text="AI assistant for small businesses" />
               </div>
 
-              <h1 className="text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5">
-                <span className="text-slate-900 dark:text-[#f5f5f5]">Never miss a{" "}</span>
+              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 ${ink}`}>
+                Never miss a{" "}
                 <br className="hidden sm:block" />
-                <span className="text-[#ff914d]">customer </span>
-                <span className="text-slate-900 dark:text-[#f5f5f5]">again.</span>
+                <span className={accentText}>customer</span> again.
               </h1>
 
-              <p className="text-[clamp(17px,2.3vw,20px)] leading-[1.7] text-slate-500 dark:text-[#bdbdbf] max-w-[680px] mb-7">
+              <p className={`text-[clamp(17px,2.3vw,20px)] leading-[1.7] ${body} max-w-[680px] mb-7`}>
                 SimplAssist texts customers back when you miss a call, chats with website
                 visitors 24/7, and keeps every lead organized in one clean dashboard.
               </p>
 
-              {/* CTA buttons */}
+              {/* CTA buttons — flat, matte, no glow */}
               <div className="flex gap-3.5 flex-wrap mb-7">
-                <Link
-                  href="/signup"
-                  className="
-                    inline-flex items-center justify-center rounded-full px-5 py-3.5 font-bold text-sm
-                    text-white dark:text-[#111]
-                    bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)]
-                    shadow-[0_14px_34px_rgba(255,145,77,.26)]
-                    hover:-translate-y-px transition-transform
-                  "
-                >
+                <Link href="/signup" className={btnPrimary}>
                   Get Started Free
                 </Link>
-                <a
-                  href="#how-it-works"
-                  className="
-                    inline-flex items-center justify-center rounded-full px-5 py-3.5 font-bold text-sm
-                    text-slate-700 dark:text-white bg-slate-100 dark:bg-transparent dark:bg-white/[0.08]
-                    border border-slate-200 dark:border-white/[0.10]
-                    hover:-translate-y-px transition-transform
-                  "
-                >
+                <a href="#how-it-works" className={btnSecondary}>
                   See How It Works
                 </a>
               </div>
@@ -293,28 +290,19 @@ export default function HomePage() {
                   { stat: "1 inbox", label: "SMS and web chat conversations in one place" },
                   { stat: "Fast setup", label: "Built for small teams that want results without complexity" },
                 ].map((item) => (
-                  <div
-                    key={item.stat}
-                    className={`p-5 ${glassCard}`}
-                  >
-                    <strong className="block text-[22px] mb-2 text-slate-900 dark:text-[#f5f5f5]">
-                      {item.stat}
-                    </strong>
-                    <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-                      {item.label}
-                    </span>
+                  <div key={item.stat} className={`p-5 ${card} ${cardHover}`}>
+                    <strong className={`block text-[22px] mb-2 ${ink}`}>{item.stat}</strong>
+                    <span className={`text-sm ${body}`}>{item.label}</span>
                   </div>
                 ))}
               </div>
             </div>
-          </FadeIn>
+          </Reveal>
 
           {/* Hero panel — chat window + dashboard strip */}
-          <FadeIn priority delayMs={140} offset="lg" className="hidden lg:block">
-            <div
-              className={`p-5 relative overflow-hidden ${glassCard}`}
-            >
-              {/* Panel glow */}
+          <Reveal priority delayMs={140} className="hidden lg:block">
+            <div className={`p-5 relative overflow-hidden ${card}`}>
+              {/* Ambient corner tint (dark only) */}
               <div
                 className="absolute pointer-events-none hidden dark:block"
                 style={{
@@ -323,59 +311,64 @@ export default function HomePage() {
                   width: 240,
                   height: 240,
                   borderRadius: "50%",
-                  background: "radial-gradient(circle, rgba(255,145,77,.40), transparent 65%)",
-                  filter: "blur(16px)",
+                  background: "radial-gradient(circle, rgba(255,145,77,.32), transparent 65%)",
+                  filter: "blur(18px)",
                 }}
               />
 
               {/* Chat window */}
-              <div
-                className="
-                  rounded-[22px] p-5
-                  bg-slate-50 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.04))]
-                  border border-slate-200 dark:border-white/[0.10]
-                "
-              >
+              <div className={`${tile} p-5`}>
                 {/* Window top bar */}
                 <div className="flex items-center justify-between gap-3 mb-5">
-                  <div className="flex items-center gap-2.5 font-bold text-sm text-slate-700 dark:text-[#f5f5f5]">
-                    <Image
-                      src="/logo-dark.png"
-                      alt="SimplAssist"
-                      width={56}
-                      height={14}
-                      className="hidden dark:block h-3.5 w-auto object-contain"
-                    />
-                    <Image
-                      src="/logo-light.png"
-                      alt="SimplAssist"
-                      width={56}
-                      height={14}
-                      className="block dark:hidden h-3.5 w-auto object-contain"
-                    />
+                  <div className={`flex items-center gap-2.5 font-bold text-sm ${ink}`}>
+                    <Logo size="sm" />
                     <span>SimplAssist Live</span>
                   </div>
                   <div className="flex gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-white/[0.22]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-white/[0.22]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-white/[0.22]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
                   </div>
                 </div>
 
-                {/* Messages */}
+                {/* Messages — matte bubbles, no gradients */}
                 <div className="space-y-3">
-                  <div className="ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold bg-[linear-gradient(135deg,rgba(255,145,77,.95),rgba(255,176,122,.85))] text-[#151515]">
+                  <div
+                    className="
+                      ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold
+                      bg-[#fcebdd] border border-[#f6d9c0] text-[#9a3412]
+                      dark:bg-[#ff914d] dark:border-transparent dark:text-[#16100b]
+                    "
+                  >
                     Missed call from Sarah — new customer asking about booking.
                   </div>
-                  <div className="w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed bg-slate-100 dark:bg-transparent dark:bg-white/[0.08] border border-slate-200 dark:border-white/[0.08] text-slate-700 dark:text-[#f0f0f0]">
+                  <div
+                    className="
+                      w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed
+                      bg-white border border-[#ece4d8] text-stone-700
+                      dark:bg-white/[0.08] dark:border-white/[0.08] dark:text-[#f0f0f0]
+                    "
+                  >
                     Hi Sarah! Thanks for calling Acme Plumbing. We missed your call, but
                     we&apos;ve got your message and will follow up soon. Need help right away?
                     You can reply here anytime.
                   </div>
-                  <div className="ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold bg-[linear-gradient(135deg,rgba(255,145,77,.95),rgba(255,176,122,.85))] text-[#151515]">
+                  <div
+                    className="
+                      ml-auto w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed font-semibold
+                      bg-[#fcebdd] border border-[#f6d9c0] text-[#9a3412]
+                      dark:bg-[#ff914d] dark:border-transparent dark:text-[#16100b]
+                    "
+                  >
                     Can you also answer questions on my website?
                   </div>
-                  <div className="w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed bg-slate-100 dark:bg-transparent dark:bg-white/[0.08] border border-slate-200 dark:border-white/[0.08] text-slate-700 dark:text-[#f0f0f0]">
+                  <div
+                    className="
+                      w-fit max-w-[88%] px-4 py-3.5 rounded-[18px] text-[15px] leading-relaxed
+                      bg-white border border-[#ece4d8] text-stone-700
+                      dark:bg-white/[0.08] dark:border-white/[0.08] dark:text-[#f0f0f0]
+                    "
+                  >
                     Yes — SimplAssist can chat with visitors, answer common questions, and
                     help capture more leads even after hours.
                   </div>
@@ -385,18 +378,18 @@ export default function HomePage() {
               {/* Dashboard strip */}
               <div className="grid grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
                 {/* New Leads */}
-                <div className="rounded-[20px] p-5 bg-slate-50 dark:bg-white/[0.05] border border-slate-200 dark:border-white/[0.08]">
-                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-orange-500 dark:text-[#ffd7bf] mb-2.5">
+                <div className={`${tile} rounded-[20px] p-5`}>
+                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
                     New Leads
                   </div>
                   <div className="space-y-2.5">
                     {[
-                      { name: "Sarah M.", badge: "Hot Lead", color: "bg-orange-100 dark:bg-[rgba(255,145,77,.14)] text-orange-600 dark:text-[#ffd5bc] border-orange-200 dark:border-[rgba(255,145,77,.22)]" },
-                      { name: "James R.", badge: "Website Chat", color: "bg-blue-50 dark:bg-[rgba(255,145,77,.14)] text-blue-600 dark:text-[#ffd5bc] border-blue-200 dark:border-[rgba(255,145,77,.22)]" },
-                      { name: "Alicia T.", badge: "Missed Call", color: "bg-purple-50 dark:bg-[rgba(255,145,77,.14)] text-purple-600 dark:text-[#ffd5bc] border-purple-200 dark:border-[rgba(255,145,77,.22)]" },
+                      { name: "Sarah M.", badge: "Hot Lead", color: "bg-[#fcebdd] text-[#9a3412] border-[#f6d9c0] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
+                      { name: "James R.", badge: "Website Chat", color: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
+                      { name: "Alicia T.", badge: "Missed Call", color: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]" },
                     ].map((lead) => (
-                      <div key={lead.name} className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-[14px] bg-white dark:bg-white/[0.04]">
-                        <span className="text-sm font-medium text-slate-700 dark:text-[#f5f5f5]">{lead.name}</span>
+                      <div key={lead.name} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
+                        <span className={`text-sm font-medium ${ink}`}>{lead.name}</span>
                         <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-[12px] font-bold border ${lead.color}`}>
                           {lead.badge}
                         </span>
@@ -406,8 +399,8 @@ export default function HomePage() {
                 </div>
 
                 {/* What You See */}
-                <div className="rounded-[20px] p-5 bg-slate-50 dark:bg-white/[0.05] border border-slate-200 dark:border-white/[0.08]">
-                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-orange-500 dark:text-[#ffd7bf] mb-2.5">
+                <div className={`${tile} rounded-[20px] p-5`}>
+                  <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
                     What You See
                   </div>
                   <div className="space-y-2.5">
@@ -416,191 +409,169 @@ export default function HomePage() {
                       { label: "Response time", value: "< 10 sec" },
                       { label: "Channels", value: "SMS + Web" },
                     ].map((item) => (
-                      <div key={item.label} className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-[14px] bg-white dark:bg-white/[0.04]">
-                        <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{item.label}</span>
-                        <span className="text-sm font-bold text-slate-900 dark:text-[#f5f5f5]">{item.value}</span>
+                      <div key={item.label} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
+                        <span className={`text-sm ${body}`}>{item.label}</span>
+                        <span className={`text-sm font-bold ${ink}`}>{item.value}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
             </div>
-          </FadeIn>
+          </Reveal>
         </section>
 
         {/* ── Features ── */}
         <section id="features" className="py-16 sm:py-24">
-          <FadeIn className="mb-12 sm:mb-16">
-            <Eyebrow text="Everything you need" />
-            <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
-              <h2 className="text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold text-slate-900 dark:text-[#f5f5f5]">
+          <SectionHeader
+            eyebrowText="Everything you need"
+            title={
+              <>
                 Built for small businesses that want a{" "}
-                <span className="text-[#ff914d]">bigger presence</span>.
-              </h2>
-              <p className="text-slate-500 dark:text-[#bdbdbf] max-w-[600px] leading-[1.65] lg:text-right">
-                Give customers a fast, professional experience without hiring a full-time front desk team.
-              </p>
-            </div>
-          </FadeIn>
+                <span className={accentText}>bigger presence</span>.
+              </>
+            }
+            subtitle="Give customers a fast, professional experience without hiring a full-time front desk team."
+          />
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {features.map((feature, i) => (
-              <FadeIn key={feature.title} delayMs={i * 75} className="h-full">
-                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${glassCard}`}>
+              <Reveal key={feature.title} delayMs={i * 75} className="h-full">
+                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${card} ${cardHover}`}>
                   <div
                     className="
                       w-14 h-14 rounded-[22px] grid place-items-center mb-4
-                      bg-orange-100 dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
-                      border border-orange-200 dark:border-white/[0.10]
+                      bg-[#fdf1e7] border border-[#f5dcc4]
+                      dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
+                      dark:border-white/[0.10]
                     "
                   >
-                    <feature.icon className="w-6 h-6 text-[#ff914d]" />
+                    <feature.icon className="w-6 h-6 text-[#ea580c] dark:text-[#ff914d]" />
                   </div>
-                  <h3 className="text-xl sm:text-[22px] font-bold text-slate-900 dark:text-[#f5f5f5] mb-2.5">
+                  <h3 className={`text-xl sm:text-[22px] font-bold ${ink} mb-2.5`}>
                     {feature.title}
                   </h3>
-                  <p className="text-slate-500 dark:text-[#bdbdbf] leading-[1.7]">
-                    {feature.description}
-                  </p>
+                  <p className={`${body} leading-[1.7]`}>{feature.description}</p>
                 </div>
-              </FadeIn>
+              </Reveal>
             ))}
           </div>
         </section>
 
         {/* ── How It Works ── */}
         <section id="how-it-works" className="py-16 sm:py-24">
-          <FadeIn className="mb-12 sm:mb-16">
-            <Eyebrow text="How it works" />
-            <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
-              <h2 className="text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold text-slate-900 dark:text-[#f5f5f5]">
-                Three simple steps to keep every{" "}
-                <span className="text-[#ff914d]">lead</span>.
-              </h2>
-              <p className="text-slate-500 dark:text-[#bdbdbf] max-w-[600px] leading-[1.65] lg:text-right">
-                Go from sign-up to live AI assistant in under ten minutes.
-              </p>
-            </div>
-          </FadeIn>
+          <SectionHeader
+            eyebrowText="How it works"
+            title={
+              <>
+                Three simple steps to keep every <span className={accentText}>lead</span>.
+              </>
+            }
+            subtitle="Go from sign-up to live AI assistant in under ten minutes."
+          />
 
           <div className="grid md:grid-cols-3 gap-5">
             {steps.map((step, i) => (
-              <FadeIn key={step.title} delayMs={i * 90} className="h-full">
-                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${glassCard}`}>
+              <Reveal key={step.title} delayMs={i * 90} className="h-full">
+                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${card} ${cardHover}`}>
                   <div
                     className="
                       w-11 h-11 rounded-full grid place-items-center mb-4
-                      bg-[linear-gradient(135deg,#ff914d,#ffb07a)]
-                      text-[#111] font-extrabold text-lg
+                      bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]
+                      font-extrabold text-lg
                     "
                   >
                     {i + 1}
                   </div>
-                  <h3 className="text-xl sm:text-[22px] font-bold text-slate-900 dark:text-[#f5f5f5] mb-2.5">
+                  <h3 className={`text-xl sm:text-[22px] font-bold ${ink} mb-2.5`}>
                     {step.title}
                   </h3>
-                  <p className="text-slate-500 dark:text-[#bdbdbf] leading-[1.7]">
-                    {step.description}
-                  </p>
+                  <p className={`${body} leading-[1.7]`}>{step.description}</p>
                 </div>
-              </FadeIn>
+              </Reveal>
             ))}
           </div>
         </section>
 
         {/* ── Pricing ── */}
         <section id="pricing" className="py-16 sm:py-24">
-          <FadeIn className="mb-12 sm:mb-16">
-            <Eyebrow text="Simple, transparent pricing" />
-            <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
-              <h2 className="text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold text-slate-900 dark:text-[#f5f5f5]">
+          <SectionHeader
+            eyebrowText="Simple, transparent pricing"
+            title={
+              <>
                 Start free and upgrade as your{" "}
-                <span className="text-[#ff914d]">business grows</span>.
-              </h2>
-              <p className="text-slate-500 dark:text-[#bdbdbf] max-w-[600px] leading-[1.65] lg:text-right">
-                No contracts. Paid SMS activation includes a one-time $25 setup fee.
-              </p>
-            </div>
-          </FadeIn>
+                <span className={accentText}>business grows</span>.
+              </>
+            }
+            subtitle="No contracts. Paid SMS activation includes a one-time $25 setup fee."
+          />
 
           <div className="grid md:grid-cols-3 gap-5 items-start">
             {plans.map((plan, i) => (
-              <FadeIn key={plan.name} delayMs={i * 100} className="h-full">
+              <Reveal key={plan.name} delayMs={i * 100} className="h-full">
                 <div
-                  className={`
-                    rounded-[28px] p-7 flex flex-col min-h-full relative
-                    backdrop-blur-[18px]
-                    ${
-                      plan.highlighted
-                        ? "bg-white/90 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.06))] outline outline-1 outline-[rgba(255,145,77,.40)] shadow-2xl dark:shadow-[0_30px_80px_rgba(255,145,77,.14)] md:-translate-y-1 z-10 border border-transparent"
-                        : `bg-white/70 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.05))] border border-slate-200 dark:border-white/[0.14] shadow-sm dark:shadow-[0_20px_60px_rgba(0,0,0,0.45)]`
-                    }
-                  `}
+                  className={
+                    plan.highlighted
+                      ? `
+                        rounded-[28px] p-7 flex flex-col min-h-full relative md:-translate-y-1 z-10
+                        bg-white border border-transparent
+                        outline outline-2 outline-[rgba(194,65,12,.30)]
+                        shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgba(154,52,18,0.18)]
+                        dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.05))]
+                        dark:outline-[rgba(255,145,77,.42)]
+                        dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
+                        dark:backdrop-blur-[18px]
+                      `
+                      : `p-7 flex flex-col min-h-full relative ${card} ${cardHover}`
+                  }
                 >
                   <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">
-                      {plan.name}
-                    </h3>
+                    <h3 className={`text-2xl font-bold ${ink}`}>{plan.name}</h3>
                     {plan.highlighted && (
-                      <span className="px-3 py-1.5 rounded-full text-[12px] font-extrabold bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-[#111]">
+                      <span className="px-3 py-1.5 rounded-full text-[12px] font-extrabold bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]">
                         Most Popular
                       </span>
                     )}
                   </div>
-                  <p className="text-slate-500 dark:text-[#bdbdbf] leading-[1.65] mb-6">
-                    {plan.description}
-                  </p>
-                  <div className="text-[50px] font-extrabold tracking-[-0.05em] mb-5 text-slate-900 dark:text-[#f5f5f5]">
+                  <p className={`${body} leading-[1.65] mb-6`}>{plan.description}</p>
+                  <div className={`text-[50px] font-extrabold tracking-[-0.05em] mb-5 ${ink}`}>
                     {plan.price}
-                    <small className="text-lg text-slate-400 dark:text-[#bdbdbf]">/mo</small>
+                    <small className="text-lg text-stone-400 dark:text-[#bdbdbf]">/mo</small>
                   </div>
                   <ul className="space-y-3 mb-6 flex-1">
                     {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2.5 text-slate-700 dark:text-[#efefef] leading-relaxed">
-                        <span className="text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
+                      <li key={feature} className="flex items-start gap-2.5 text-stone-700 dark:text-[#efefef] leading-relaxed">
+                        <span className="text-[#ea580c] dark:text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
                         <span>{feature}</span>
                       </li>
                     ))}
                   </ul>
                   <Link
                     href="/signup"
-                    className={`
-                      block text-center py-4 rounded-full font-bold transition-all
-                      ${
-                        plan.highlighted
-                          ? "text-[#111] bg-[linear-gradient(135deg,#ff914d,#ffb07a)] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:-translate-y-px"
-                          : "text-slate-700 dark:text-white bg-slate-100 dark:bg-transparent dark:bg-white/[0.08] border border-slate-200 dark:border-white/[0.10] hover:-translate-y-px"
-                      }
-                    `}
+                    className={plan.highlighted ? `${btnPrimary} w-full` : `${btnSecondary} w-full`}
                   >
                     Get Started
                   </Link>
                 </div>
-              </FadeIn>
+              </Reveal>
             ))}
           </div>
         </section>
 
         {/* ── CTA ── */}
-        <FadeIn>
-          <section
-            className={`
-              my-6 p-8
-              grid lg:grid-cols-[1.1fr_.9fr] gap-6 items-center
-              ${glassCard}
-            `}
-          >
+        <Reveal>
+          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 items-center ${card}`}>
             <div>
-              <h2 className="text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.02] tracking-[-0.04em] mb-3 text-slate-900 dark:text-[#f5f5f5]">
+              <h2 className={`text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.02] tracking-[-0.04em] mb-3 ${ink}`}>
                 Ready to stop losing customers?
               </h2>
-              <p className="text-slate-500 dark:text-[#bdbdbf] leading-[1.7] max-w-[680px]">
+              <p className={`${body} leading-[1.7] max-w-[680px]`}>
                 Join hundreds of small businesses already using SimplAssist to respond
                 faster, capture more leads, and grow without hiring more staff.
               </p>
             </div>
-            <div className="rounded-[22px] p-6 bg-slate-50 dark:bg-white/[0.05] border border-slate-200 dark:border-white/[0.08]">
-              <strong className="block text-base mb-2.5 text-slate-900 dark:text-[#f5f5f5]">
+            <div className={`${tile} p-6`}>
+              <strong className={`block text-base mb-2.5 ${ink}`}>
                 What you get on day one:
               </strong>
               <ul className="space-y-2.5 mb-5">
@@ -610,36 +581,23 @@ export default function HomePage() {
                   "Dashboard with every lead and conversation",
                   "Free 14-day trial — no credit card required",
                 ].map((item) => (
-                  <li key={item} className="flex items-center gap-2.5 text-slate-700 dark:text-[#ececec]">
-                    <span className="w-2 h-2 rounded-full bg-[#ff914d] shadow-[0_0_14px_rgba(255,145,77,.70)] shrink-0" />
+                  <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">
+                    <span className="w-2 h-2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] shrink-0" />
                     {item}
                   </li>
                 ))}
               </ul>
-              <Link
-                href="/signup"
-                className="
-                  block text-center py-4 rounded-full font-bold
-                  text-[#111] bg-[linear-gradient(135deg,#ff914d,#ffb07a)]
-                  shadow-[0_14px_34px_rgba(255,145,77,.26)]
-                  hover:-translate-y-px transition-transform
-                "
-              >
+              <Link href="/signup" className={btnPrimaryWide}>
                 Start Free Trial
               </Link>
             </div>
           </section>
-        </FadeIn>
+        </Reveal>
 
         {/* ── Footer ── */}
         <footer className="pb-10 pt-2">
-          <FadeIn>
-            <div
-              className={`
-                px-6 py-6 flex items-center justify-between gap-4 flex-wrap
-                ${glassCard}
-              `}
-            >
+          <Reveal>
+            <div className={`px-6 py-6 flex items-center justify-between gap-4 flex-wrap ${card}`}>
               <div className="flex items-center gap-3.5">
                 <Image
                   src="/logo-dark.png"
@@ -655,19 +613,19 @@ export default function HomePage() {
                   height={22}
                   className="block dark:hidden h-[22px] w-auto object-contain"
                 />
-                <small className="text-slate-400 dark:text-[#bdbdbf] block mt-1">
+                <small className="text-stone-500 dark:text-[#bdbdbf] block mt-1">
                   &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
                 </small>
               </div>
               <div className="flex gap-5 flex-wrap text-sm">
-                <a href="#features" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors">Features</a>
-                <a href="#pricing" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors">Pricing</a>
-                <Link href="/privacy" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors">Privacy</Link>
-                <Link href="/terms" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors">Terms</Link>
-                <Link href="/login" className="text-slate-500 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors">Log In</Link>
+                <a href="#features" className={navLink}>Features</a>
+                <a href="#pricing" className={navLink}>Pricing</a>
+                <Link href="/privacy" className={navLink}>Privacy</Link>
+                <Link href="/terms" className={navLink}>Terms</Link>
+                <Link href="/login" className={navLink}>Log In</Link>
               </div>
             </div>
-          </FadeIn>
+          </Reveal>
         </footer>
       </div>
     </div>

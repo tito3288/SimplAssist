@@ -7,7 +7,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
-import { Moon, Sun } from "lucide-react";
+import { Eye, EyeOff, Moon, Sun } from "lucide-react";
+import type { UseFormRegisterReturn } from "react-hook-form";
+import { fieldLabel, inputField } from "./theme";
 
 /* ── Scroll reveal ── */
 
@@ -122,6 +124,70 @@ export function ThemeToggleV2() {
       <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
       <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
     </button>
+  );
+}
+
+/* ── Password field (react-hook-form aware, mirrors AuthPasswordField) ── */
+
+type AuthPasswordFieldV2Props = {
+  id: string;
+  label: string;
+  autoComplete?: string;
+  placeholder?: string;
+  error?: string;
+  registration: UseFormRegisterReturn;
+};
+
+export function AuthPasswordFieldV2({
+  id,
+  label,
+  autoComplete,
+  placeholder = "••••••••",
+  error,
+  registration,
+}: AuthPasswordFieldV2Props) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div>
+      <label htmlFor={id} className={fieldLabel}>
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          {...registration}
+          className={`${inputField} pr-12`}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="
+            absolute right-2.5 top-1/2 -translate-y-1/2 rounded-xl p-2
+            text-stone-500 hover:text-[#c2410c]
+            dark:text-[#888] dark:hover:text-[#ffb07a]
+            transition-colors
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50
+            dark:focus-visible:ring-[#ff914d]/50 focus-visible:ring-offset-2
+            focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#0a0a0c]
+          "
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+        >
+          {visible ? (
+            <Eye className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden />
+          ) : (
+            <EyeOff className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden />
+          )}
+        </button>
+      </div>
+      {error && (
+        <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{error}</p>
+      )}
+    </div>
   );
 }
 
