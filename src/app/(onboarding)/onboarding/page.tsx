@@ -16,6 +16,7 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
+  ONBOARDING_STEPS,
   ONBOARDING_STEP_LABELS,
   onboardingStepNumber,
   type OnboardingState,
@@ -155,7 +156,7 @@ export default function OnboardingPage() {
           <BusinessInfoForm
             businessId={state.businessId}
             initialData={state.businessInfo}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
           />
         )}
 
@@ -163,7 +164,7 @@ export default function OnboardingPage() {
           <BusinessHoursForm
             businessId={state.businessId}
             initialData={state.businessHours.length > 0 ? state.businessHours : undefined}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('business_info')}
           />
         )}
@@ -173,7 +174,7 @@ export default function OnboardingPage() {
             businessId={state.businessId}
             businessType={(state.businessInfo.business_type || 'general') as BusinessType}
             initialData={state.servicesAndFaqs.services.length > 0 ? state.servicesAndFaqs : undefined}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('business_hours')}
           />
         )}
@@ -183,7 +184,7 @@ export default function OnboardingPage() {
             businessId={state.businessId}
             businessName={state.businessInfo.name || 'Your Business'}
             initialData={state.aiSettings || undefined}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('services_faqs')}
           />
         )}
@@ -192,7 +193,7 @@ export default function OnboardingPage() {
           <BrandVerificationForm
             businessId={state.businessId}
             initialData={state.brandVerification || undefined}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('ai_settings')}
           />
         )}
@@ -212,7 +213,7 @@ export default function OnboardingPage() {
               services={state.servicesAndFaqs.services}
               riskReview={state.registration.riskReview}
               initialData={state.brandVerification}
-              onNext={() => refreshState()}
+              onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
               onBack={() => setStep('legal_verification')}
             />
           </div>
@@ -223,7 +224,7 @@ export default function OnboardingPage() {
             state={state}
             onBack={() => setStep('sms_use_case')}
             onPurchased={() => refreshState()}
-            onNext={() => refreshState()}
+            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
           />
         )}
 
@@ -517,6 +518,18 @@ function statusCopy(state: OnboardingState): string {
   }
 
   return 'Business verification can take hours to a couple of days. We will keep this page updated as carriers respond.';
+}
+
+/**
+ * Successor in the canonical wizard order, clamped at the final step.
+ * Used by plain Next so the UI advances exactly one step; the server-derived
+ * resume position applies only on load and after Stripe/purchase snaps
+ * (docs/onboarding-resume-position-bug.md).
+ */
+function nextStepOf(step: OnboardingStep): OnboardingStep {
+  const idx = ONBOARDING_STEPS.indexOf(step);
+  if (idx === -1) return step;
+  return ONBOARDING_STEPS[Math.min(idx + 1, ONBOARDING_STEPS.length - 1)];
 }
 
 function numberToStep(step: number): OnboardingStep {
