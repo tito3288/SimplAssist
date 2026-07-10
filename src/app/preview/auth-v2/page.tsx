@@ -12,7 +12,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, Mail } from "lucide-react";
-import { LoadingDot, ThemeToggleV2 } from "../_v2/ui";
+import { LoadingDot, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import {
   body,
   btnPrimaryWide,
@@ -26,7 +26,7 @@ import {
   lightAmbient,
   pageShell,
   tile,
-} from "../_v2/theme";
+} from "@/lib/theme-v2/theme";
 
 type View = "signup" | "login" | "sent";
 

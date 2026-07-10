@@ -15,8 +15,8 @@ import {
   inlineLink,
   inputField,
   tile,
-} from "@/app/preview/_v2/theme";
-import { AuthPasswordFieldV2, LoadingDot } from "@/app/preview/_v2/ui";
+} from "@/lib/theme-v2/theme";
+import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
 
 const signupSchema = z
   .object({

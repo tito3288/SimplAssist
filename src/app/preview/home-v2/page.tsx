@@ -9,7 +9,7 @@ import {
   Star,
   ArrowUpRight,
 } from "lucide-react";
-import { Reveal, ThemeToggleV2 } from "../_v2/ui";
+import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import {
   accentText,
   body,
@@ -28,7 +28,7 @@ import {
   pageShell,
   tile,
   tileRow,
-} from "../_v2/theme";
+} from "@/lib/theme-v2/theme";
 
 export const metadata: Metadata = {
   title: "SimplAssist — Home (v2 preview)",

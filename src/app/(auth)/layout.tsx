@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
-import { ThemeToggleV2 } from "@/app/preview/_v2/ui";
+import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import {
   body,
   card,
@@ -10,7 +10,7 @@ import {
   inlineLink,
   lightAmbient,
   pageShell,
-} from "@/app/preview/_v2/theme";
+} from "@/lib/theme-v2/theme";
 
 export default function AuthLayout({
   children,

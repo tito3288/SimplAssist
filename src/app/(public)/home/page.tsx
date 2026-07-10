@@ -8,7 +8,7 @@ import {
   Star,
   ArrowUpRight,
 } from "lucide-react";
-import { Reveal, ThemeToggleV2 } from "@/app/preview/_v2/ui";
+import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import {
   accentText,
   body,
@@ -27,7 +27,7 @@ import {
   pageShell,
   tile,
   tileRow,
-} from "@/app/preview/_v2/theme";
+} from "@/lib/theme-v2/theme";
 
 /* ── Data ── */
 
