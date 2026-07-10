@@ -1,8 +1,8 @@
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
+import { inlineLink } from "@/lib/theme-v2/theme";
 
-const linkClass =
-  "font-medium text-[#ff914d] underline-offset-2 transition-colors hover:text-[#ffb07a] hover:underline";
+const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
 
 export default function PrivacyPage() {
   return (

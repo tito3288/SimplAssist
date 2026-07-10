@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { fontStack } from "@/lib/theme-v2/theme";
 
 function PreviewContent() {
   const searchParams = useSearchParams();
@@ -10,15 +11,8 @@ function PreviewContent() {
   return (
     <>
       <div
-        style={{
-          background: "#f0f4ff",
-          borderBottom: "1px solid #d0d8e8",
-          padding: "12px 20px",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-          fontSize: "14px",
-          color: "#4a5568",
-          textAlign: "center",
-        }}
+        className="border-b border-[#ece4d8] bg-[#faf8f4] px-5 py-3 text-center text-sm text-stone-600 dark:border-white/[0.10] dark:bg-[#0a0a0b] dark:text-[#bdbdbf]"
+        style={{ fontFamily: fontStack }}
       >
         Widget Preview - This is how the chat widget will appear on your website
       </div>

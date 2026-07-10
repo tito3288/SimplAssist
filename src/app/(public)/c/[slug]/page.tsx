@@ -2,9 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Phone, Mail, MapPin, Clock } from "lucide-react";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { glassCard, textPrimary, textSecondary } from "@/lib/glass";
+import { body, card, ink, inlineLink } from "@/lib/theme-v2/theme";
+import {
+  PublicPageShell,
+  publicHeaderLink,
+} from "@/components/legal/LegalDocLayout";
 import { formatPhoneNumber } from "@/lib/utils";
 import { isPendingSlug } from "@/lib/util/slug";
 
@@ -124,137 +128,116 @@ export default async function BusinessLandingPage({ params }: PageProps) {
   const address = formatAddress(business);
 
   return (
-    <div
-      className="
-        relative min-h-screen overflow-x-hidden
-        bg-gradient-to-b from-slate-50 via-white to-slate-100
-        dark:bg-none dark:bg-[#050505]
-      "
-    >
-      <div
-        className="pointer-events-none fixed inset-0 -z-10 hidden dark:block"
-        style={{
-          background:
-            "radial-gradient(circle at 80% 0%, rgba(255,145,77,.18), transparent 26%), radial-gradient(circle at 12% 40%, rgba(255,145,77,.08), transparent 20%), linear-gradient(180deg, #080808 0%, #050505 45%, #0a0a0c 100%)",
-        }}
-      />
-
-      <header className="relative z-[1] border-b border-slate-200/80 dark:border-white/[0.08] bg-white/60 dark:bg-[rgba(8,8,10,0.65)] backdrop-blur-xl">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
-          <span className={`text-sm font-semibold tracking-tight ${textPrimary}`}>
-            {business.name}
-          </span>
-          <div className="flex items-center gap-4">
-            <Link
-              href={`/c/${business.slug}/privacy`}
-              className="text-sm font-medium text-slate-600 transition-colors hover:text-[#ff914d] dark:text-[#bdbdbf]"
-            >
-              Privacy
-            </Link>
-            <Link
-              href={`/c/${business.slug}/terms`}
-              className="text-sm font-medium text-slate-600 transition-colors hover:text-[#ff914d] dark:text-[#bdbdbf]"
-            >
-              Terms
-            </Link>
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
-
-      <main className="relative z-[1] mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
-        <article className={`p-8 sm:p-10 lg:p-12 ${glassCard}`}>
-          <h1
-            className={`text-[clamp(1.75rem,4vw,2.25rem)] font-bold tracking-tight ${textPrimary}`}
-          >
-            {business.name}
-          </h1>
-
-          <div className={`mt-8 grid gap-4 ${textSecondary}`}>
-            {business.phone_number && (
-              <a
-                href={`tel:${business.phone_number}`}
-                className="inline-flex items-center gap-3 text-base transition-colors hover:text-[#ff914d]"
-              >
-                <Phone className="h-4 w-4 shrink-0" aria-hidden />
-                <span>{formatPhoneNumber(business.phone_number)}</span>
-              </a>
-            )}
-            {business.email && (
-              <a
-                href={`mailto:${business.email}`}
-                className="inline-flex items-center gap-3 text-base transition-colors hover:text-[#ff914d]"
-              >
-                <Mail className="h-4 w-4 shrink-0" aria-hidden />
-                <span>{business.email}</span>
-              </a>
-            )}
-            {address && (
-              <div className="inline-flex items-start gap-3 text-base">
-                <MapPin className="h-4 w-4 shrink-0 mt-1" aria-hidden />
-                <span>{address}</span>
-              </div>
-            )}
-          </div>
-
-          {hours.length > 0 && (
-            <section className="mt-10">
-              <h2
-                className={`mb-3 inline-flex items-center gap-2 text-lg font-semibold tracking-tight sm:text-xl ${textPrimary}`}
-              >
-                <Clock className="h-5 w-5 shrink-0" aria-hidden />
-                Hours
-              </h2>
-              <ul className={`space-y-1.5 text-[15px] sm:text-base ${textSecondary}`}>
-                {hours.map((h) => (
-                  <li key={h.day_of_week} className="flex justify-between gap-6">
-                    <span>{DAY_NAMES[h.day_of_week]}</span>
-                    <span>
-                      {h.is_closed
-                        ? "Closed"
-                        : `${formatTime(h.open_time)} – ${formatTime(h.close_time)}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {business.opt_in_description && (
-            <section className="mt-10">
-              <h2
-                className={`mb-3 text-lg font-semibold tracking-tight sm:text-xl ${textPrimary}`}
-              >
-                About our SMS messaging
-              </h2>
-              <p className={`text-[15px] leading-relaxed sm:text-base ${textSecondary}`}>
-                {business.opt_in_description}
-              </p>
-              <p className={`mt-3 text-sm ${textSecondary}`}>
-                See our{" "}
-                <Link
-                  href={`/c/${business.slug}/privacy`}
-                  className="font-medium text-[#ff914d] underline-offset-2 hover:underline"
-                >
-                  Privacy Policy
-                </Link>{" "}
-                and{" "}
-                <Link
-                  href={`/c/${business.slug}/terms`}
-                  className="font-medium text-[#ff914d] underline-offset-2 hover:underline"
-                >
-                  Terms of Service
-                </Link>{" "}
-                for details on opt-in, opt-out, and message frequency.
-              </p>
-            </section>
-          )}
-        </article>
-
-        <p className={`mt-8 text-center text-xs ${textSecondary}`}>
+    <PublicPageShell
+      headerLeft={
+        <span className={`text-sm font-semibold tracking-tight ${ink}`}>
+          {business.name}
+        </span>
+      }
+      headerRight={
+        <>
+          <Link href={`/c/${business.slug}/privacy`} className={publicHeaderLink}>
+            Privacy
+          </Link>
+          <Link href={`/c/${business.slug}/terms`} className={publicHeaderLink}>
+            Terms
+          </Link>
+          <ThemeToggleV2 />
+        </>
+      }
+      footer={
+        <p className={`mt-8 text-center text-xs ${body}`}>
           &copy; {new Date().getFullYear()} {business.name}. Messaging service powered by SimplAssist.
         </p>
-      </main>
-    </div>
+      }
+    >
+      <article className={`p-8 sm:p-10 lg:p-12 ${card}`}>
+        <h1
+          className={`text-[clamp(1.75rem,4vw,2.25rem)] font-bold tracking-tight ${ink}`}
+        >
+          {business.name}
+        </h1>
+
+        <div className={`mt-8 grid gap-4 ${body}`}>
+          {business.phone_number && (
+            <a
+              href={`tel:${business.phone_number}`}
+              className="inline-flex items-center gap-3 text-base transition-colors hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+            >
+              <Phone className="h-4 w-4 shrink-0" aria-hidden />
+              <span>{formatPhoneNumber(business.phone_number)}</span>
+            </a>
+          )}
+          {business.email && (
+            <a
+              href={`mailto:${business.email}`}
+              className="inline-flex items-center gap-3 text-base transition-colors hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+            >
+              <Mail className="h-4 w-4 shrink-0" aria-hidden />
+              <span>{business.email}</span>
+            </a>
+          )}
+          {address && (
+            <div className="inline-flex items-start gap-3 text-base">
+              <MapPin className="h-4 w-4 shrink-0 mt-1" aria-hidden />
+              <span>{address}</span>
+            </div>
+          )}
+        </div>
+
+        {hours.length > 0 && (
+          <section className="mt-10">
+            <h2
+              className={`mb-3 inline-flex items-center gap-2 text-lg font-semibold tracking-tight sm:text-xl ${ink}`}
+            >
+              <Clock className="h-5 w-5 shrink-0" aria-hidden />
+              Hours
+            </h2>
+            <ul className={`space-y-1.5 text-[15px] sm:text-base ${body}`}>
+              {hours.map((h) => (
+                <li key={h.day_of_week} className="flex justify-between gap-6">
+                  <span>{DAY_NAMES[h.day_of_week]}</span>
+                  <span>
+                    {h.is_closed
+                      ? "Closed"
+                      : `${formatTime(h.open_time)} – ${formatTime(h.close_time)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {business.opt_in_description && (
+          <section className="mt-10">
+            <h2
+              className={`mb-3 text-lg font-semibold tracking-tight sm:text-xl ${ink}`}
+            >
+              About our SMS messaging
+            </h2>
+            <p className={`text-[15px] leading-relaxed sm:text-base ${body}`}>
+              {business.opt_in_description}
+            </p>
+            <p className={`mt-3 text-sm ${body}`}>
+              See our{" "}
+              <Link
+                href={`/c/${business.slug}/privacy`}
+                className={`${inlineLink} underline-offset-2 hover:underline`}
+              >
+                Privacy Policy
+              </Link>{" "}
+              and{" "}
+              <Link
+                href={`/c/${business.slug}/terms`}
+                className={`${inlineLink} underline-offset-2 hover:underline`}
+              >
+                Terms of Service
+              </Link>{" "}
+              for details on opt-in, opt-out, and message frequency.
+            </p>
+          </section>
+        )}
+      </article>
+    </PublicPageShell>
   );
 }
