@@ -18,7 +18,6 @@ import {
   card,
   cardHover,
   darkAmbient,
-  eyebrow,
   fontStack,
   ink,
   lightAmbient,
@@ -134,21 +133,6 @@ const plans = [
 
 /* ── Local pieces ── */
 
-function Eyebrow({ text }: { text: string }) {
-  return (
-    <span className={eyebrow}>
-      <span
-        className="
-          h-2.5 w-2.5 shrink-0 rounded-full
-          bg-[#ea580c] dark:bg-[#ff914d]
-          dark:shadow-[0_0_14px_rgba(255,145,77,.55)]
-        "
-      />
-      {text}
-    </span>
-  );
-}
-
 function Logo({ size = "md" }: { size?: "sm" | "md" }) {
   const cls = size === "sm" ? "h-3.5 w-auto object-contain" : "h-8 w-auto object-contain";
   const dims = size === "sm" ? { width: 56, height: 14 } : { width: 140, height: 34 };
@@ -161,23 +145,18 @@ function Logo({ size = "md" }: { size?: "sm" | "md" }) {
 }
 
 function SectionHeader({
-  eyebrowText,
   title,
   subtitle,
 }: {
-  eyebrowText: string;
   title: React.ReactNode;
   subtitle: string;
 }) {
   return (
     <Reveal className="mb-12 sm:mb-16">
-      <Eyebrow text={eyebrowText} />
-      <div className="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-4">
-        <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
-          {title}
-        </h2>
-        <p className={`${body} max-w-[600px] leading-[1.65] lg:text-right`}>{subtitle}</p>
-      </div>
+      <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
+        {title}
+      </h2>
+      <p className={`${body} mt-4 max-w-[60ch] leading-[1.65]`}>{subtitle}</p>
     </Reveal>
   );
 }
@@ -258,11 +237,7 @@ export default function HomePage() {
         <section className="grid lg:grid-cols-[1.12fr_.88fr] gap-7 items-center pt-4 pb-10">
           <Reveal priority>
             <div className="flex flex-col items-start">
-              <div className="mt-12 sm:mt-0">
-                <Eyebrow text="AI assistant for small businesses" />
-              </div>
-
-              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 ${ink}`}>
+              <h1 className={`text-[clamp(40px,7vw,76px)] font-extrabold leading-[0.96] tracking-[-0.05em] mb-5 mt-12 sm:mt-0 ${ink}`}>
                 Never miss a{" "}
                 <br className="hidden sm:block" />
                 <span className={accentText}>customer</span> again.
@@ -424,7 +399,6 @@ export default function HomePage() {
         {/* ── Features ── */}
         <section id="features" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="Everything you need"
             title={
               <>
                 Built for small businesses that want a{" "}
@@ -461,7 +435,6 @@ export default function HomePage() {
         {/* ── How It Works ── */}
         <section id="how-it-works" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="How it works"
             title={
               <>
                 Three simple steps to keep every <span className={accentText}>lead</span>.
@@ -496,7 +469,6 @@ export default function HomePage() {
         {/* ── Pricing ── */}
         <section id="pricing" className="py-16 sm:py-24">
           <SectionHeader
-            eyebrowText="Simple, transparent pricing"
             title={
               <>
                 Start free and upgrade as your{" "}
