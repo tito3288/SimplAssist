@@ -115,8 +115,8 @@ export const navShell = `
   w-[min(1200px,calc(100%-2rem))] max-w-[calc(100vw-2rem)]
   rounded-full
   backdrop-blur-[28px] backdrop-saturate-[1.6]
-  bg-[rgba(250,248,244,0.82)] dark:bg-[rgba(10,10,11,0.74)]
-  border border-[rgba(28,25,23,0.08)] dark:border-white/[0.10]
+  bg-[#faf8f4]/80 dark:bg-[#0a0a0b]/75
+  border border-black/[0.08] dark:border-white/[0.10]
   shadow-[0_8px_32px_-12px_rgba(28,25,23,0.14)] dark:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.7)]
 `;
 
