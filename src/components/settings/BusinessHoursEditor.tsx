@@ -33,6 +33,7 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
   });
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const updateDay = (index: number, updates: Partial<DayHours>) => {
     setHours((prev) => prev.map((h, i) => (i === index ? { ...h, ...updates } : h)));
@@ -41,23 +42,27 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
   const handleSave = async () => {
     setSaving(true);
     setSuccess(false);
+    setSubmitError('');
     try {
       const supabase = createClient();
-      await supabase.from('business_hours').delete().eq('business_id', businessId);
-      const { error } = await supabase.from('business_hours').insert(
+      // Atomic replace: one 7-row upsert on (business_id, day_of_week).
+      // Days 0-6 are the whole keyspace, so no delete is needed — a failed
+      // save can never wipe the existing hours.
+      const { error } = await supabase.from('business_hours').upsert(
         hours.map((h) => ({
           business_id: businessId,
           day_of_week: h.day_of_week,
           is_closed: h.is_closed,
           open_time: h.is_closed ? '00:00' : h.open_time,
           close_time: h.is_closed ? '00:00' : h.close_time,
-        }))
+        })),
+        { onConflict: 'business_id,day_of_week' }
       );
       if (error) throw error;
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
-      // Handle silently
+      setSubmitError('Could not save your business hours. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -129,6 +134,9 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
         </button>
         {success && (
           <span className="text-sm text-green-600 dark:text-green-400 font-medium">Hours saved successfully!</span>
+        )}
+        {submitError && (
+          <span className="text-sm text-red-600 dark:text-red-400">{submitError}</span>
         )}
       </div>
     </div>

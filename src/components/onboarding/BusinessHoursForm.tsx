@@ -42,17 +42,18 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
     setSubmitError('');
     try {
       const supabase = createClient();
-      // Delete existing hours then insert new ones
-      const { error: deleteError } = await supabase.from('business_hours').delete().eq('business_id', businessId);
-      if (deleteError) throw deleteError;
-      const { error } = await supabase.from('business_hours').insert(
+      // Atomic replace: one 7-row upsert on (business_id, day_of_week).
+      // Days 0-6 are the whole keyspace, so no delete is needed — a failed
+      // save can never wipe the existing hours.
+      const { error } = await supabase.from('business_hours').upsert(
         hours.map((h, i) => ({
           business_id: businessId,
           day_of_week: i,
           is_closed: h.is_closed,
           open_time: h.is_closed ? '00:00' : h.open_time,
           close_time: h.is_closed ? '00:00' : h.close_time,
-        }))
+        })),
+        { onConflict: 'business_id,day_of_week' }
       );
       if (error) throw error;
       await supabase.from('businesses').update({
