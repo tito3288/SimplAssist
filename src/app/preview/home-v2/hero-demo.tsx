@@ -10,7 +10,6 @@
  * scroll up out of view), so the surrounding page never shifts.
  */
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { body, ink, tile, tileRow } from "@/lib/theme-v2/theme";
 
@@ -200,22 +199,12 @@ export function HeroDemo() {
       <div className={`${tile} p-5`}>
         {/* Window top bar */}
         <div className="flex items-center justify-between gap-3 mb-4">
-          <div className={`flex items-center gap-2.5 font-bold text-sm ${ink}`}>
-            <Image
-              src="/logo-dark.png"
-              alt="SimplAssist"
-              width={56}
-              height={14}
-              className="hidden dark:block h-3.5 w-auto object-contain"
-            />
-            <Image
-              src="/logo-light.png"
-              alt="SimplAssist"
-              width={56}
-              height={14}
-              className="block dark:hidden h-3.5 w-auto object-contain"
-            />
-            <span>SimplAssist Live</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className={`font-bold text-sm ${ink}`}>Acme Plumbing</span>
+            <span className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-[#9a9a9c] whitespace-nowrap">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500 dark:bg-green-400" />
+              AI Assistant active
+            </span>
           </div>
           <div className="flex gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-stone-300 dark:bg-white/[0.22]" />
@@ -224,18 +213,21 @@ export function HeroDemo() {
           </div>
         </div>
 
-        {/* Fixed-height message area: bottom-pinned, older messages scroll up */}
-        <div className="h-[380px] overflow-hidden flex flex-col justify-end gap-3" aria-live="polite">
-          {SCRIPT.slice(0, visible).map((m, i) => (
-            <Enter key={i} animate={!reduceMotion}>
-              <Bubble from={m.from}>{m.text}</Bubble>
-            </Enter>
-          ))}
-          {typing && (
-            <Enter animate>
-              <TypingBubble from={typing} />
-            </Enter>
-          )}
+        {/* Fixed-height message area: stack pinned to the bottom edge, messages
+            push upward as they arrive and older ones clip out the top */}
+        <div className="relative h-[380px] overflow-hidden" aria-live="polite">
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3">
+            {SCRIPT.slice(0, visible).map((m, i) => (
+              <Enter key={i} animate={!reduceMotion}>
+                <Bubble from={m.from}>{m.text}</Bubble>
+              </Enter>
+            ))}
+            {typing && (
+              <Enter animate>
+                <TypingBubble from={typing} />
+              </Enter>
+            )}
+          </div>
         </div>
       </div>
 
