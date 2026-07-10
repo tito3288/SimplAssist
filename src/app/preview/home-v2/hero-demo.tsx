@@ -259,12 +259,12 @@ export function HeroDemo() {
           </div>
           <div className="space-y-2.5">
             {[
-              { label: "Reply time", value: "Under 10 sec" },
+              { label: "Auto-reply", value: "Before they call your competitor" },
               { label: "Works 24/7", value: "Even after hours" },
             ].map((item) => (
-              <div key={item.label} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
-                <span className={`text-sm ${body}`}>{item.label}</span>
-                <span className={`text-sm font-bold ${ink}`}>{item.value}</span>
+              <div key={item.label} className={`flex flex-col gap-0.5 px-3.5 py-3 ${tileRow}`}>
+                <span className={`text-xs ${body}`}>{item.label}</span>
+                <span className={`text-sm font-bold leading-snug ${ink}`}>{item.value}</span>
               </div>
             ))}
           </div>

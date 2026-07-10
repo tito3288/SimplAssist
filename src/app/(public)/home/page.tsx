@@ -381,7 +381,7 @@ export default function HomePage() {
                   <div className="space-y-2.5">
                     {[
                       { label: "Conversations", value: "128" },
-                      { label: "Response time", value: "< 10 sec" },
+                      { label: "Auto-reply", value: "Instant" },
                       { label: "Channels", value: "SMS + Web" },
                     ].map((item) => (
                       <div key={item.label} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
@@ -440,7 +440,7 @@ export default function HomePage() {
                 Three simple steps to keep every <span className={accentText}>lead</span>.
               </>
             }
-            subtitle="Go from sign-up to live AI assistant in under ten minutes."
+            subtitle="Go from sign-up to live AI assistant in just a few guided steps."
           />
 
           <div className="grid md:grid-cols-3 gap-5">

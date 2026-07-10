@@ -373,7 +373,7 @@ export default function HomeV2Page() {
                 Three simple steps to keep every <span className={accentText}>lead</span>.
               </>
             }
-            subtitle="Go from sign-up to live AI assistant in under ten minutes."
+            subtitle="Go from sign-up to live AI assistant in just a few guided steps."
           />
 
           <div className="grid md:grid-cols-3 gap-5">
@@ -482,7 +482,7 @@ export default function HomeV2Page() {
               </strong>
               <ul className="space-y-2.5 mb-5">
                 {[
-                  "AI missed-call texting — live in minutes",
+                  "AI that texts back every missed call, day or night",
                   "Website chat widget — embed with one line of code",
                   "Dashboard with every lead and conversation",
                   "Free 14-day trial — no credit card required",
