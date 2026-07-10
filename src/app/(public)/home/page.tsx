@@ -532,25 +532,25 @@ export default function HomePage() {
 
         {/* ── CTA ── */}
         <Reveal>
-          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 items-center ${card}`}>
-            <div>
-              <h2 className={`text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.02] tracking-[-0.04em] mb-3 ${ink}`}>
+          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 items-start ${card}`}>
+            <div className="lg:pt-1.5">
+              <h2 className={`text-balance text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.05] tracking-[-0.04em] mb-3 ${ink}`}>
                 Your voicemail isn&apos;t closing deals.
               </h2>
-              <p className={`${body} leading-[1.7] max-w-[680px]`}>
+              <p className={`${body} leading-[1.7] max-w-[560px]`}>
                 SimplAssist texts customers back before they&apos;ve dialed your competitor.
               </p>
             </div>
             <div className={`${tile} p-6`}>
               <strong className={`block text-base mb-2.5 ${ink}`}>
-                What you get on day one:
+                What you get:
               </strong>
               <ul className="space-y-2.5 mb-5">
                 {[
-                  "AI missed-call texting — live in minutes",
+                  "AI that texts back every missed call, day or night",
                   "Website chat widget — embed with one line of code",
-                  "Dashboard with every lead and conversation",
-                  "Set up once — live the same week",
+                  "Every lead and conversation in one dashboard",
+                  "Live the same week, once your number's approved to send",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2.5 text-stone-700 dark:text-[#ececec]">
                     <span className="w-2 h-2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] shrink-0" />
