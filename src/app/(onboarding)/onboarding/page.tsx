@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Clock, Phone, RefreshCcw, AlertTriangle } from 'lucide-react';
 import StepProgress from '@/components/onboarding/StepProgress';
-import BusinessInfoForm from '@/components/onboarding/BusinessInfoForm';
+import BusinessInfoForm, { type ScrapedData } from '@/components/onboarding/BusinessInfoForm';
 import BusinessHoursForm from '@/components/onboarding/BusinessHoursForm';
 import ServicesAndFaqsForm from '@/components/onboarding/ServicesAndFaqsForm';
 import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
@@ -46,6 +46,10 @@ export default function OnboardingPage() {
   const [finalizingCheckout, setFinalizingCheckout] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Website-scan results carried from Business Info to the Services & FAQs
+  // step so they can pre-fill those (editable) fields. Convenience only —
+  // never saved or submitted on their own, and saved DB data always wins.
+  const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
 
   const loadState = useCallback(async (options: { keepStep?: boolean } = {}) => {
     setLoadError(null);
@@ -163,7 +167,15 @@ export default function OnboardingPage() {
           <BusinessInfoForm
             businessId={state.businessId}
             initialData={state.businessInfo}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            onNext={(_data, scraped) => {
+              // Only a fresh scan updates the captured result. BusinessInfoForm
+              // remounts with null scrapedData on back-navigation, so guarding
+              // here keeps an earlier scan's prefill from being wiped when the
+              // customer returns and continues without re-scanning.
+              if (scraped) setScrapedData(scraped);
+              setStep(nextStepOf(step));
+              refreshState({ keepStep: true });
+            }}
           />
         )}
 
@@ -181,6 +193,8 @@ export default function OnboardingPage() {
             businessId={state.businessId}
             businessType={(state.businessInfo.business_type || 'general') as BusinessType}
             initialData={state.servicesAndFaqs.services.length > 0 ? state.servicesAndFaqs : undefined}
+            scrapedServices={scrapedData?.services}
+            scrapedFaqs={scrapedData?.faqs}
             onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('business_hours')}
           />

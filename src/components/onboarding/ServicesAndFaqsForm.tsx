@@ -119,12 +119,19 @@ export default function ServicesAndFaqsForm({
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // Prefill precedence: saved data (initialData) always wins, so the
+  // customer's own entries are never overwritten. A website scan pre-fills
+  // (as editable fields) only when there's no saved data; otherwise the empty
+  // template / suggested FAQs. Empty scraped arrays are treated as absent so a
+  // scan that found nothing never leaves the customer with zero rows.
   const defaultServices = initialData?.services ||
-    scrapedServices?.map((s) => ({ name: s.name, description: s.description || '', price: s.price || '' })) ||
+    (scrapedServices?.length
+      ? scrapedServices.map((s) => ({ name: s.name, description: s.description || '', price: s.price || '' }))
+      : undefined) ||
     [{ name: '', description: '', price: '' }];
 
   const defaultFaqs = initialData?.faqs ||
-    scrapedFaqs ||
+    (scrapedFaqs?.length ? scrapedFaqs : undefined) ||
     SUGGESTED_FAQS[businessType] ||
     SUGGESTED_FAQS.general;
 
@@ -263,7 +270,7 @@ export default function ServicesAndFaqsForm({
         <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">FAQs</h2>
         <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-2">Common questions your customers ask.</p>
 
-        {!initialData && !scrapedFaqs && suggestedFaqs.length > 0 && (
+        {!initialData && !scrapedFaqs?.length && suggestedFaqs.length > 0 && (
           <div className="mb-4 p-3 bg-[#ff914d]/5 border border-[#ff914d]/20 rounded-lg">
             <p className="text-sm text-[#ff914d] font-medium mb-2">Suggested FAQs for your business type:</p>
             <p className="text-xs text-[#ff914d]/80">
