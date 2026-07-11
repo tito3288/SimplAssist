@@ -1,9 +1,14 @@
 import "server-only";
 
 import crypto from "crypto";
-import dns from "dns/promises";
-import net from "net";
-import { scrapeBusinessWebsite } from "@/lib/firecrawl/client";
+import { crawlSite, CRAWL_RISK_OPTS } from "@/lib/firecrawl/crawl";
+import {
+  validatePublicHttpUrl,
+  withTimeout,
+  limitText,
+  WEBSITE_FETCH_TIMEOUT_MS,
+  MAX_WEBSITE_TEXT_CHARS,
+} from "@/lib/firecrawl/webFetch";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   A2P_RISK_BLOCKED_MESSAGE,
@@ -22,10 +27,15 @@ import type {
   OnboardingRegistrationStatus,
 } from "@/types/database";
 
-const WEBSITE_FETCH_TIMEOUT_MS = 12_000;
 const OVERALL_SCAN_TIMEOUT_MS = 28_000;
-const MAX_WEBSITE_TEXT_CHARS = 80_000;
 const MAX_EVIDENCE_PER_RULE = 3;
+
+// Crawler generation (single-page scanning was the implicit v1; multi-page is
+// v2). Folded into hashA2pRiskInput so bumping it invalidates every cached
+// decision — businesses that "passed" under the old crawler are re-screened on
+// their next launch/registration attempt. Already-registered businesses are
+// still shielded by registrationHasStartedForRisk.
+const CRAWLER_VERSION = 2;
 
 type FindingSeverity = "block" | "review";
 
@@ -433,6 +443,7 @@ export function hashA2pRiskInput(input: A2pRiskInput): string {
     optInDescription: clean(input.optInDescription),
     checklistAnswer: input.checklistAnswer,
     checklistSelections: [...input.checklistSelections].sort(),
+    crawlerVersion: CRAWLER_VERSION,
   };
 
   return crypto
@@ -609,7 +620,27 @@ async function runDeterministicScan(
   if (input.websiteUrl) {
     const websiteScan = await readWebsiteForRisk(input.websiteUrl);
     if (websiteScan.ok) {
-      sources.push({ source: "website", text: websiteScan.text });
+      // One source per crawled page so the deterministic rules run over every
+      // page's full text. A prohibited /menu is matched on its own budget and
+      // can't be hidden by a clean homepage or truncated away by another page.
+      for (const page of websiteScan.pages) {
+        sources.push({ source: `website ${page.url}`, text: page.text });
+      }
+      // Fail closed on risk-relevant pages we discovered but couldn't fetch:
+      // route to manual review rather than passing on a transient miss of the
+      // exact pages (menu/shop/products/pricing) most likely to carry risk.
+      if (websiteScan.failedRiskRelevant.length > 0) {
+        findings.push({
+          ruleId: "website_subpage_unavailable",
+          category: "manual_review",
+          severity: "review",
+          label: "A key website page could not be scanned before submission",
+          evidence: websiteScan.failedRiskRelevant
+            .slice(0, MAX_EVIDENCE_PER_RULE)
+            .map((path) => `Could not read ${path}`),
+          source: "website",
+        });
+      }
     } else {
       findings.push({
         ruleId: "website_scan_unavailable",
@@ -921,30 +952,47 @@ export async function appendRiskEvent(args: {
 
 async function readWebsiteForRisk(
   websiteUrl: string
-): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+): Promise<
+  | { ok: true; pages: { url: string; text: string }[]; failedRiskRelevant: string[] }
+  | { ok: false; reason: string }
+> {
   try {
     const safeUrl = await validatePublicHttpUrl(websiteUrl);
-    const firecrawlText = await scrapeWithFirecrawl(safeUrl).catch(() => null);
-    if (firecrawlText && firecrawlText.trim()) {
-      return { ok: true, text: limitText(firecrawlText) };
+
+    // Multi-page crawl (homepage + discovered risk-relevant subpages), all via
+    // Firecrawl so JS-rendered menu/shop/product pages are actually read.
+    const crawl = await crawlSite(safeUrl, CRAWL_RISK_OPTS);
+
+    // The homepage is the anchor, fetched exactly as before: prefer the
+    // crawler's Firecrawl markdown, else fall back to a native fetch. If neither
+    // yields content the scan is unavailable (a review finding upstream) — no
+    // worse than today's single-page behavior.
+    let homepageText = crawl.homepageOk ? crawl.homepageMarkdown : "";
+    if (!homepageText.trim()) {
+      homepageText = await fetchWebsiteText(safeUrl);
     }
-    const directText = await fetchWebsiteText(safeUrl);
-    return { ok: true, text: limitText(directText) };
+    if (!homepageText.trim()) {
+      return { ok: false, reason: "Website returned no readable content" };
+    }
+
+    // One source per page, each capped INDEPENDENTLY at MAX_WEBSITE_TEXT_CHARS.
+    // The homepage keeps its full budget (element 0); subpages are purely
+    // additive, so a prohibited subpage can never be truncated away.
+    const pages = [
+      { url: safeUrl, text: limitText(homepageText) },
+      ...crawl.subpages.map((page) => ({
+        url: page.url,
+        text: limitText(page.markdown),
+      })),
+    ];
+
+    return { ok: true, pages, failedRiskRelevant: crawl.failedRiskRelevant };
   } catch (err) {
     return {
       ok: false,
       reason: err instanceof Error ? err.message : "Website scan failed",
     };
   }
-}
-
-async function scrapeWithFirecrawl(url: string): Promise<string | null> {
-  if (!process.env.FIRECRAWL_API_KEY) return null;
-  return withTimeout<string | null>(
-    scrapeBusinessWebsite(url),
-    WEBSITE_FETCH_TIMEOUT_MS,
-    null
-  );
 }
 
 async function fetchWebsiteText(url: string): Promise<string> {
@@ -1005,78 +1053,6 @@ async function readResponseText(response: Response): Promise<string> {
   return output;
 }
 
-async function validatePublicHttpUrl(url: string): Promise<string> {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("Website URL must use http or https");
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname === "metadata.google.internal"
-  ) {
-    throw new Error("Website URL cannot point to a private host");
-  }
-
-  if (net.isIP(hostname)) {
-    if (isBlockedIp(hostname)) {
-      throw new Error("Website URL cannot point to a private IP address");
-    }
-    return parsed.toString();
-  }
-
-  const addresses = await dns.lookup(hostname, { all: true, verbatim: false });
-  if (addresses.length === 0) {
-    throw new Error("Website host could not be resolved");
-  }
-
-  if (addresses.some((address) => isBlockedIp(address.address))) {
-    throw new Error("Website URL resolves to a private IP address");
-  }
-
-  return parsed.toString();
-}
-
-function isBlockedIp(address: string): boolean {
-  const version = net.isIP(address);
-  if (version === 4) return isBlockedIpv4(address);
-  if (version === 6) return isBlockedIpv6(address);
-  return true;
-}
-
-function isBlockedIpv4(address: string): boolean {
-  const parts = address.split(".").map((part) => Number(part));
-  const [a, b] = parts;
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return true;
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 192 && b === 0) return true;
-  if (a === 192 && b === 0 && parts[2] === 2) return true;
-  if (a === 198 && b === 51 && parts[2] === 100) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a === 203 && b === 0 && parts[2] === 113) return true;
-  if (a >= 224) return true;
-  if (address === "169.254.169.254") return true;
-  return false;
-}
-
-function isBlockedIpv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  return (
-    normalized === "::1" ||
-    normalized === "::" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe80") ||
-    normalized.startsWith("2001:db8")
-  );
-}
-
 function snippetForPattern(text: string, pattern: RegExp): string | null {
   const match = text.match(pattern);
   if (!match || match.index == null) return null;
@@ -1092,28 +1068,6 @@ function stripHtml(value: string): string {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function limitText(value: string): string {
-  return value.slice(0, MAX_WEBSITE_TEXT_CHARS);
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  fallback: T
-): Promise<T> {
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((resolve) => {
-        timeout = setTimeout(() => resolve(fallback), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function clean(value: string | null | undefined): string {
