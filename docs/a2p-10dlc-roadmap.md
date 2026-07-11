@@ -1,6 +1,6 @@
 # Per-Customer A2P 10DLC Roadmap (Telnyx)
 
-**Status as of 2026-07-09:** Phase 11 Option B is shipped: EIN-only launch with No-EIN waitlist hold. Sole Proprietor/OTP support is deferred to a future Option A phase. Stripe remains intentionally test-mode until the Pre-Launch Checklist live-mode switch.
+**Status as of 2026-07-11:** Phase 11 Option B is shipped: EIN-only launch with No-EIN waitlist hold. Sole Proprietor/OTP support is deferred to a future Option A phase. **Stripe is live-mode ready:** the code guard that forced test mode was removed (commit `4bfb5db`) and the live products, prices, and price IDs are configured — test mode is no longer enforced in code. The remaining Pre-Launch Checklist items are validation and operational steps, not the Stripe switch.
 
 This is the shared source of truth for the per-customer A2P (Application-to-Person) 10DLC compliance initiative. It is the canonical reference for any agent or human working on Phase 7+. Compare implementation against this document rather than reconstructing context from scattered code comments.
 
@@ -65,7 +65,21 @@ For per-customer compliance — required by TCR (The Campaign Registry) rules to
 | 10 | Number purchasing timing | 🔒 Decision locked, implementation pending |
 | 11 | EIN vs Sole Proprietor branching + SMS OTP | ✅ Shipped (Option B: EIN-only launch; Sole Prop/OTP deferred) |
 
-**Migrations applied:** `012`–`021` cover Phases 1–11 Option B. See `supabase/migrations/`.
+**Migrations applied:** `012`–`024`. `012`–`021` cover Phases 1–11 Option B; `022` call forwarding; `023` atomic services/FAQs replace; `024` rejected-campaign history. See `supabase/migrations/`.
+
+### Post-Phase-11 Onboarding Hardening (2026-07-09 – 2026-07-11)
+
+Reliability and UX fixes to the onboarding/registration flow after Phase 11, surfaced during pre-launch validation. Behavior-changing items only — pure polish and design changes (button/theme/step-progress styling) live in git history, not here.
+
+- **Retry recovery + rejected-campaign history** (migration `024`): a failed or carrier-rejected registration can be retried. On retry, the A2P risk input is re-screened when it changed (hash mismatch), the rejected Telnyx campaign is deactivated/archived, and a carrier *campaign* rejection maps to a retryable `failed` state. **Brand rejections now also map to `failed`** so the routed fix path is reachable. Rejection history is preserved in `rejected_campaigns`. Claiming a retry uses a compare-and-swap so concurrent webhooks/attempts can't double-submit.
+- **Atomic services/FAQs save** (migration `023`, `replace_services_and_faqs` RPC) and **business-hours natural-key upsert**: these saves are now single-transaction, so a mid-save failure can no longer wipe existing rows. Client save errors (including delete failures) are surfaced instead of silently swallowed.
+- **Carrier-rejection routing + plain-English copy**: the carrier-review panel explains rejections in plain language (the raw carrier wording is always preserved beneath) and routes "Fix & resubmit" to the step that needs fixing. Classes we generate (opt-in / message-flow, code 708) and brand re-filing route to **contact support** rather than a form whose edits the carrier never sees.
+- **Mid-review edit lock**: business and compliance edits are blocked (HTTP 409) once a registration is in carrier review, except the `failed` recovery state. Enforced server-side on the brand-verification and sms-use-case routes; the onboarding UI mirrors the same predicate (`registrationHasStartedForRisk` and status ≠ `failed`), so the "Fix & resubmit" button only appears where the save will actually be accepted.
+- **Website-scan autofill**: fixed a dead Anthropic model ID in the scan extractor (`claude-haiku-4-20250404`, which the API 404'd — silently returning empty since the feature shipped) to `claude-haiku-4-5-20251001`; extraction errors now log instead of being swallowed. Wired the extracted services/FAQs through to pre-fill the (editable, review-before-save) Services & FAQs step, and capped FAQ answers at 2000 characters (input + zod).
+
+**Known follow-ups (deferred):**
+- **Brand-level recovery in the retry pipeline.** A retry reuses the existing Telnyx brand record (`registerBrand` early-returns on an existing brand ID), so corrected identity/website data is saved but **not re-filed with the carrier** — currently handled via support. This is the near-mandatory companion to the brand→`failed` mapping above.
+- **Multi-page website scraping** (`/services`, `/faq`, `/pricing`) to surface content a single-page scan misses.
 
 ---
 
@@ -691,11 +705,11 @@ After Phase 11 Option B is complete and tested, complete the **Pre-Launch Checkl
 
 Required steps between "Phase 11 complete and tested" and "first real customer":
 
-1. [ ] **Stripe LIVE mode setup:** recreate all 5 products/prices in live mode: 3 monthly plans at $25 / $45 / $65, the $25 one-time setup fee, and the $0.03 SMS overage part. Put the live price IDs plus the `sk_live_...` secret key in Railway.
+1. [x] **Stripe LIVE mode setup:** recreate all 5 products/prices in live mode: 3 monthly plans at $25 / $45 / $65, the $25 one-time setup fee, and the $0.03 SMS overage part. Put the live price IDs plus the `sk_live_...` secret key in Railway. — Done: live products/prices/IDs configured.
 2. [ ] **Live webhook endpoint:** create a Stripe Dashboard webhook endpoint in live mode for the production domain at `/api/stripe/webhook`. Subscribe it to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, and `invoice.payment_failed`. Put its `whsec_...` signing secret in Railway.
-3. [ ] **Code change:** remove the test-mode-only guard (`sk_live` rejection plus test-price `livemode` assertion). This must be a deliberate commit via the standard plan → review → implement flow.
+3. [x] **Code change:** remove the test-mode-only guard (`sk_live` rejection plus test-price `livemode` assertion). This must be a deliberate commit via the standard plan → review → implement flow. — Done in commit `4bfb5db` (removed the `cs_test_` check, `assertTestModePrice`, and `validateStripeTestModeEnv`).
 4. [ ] **Regenerate `A2P_REVIEW_ADMIN_TOKEN` in Railway.** The current value was exposed in screenshots.
-5. [ ] **Build call forwarding feature (plan → review → implement):** call forwarding is confirmed to require implementation, not configuration. Portal forwarding is unavailable for numbers attached to voice applications. Build it programmatically: answer inbound → bridge to the owner's number with a short ring timeout → on no-answer, existing missed-call flow takes over. Add a per-business dashboard setting (toggle + forward-to number), voicemail-steal mitigation via short timeout, and a margin note because both call legs are billed per minute.
+5. [x] **Build call forwarding feature (plan → review → implement):** call forwarding is confirmed to require implementation, not configuration. Portal forwarding is unavailable for numbers attached to voice applications. Build it programmatically: answer inbound → bridge to the owner's number with a short ring timeout → on no-answer, existing missed-call flow takes over. Add a per-business dashboard setting (toggle + forward-to number), voicemail-steal mitigation via short timeout, and a margin note because both call legs are billed per minute. — Shipped: commit `1572f11`, migration `022`.
 6. [ ] **Fresh clean-account EIN test on REAL Telnyx:** create a new account with a real EIN, real payment, and `telnyx_submission_disabled = false`; run the full pipeline through carrier review to SMS-ready. Expect roughly $14 in real fees. This is the locked end-to-end validation before any customer.
 7. [ ] **Post-approval product validation on the real EIN account:** verify inbound SMS gets an AI reply using that business's real context; missed call triggers the auto-text and AI follow-up conversation; STOP opt-out is honored; conversations and usage are recorded in the dashboard/meter; and call forwarding from the Telnyx number to the owner's real phone is working.
 8. [ ] **Re-verify pricing before launch:** re-check Telnyx SMS/MMS/number costs, Stripe fees, and margin math from the Phase 9 pricing note.
@@ -758,4 +772,4 @@ This is not required before launch. Prioritize campaign approval, number assignm
 - `src/app/api/settings/compliance/route.ts` — compliance modes + URL reachability check
 - `src/app/(public)/c/[slug]/{privacy,terms}/page.tsx` + landing — public per-business pages
 - `src/components/dashboard/A2pStatusCard.tsx`, `src/components/settings/CompliancePanel.tsx`, `src/components/onboarding/BrandVerificationForm.tsx`
-- `supabase/migrations/012`–`016` — Phases 1–6.5
+- `supabase/migrations/012`–`024` — Phases 1–11 plus call forwarding (`022`), atomic saves (`023`), and rejected-campaign history (`024`); see **Migrations applied** near the top for the breakdown

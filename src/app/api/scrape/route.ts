@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { scrapeBusinessWebsite } from "@/lib/firecrawl/client";
+import {
+  crawlSite,
+  CRAWL_AUTOFILL_OPTS,
+  type CrawlResult,
+} from "@/lib/firecrawl/crawl";
 import { extractBusinessInfo } from "@/lib/firecrawl/extract";
 
 const scrapeSchema = z.object({
@@ -14,6 +18,25 @@ const scrapeSchema = z.object({
 const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 5;
+
+// Caps the combined multi-page markdown handed to the extractor LLM. Homepage
+// content comes first, so if the site is huge the homepage is always kept and
+// only trailing subpage content is trimmed. Lives here (not in the extractor)
+// so extractBusinessInfo stays cap-free. ~60k chars ≈ 15k tokens — ample for
+// Claude Haiku's extraction and far under its context window.
+const MAX_AUTOFILL_INPUT_CHARS = 60_000;
+
+// Flattens a crawl into homepage-first markdown for the extractor. Returns ""
+// when the homepage could not be read, which yields EMPTY_RESULT downstream —
+// exactly today's behavior for a failed scan.
+function assembleAutofillInput(crawl: CrawlResult): string {
+  if (!crawl.homepageOk) return "";
+  let combined = crawl.homepageMarkdown;
+  for (const page of crawl.subpages) {
+    combined += `\n\n--- ${page.path} ---\n\n${page.markdown}`;
+  }
+  return combined.slice(0, MAX_AUTOFILL_INPUT_CHARS);
+}
 
 function isRateLimited(identifier: string): boolean {
   const now = Date.now();
@@ -53,7 +76,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rawContent = await scrapeBusinessWebsite(parsed.data.url);
+    const crawl = await crawlSite(parsed.data.url, CRAWL_AUTOFILL_OPTS);
+    const rawContent = assembleAutofillInput(crawl);
     const businessInfo = await extractBusinessInfo(rawContent);
 
     return NextResponse.json(businessInfo);
