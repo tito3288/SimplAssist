@@ -9,6 +9,13 @@ import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 
+// Cap FAQ answers so a pasted or scan-prefilled answer can't bloat the AI
+// prompt context. The DB column is unbounded `text` and nothing external
+// (incl. Telnyx, which never receives FAQs) limits it, so this is a product
+// cap. One constant drives both the input maxLength and the zod rule so they
+// can't drift.
+const FAQ_ANSWER_MAX_LENGTH = 2000;
+
 const servicesAndFaqsSchema = z.object({
   services: z
     .array(
@@ -22,7 +29,10 @@ const servicesAndFaqsSchema = z.object({
   faqs: z.array(
     z.object({
       question: z.string().min(1, 'Question is required'),
-      answer: z.string().min(1, 'Answer is required'),
+      answer: z
+        .string()
+        .min(1, 'Answer is required')
+        .max(FAQ_ANSWER_MAX_LENGTH, `Answer must be ${FAQ_ANSWER_MAX_LENGTH} characters or less`),
     })
   ),
 });
@@ -302,8 +312,14 @@ export default function ServicesAndFaqsForm({
                 {...register(`faqs.${index}.answer`)}
                 placeholder="Answer"
                 rows={2}
+                maxLength={FAQ_ANSWER_MAX_LENGTH}
                 className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] text-sm resize-none"
               />
+              {errors.faqs?.[index]?.answer && (
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {errors.faqs[index]?.answer?.message}
+                </p>
+              )}
             </div>
           ))}
         </div>
