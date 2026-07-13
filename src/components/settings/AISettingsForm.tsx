@@ -120,59 +120,59 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
       {/* Section 1: Tone & Voice */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">How your AI assistant communicates with customers.</p>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">How your AI assistant communicates with customers.</p>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-2">Tone</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">Tone</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {TONE_OPTIONS.map((opt) => (
                 <label
                   key={opt.value}
                   className={`cursor-pointer p-4 border-2 rounded-lg text-center transition-colors ${
                     selectedTone === opt.value
-                      ? 'border-[#ff914d] bg-orange-50 dark:bg-white/[0.08]'
-                      : 'border-slate-200 dark:border-white/[0.12] hover:border-slate-300 dark:hover:border-white/[0.20]'
+                      ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                      : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                   }`}
                 >
                   <input type="radio" value={opt.value} {...register('tone')} className="sr-only" />
-                  <p className="font-medium text-sm text-slate-900 dark:text-[#f5f5f5]">{opt.label}</p>
-                  <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">{opt.description}</p>
+                  <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">{opt.label}</p>
+                  <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-1">{opt.description}</p>
                 </label>
               ))}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-2">Business Voice</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">Business Voice</label>
             <div className="flex gap-3">
               <label
                 className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-                  watch('business_voice') === 'we' ? 'border-[#ff914d] bg-orange-50 dark:bg-white/[0.08]' : 'border-slate-200 dark:border-white/[0.12] hover:border-slate-300 dark:hover:border-white/[0.20]'
+                  watch('business_voice') === 'we' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
                 <input type="radio" value="we" {...register('business_voice')} className="sr-only" />
-                <p className="font-medium text-sm text-slate-900 dark:text-[#f5f5f5]">&ldquo;We&rdquo;</p>
-                <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">We can help you with...</p>
+                <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;We&rdquo;</p>
+                <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">We can help you with...</p>
               </label>
               <label
                 className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-                  watch('business_voice') === 'business_name' ? 'border-[#ff914d] bg-orange-50 dark:bg-white/[0.08]' : 'border-slate-200 dark:border-white/[0.12] hover:border-slate-300 dark:hover:border-white/[0.20]'
+                  watch('business_voice') === 'business_name' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
                 <input type="radio" value="business_name" {...register('business_voice')} className="sr-only" />
-                <p className="font-medium text-sm text-slate-900 dark:text-[#f5f5f5]">&ldquo;{businessName}&rdquo;</p>
-                <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">{businessName} can help...</p>
+                <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;{businessName}&rdquo;</p>
+                <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">{businessName} can help...</p>
               </label>
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-1">Language</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1">Language</label>
             <select
               {...register('language')}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+              className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none"
             >
               {LANGUAGE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -184,20 +184,20 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
 
       {/* Section 2: Web Chat Greeting */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Configure your web chat greeting in <a href="/widget" className="text-[#ff914d] hover:text-[#ffb07a] underline">Widget Settings</a>.
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+          Configure your web chat greeting in <a href="/widget" className="text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] underline">Widget Settings</a>.
         </p>
       </section>
 
       {/* Section 3: Response Behavior */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Control how quickly your AI responds to SMS messages.</p>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control how quickly your AI responds to SMS messages.</p>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-1">
-            SMS Response Delay: <span className="text-[#ff914d]">{getDelayLabel(responseDelay)}</span>
+          <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1">
+            SMS Response Delay: <span className="text-[#c2410c] dark:text-[#ff914d]">{getDelayLabel(responseDelay)}</span>
           </label>
           <Controller
             name="sms_response_delay_seconds"
@@ -210,11 +210,11 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                 step={5}
                 value={field.value}
                 onChange={(e) => field.onChange(Number(e.target.value))}
-                className="w-full h-2 bg-gray-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[#ff914d]"
+                className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[#ea580c] dark:accent-[#ff914d]"
               />
             )}
           />
-          <div className="flex justify-between text-xs text-slate-400 dark:text-[#666] mt-1">
+          <div className="flex justify-between text-xs text-stone-400 dark:text-[#666] mt-1">
             <span>Instant</span>
             <span>1 minute</span>
           </div>
@@ -223,11 +223,11 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
 
       {/* Section 4: Booking */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
 
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
+          <label className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
           <Controller
             name="booking_enabled"
             control={control}
@@ -236,7 +236,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                 type="button"
                 onClick={() => field.onChange(!field.value)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  field.value ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+                  field.value ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
                 }`}
               >
                 <span
@@ -251,27 +251,27 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
 
         {bookingEnabled && (
           <>
-            <div className="mt-3 pl-4 border-l-2 border-[#ff914d]/30 space-y-2">
+            <div className="mt-3 pl-4 border-l-2 border-[#ea580c]/30 dark:border-[#ff914d]/30 space-y-2">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="collect_info" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
+                <input type="radio" value="collect_info" {...register('booking_mode')} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
                 <div>
-                  <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Collect customer info</p>
-                  <p className="text-xs text-slate-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
+                  <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Collect customer info</p>
+                  <p className="text-xs text-stone-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
                 </div>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="schedule_direct" {...register('booking_mode')} className="text-[#ff914d] accent-[#ff914d]" />
+                <input type="radio" value="schedule_direct" {...register('booking_mode')} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
                 <div>
-                  <p className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">Direct scheduling</p>
-                  <p className="text-xs text-slate-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
+                  <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Direct scheduling</p>
+                  <p className="text-xs text-stone-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
                 </div>
               </label>
             </div>
 
             {/* Google Calendar Connection - inline, only when Direct scheduling selected */}
             {businessId && bookingMode === 'schedule_direct' && (
-              <div className="mt-4 p-4 rounded-xl bg-white/5 border border-white/[0.08]">
-                <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Google Calendar</p>
+              <div className="mt-4 p-4 rounded-xl bg-white border border-[#ece4d8] dark:bg-white/5 dark:border-white/[0.08]">
+                <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Google Calendar</p>
                 <GoogleCalendarConnect
                   businessId={businessId}
                   connectedEmail={calendarEmail ?? null}
@@ -284,21 +284,21 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
 
       {/* Section 5: Guardrails */}
       <section>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
 
         {guardrails.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
             {guardrails.map((rule, index) => (
               <span
                 key={index}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 dark:bg-white/[0.08] text-slate-700 dark:text-[#bdbdbf] text-sm rounded-full"
+                className="inline-flex items-center gap-1 px-3 py-1 bg-[#f0e9de] dark:bg-white/[0.08] text-stone-700 dark:text-[#bdbdbf] text-sm rounded-full"
               >
                 {rule}
                 <button
                   type="button"
                   onClick={() => removeGuardrail(index)}
-                  className="text-slate-400 dark:text-[#666] hover:text-red-500"
+                  className="text-stone-400 dark:text-[#666] hover:text-red-500"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -311,7 +311,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
           {...register('guardrails_text')}
           rows={3}
           placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] resize-none"
+          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none resize-none"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
@@ -322,21 +322,21 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
             }
           }}
         />
-        <p className="text-xs text-slate-400 dark:text-[#666] mt-1">Type a rule and press Enter, or add multiple rules (one per line).</p>
+        <p className="text-xs text-stone-400 dark:text-[#666] mt-1">Type a rule and press Enter, or add multiple rules (one per line).</p>
         <button
           type="button"
           onClick={() => {
             const text = watch('guardrails_text');
             if (text?.trim()) addGuardrail(text);
           }}
-          className="text-xs text-[#ff914d] hover:text-[#e07a3a] mt-1"
+          className="text-xs text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] mt-1"
         >
           + Add rules
         </button>
       </section>
 
       {/* Save */}
-      <div className="flex items-center gap-4 pt-4 border-t dark:border-white/[0.10]">
+      <div className="flex items-center gap-4 pt-4 border-t border-[#ece4d8] dark:border-white/[0.10]">
         <button
           type="submit"
           disabled={saving}

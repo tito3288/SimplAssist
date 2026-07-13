@@ -6,6 +6,7 @@ import { Pencil, Trash2, Plus, ChevronUp } from 'lucide-react';
 import type { FAQ } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaCompactClass } from '@/lib/glass';
+import { statusInfo, statusWarning, statusNeutral } from '@/lib/theme-v2/theme';
 
 interface FAQManagerProps {
   businessId: string;
@@ -29,9 +30,9 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   const sourceLabel = (source: string) => {
     switch (source) {
-      case 'scraped': return { text: 'Scraped', color: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300' };
-      case 'suggested': return { text: 'Suggested', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-300' };
-      default: return { text: 'Manual', color: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-[#bdbdbf]' };
+      case 'scraped': return { text: 'Scraped', color: statusInfo };
+      case 'suggested': return { text: 'Suggested', color: statusWarning };
+      default: return { text: 'Manual', color: statusNeutral };
     }
   };
 
@@ -114,20 +115,20 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   return (
     <div className="space-y-4">
       {faqs.length === 0 && !showAddForm && (
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] text-center py-4">No FAQs yet. Add your first FAQ below.</p>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] text-center py-4">No FAQs yet. Add your first FAQ below.</p>
       )}
 
       <div className="space-y-2">
         {faqs.map((faq) => {
           const badge = sourceLabel(faq.source);
           return (
-            <div key={faq.id} className="border border-slate-200 dark:border-white/[0.12] rounded-lg">
+            <div key={faq.id} className="border border-[#ece4d8] dark:border-white/[0.12] rounded-lg">
               <div className="flex items-start gap-3 p-3">
                 <button
                   type="button"
                   onClick={() => handleToggleActive(faq.id, faq.is_active)}
                   className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5 ${
-                    faq.is_active ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+                    faq.is_active ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
                   }`}
                 >
                   <span
@@ -139,20 +140,20 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className={`text-sm font-medium ${faq.is_active ? 'text-slate-900 dark:text-[#f5f5f5]' : 'text-slate-400 dark:text-[#666]'}`}>
+                    <p className={`text-sm font-medium ${faq.is_active ? 'text-stone-900 dark:text-[#f5f5f5]' : 'text-stone-400 dark:text-[#666]'}`}>
                       {faq.question}
                     </p>
                     <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${badge.color}`}>
                       {badge.text}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-0.5 line-clamp-2">{faq.answer}</p>
+                  <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-0.5 line-clamp-2">{faq.answer}</p>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => (expandedId === faq.id ? setExpandedId(null) : startEdit(faq))}
-                  className="text-slate-400 dark:text-[#bdbdbf] hover:text-[#ff914d] p-1 shrink-0"
+                  className="text-stone-400 dark:text-[#bdbdbf] hover:text-[#c2410c] dark:hover:text-[#ff914d] p-1 shrink-0"
                 >
                   {expandedId === faq.id ? <ChevronUp className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
                 </button>
@@ -170,7 +171,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                     <button
                       type="button"
                       onClick={() => setDeleteConfirmId(null)}
-                      className="text-xs text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5]"
+                      className="text-xs text-stone-500 dark:text-[#bdbdbf] hover:text-stone-700 dark:hover:text-[#f5f5f5]"
                     >
                       Cancel
                     </button>
@@ -179,7 +180,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmId(faq.id)}
-                    className="text-slate-400 dark:text-[#bdbdbf] hover:text-red-500 p-1 shrink-0"
+                    className="text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1 shrink-0"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -187,25 +188,25 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
               </div>
 
               {expandedId === faq.id && (
-                <div className="border-t border-slate-200 dark:border-white/[0.10] p-3 space-y-2 bg-slate-50 dark:bg-white/[0.03]">
+                <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
                   <input
                     value={editQuestion}
                     onChange={(e) => setEditQuestion(e.target.value)}
                     placeholder="Question"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
                   />
                   <textarea
                     value={editAnswer}
                     onChange={(e) => setEditAnswer(e.target.value)}
                     placeholder="Answer"
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] resize-none"
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 resize-none"
                   />
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setExpandedId(null)}
-                      className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
+                      className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
                     >
                       Cancel
                     </button>
@@ -233,25 +234,25 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
       </div>
 
       {showAddForm ? (
-        <div className="border border-[#ff914d]/40 dark:border-[#ff914d]/30 rounded-lg p-3 space-y-2 bg-orange-50 dark:bg-white/[0.04]">
+        <div className="border border-[#f5dcc4] dark:border-[#ff914d]/30 rounded-lg p-3 space-y-2 bg-[#fdf1e7] dark:bg-white/[0.04]">
           <input
             value={newQuestion}
             onChange={(e) => setNewQuestion(e.target.value)}
             placeholder="Question *"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
           <textarea
             value={newAnswer}
             onChange={(e) => setNewAnswer(e.target.value)}
             placeholder="Answer *"
             rows={3}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] resize-none"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 resize-none"
           />
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => { setShowAddForm(false); setNewQuestion(''); setNewAnswer(''); }}
-              className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
+              className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             >
               Cancel
             </button>
@@ -276,7 +277,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
         <button
           type="button"
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1 text-sm text-[#ff914d] hover:text-[#e07a3a] font-medium"
+          className="flex items-center gap-1 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
         >
           <Plus className="w-4 h-4" /> Add FAQ
         </button>

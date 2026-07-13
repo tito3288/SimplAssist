@@ -10,6 +10,8 @@ import {
 } from '@/lib/legal/perBusinessCopy';
 import { isPendingSlug } from '@/lib/util/slug';
 import { primaryCtaInlineClass } from '@/lib/glass';
+import { statusWarning } from '@/lib/theme-v2/theme';
+import { cn } from '@/lib/utils';
 
 type Mode = 'hosted' | 'self_hosted' | 'existing';
 
@@ -129,7 +131,7 @@ export default function CompliancePanel({
   return (
     <div className="space-y-6">
       {pending && (
-        <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className={cn("rounded-lg px-4 py-3 text-sm", statusWarning)}>
           <div className="flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden />
             <span>
@@ -174,7 +176,7 @@ export default function CompliancePanel({
               <button
                 type="button"
                 onClick={() => setShowGenerated((v) => !v)}
-                className="text-sm font-medium text-[#ff914d] hover:text-[#ffb07a]"
+                className="text-sm font-medium text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
               >
                 {showGenerated ? 'Hide generated copy' : 'View generated copy'}
               </button>
@@ -223,14 +225,14 @@ export default function CompliancePanel({
         >
           {mode === 'existing' && (
             <div className="mt-4 space-y-4">
-              <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-                <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+              <div className={cn("rounded-lg px-4 py-3", statusWarning)}>
+                <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
                   Before pasting your URL, confirm your existing privacy policy includes:
                 </p>
                 <ul className="mt-2 space-y-1.5">
                   {CHECKLIST_ITEMS.map((item, idx) => (
                     <li key={idx}>
-                      <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-[#bdbdbf]">
+                      <label className="flex items-start gap-2 text-sm text-stone-700 dark:text-[#bdbdbf]">
                         <input
                           type="checkbox"
                           checked={checklist[idx]}
@@ -239,14 +241,14 @@ export default function CompliancePanel({
                             next[idx] = e.target.checked;
                             setChecklist(next);
                           }}
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-[#ff914d] focus:ring-[#ff914d]/40"
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#e3dacc] text-[#c2410c] dark:text-[#ff914d] focus:ring-[#ea580c]/40 dark:focus:ring-[#ff914d]/40"
                         />
                         <span>{item}</span>
                       </label>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-3 text-xs text-slate-600 dark:text-[#9a9a9c]">
+                <p className="mt-3 text-xs text-stone-600 dark:text-[#9a9a9c]">
                   If your policy is missing any of these, choose &quot;Host on your own domain&quot; instead to get compliant copy.
                 </p>
               </div>
@@ -289,12 +291,12 @@ export default function CompliancePanel({
               : 'Save'}
         </button>
         {mode !== 'hosted' && submitting && (
-          <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+          <span className="text-xs text-stone-500 dark:text-[#bdbdbf]">
             Verifying your URLs are reachable — this can take up to 10 seconds.
           </span>
         )}
         {mode === 'existing' && !allChecked && (
-          <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+          <span className="text-xs text-stone-500 dark:text-[#bdbdbf]">
             Tick all four checkboxes to enable save.
           </span>
         )}
@@ -327,8 +329,8 @@ function ModeOption({
       htmlFor={id}
       className={`block cursor-pointer rounded-xl border p-4 transition-colors ${
         checked
-          ? 'border-[#ff914d] bg-orange-50/60 dark:border-[#ff914d]/60 dark:bg-orange-500/[0.06]'
-          : 'border-slate-200 bg-white hover:border-slate-300 dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20'
+          ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+          : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/20'
       }`}
     >
       <div className="flex items-start gap-3">
@@ -338,13 +340,13 @@ function ModeOption({
           type="radio"
           checked={checked}
           onChange={onChange}
-          className="mt-1 h-4 w-4 shrink-0 text-[#ff914d] focus:ring-[#ff914d]/40"
+          className="mt-1 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d] focus:ring-[#ea580c]/40 dark:focus:ring-[#ff914d]/40"
         />
         <div className="flex-1">
-          <div className="text-sm font-semibold text-slate-900 dark:text-[#f5f5f5]">
+          <div className="text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">
             {title}
           </div>
-          <p className="mt-0.5 text-sm text-slate-600 dark:text-[#bdbdbf]">
+          <p className="mt-0.5 text-sm text-stone-600 dark:text-[#bdbdbf]">
             {description}
           </p>
           {children}
@@ -360,11 +362,11 @@ function PreviewRow({ label, href }: { label: string; href: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+      className="inline-flex items-center justify-between gap-2 rounded-full border border-[#ece4d8] bg-white px-3 py-2 text-sm text-stone-700 transition-colors hover:border-[#ea580c] hover:text-[#c2410c] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[#ff914d] dark:hover:text-[#ff914d]"
     >
       <span>
         <span className="font-medium">{label}</span>
-        <span className="ml-2 text-xs text-slate-500 dark:text-[#9a9a9c]">{href}</span>
+        <span className="ml-2 text-xs text-stone-500 dark:text-[#9a9a9c]">{href}</span>
       </span>
       <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
     </a>
@@ -385,13 +387,13 @@ function GeneratedTextarea({
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <span className="text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">
+        <span className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">
           {label}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#ff914d] hover:text-[#ff914d] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf]"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#ece4d8] bg-white px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:border-[#ea580c] hover:text-[#c2410c] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[#ff914d] dark:hover:text-[#ff914d]"
         >
           {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
           {copied ? 'Copied' : 'Copy'}
@@ -401,7 +403,7 @@ function GeneratedTextarea({
         readOnly
         value={value}
         rows={10}
-        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-slate-700 dark:border-white/10 dark:bg-white/[0.02] dark:text-[#bdbdbf]"
+        className="w-full rounded-lg border border-[#e3dacc] bg-white px-3 py-2 font-mono text-xs leading-relaxed text-stone-900 focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
       />
     </div>
   );
@@ -422,7 +424,7 @@ function UrlInput({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700 dark:text-[#bdbdbf] mb-1.5">
+      <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1.5">
         {label}
       </label>
       <input
@@ -430,10 +432,10 @@ function UrlInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full px-3 py-2 rounded-lg border bg-white dark:bg-white/5 text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-orange-500/40 ${
+        className={`w-full px-3 py-2 rounded-lg border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 ${
           error
             ? 'border-red-400 dark:border-red-500/50'
-            : 'border-slate-200 dark:border-white/10'
+            : 'border-[#e3dacc] dark:border-white/[0.12]'
         }`}
       />
       {error && <p className="mt-1 text-sm text-red-500">{error}</p>}

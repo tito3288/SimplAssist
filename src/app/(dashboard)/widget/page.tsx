@@ -46,7 +46,7 @@ export default async function WidgetPage() {
   if (!widgetConfig) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Website Chat Widget</h1>
+        <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Website Chat Widget</h1>
         <p className="mt-2 text-red-600">Failed to load widget configuration. Please try again.</p>
       </div>
     );
