@@ -4,6 +4,12 @@ import { useState, useEffect, useRef } from "react";
 import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn, formatPhoneNumber } from "@/lib/utils";
+import {
+  statusSuccess,
+  statusWarning,
+  statusNeutral,
+  statusInfo,
+} from "@/lib/theme-v2/theme";
 import type { Message, SmsBlockReason } from "@/types/database";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 
@@ -180,18 +186,18 @@ export function MessageThread({
   return (
     <div className="flex h-full flex-col bg-white dark:bg-transparent">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/[0.10] px-4 py-3">
+      <div className="flex items-center justify-between border-b border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06]">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 dark:bg-white/[0.06]">
             {conversation.channel === "sms" ? (
-              <Phone className="h-5 w-5 text-slate-500 dark:text-[#bdbdbf]" />
+              <Phone className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             ) : (
-              <MessageCircle className="h-5 w-5 text-slate-500 dark:text-[#bdbdbf]" />
+              <MessageCircle className="h-5 w-5 text-stone-500 dark:text-[#bdbdbf]" />
             )}
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-[#f5f5f5]">{contactName}</h2>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#bdbdbf]">
+            <h2 className="text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">{contactName}</h2>
+            <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-[#bdbdbf]">
               {conversation.contact?.phone_number && (
                 <span>{formatPhoneNumber(conversation.contact.phone_number)}</span>
               )}
@@ -205,10 +211,10 @@ export function MessageThread({
                 className={cn(
                   "rounded-full px-1.5 py-0.5 font-medium",
                   conversation.status === "active"
-                    ? "bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300"
+                    ? statusSuccess
                     : conversation.status === "handed_off"
-                    ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                    : "bg-slate-100 dark:bg-white/[0.06] text-slate-500 dark:text-[#bdbdbf]"
+                    ? statusWarning
+                    : statusNeutral
                 )}
               >
                 {conversation.status === "handed_off"
@@ -226,8 +232,8 @@ export function MessageThread({
           className={cn(
             "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             isAiHandling
-              ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30"
-              : "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-500/30",
+              ? "bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-[#d4d4d8] hover:bg-stone-200 dark:hover:bg-white/[0.12]"
+              : "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.16)] text-[#c2410c] dark:text-[#ffd5bc] hover:bg-[#fbe6d4] dark:hover:bg-[rgba(255,145,77,.24)]",
             toggling && "opacity-50"
           )}
         >
@@ -239,7 +245,7 @@ export function MessageThread({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400 dark:text-[#bdbdbf]">
+          <div className="flex h-full items-center justify-center text-sm text-stone-400 dark:text-[#bdbdbf]">
             No messages in this conversation yet.
           </div>
         ) : (
@@ -252,7 +258,7 @@ export function MessageThread({
               if (isSystem) {
                 return (
                   <div key={msg.id} className="flex justify-center">
-                    <div className="max-w-[80%] rounded-full bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-3 py-1.5 text-center text-xs text-amber-700 dark:text-amber-300">
+                    <div className="max-w-[80%] rounded-full bg-stone-100 dark:bg-white/[0.06] border border-stone-200 dark:border-white/[0.10] px-3 py-1.5 text-center text-xs text-stone-600 dark:text-[#cfcfcf]">
                       <Info className="mr-1 inline-block h-3 w-3 align-[-2px]" />
                       {msg.content}
                     </div>
@@ -272,7 +278,7 @@ export function MessageThread({
                     {/* Role label */}
                     <div
                       className={cn(
-                        "mb-1 flex items-center gap-1 text-xs text-slate-400 dark:text-[#bdbdbf]",
+                        "mb-1 flex items-center gap-1 text-xs text-stone-400 dark:text-[#bdbdbf]",
                         isCustomer ? "justify-start" : "justify-end"
                       )}
                     >
@@ -293,10 +299,10 @@ export function MessageThread({
                       className={cn(
                         "rounded-2xl px-4 py-2 text-sm",
                         isCustomer
-                          ? "rounded-bl-md bg-slate-100 dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5]"
+                          ? "rounded-bl-md border border-[#ece4d8] dark:border-white/[0.08] bg-[#f3ede3] dark:bg-white/[0.06] text-stone-800 dark:text-[#f0f0f0]"
                           : isHumanAgent
-                          ? "rounded-br-md bg-green-500 text-white"
-                          : "rounded-br-md bg-blue-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white"
+                          ? "rounded-br-md bg-stone-800 text-white dark:bg-white/[0.16] dark:text-[#f5f5f5]"
+                          : "rounded-br-md bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]"
                       )}
                     >
                       {msg.content}
@@ -304,7 +310,7 @@ export function MessageThread({
                     {/* Timestamp */}
                     <div
                       className={cn(
-                        "mt-1 text-xs text-slate-400 dark:text-[#bdbdbf]",
+                        "mt-1 text-xs text-stone-400 dark:text-[#bdbdbf]",
                         isCustomer ? "text-left" : "text-right"
                       )}
                     >
@@ -320,14 +326,14 @@ export function MessageThread({
       </div>
 
       {/* Input */}
-      <div className="border-t border-slate-200 dark:border-white/[0.10] px-4 py-3">
+      <div className="border-t border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
         {isAiHandling ? (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-purple-50 dark:bg-purple-500/10 px-4 py-3 text-sm text-purple-600 dark:text-purple-300">
+          <div className={cn("flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm", statusInfo)}>
             <Bot className="h-4 w-4" />
             AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
           </div>
         ) : smsBlocked ? (
-          <div className="flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3 text-sm">
+          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
             <div>
               <p className="font-medium text-amber-700 dark:text-amber-300">SMS sending paused</p>
@@ -349,13 +355,13 @@ export function MessageThread({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 rounded-lg bg-white dark:bg-white/[0.06] border border-gray-300 dark:border-white/[0.12] px-4 py-2 text-sm text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
+              className="flex-1 rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] px-4 py-2 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[#ea580c] dark:focus:border-[#ff914d] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30"
               disabled={sending}
             />
             <button
               type="submit"
               disabled={!input.trim() || sending}
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white transition-colors hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] text-white transition-colors disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
             </button>

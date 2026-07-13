@@ -6,7 +6,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { glassInput, textSecondary } from "@/lib/glass";
+import { body } from "@/lib/theme-v2/theme";
 
 interface DeleteAccountModalProps {
   open: boolean;
@@ -59,12 +59,12 @@ export default function DeleteAccountModal({ open, onClose }: DeleteAccountModal
           </p>
         </div>
 
-        <p className={`text-sm ${textSecondary}`}>
+        <p className={`text-sm ${body}`}>
           You can reactivate your account within 60 days by logging back in.
         </p>
 
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textSecondary}`}>
+          <label className={`block text-sm font-medium mb-2 ${body}`}>
             Type <strong className="text-red-600 dark:text-red-400">DELETE</strong> to confirm
           </label>
           <input
@@ -72,7 +72,7 @@ export default function DeleteAccountModal({ open, onClose }: DeleteAccountModal
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="DELETE"
-            className={`w-full rounded-lg px-3 py-2 text-sm ${glassInput}`}
+            className="w-full rounded-lg px-3 py-2 text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
         </div>
 

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { ConversationList } from "./ConversationList";
 import { MessageThread } from "./MessageThread";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
-import { glassCard } from "@/lib/glass";
+import { card } from "@/lib/theme-v2/theme";
 import type { SmsBlockReason } from "@/types/database";
 
 interface InboxLayoutProps {
@@ -33,7 +33,7 @@ export function InboxLayout({
   }
 
   return (
-    <div className={`flex h-full overflow-hidden ${glassCard}`}>
+    <div className={`flex h-full overflow-hidden ${card}`}>
       {/* Conversation list - left panel */}
       <div
         className={cn(
@@ -59,10 +59,10 @@ export function InboxLayout({
         {selected ? (
           <div className="flex h-full flex-col">
             {/* Mobile back button */}
-            <div className="flex items-center border-b border-slate-200 dark:border-white/[0.10] px-3 py-2 md:hidden">
+            <div className="flex items-center border-b border-[#ece4d8] dark:border-white/[0.10] px-3 py-2 md:hidden">
               <button
                 onClick={() => setSelected(null)}
-                className="flex items-center gap-1 text-sm text-[#ff914d]"
+                className="flex items-center gap-1 text-sm text-[#c2410c] dark:text-[#ff914d]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
@@ -78,7 +78,7 @@ export function InboxLayout({
             </div>
           </div>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center text-slate-400 dark:text-[#bdbdbf]">
+          <div className="flex h-full flex-col items-center justify-center text-stone-400 dark:text-[#bdbdbf]">
             <MessageSquare className="mb-3 h-12 w-12" />
             <p className="text-sm">Select a conversation to view messages</p>
           </div>

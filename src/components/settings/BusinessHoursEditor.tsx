@@ -74,16 +74,16 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
         <div
           key={index}
           className={`flex flex-wrap items-center gap-3 sm:gap-4 p-3 rounded-lg border ${
-            day.is_closed ? 'bg-slate-50 dark:bg-white/[0.03] border-slate-200 dark:border-white/[0.10]' : 'border-slate-300 dark:border-white/[0.14]'
+            day.is_closed ? 'bg-[#faf6ef] dark:bg-white/[0.03] border-[#ece4d8] dark:border-white/[0.10]' : 'border-[#e3dacc] dark:border-white/[0.14]'
           }`}
         >
-          <span className="w-20 sm:w-24 text-sm font-medium text-slate-700 dark:text-[#bdbdbf]">{DAYS[index]}</span>
+          <span className="w-20 sm:w-24 text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">{DAYS[index]}</span>
 
           <button
             type="button"
             onClick={() => updateDay(index, { is_closed: !day.is_closed })}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-              !day.is_closed ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+              !day.is_closed ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
             }`}
           >
             <span
@@ -92,7 +92,7 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
               }`}
             />
           </button>
-          <span className="text-xs text-slate-500 dark:text-[#bdbdbf] w-12">
+          <span className="text-xs text-stone-500 dark:text-[#bdbdbf] w-12">
             {day.is_closed ? 'Closed' : 'Open'}
           </span>
 
@@ -102,14 +102,14 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
                 type="time"
                 value={day.open_time}
                 onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
               />
-              <span className="text-slate-400 dark:text-[#666]">to</span>
+              <span className="text-stone-400 dark:text-[#666]">to</span>
               <input
                 type="time"
                 value={day.close_time}
                 onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
               />
             </div>
           )}

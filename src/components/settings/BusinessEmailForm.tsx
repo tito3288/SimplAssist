@@ -50,7 +50,7 @@ export default function BusinessEmailForm({ businessId, initialEmail }: Business
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="info@yourbusiness.com"
-          className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+          className="flex-1 px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
         />
         <button
           onClick={handleSave}
@@ -61,7 +61,7 @@ export default function BusinessEmailForm({ businessId, initialEmail }: Business
         </button>
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
-      <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+      <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
         Your AI will suggest this email when it can&apos;t fully help a customer.
       </p>
     </div>

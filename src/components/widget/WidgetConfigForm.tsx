@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { secondaryCtaCompactClass } from '@/lib/glass';
+import { statusSuccess, statusNeutral } from '@/lib/theme-v2/theme';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -100,11 +101,11 @@ function LogoUpload({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Logo</label>
+      <label className="block text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Logo</label>
 
       {currentUrl ? (
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-slate-200 dark:border-white/[0.12] flex-shrink-0">
+          <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-[#ece4d8] dark:border-white/[0.12] flex-shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={currentUrl} alt="Logo" className="w-full h-full object-cover" />
           </div>
@@ -133,17 +134,17 @@ function LogoUpload({
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="w-full flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-slate-200 dark:border-white/[0.12] hover:border-[#ff914d] dark:hover:border-[#ff914d]/50 transition-colors cursor-pointer"
+          className="w-full flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-[#ece4d8] dark:border-white/[0.12] hover:border-[#ea580c] dark:hover:border-[#ff914d]/50 transition-colors cursor-pointer"
         >
           {uploading ? (
-            <Loader2 className="w-6 h-6 text-[#ff914d] animate-spin" />
+            <Loader2 className="w-6 h-6 text-[#c2410c] dark:text-[#ff914d] animate-spin" />
           ) : (
-            <Upload className="w-6 h-6 text-slate-400 dark:text-[#666]" />
+            <Upload className="w-6 h-6 text-stone-400 dark:text-[#666]" />
           )}
-          <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+          <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             {uploading ? "Uploading..." : "Click to upload your logo"}
           </span>
-          <span className="text-xs text-slate-400 dark:text-[#666]">PNG, JPG, SVG, or WEBP. Max 2MB.</span>
+          <span className="text-xs text-stone-400 dark:text-[#666]">PNG, JPG, SVG, or WEBP. Max 2MB.</span>
         </button>
       )}
 
@@ -233,13 +234,13 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
       {/* Section 1: Appearance */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Appearance</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Customize how the chat widget looks on your website.</p>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Appearance</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Customize how the chat widget looks on your website.</p>
 
         <div className="space-y-5">
           {/* Brand color */}
           <div>
-            <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Brand Color</label>
+            <label className="block text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Brand Color</label>
             <div className="space-y-3">
               <HexColorPicker
                 color={brandColor}
@@ -249,15 +250,15 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
               {/* Hex input + current swatch */}
               <div className="flex items-center gap-3">
                 <div
-                  className="h-9 w-9 rounded-lg border border-slate-200 dark:border-white/[0.12] flex-shrink-0"
+                  className="h-9 w-9 rounded-lg border border-[#ece4d8] dark:border-white/[0.12] flex-shrink-0"
                   style={{ backgroundColor: brandColor }}
                 />
-                <div className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-white/[0.12] dark:bg-white/[0.06] px-3 py-2">
-                  <span className="text-sm text-slate-400 dark:text-[#666]">#</span>
+                <div className="flex items-center gap-1 rounded-lg border border-[#e3dacc] bg-white dark:border-white/[0.12] dark:bg-white/[0.06] px-3 py-2">
+                  <span className="text-sm text-stone-400 dark:text-[#666]">#</span>
                   <HexColorInput
                     color={brandColor}
                     onChange={(color) => setValue('brand_color', color)}
-                    className="w-20 bg-transparent text-sm text-slate-900 dark:text-[#f5f5f5] outline-none uppercase tracking-wider"
+                    className="w-20 bg-transparent text-sm text-stone-900 dark:text-[#f5f5f5] outline-none uppercase tracking-wider"
                   />
                 </div>
               </div>
@@ -272,7 +273,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                     onClick={() => setValue('brand_color', color.value)}
                     className={cn(
                       'h-8 w-8 rounded-full border-2 transition-transform hover:scale-110',
-                      brandColor === color.value ? 'border-slate-900 dark:border-[#f5f5f5] scale-110' : 'border-transparent'
+                      brandColor === color.value ? 'border-stone-900 dark:border-[#f5f5f5] scale-110' : 'border-transparent'
                     )}
                     style={{ backgroundColor: color.value }}
                   />
@@ -283,7 +284,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
           {/* Position */}
           <div>
-            <label className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5] mb-2">Widget Position</label>
+            <label className="block text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Widget Position</label>
             <div className="grid grid-cols-2 gap-3">
               {(['bottom_right', 'bottom_left'] as const).map((pos) => (
                 <button
@@ -293,11 +294,11 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                   className={cn(
                     'relative flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors',
                     position === pos
-                      ? 'border-[#ff914d] bg-orange-50 dark:bg-[#ff914d]/10'
-                      : 'border-slate-200 dark:border-white/[0.10] hover:border-slate-300 dark:hover:border-white/[0.20]'
+                      ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                      : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e0d7c8] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                   )}
                 >
-                  <div className="h-16 w-24 rounded border border-slate-200 dark:border-white/[0.10] bg-white dark:bg-white/[0.06] relative">
+                  <div className="h-16 w-24 rounded border border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-white/[0.06] relative">
                     <div
                       className={cn(
                         'absolute bottom-1 h-4 w-4 rounded-full',
@@ -306,7 +307,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                       style={{ backgroundColor: brandColor }}
                     />
                   </div>
-                  <span className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+                  <span className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
                     {pos === 'bottom_right' ? 'Bottom Right' : 'Bottom Left'}
                   </span>
                 </button>
@@ -316,13 +317,13 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
           {/* Show logo toggle */}
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">Show Logo</label>
+            <label className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">Show Logo</label>
             <button
               type="button"
               onClick={() => setValue('show_logo', !showLogo)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                showLogo ? 'bg-[#ff914d]' : 'bg-gray-200 dark:bg-white/[0.10]'
+                showLogo ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
               )}
             >
               <span
@@ -348,34 +349,34 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
       {/* Section 2: Welcome Message */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Welcome Message</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">The first message visitors see when they open the chat.</p>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Welcome Message</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">The first message visitors see when they open the chat.</p>
 
         <div className="relative">
           <textarea
             {...register('welcome_message')}
             rows={3}
             maxLength={500}
-            className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none resize-none"
+            className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 px-3 py-2 text-sm outline-none resize-none"
           />
           <div className="flex items-center justify-between mt-1">
             <button
               type="button"
               onClick={() => setValue('welcome_message', DEFAULT_WELCOME_MESSAGE)}
-              className="text-xs text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5] flex items-center gap-1"
+              className="text-xs text-stone-500 dark:text-[#bdbdbf] hover:text-stone-700 dark:hover:text-[#f5f5f5] flex items-center gap-1"
             >
               <RotateCcw className="h-3 w-3" />
               Reset to default
             </button>
-            <span className="text-xs text-slate-500 dark:text-[#bdbdbf]">{welcomeMessage.length}/500</span>
+            <span className="text-xs text-stone-500 dark:text-[#bdbdbf]">{welcomeMessage.length}/500</span>
           </div>
         </div>
       </div>
 
       {/* Section 3: Quick Reply Buttons */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Quick Reply Buttons</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Quick Reply Buttons</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
           Suggested questions shown below the welcome message. Visitors can click to start a conversation. Leave empty to hide.
         </p>
 
@@ -393,9 +394,9 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                   }}
                   maxLength={50}
                   placeholder={`Question ${index + 1}`}
-                  className="w-full rounded-lg border border-slate-200 dark:bg-white/[0.06] dark:border-white/[0.12] dark:text-[#f5f5f5] dark:placeholder:text-[#666] px-3 py-2 text-sm focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d] outline-none"
+                  className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 px-3 py-2 text-sm outline-none"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-[#666] pointer-events-none">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-stone-400 dark:text-[#666] pointer-events-none">
                   {reply.length}/50
                 </span>
               </div>
@@ -405,7 +406,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                   const updated = quickReplies.filter((_, i) => i !== index);
                   setValue('quick_replies', updated);
                 }}
-                className="p-2 rounded-lg border border-slate-200 dark:border-white/[0.12] text-slate-400 dark:text-[#666] hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-500/30 transition-colors"
+                className="p-2 rounded-lg border border-[#ece4d8] dark:border-white/[0.12] text-stone-400 dark:text-[#666] hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-500/30 transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -416,7 +417,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
             <button
               type="button"
               onClick={() => setValue('quick_replies', [...quickReplies, ''])}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full border border-dashed border-slate-200 dark:border-white/[0.12] text-slate-500 dark:text-[#bdbdbf] hover:border-[#ff914d] hover:text-[#ff914d] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full border border-dashed border-[#ece4d8] dark:border-white/[0.12] text-stone-500 dark:text-[#bdbdbf] hover:border-[#ea580c] hover:text-[#c2410c] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
             >
               <Plus className="h-4 w-4" />
               Add question
@@ -427,18 +428,18 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
       {/* Section 4: Lead Capture */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Lead Capture</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Collect visitor contact information during conversations.</p>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Lead Capture</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Collect visitor contact information during conversations.</p>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">Enable Lead Capture</label>
+            <label className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">Enable Lead Capture</label>
             <button
               type="button"
               onClick={() => setValue('lead_capture_enabled', !leadCaptureEnabled)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                leadCaptureEnabled ? 'bg-[#ff914d]' : 'bg-gray-200 dark:bg-white/[0.10]'
+                leadCaptureEnabled ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
               )}
             >
               <span
@@ -459,15 +460,15 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
               ]).map((option) => (
                 <label
                   key={option.value}
-                  className="flex items-center gap-3 cursor-pointer rounded-lg border border-slate-200 dark:border-white/[0.10] px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors"
+                  className="flex items-center gap-3 cursor-pointer rounded-lg border border-[#ece4d8] dark:border-white/[0.10] px-4 py-3 hover:bg-[#faf6ef] dark:hover:bg-white/[0.03] transition-colors"
                 >
                   <input
                     type="radio"
                     value={option.value}
                     {...register('lead_capture_timing')}
-                    className="h-4 w-4 text-[#ff914d] border-slate-200 dark:border-white/[0.12] focus:ring-[#ff914d] dark:bg-white/[0.06]"
+                    className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d] border-[#ece4d8] dark:border-white/[0.12] focus:ring-[#ea580c] dark:focus:ring-[#ff914d] dark:bg-white/[0.06]"
                   />
-                  <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{option.label}</span>
+                  <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">{option.label}</span>
                 </label>
               ))}
             </div>
@@ -477,17 +478,17 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
       {/* Section 4: Widget Status */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Widget Status</h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">Control whether the widget is visible on your website.</p>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Widget Status</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control whether the widget is visible on your website.</p>
 
-        <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-white/[0.10] p-4">
+        <div className="flex items-center justify-between rounded-lg border border-[#ece4d8] dark:border-white/[0.10] p-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setValue('is_active', !isActive)}
               className={cn(
                 'relative inline-flex h-7 w-14 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                isActive ? 'bg-green-500' : 'bg-gray-200 dark:bg-white/[0.10]'
+                isActive ? 'bg-green-500' : 'bg-stone-200 dark:bg-white/[0.12]'
               )}
             >
               <span
@@ -501,7 +502,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
               <span
                 className={cn(
                   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                  isActive ? 'bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-white/[0.06] text-slate-500 dark:text-[#bdbdbf]'
+                  isActive ? statusSuccess : statusNeutral
                 )}
               >
                 {isActive ? 'Active' : 'Inactive'}
@@ -524,8 +525,8 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           className={cn(
             'inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-white transition-colors',
             saving
-              ? 'bg-orange-400 dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:opacity-60 cursor-not-allowed'
-              : 'bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600'
+              ? 'bg-[#ea580c]/60 dark:bg-[#ff914d]/50 cursor-not-allowed'
+              : 'bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33]'
           )}
         >
           {saving ? (

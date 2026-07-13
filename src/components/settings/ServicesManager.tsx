@@ -118,18 +118,18 @@ export default function ServicesManager({ businessId, initialServices }: Service
   return (
     <div className="space-y-4">
       {services.length === 0 && !showAddForm && (
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf] text-center py-4">No services yet. Add your first service below.</p>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] text-center py-4">No services yet. Add your first service below.</p>
       )}
 
       <div className="space-y-2">
         {services.map((service) => (
-          <div key={service.id} className="border border-slate-200 dark:border-white/[0.12] rounded-lg">
+          <div key={service.id} className="border border-[#ece4d8] dark:border-white/[0.12] rounded-lg">
             <div className="flex items-center gap-3 p-3">
               <button
                 type="button"
                 onClick={() => handleToggleActive(service.id, service.is_active)}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                  service.is_active ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+                  service.is_active ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
                 }`}
               >
                 <span
@@ -140,22 +140,22 @@ export default function ServicesManager({ businessId, initialServices }: Service
               </button>
 
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${service.is_active ? 'text-slate-900 dark:text-[#f5f5f5]' : 'text-slate-400 dark:text-[#666]'}`}>
+                <p className={`text-sm font-medium ${service.is_active ? 'text-stone-900 dark:text-[#f5f5f5]' : 'text-stone-400 dark:text-[#666]'}`}>
                   {service.name}
                 </p>
                 {service.description && (
-                  <p className="text-xs text-slate-500 dark:text-[#bdbdbf] truncate">{service.description}</p>
+                  <p className="text-xs text-stone-500 dark:text-[#bdbdbf] truncate">{service.description}</p>
                 )}
               </div>
 
               {service.price && (
-                <span className="text-sm text-slate-600 dark:text-[#bdbdbf] shrink-0">{service.price}</span>
+                <span className="text-sm text-stone-600 dark:text-[#bdbdbf] shrink-0">{service.price}</span>
               )}
 
               <button
                 type="button"
                 onClick={() => (expandedId === service.id ? setExpandedId(null) : startEdit(service))}
-                className="text-slate-400 dark:text-[#bdbdbf] hover:text-[#ff914d] p-1"
+                className="text-stone-400 dark:text-[#bdbdbf] hover:text-[#c2410c] dark:hover:text-[#ff914d] p-1"
               >
                 {expandedId === service.id ? <ChevronUp className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
               </button>
@@ -173,7 +173,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmId(null)}
-                    className="text-xs text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5]"
+                    className="text-xs text-stone-500 dark:text-[#bdbdbf] hover:text-stone-700 dark:hover:text-[#f5f5f5]"
                   >
                     Cancel
                   </button>
@@ -182,7 +182,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
                 <button
                   type="button"
                   onClick={() => setDeleteConfirmId(service.id)}
-                  className="text-slate-400 dark:text-[#bdbdbf] hover:text-red-500 p-1"
+                  className="text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -190,30 +190,30 @@ export default function ServicesManager({ businessId, initialServices }: Service
             </div>
 
             {expandedId === service.id && (
-              <div className="border-t border-slate-200 dark:border-white/[0.10] p-3 space-y-2 bg-slate-50 dark:bg-white/[0.03]">
+              <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
                 <input
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   placeholder="Service name"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                  className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
                 />
                 <input
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   placeholder="Description (optional)"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                  className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
                 />
                 <input
                   value={editPrice}
                   onChange={(e) => setEditPrice(e.target.value)}
                   placeholder="Price (optional)"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+                  className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
                 />
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setExpandedId(null)}
-                    className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
+                    className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
                   >
                     Cancel
                   </button>
@@ -240,30 +240,30 @@ export default function ServicesManager({ businessId, initialServices }: Service
       </div>
 
       {showAddForm ? (
-        <div className="border border-[#ff914d]/40 dark:border-[#ff914d]/30 rounded-lg p-3 space-y-2 bg-orange-50 dark:bg-white/[0.04]">
+        <div className="border border-[#ea580c]/40 dark:border-[#ff914d]/30 rounded-lg p-3 space-y-2 bg-[#fdf1e7] dark:bg-white/[0.04]">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Service name *"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
           <input
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
             placeholder="Description (optional)"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
           <input
             value={newPrice}
             onChange={(e) => setNewPrice(e.target.value)}
             placeholder="Price (optional)"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-white/[0.12] rounded-lg text-sm bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d]"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => { setShowAddForm(false); setNewName(''); setNewDescription(''); setNewPrice(''); }}
-              className="px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-800 dark:hover:text-[#f5f5f5]"
+              className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             >
               Cancel
             </button>
@@ -288,7 +288,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
         <button
           type="button"
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1 text-sm text-[#ff914d] hover:text-[#e07a3a] font-medium"
+          className="flex items-center gap-1 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
         >
           <Plus className="w-4 h-4" /> Add Service
         </button>

@@ -21,8 +21,8 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5] mb-1">Embed Code</h2>
-      <p className="text-sm text-slate-500 dark:text-[#bdbdbf] mb-4">
+      <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Embed Code</h2>
+      <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
         Add the chat widget to your website by copying the code below.
       </p>
 
@@ -31,7 +31,7 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-gray-600 dark:bg-white/[0.08] dark:text-[#e8e8e8] dark:hover:bg-white/[0.12]"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-stone-700 px-3 py-1.5 text-xs font-medium text-stone-200 transition-colors hover:bg-stone-600 dark:bg-white/[0.08] dark:text-[#e8e8e8] dark:hover:bg-white/[0.12]"
           >
             {copied ? (
               <>
@@ -52,11 +52,11 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
       </div>
 
       <div className="mt-4 space-y-2">
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
-          Paste this code before the closing <code className="text-xs bg-gray-100 dark:bg-white/[0.06] px-1.5 py-0.5 rounded font-mono">&lt;/body&gt;</code> tag
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+          Paste this code before the closing <code className="text-xs bg-stone-100 dark:bg-white/[0.06] px-1.5 py-0.5 rounded font-mono">&lt;/body&gt;</code> tag
           on any page where you want the chat widget to appear. It works with WordPress, Squarespace, Wix, Shopify, and any other website.
         </p>
-        <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+        <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
           Note: The widget will only appear when it&apos;s set to Active above.
         </p>
       </div>

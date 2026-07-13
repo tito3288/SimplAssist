@@ -3,7 +3,13 @@ import { redirect } from "next/navigation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
-import { glassCard } from "@/lib/glass";
+import {
+  card,
+  cardRecommended,
+  statusSuccess,
+  statusWarning,
+  statusDanger,
+} from "@/lib/theme-v2/theme";
 
 export default async function BillingPage() {
   const supabase = await createClient();
@@ -46,18 +52,18 @@ export default async function BillingPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Billing</h1>
-      <p className="mt-2 text-slate-500 dark:text-[#bdbdbf]">
+      <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Billing</h1>
+      <p className="mt-2 text-stone-500 dark:text-[#bdbdbf]">
         {hasActiveSubscription
           ? "Manage your subscription"
           : "Choose a plan to get started"}
       </p>
 
       {hasActiveSubscription ? (
-        <div className={`mt-8 p-6 ${glassCard}`}>
+        <div className={`mt-8 p-6 ${card}`}>
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5]">
+              <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
                 {SUBSCRIPTION_PLANS[subscription.plan as SubscriptionPlan]
                   ?.name ?? subscription.plan}
               </h2>
@@ -65,15 +71,15 @@ export default async function BillingPage() {
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                     subscription.status === "active"
-                      ? "bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400 dark:border dark:border-green-500/20"
+                      ? statusSuccess
                       : subscription.status === "past_due"
-                        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border dark:border-yellow-500/20"
-                        : "bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 dark:border dark:border-red-500/20"
+                        ? statusWarning
+                        : statusDanger
                   }`}
                 >
                   {subscription.status.replace("_", " ")}
                 </span>
-                <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+                <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">
                   Next billing date:{" "}
                   {new Date(
                     subscription.current_period_end
@@ -94,34 +100,32 @@ export default async function BillingPage() {
           ).map(([key, plan]) => (
             <div
               key={key}
-              className={`relative p-6 ${glassCard} ${
-                key === "sms_and_chat"
-                  ? "outline outline-1 outline-[rgba(255,145,77,.40)] dark:shadow-[0_30px_80px_rgba(255,145,77,.14)]"
-                  : ""
+              className={`relative p-6 rounded-[28px] ${
+                key === "sms_and_chat" ? cardRecommended : card
               }`}
             >
               {key === "sms_and_chat" && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[linear-gradient(135deg,#ff914d,#ffb07a)] px-3 py-0.5 text-xs font-medium text-[#111]">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] px-3 py-0.5 text-xs font-medium text-white dark:text-[#16100b]">
                   Recommended
                 </span>
               )}
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5]">
+              <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
                 {plan.name}
               </h3>
               <p className="mt-2">
-                <span className="text-3xl font-bold text-slate-900 dark:text-[#f5f5f5]">
+                <span className="text-3xl font-bold text-stone-900 dark:text-[#f5f5f5]">
                   ${plan.price}
                 </span>
-                <span className="text-slate-500 dark:text-[#bdbdbf]">/mo</span>
+                <span className="text-stone-500 dark:text-[#bdbdbf]">/mo</span>
               </p>
               <ul className="mt-6 space-y-3">
                 {plan.features.map((feature) => (
                   <li
                     key={feature}
-                    className="flex items-start gap-2 text-sm text-slate-500 dark:text-[#bdbdbf]"
+                    className="flex items-start gap-2 text-sm text-stone-500 dark:text-[#bdbdbf]"
                   >
                     <svg
-                      className="mt-0.5 h-4 w-4 shrink-0 text-[#ff914d]"
+                      className="mt-0.5 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d]"
                       fill="none"
                       viewBox="0 0 24 24"
                       strokeWidth={2}
@@ -146,21 +150,21 @@ export default async function BillingPage() {
       )}
 
       {hasActiveSubscription && (
-        <div className={`mt-6 p-6 ${glassCard}`}>
+        <div className={`mt-6 p-6 ${card}`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-[#f5f5f5]">
+              <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
                 SMS usage
               </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+              <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
                 Current billing period usage counts inbound and outbound SMS parts.
               </p>
             </div>
-            <div className="text-sm font-medium text-slate-700 dark:text-[#d8d8d8]">
+            <div className="text-sm font-medium text-stone-700 dark:text-[#d8d8d8]">
               {usedSmsParts.toLocaleString()} / {includedSmsParts.toLocaleString()} parts
             </div>
           </div>
-          <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-white/[0.10]">
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-stone-200 dark:bg-white/[0.10]">
             <div
               className={`h-full rounded-full ${
                 usagePercent >= 100
@@ -172,7 +176,7 @@ export default async function BillingPage() {
               style={{ width: `${usagePercent}%` }}
             />
           </div>
-          <p className="mt-3 text-sm text-slate-500 dark:text-[#bdbdbf]">
+          <p className="mt-3 text-sm text-stone-500 dark:text-[#bdbdbf]">
             {usagePercent >= 100
               ? "Outbound SMS is paused until you upgrade or enable overages."
               : usagePercent >= 80

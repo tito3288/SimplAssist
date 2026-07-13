@@ -5,7 +5,7 @@ import type { WidgetConfig } from '@/types/database';
 import WidgetConfigForm, { type WidgetConfigFormValues } from '@/components/widget/WidgetConfigForm';
 import WidgetPreview from '@/components/widget/WidgetPreview';
 import EmbedCodeGenerator from '@/components/widget/EmbedCodeGenerator';
-import { glassCard } from '@/lib/glass';
+import { card } from '@/lib/theme-v2/theme';
 
 interface WidgetPageClientProps {
   config: WidgetConfig;
@@ -34,13 +34,13 @@ export default function WidgetPageClient({ config, businessId }: WidgetPageClien
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Website Chat Widget</h1>
-        <p className="mt-1 text-slate-500 dark:text-[#bdbdbf]">Configure and embed a chat assistant on your website</p>
+        <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Website Chat Widget</h1>
+        <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Configure and embed a chat assistant on your website</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left column — config form */}
-        <div className={`lg:col-span-3 p-6 ${glassCard}`}>
+        <div className={`lg:col-span-3 p-6 ${card}`}>
           <WidgetConfigForm
             config={config}
             onSaved={() => setRefreshKey((k) => k + 1)}
@@ -50,10 +50,10 @@ export default function WidgetPageClient({ config, businessId }: WidgetPageClien
 
         {/* Right column — preview + embed code */}
         <div className="lg:col-span-2 space-y-6">
-          <div className={`p-6 ${glassCard}`}>
+          <div className={`p-6 ${card}`}>
             <WidgetPreview businessId={businessId} refreshKey={refreshKey} preview={previewValues} />
           </div>
-          <div className={`p-6 ${glassCard}`}>
+          <div className={`p-6 ${card}`}>
             <EmbedCodeGenerator businessId={businessId} />
           </div>
         </div>

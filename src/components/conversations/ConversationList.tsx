@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { Phone, MessageCircle, Search, Bot, User, Trash2, Loader2 } from "lucide-react";
 import { cn, formatPhoneNumber } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
+import { statusInfo, statusWarning, statusNeutral } from "@/lib/theme-v2/theme";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 
 interface ConversationListProps {
@@ -86,23 +87,23 @@ export function ConversationList({
   ];
 
   return (
-    <div className="flex h-full flex-col border-r border-slate-200 dark:border-white/[0.10] bg-white dark:bg-transparent">
+    <div className="flex h-full flex-col border-r border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-transparent">
       {/* Search */}
-      <div className="border-b border-slate-200 dark:border-white/[0.10] p-3">
+      <div className="border-b border-[#ece4d8] dark:border-white/[0.10] p-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-[#666]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400 dark:text-[#666]" />
           <input
             type="text"
             placeholder="Search conversations..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg bg-white dark:bg-white/[0.06] border border-gray-300 dark:border-white/[0.12] py-2 pl-9 pr-3 text-sm text-slate-900 dark:text-[#f5f5f5] placeholder:text-gray-400 dark:placeholder:text-[#666] focus:border-[#ff914d] focus:outline-none focus:ring-1 focus:ring-[#ff914d]"
+            className="w-full rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] py-2 pl-9 pr-3 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[#ea580c] dark:focus:border-[#ff914d] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30"
           />
         </div>
       </div>
 
       {/* Filter tabs */}
-      <div className="flex border-b border-slate-200 dark:border-white/[0.10]">
+      <div className="flex border-b border-[#ece4d8] dark:border-white/[0.10]">
         {tabs.map((tab) => (
           <button
             key={tab.value}
@@ -110,8 +111,8 @@ export function ConversationList({
             className={cn(
               "flex-1 px-3 py-2 text-sm font-medium transition-colors",
               filter === tab.value
-                ? "border-b-2 border-[#ff914d] text-[#ff914d]"
-                : "text-slate-500 dark:text-[#bdbdbf] hover:text-slate-700 dark:hover:text-[#f5f5f5]"
+                ? "border-b-2 border-[#ea580c] text-[#c2410c] dark:border-[#ff914d] dark:text-[#ff914d]"
+                : "text-stone-500 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             )}
           >
             {tab.label}
@@ -122,7 +123,7 @@ export function ConversationList({
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="p-6 text-center text-sm text-slate-500 dark:text-[#bdbdbf]">
+          <div className="p-6 text-center text-sm text-stone-500 dark:text-[#bdbdbf]">
             {conversations.length === 0
               ? "No conversations yet. Once customers start texting or chatting, they'll appear here."
               : "No conversations match your search."}
@@ -145,30 +146,30 @@ export function ConversationList({
                 key={conv.id}
                 onClick={() => onSelect(conv)}
                 className={cn(
-                  "group flex w-full items-start gap-3 border-b border-slate-100 dark:border-white/[0.06] px-4 py-3 text-left cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]",
-                  activeId === conv.id && "bg-orange-50 dark:bg-[rgba(255,145,77,.08)] hover:bg-orange-50 dark:hover:bg-[rgba(255,145,77,.08)]"
+                  "group flex w-full items-start gap-3 border-b border-[#f0e9de] dark:border-white/[0.06] px-4 py-3 text-left cursor-pointer transition-colors hover:bg-[#faf6ef] dark:hover:bg-white/[0.04]",
+                  activeId === conv.id && "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.08)] hover:bg-[#fdf1e7] dark:hover:bg-[rgba(255,145,77,.08)]"
                 )}
               >
                 {/* Channel icon */}
                 <div className="mt-0.5 flex-shrink-0">
                   {conv.channel === "sms" ? (
-                    <Phone className="h-5 w-5 text-slate-400 dark:text-[#bdbdbf]" />
+                    <Phone className="h-5 w-5 text-stone-400 dark:text-[#bdbdbf]" />
                   ) : (
-                    <MessageCircle className="h-5 w-5 text-slate-400 dark:text-[#bdbdbf]" />
+                    <MessageCircle className="h-5 w-5 text-stone-400 dark:text-[#bdbdbf]" />
                   )}
                 </div>
 
                 {/* Content */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+                    <span className="truncate text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
                       {contactName}
                     </span>
-                    <span className="flex-shrink-0 text-xs text-slate-500 dark:text-[#bdbdbf]">
+                    <span className="flex-shrink-0 text-xs text-stone-500 dark:text-[#bdbdbf]">
                       {timeAgo(conv.last_message_at)}
                     </span>
                   </div>
-                  <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-[#bdbdbf]">
+                  <p className="mt-0.5 truncate text-sm text-stone-500 dark:text-[#bdbdbf]">
                     {preview}
                   </p>
                   <div className="mt-1 flex items-center gap-2">
@@ -176,9 +177,7 @@ export function ConversationList({
                     <span
                       className={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                        conv.is_ai_handling
-                          ? "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300"
-                          : "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                        conv.is_ai_handling ? statusInfo : statusWarning
                       )}
                     >
                       {conv.is_ai_handling ? (
@@ -193,7 +192,7 @@ export function ConversationList({
                     </span>
                     {/* Status badge */}
                     {conv.status === "closed" && (
-                      <span className="rounded-full bg-slate-100 dark:bg-white/[0.06] px-2 py-0.5 text-xs text-slate-500 dark:text-[#bdbdbf]">
+                      <span className={cn("rounded-full px-2 py-0.5 text-xs", statusNeutral)}>
                         Closed
                       </span>
                     )}
@@ -203,7 +202,7 @@ export function ConversationList({
                 {/* Delete + Unread indicator */}
                 <div className="mt-1 flex flex-col items-center gap-1 flex-shrink-0">
                   {conv.status === "active" && !conv.is_ai_handling && (
-                    <div className="h-2.5 w-2.5 rounded-full bg-[#ff914d]" />
+                    <div className="h-2.5 w-2.5 rounded-full bg-[#ea580c] dark:bg-[#ff914d]" />
                   )}
                   <button
                     type="button"
@@ -211,7 +210,7 @@ export function ConversationList({
                       e.stopPropagation();
                       setDeleteTargetId(conv.id);
                     }}
-                    className="p-1 rounded-lg text-slate-300 dark:text-white/[0.15] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                    className="p-1 rounded-lg text-stone-300 dark:text-white/[0.15] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
                     title="Delete conversation"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -234,7 +233,7 @@ export function ConversationList({
           <button
             onClick={() => setDeleteTargetId(null)}
             disabled={deleting}
-            className="flex-1 rounded-full border border-slate-200 dark:border-white/[0.12] px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+            className="flex-1 rounded-full border border-[#e7e0d4] dark:border-white/[0.12] px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-[#bdbdbf] hover:bg-[#faf6ef] dark:hover:bg-white/[0.04] transition-colors"
           >
             Cancel
           </button>

@@ -2,7 +2,8 @@
 
 import { Users, UserPlus, Flame, Phone, MessageCircle } from "lucide-react";
 import type { Contact } from "@/types/database";
-import { glassCard, orangeAccentIcon, textPrimary, textSecondary } from "@/lib/glass";
+import { orangeAccentIcon } from "@/lib/glass";
+import { card, ink, body } from "@/lib/theme-v2/theme";
 
 interface ContactStatsProps {
   contacts: Contact[];
@@ -29,26 +30,26 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       label: "Total Contacts",
       value: total,
       icon: Users,
-      color: "text-[#ff914d]",
+      color: "text-[#c2410c] dark:text-[#ff914d]",
     },
     {
       label: "New This Week",
       value: newThisWeek,
       icon: UserPlus,
-      color: "text-[#ff914d]",
+      color: "text-[#c2410c] dark:text-[#ff914d]",
     },
     {
       label: "Hot Leads",
       value: hotLeads,
       icon: Flame,
-      color: "text-[#ff914d]",
+      color: "text-[#c2410c] dark:text-[#ff914d]",
     },
     {
       label: "SMS / Web Chat",
       value: `${smsCount} / ${webChatCount}`,
       icon: Phone,
       secondIcon: MessageCircle,
-      color: "text-[#ff914d]",
+      color: "text-[#c2410c] dark:text-[#ff914d]",
     },
   ];
 
@@ -57,15 +58,15 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       {stats.map((stat) => (
         <div
           key={stat.label}
-          className={`p-5 ${glassCard}`}
+          className={`p-5 ${card}`}
         >
           <div className="flex items-center gap-3">
             <div className={`p-2.5 ${orangeAccentIcon}`}>
               <stat.icon className={`h-5 w-5 ${stat.color}`} />
             </div>
             <div>
-              <p className={`text-sm ${textSecondary}`}>{stat.label}</p>
-              <p className={`text-2xl font-semibold ${textPrimary}`}>
+              <p className={`text-sm ${body}`}>{stat.label}</p>
+              <p className={`text-2xl font-semibold ${ink}`}>
                 {stat.value}
               </p>
             </div>

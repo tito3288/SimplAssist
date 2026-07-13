@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import Sidebar from "./_components/sidebar";
+import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
 
 export default async function DashboardLayout({
   children,
@@ -40,20 +41,17 @@ export default async function DashboardLayout({
 
   return (
     <div
-      className="
-        flex min-h-screen flex-col lg:flex-row relative
-        bg-gradient-to-b from-slate-50 via-white to-slate-100
-        dark:bg-none dark:bg-[#050505]
-        lg:p-5 lg:gap-5
-      "
+      className={`${pageShell} isolate flex flex-col lg:flex-row lg:p-5 lg:gap-5`}
+      style={{ fontFamily: fontStack }}
     >
-      {/* Dark-mode radial background gradient */}
+      {/* Ambient backgrounds — light gets its own warm treatment */}
+      <div
+        className="fixed inset-0 -z-10 pointer-events-none dark:hidden"
+        style={{ background: lightAmbient }}
+      />
       <div
         className="hidden dark:block fixed inset-0 pointer-events-none -z-10"
-        style={{
-          background:
-            "radial-gradient(circle at top right, rgba(255,145,77,.18), transparent 22%), radial-gradient(circle at 12% 18%, rgba(255,145,77,.10), transparent 20%), linear-gradient(180deg, #080808 0%, #050505 42%, #0a0a0c 100%)",
-        }}
+        style={{ background: darkAmbient }}
       />
 
       {/* Decorative orbs */}

@@ -36,12 +36,12 @@ export default function GoogleCalendarConnect({
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+          <div className="w-3 h-3 rounded-full bg-green-500" />
           <div>
-            <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+            <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
               Connected
             </p>
-            <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+            <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
               {connectedEmail}
             </p>
           </div>
@@ -63,7 +63,7 @@ export default function GoogleCalendarConnect({
       <button
         type="button"
         onClick={handleConnect}
-        className="inline-flex items-center justify-center gap-3 px-5 py-3 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-[#f5f5f5] font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
+        className="inline-flex items-center justify-center gap-3 px-5 py-3 rounded-full bg-white dark:bg-white/5 border border-[#ece4d8] dark:border-white/10 text-stone-900 dark:text-[#f5f5f5] font-medium hover:bg-[#faf6ef] dark:hover:bg-white/10 transition-colors"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -73,7 +73,7 @@ export default function GoogleCalendarConnect({
         </svg>
         Connect Google Calendar
       </button>
-      <p className="text-xs text-slate-500 dark:text-[#bdbdbf]">
+      <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
         Allows your AI to check your availability and book appointments directly on your calendar.
       </p>
     </div>
