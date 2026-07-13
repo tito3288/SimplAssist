@@ -164,6 +164,7 @@ function LogoUpload({
 export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: WidgetConfigFormProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const {
     register,
@@ -203,6 +204,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
   const onSubmit = async (data: WidgetConfigFormValues) => {
     setSaving(true);
     setSaved(false);
+    setSaveError('');
     const supabase = createBrowserClient();
 
     const { error } = await supabase
@@ -227,6 +229,8 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       onSaved?.();
+    } else {
+      setSaveError('Could not save your widget settings. Please try again.');
     }
   };
 
@@ -540,6 +544,9 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
         </button>
         {saved && (
           <span className="text-sm text-green-600">Settings saved successfully</span>
+        )}
+        {saveError && (
+          <span className="text-sm text-red-600 dark:text-red-400">{saveError}</span>
         )}
       </div>
     </form>

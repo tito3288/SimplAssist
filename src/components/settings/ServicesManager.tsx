@@ -18,6 +18,9 @@ export default function ServicesManager({ businessId, initialServices }: Service
   const [showAddForm, setShowAddForm] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  // Scoped to the acting control ('add' or a service id) so the message
+  // renders where the user is looking, not off-viewport atop a long list.
+  const [actionError, setActionError] = useState<{ scope: string; message: string } | null>(null);
 
   // Add form state
   const [newName, setNewName] = useState('');
@@ -34,6 +37,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
   const handleAdd = async () => {
     if (!newName.trim()) return;
     setSaving('add');
+    setActionError(null);
     try {
       const { data, error } = await supabase
         .from('services')
@@ -53,7 +57,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
       setNewPrice('');
       setShowAddForm(false);
     } catch {
-      // Handle silently
+      setActionError({ scope: 'add', message: 'Could not add the service. Please try again.' });
     } finally {
       setSaving(null);
     }
@@ -61,6 +65,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
 
   const handleEdit = async (id: string) => {
     setSaving(id);
+    setActionError(null);
     try {
       const { error } = await supabase
         .from('services')
@@ -78,35 +83,42 @@ export default function ServicesManager({ businessId, initialServices }: Service
       );
       setExpandedId(null);
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not save the service. Please try again.' });
     } finally {
       setSaving(null);
     }
   };
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
+    setActionError(null);
     try {
       const { error } = await supabase.from('services').update({ is_active: !isActive }).eq('id', id);
       if (error) throw error;
       setServices((prev) => prev.map((s) => (s.id === id ? { ...s, is_active: !isActive } : s)));
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not update the service. Please try again.' });
     }
   };
 
   const handleDelete = async (id: string) => {
     setSaving(id);
+    setActionError(null);
     try {
       const { error } = await supabase.from('services').delete().eq('id', id);
       if (error) throw error;
       setServices((prev) => prev.filter((s) => s.id !== id));
       setDeleteConfirmId(null);
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not delete the service. Please try again.' });
     } finally {
       setSaving(null);
     }
   };
+
+  const errorFor = (scope: string, className = '') =>
+    actionError?.scope === scope ? (
+      <p className={`text-sm text-red-600 dark:text-red-400 ${className}`}>{actionError.message}</p>
+    ) : null;
 
   const startEdit = (service: Service) => {
     setEditName(service.name);
@@ -117,6 +129,13 @@ export default function ServicesManager({ businessId, initialServices }: Service
 
   return (
     <div className="space-y-4">
+      {/* Fallback for an error scoped to a row that no longer renders (e.g.
+          a slow failing toggle racing a successful delete) — without this
+          the failure would be silent again. */}
+      {actionError && actionError.scope !== 'add' &&
+        !services.some((s) => s.id === actionError.scope) &&
+        errorFor(actionError.scope)}
+
       {services.length === 0 && !showAddForm && (
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] text-center py-4">No services yet. Add your first service below.</p>
       )}
@@ -189,6 +208,8 @@ export default function ServicesManager({ businessId, initialServices }: Service
               )}
             </div>
 
+            {errorFor(service.id, 'px-3 pb-2')}
+
             {expandedId === service.id && (
               <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
                 <input
@@ -259,10 +280,11 @@ export default function ServicesManager({ businessId, initialServices }: Service
             placeholder="Price (optional)"
             className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
           />
+          {errorFor('add')}
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => { setShowAddForm(false); setNewName(''); setNewDescription(''); setNewPrice(''); }}
+              onClick={() => { setShowAddForm(false); setNewName(''); setNewDescription(''); setNewPrice(''); setActionError(null); }}
               className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             >
               Cancel
