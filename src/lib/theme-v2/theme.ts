@@ -1,6 +1,6 @@
 /**
- * Design-exploration tokens for /preview/home-v2 and /preview/auth-v2.
- * Self-contained: nothing here is shared with production pages.
+ * Warm matte theme-v2 design tokens — the production design system, adopted
+ * app-wide across the theme-v2 migration (slices 1-6).
  *
  * Direction:
  * - Buttons are flat + matte. No drop-glow, no internal gradient. Hover = darker

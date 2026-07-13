@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Interactive primitives for the /preview/*-v2 design exploration.
- * Local copies — intentionally not shared with production components.
+ * Interactive primitives for the warm matte theme-v2 design system,
+ * used across production pages (theme-v2 migration, slices 1-6).
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
