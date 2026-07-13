@@ -2,6 +2,12 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import { X } from "lucide-react";
+import {
+  toastBase,
+  statusSuccess,
+  statusDanger,
+  statusInfo,
+} from "@/lib/theme-v2/theme";
 
 type ToastType = "success" | "error" | "info";
 
@@ -18,9 +24,9 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const typeStyles: Record<ToastType, string> = {
-  success: "bg-green-600",
-  error: "bg-red-600",
-  info: "bg-blue-600",
+  success: statusSuccess,
+  error: statusDanger,
+  info: statusInfo,
 };
 
 let nextId = 0;
@@ -47,12 +53,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`${typeStyles[toast.type]} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[280px] animate-slide-in`}
+            className={`${toastBase} ${typeStyles[toast.type]} animate-slide-in`}
           >
             <span className="text-sm flex-1">{toast.message}</span>
             <button
               onClick={() => dismiss(toast.id)}
-              className="text-white/80 hover:text-white"
+              className="opacity-60 hover:opacity-100 transition-opacity"
             >
               <X className="w-4 h-4" />
             </button>
@@ -72,6 +78,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         }
         .animate-slide-in {
           animation: slide-in 0.3s ease-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .animate-slide-in {
+            animation: none;
+          }
         }
       `}</style>
     </ToastContext.Provider>

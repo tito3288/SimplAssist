@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { createBrowserClient } from "@/lib/supabase/client";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { StaggeredMenuIcon } from "@/components/icons/staggered-menu-icon";
 
 const navItems = [
@@ -107,7 +107,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
           <div
             className={`col-start-2 row-start-1 justify-self-end shrink-0 ${websiteUrl ? "row-span-2 self-start" : ""}`}
           >
-            <ThemeToggle />
+            <ThemeToggleV2 />
           </div>
         </div>
         <button

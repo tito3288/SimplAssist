@@ -19,7 +19,7 @@ export default function AuthLayout({
 }) {
   return (
     <div
-      className={`${pageShell} flex flex-col items-center justify-center p-4 sm:p-6`}
+      className={`${pageShell} isolate flex flex-col items-center justify-center p-4 sm:p-6`}
       style={{ fontFamily: fontStack }}
     >
       {/* Ambient backgrounds */}

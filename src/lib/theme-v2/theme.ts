@@ -38,13 +38,8 @@ const btnPrimaryColors = `
   focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
 `;
 
-/** Primary CTA pill. */
-export const btnPrimary = `${btnBase} ${btnPrimaryColors} px-6 py-3.5`;
-
-/** Secondary — quiet neutral pill. */
-export const btnSecondary = `
-  ${btnBase}
-  px-6 py-3.5
+/** Quiet neutral pill — matte, warm hairline border. */
+const btnSecondaryColors = `
   bg-white text-stone-700 border border-[#e7e0d4]
   hover:bg-[#faf6ef] hover:border-[#d9d0c1]
   active:translate-y-px
@@ -52,6 +47,12 @@ export const btnSecondary = `
   dark:hover:bg-white/[0.11] dark:hover:border-white/[0.16]
   focus-visible:ring-stone-400/60 dark:focus-visible:ring-white/40
 `;
+
+/** Primary CTA pill. */
+export const btnPrimary = `${btnBase} ${btnPrimaryColors} px-6 py-3.5`;
+
+/** Secondary — quiet neutral pill. */
+export const btnSecondary = `${btnBase} ${btnSecondaryColors} px-6 py-3.5`;
 
 /** Full-width form CTA (auth). Same matte rules as btnPrimary. */
 export const btnPrimaryWide = `
@@ -61,6 +62,17 @@ export const btnPrimaryWide = `
   disabled:hover:bg-[#ea580c] dark:disabled:hover:bg-[#ff914d]
   disabled:active:translate-y-0
 `;
+
+/**
+ * Inline pills — standard row CTAs (Next, Save, Back, Cancel). Geometry matches
+ * the app's prevailing buttons so migrating existing call sites only swaps color.
+ */
+export const btnPrimaryInline = `${btnBase} ${btnPrimaryColors} gap-2 px-6 py-2`;
+export const btnSecondaryInline = `${btnBase} ${btnSecondaryColors} gap-2 px-6 py-2`;
+
+/** Compact pills — row-level Save/Add, admin forms, small utility buttons. */
+export const btnPrimaryCompact = `${btnBase} ${btnPrimaryColors} gap-1.5 px-3 py-1.5`;
+export const btnSecondaryCompact = `${btnBase} ${btnSecondaryColors} gap-1.5 px-3 py-1.5`;
 
 /* ── Cards ── */
 
@@ -101,6 +113,66 @@ export const tileRow = `
   rounded-[14px]
   bg-white border border-[#f0e9de]
   dark:bg-white/[0.04] dark:border-transparent
+`;
+
+/**
+ * Recommended / highlighted card. The highlight itself is flat — a burnt-orange
+ * outline plus a warm tinted shadow, replacing the v1 orange glow-shadow + gradient
+ * badge. Dark keeps the standard v2 glass card surface (same family as `card`).
+ * Lifted from the v2 pricing card. Pair with a card's own radius/padding/layout
+ * (e.g. `rounded-[28px] p-7 relative md:-translate-y-1 z-10`).
+ */
+export const cardRecommended = `
+  bg-white border border-transparent
+  outline outline-2 outline-[rgba(194,65,12,.30)]
+  shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgba(154,52,18,0.18)]
+  dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.05))]
+  dark:outline-[rgba(255,145,77,.42)]
+  dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
+  dark:backdrop-blur-[18px]
+`;
+
+/** Flat solid accent pill ("Recommended", "Most Popular"). No gradient. */
+export const badgeAccent = `
+  inline-flex items-center px-3 py-1.5 rounded-full text-[12px] font-extrabold
+  bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]
+`;
+
+/* ── Semantic status ── */
+
+/**
+ * One sanctioned set of status tints on the warm palette — success/warning/
+ * danger read as color; info + neutral stay warm neutral (orange is reserved
+ * for actions). Each is a bg/text/border string for both themes; used by
+ * badges, banners, toasts, and usage indicators.
+ */
+export const statusSuccess = `
+  bg-green-50 text-green-700 border border-green-200
+  dark:bg-[rgba(74,222,128,0.12)] dark:text-[#bbf7d0] dark:border-[rgba(74,222,128,0.25)]
+`;
+export const statusWarning = `
+  bg-amber-50 text-amber-800 border border-amber-200
+  dark:bg-[rgba(245,158,11,0.12)] dark:text-[#fcd9a5] dark:border-[rgba(245,158,11,0.25)]
+`;
+export const statusDanger = `
+  bg-red-50 text-red-700 border border-red-200
+  dark:bg-[rgba(239,68,68,0.10)] dark:text-[#fca5a5] dark:border-[rgba(239,68,68,0.22)]
+`;
+export const statusInfo = `
+  bg-stone-100 text-stone-700 border border-stone-200
+  dark:bg-white/[0.06] dark:text-[#d4d4d8] dark:border-white/[0.10]
+`;
+export const statusNeutral = `
+  bg-stone-100 text-stone-600 border border-stone-200/70
+  dark:bg-white/[0.08] dark:text-[#bdbdbf] dark:border-white/[0.10]
+`;
+
+/**
+ * Toast shape + elevation only — the semantic tint (and its border) comes from a
+ * `status*` token composed alongside this. Matte, no solid saturated block.
+ */
+export const toastBase = `
+  flex items-center gap-3 min-w-[280px] px-4 py-3 rounded-2xl shadow-lg
 `;
 
 /* ── Nav ── */

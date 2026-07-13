@@ -182,7 +182,7 @@ function SectionHeader({
 
 export default function HomePage() {
   return (
-    <div className={pageShell} style={{ fontFamily: fontStack }}>
+    <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
       {/* Ambient backgrounds — light gets its own warm treatment */}
       <div
         className="fixed inset-0 -z-10 pointer-events-none dark:hidden"

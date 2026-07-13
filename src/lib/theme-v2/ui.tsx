@@ -203,3 +203,93 @@ export function LoadingDot() {
     />
   );
 }
+
+/* ── Switch (on/off toggle) ── */
+
+type SwitchProps = {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  id?: string;
+  disabled?: boolean;
+  /** Accessible name when there is no visible <label htmlFor>. */
+  label?: string;
+};
+
+/** Matte on/off switch. Track fills with the accent when on — no glow. */
+export function Switch({ checked, onCheckedChange, id, disabled, label }: SwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={`
+        relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent
+        transition-colors duration-150 motion-reduce:transition-none
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+        focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
+        focus-visible:ring-offset-[#faf8f4] dark:focus-visible:ring-offset-[#050505]
+        disabled:opacity-50 disabled:cursor-not-allowed
+        ${checked ? "bg-[#ea580c] dark:bg-[#ff914d]" : "bg-stone-200 dark:bg-white/[0.12]"}
+      `}
+    >
+      <span
+        className={`
+          inline-block h-5 w-5 rounded-full bg-white shadow-sm
+          transition-transform duration-150 motion-reduce:transition-none
+          ${checked ? "translate-x-[22px]" : "translate-x-0.5"}
+        `}
+      />
+    </button>
+  );
+}
+
+/* ── Option card (selectable radio-card) ── */
+
+type OptionCardProps = {
+  selected: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+  className?: string;
+  disabled?: boolean;
+};
+
+/** Selectable card. Selected = accent outline + warm tint; rest = neutral tile. */
+export function OptionCard({
+  selected,
+  onSelect,
+  children,
+  className = "",
+  disabled,
+}: OptionCardProps) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`
+        w-full text-left rounded-[18px] p-4
+        transition-[border-color,box-shadow,background-color] duration-150 motion-reduce:transition-none
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+        focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
+        focus-visible:ring-offset-[#faf8f4] dark:focus-visible:ring-offset-[#050505]
+        disabled:opacity-50 disabled:cursor-not-allowed
+        ${
+          selected
+            ? `border border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7]
+               dark:border-[#ff914d] dark:ring-[#ff914d]/25 dark:bg-[rgba(255,145,77,0.10)]`
+            : `border border-[#ede5d9] bg-[#faf7f2] hover:border-[#d9d0c1]
+               dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.16]`
+        }
+        ${className}
+      `}
+    >
+      {children}
+    </button>
+  );
+}

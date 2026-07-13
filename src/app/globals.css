@@ -56,11 +56,15 @@ body {
   .dot {
     width: 12px;
     height: 12px;
-    background: #ff8c42;
+    background: #ea580c;
     border-radius: 50%;
     margin: 0 auto 20px;
     animation: sa-dot-pulse 1.5s infinite;
     flex-shrink: 0;
+  }
+
+  .dark .dot {
+    background: #ff914d;
   }
 
   .dot.dot--inline {
