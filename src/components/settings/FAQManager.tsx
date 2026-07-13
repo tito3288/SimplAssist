@@ -19,6 +19,9 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   const [showAddForm, setShowAddForm] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  // Scoped to the acting control ('add' or an FAQ id) so the message renders
+  // where the user is looking, not off-viewport atop a long list.
+  const [actionError, setActionError] = useState<{ scope: string; message: string } | null>(null);
 
   const [newQuestion, setNewQuestion] = useState('');
   const [newAnswer, setNewAnswer] = useState('');
@@ -39,6 +42,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   const handleAdd = async () => {
     if (!newQuestion.trim() || !newAnswer.trim()) return;
     setSaving('add');
+    setActionError(null);
     try {
       const { data, error } = await supabase
         .from('faqs')
@@ -57,7 +61,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
       setNewAnswer('');
       setShowAddForm(false);
     } catch {
-      // Handle silently
+      setActionError({ scope: 'add', message: 'Could not add the FAQ. Please try again.' });
     } finally {
       setSaving(null);
     }
@@ -65,6 +69,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   const handleEdit = async (id: string) => {
     setSaving(id);
+    setActionError(null);
     try {
       const { error } = await supabase
         .from('faqs')
@@ -76,35 +81,42 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
       );
       setExpandedId(null);
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not save the FAQ. Please try again.' });
     } finally {
       setSaving(null);
     }
   };
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
+    setActionError(null);
     try {
       const { error } = await supabase.from('faqs').update({ is_active: !isActive }).eq('id', id);
       if (error) throw error;
       setFaqs((prev) => prev.map((f) => (f.id === id ? { ...f, is_active: !isActive } : f)));
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not update the FAQ. Please try again.' });
     }
   };
 
   const handleDelete = async (id: string) => {
     setSaving(id);
+    setActionError(null);
     try {
       const { error } = await supabase.from('faqs').delete().eq('id', id);
       if (error) throw error;
       setFaqs((prev) => prev.filter((f) => f.id !== id));
       setDeleteConfirmId(null);
     } catch {
-      // Handle silently
+      setActionError({ scope: id, message: 'Could not delete the FAQ. Please try again.' });
     } finally {
       setSaving(null);
     }
   };
+
+  const errorFor = (scope: string, className = '') =>
+    actionError?.scope === scope ? (
+      <p className={`text-sm text-red-600 dark:text-red-400 ${className}`}>{actionError.message}</p>
+    ) : null;
 
   const startEdit = (faq: FAQ) => {
     setEditQuestion(faq.question);
@@ -114,6 +126,13 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   return (
     <div className="space-y-4">
+      {/* Fallback for an error scoped to a row that no longer renders (e.g.
+          a slow failing toggle racing a successful delete) — without this
+          the failure would be silent again. */}
+      {actionError && actionError.scope !== 'add' &&
+        !faqs.some((f) => f.id === actionError.scope) &&
+        errorFor(actionError.scope)}
+
       {faqs.length === 0 && !showAddForm && (
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] text-center py-4">No FAQs yet. Add your first FAQ below.</p>
       )}
@@ -187,6 +206,8 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                 )}
               </div>
 
+              {errorFor(faq.id, 'px-3 pb-2')}
+
               {expandedId === faq.id && (
                 <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
                   <input
@@ -248,10 +269,11 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
             rows={3}
             className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 resize-none"
           />
+          {errorFor('add')}
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => { setShowAddForm(false); setNewQuestion(''); setNewAnswer(''); }}
+              onClick={() => { setShowAddForm(false); setNewQuestion(''); setNewAnswer(''); setActionError(null); }}
               className="px-3 py-1.5 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             >
               Cancel

@@ -11,6 +11,15 @@ export function generateSlug(name: string | null | undefined): string {
   const raw = (name ?? "").toLowerCase();
   const kebab = raw.replace(/[^a-z0-9]+/g, "-").replace(/(^-+)|(-+$)/g, "");
   const trimmed = kebab.slice(0, MAX_BASE_LENGTH);
+  // 'deleted-' is a reserved namespace: the account-cleanup RPC rewrites a
+  // tombstone's slug to 'deleted-<business-uuid>' under the UNIQUE index, and
+  // a name-derived slug squatting that value would make the scrub transaction
+  // fail forever (business ids are public via the widget embed snippet).
+  // ensureUniqueSlug's collision suffix appends to the base, so guarding the
+  // base is sufficient.
+  if (trimmed.startsWith("deleted-")) {
+    return `biz-${trimmed}`.slice(0, MAX_BASE_LENGTH);
+  }
   return trimmed || FALLBACK_BASE;
 }
 
