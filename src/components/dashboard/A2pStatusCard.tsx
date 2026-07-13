@@ -2,7 +2,8 @@
 
 import { Building2, Link2, MessageSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
-import { glassCard, orangeAccentIcon, textPrimary, textSecondary } from '@/lib/glass';
+import { orangeAccentIcon } from '@/lib/glass';
+import { card, ink, body, statusDanger } from '@/lib/theme-v2/theme';
 import { formatDate } from '@/lib/utils';
 import type {
   CampaignAssignmentStatus,
@@ -54,7 +55,7 @@ function RejectionBanner({
   mailto: string;
 }) {
   return (
-    <div className="mt-3 ml-11 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 dark:border-red-500/20 dark:bg-[rgba(239,68,68,.08)]">
+    <div className={`mt-3 ml-11 rounded-[18px] px-4 py-3 ${statusDanger}`}>
       <p className="text-sm font-medium text-red-700 dark:text-red-400">
         Your registration needs an update before it can be approved.
       </p>
@@ -90,12 +91,12 @@ function StatusRow({
     <div>
       <div className="flex items-center gap-3">
         <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-          <Icon className="w-5 h-5 text-[#ff914d]" />
+          <Icon className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium ${textPrimary}`}>{title}</p>
+          <p className={`text-sm font-medium ${ink}`}>{title}</p>
           {updatedAt && (
-            <p className={`text-xs ${textSecondary}`}>
+            <p className={`text-xs ${body}`}>
               Updated {formatDate(updatedAt, 'PP')}
             </p>
           )}
@@ -120,11 +121,11 @@ function AssignmentRow({
     <div>
       <div className="flex items-center gap-3">
         <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-          <Link2 className="w-5 h-5 text-[#ff914d]" />
+          <Link2 className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium ${textPrimary}`}>Phone number assignment</p>
-          <p className={`text-xs ${textSecondary}`}>
+          <p className={`text-sm font-medium ${ink}`}>Phone number assignment</p>
+          <p className={`text-xs ${body}`}>
             Your Telnyx number must be linked to the approved SMS campaign.
           </p>
         </div>
@@ -164,11 +165,11 @@ function SmsLiveRow({
   return (
     <div className="flex items-center gap-3">
       <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-        <Send className="w-5 h-5 text-[#ff914d]" />
+        <Send className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${textPrimary}`}>SMS sending</p>
-        <p className={`text-xs ${textSecondary}`}>
+        <p className={`text-sm font-medium ${ink}`}>SMS sending</p>
+        <p className={`text-xs ${body}`}>
           {smsReady ? smsReadyCopy(null) : smsReadyCopy(blockReason)}
         </p>
       </div>
@@ -198,12 +199,12 @@ export default function A2pStatusCard({
   if (!brandStatus && !campaignStatus) return null;
 
   return (
-    <div className={`p-5 ${glassCard}`}>
+    <div className={`p-5 ${card}`}>
       <div className="mb-4">
-        <p className={`text-sm font-semibold ${textPrimary}`}>
+        <p className={`text-sm font-semibold ${ink}`}>
           SMS registration status
         </p>
-        <p className={`text-xs ${textSecondary}`}>
+        <p className={`text-xs ${body}`}>
           Carriers (AT&T, T-Mobile, Verizon) review every new business sending SMS. This usually takes 1–5 days.
         </p>
       </div>

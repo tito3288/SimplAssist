@@ -29,8 +29,8 @@ export const glassInput = `
 
 export const orangeAccentIcon = `
   rounded-xl
-  bg-orange-100 dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
-  border border-orange-200 dark:border-white/[0.10]
+  bg-[#fdf1e7] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
+  border border-[#f5dcc4] dark:border-white/[0.10]
 `;
 
 export const textPrimary = "text-slate-900 dark:text-[#f5f5f5]";

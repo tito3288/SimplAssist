@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
-import { glassCard } from '@/lib/glass';
+import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 
@@ -86,29 +86,29 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-[#f5f5f5]">
+        <p className="text-3xl sm:text-4xl font-bold tracking-tight text-stone-900 dark:text-[#f5f5f5]">
           {welcomeLine}
         </p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-[#f5f5f5]">Dashboard</h1>
-        <p className="mt-1 text-slate-500 dark:text-[#bdbdbf]">Overview of your business activity.</p>
+        <h1 className="mt-2 text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Dashboard</h1>
+        <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Overview of your business activity.</p>
       </div>
 
       {/* Calendar connection warning */}
       {!calendarToken && (
-        <div className={`p-4 ${glassCard} border-amber-500/30 dark:border-amber-500/30`}>
+        <div className={`p-4 ${card} border-amber-200 dark:border-amber-500/30`}>
           <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)] flex-shrink-0" />
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">
+              <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
                 Google Calendar not connected
               </p>
-              <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-0.5">
+              <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-0.5">
                 Connect your Google Calendar to let your AI check availability and book appointments for customers automatically.
               </p>
             </div>
             <Link
               href="/settings"
-              className="px-4 py-2 text-sm font-medium rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+              className="px-4 py-2 text-sm font-medium rounded-full bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] transition-colors whitespace-nowrap"
             >
               Connect Now
             </Link>

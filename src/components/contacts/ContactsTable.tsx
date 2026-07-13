@@ -11,7 +11,14 @@ import {
 import { formatPhoneNumber } from "@/lib/utils";
 import type { Contact, Conversation } from "@/types/database";
 import ContactDetail from "./ContactDetail";
-import { glassCard, glassInput, textPrimary, textSecondary } from "@/lib/glass";
+import {
+  card,
+  ink,
+  body,
+  statusSuccess,
+  statusWarning,
+  statusNeutral,
+} from "@/lib/theme-v2/theme";
 
 type Filter = "all" | "sms" | "web_chat" | "hot";
 type Sort = "recent" | "score" | "name";
@@ -41,13 +48,13 @@ function relativeTime(date: string): string {
 }
 
 function LeadBadge({ score }: { score: number }) {
-  let color = "bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-[#bdbdbf]";
+  let color = statusNeutral;
   let label = "Cold";
   if (score >= 7) {
-    color = "bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400";
+    color = statusSuccess;
     label = "Hot";
   } else if (score >= 4) {
-    color = "bg-yellow-100 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400";
+    color = statusWarning;
     label = "Warm";
   }
   return (
@@ -152,27 +159,27 @@ export default function ContactsTable({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Search */}
         <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-[#666]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400 dark:text-[#666]" />
           <input
             type="text"
             placeholder="Search contacts..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`w-full rounded-[22px] py-2 pl-9 pr-3 text-sm focus:outline-none ${glassInput}`}
+            className="w-full rounded-[22px] py-2 pl-9 pr-3 text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 transition-[border-color,box-shadow] duration-150"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Filters */}
-          <div className="flex rounded-[22px] border border-slate-200 dark:border-white/[0.10] bg-white/70 dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.05))] backdrop-blur-[18px] overflow-hidden">
+          <div className="flex rounded-[22px] border border-[#ece4d8] dark:border-white/[0.10] bg-[#faf7f2] dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03))] overflow-hidden">
             {filters.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={`px-3 py-1.5 text-xs font-medium transition ${
                   filter === f.key
-                    ? "bg-[#ff914d] text-white dark:text-[#111]"
-                    : "text-slate-500 dark:text-[#bdbdbf] hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+                    ? "bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]"
+                    : "text-stone-600 dark:text-[#bdbdbf] hover:bg-[#faf6ef] dark:hover:bg-white/[0.06]"
                 } ${f.key === "all" ? "rounded-l-[22px]" : ""} ${
                   f.key === "hot" ? "rounded-r-[22px]" : ""
                 }`}
@@ -187,7 +194,7 @@ export default function ContactsTable({
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as Sort)}
-              className={`appearance-none rounded-[22px] py-1.5 pl-3 pr-8 text-xs font-medium focus:outline-none ${glassInput}`}
+              className="appearance-none rounded-[22px] py-1.5 pl-3 pr-8 text-xs font-medium bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 transition-[border-color,box-shadow] duration-150"
             >
               {sorts.map((s) => (
                 <option key={s.key} value={s.key}>
@@ -195,22 +202,22 @@ export default function ContactsTable({
                 </option>
               ))}
             </select>
-            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-[#666]" />
+            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400 dark:text-[#666]" />
           </div>
         </div>
       </div>
 
       {/* Table */}
-      <div className={`mt-4 overflow-hidden ${glassCard}`}>
+      <div className={`mt-4 overflow-hidden ${card}`}>
         {filtered.length === 0 ? (
-          <div className={`px-6 py-12 text-center text-sm ${textSecondary}`}>
+          <div className={`px-6 py-12 text-center text-sm ${body}`}>
             No contacts found
           </div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full min-w-[600px]">
             <thead>
-              <tr className={`border-b border-slate-100 dark:border-white/[0.06] bg-slate-50/50 dark:bg-white/[0.03] text-left text-xs font-medium uppercase tracking-wider ${textSecondary}`}>
+              <tr className={`border-b border-[#ece4d8] dark:border-white/[0.06] bg-[#faf7f2] dark:bg-white/[0.03] text-left text-xs font-medium uppercase tracking-wider ${body}`}>
                 <th className="px-6 py-3">Name</th>
                 <th className="px-6 py-3 hidden sm:table-cell">Phone</th>
                 <th className="px-6 py-3 hidden md:table-cell">Email</th>
@@ -220,38 +227,38 @@ export default function ContactsTable({
                 <th className="px-6 py-3 hidden lg:table-cell">Last Contact</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-white/[0.06]">
+            <tbody className="divide-y divide-[#ece4d8] dark:divide-white/[0.06]">
               {filtered.map((contact) => (
                 <tr
                   key={contact.id}
                   onClick={() => setSelectedContact(contact)}
-                  className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+                  className="cursor-pointer transition hover:bg-[#faf6ef] dark:hover:bg-white/[0.04]"
                 >
-                  <td className={`px-6 py-4 text-sm font-medium ${textPrimary}`}>
+                  <td className={`px-6 py-4 text-sm font-medium ${ink}`}>
                     {contact.name || "Unknown"}
                   </td>
-                  <td className={`hidden px-6 py-4 text-sm sm:table-cell ${textSecondary}`}>
+                  <td className={`hidden px-6 py-4 text-sm sm:table-cell ${body}`}>
                     {contact.phone_number
                       ? formatPhoneNumber(contact.phone_number)
                       : "\u2014"}
                   </td>
-                  <td className={`hidden px-6 py-4 text-sm md:table-cell ${textSecondary}`}>
+                  <td className={`hidden px-6 py-4 text-sm md:table-cell ${body}`}>
                     {contact.email || "\u2014"}
                   </td>
                   <td className="px-6 py-4">
                     {contact.source_channel === "sms" ? (
-                      <Phone className="h-4 w-4 text-[#ff914d]" />
+                      <Phone className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d]" />
                     ) : (
-                      <MessageCircle className="h-4 w-4 text-violet-500 dark:text-violet-400" />
+                      <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                     )}
                   </td>
                   <td className="px-6 py-4">
                     <LeadBadge score={contact.lead_score} />
                   </td>
-                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${textSecondary}`}>
+                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${body}`}>
                     {contact.conversation_count}
                   </td>
-                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${textSecondary}`}>
+                  <td className={`hidden px-6 py-4 text-sm lg:table-cell ${body}`}>
                     {relativeTime(contact.last_contacted_at)}
                   </td>
                 </tr>

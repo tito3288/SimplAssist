@@ -78,8 +78,8 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
               onClick={() => setMobileOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-full text-sm font-medium transition-colors ${
                 isActive
-                  ? "bg-[rgba(255,145,77,.12)] dark:bg-[rgba(255,145,77,.15)] text-[#ff914d] border border-[rgba(255,145,77,.20)]"
-                  : "text-slate-600 dark:text-[#bdbdbf] hover:bg-slate-100 dark:hover:bg-white/[0.06] hover:text-slate-900 dark:hover:text-white border border-transparent"
+                  ? "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.15)] text-[#c2410c] dark:text-[#ff914d] border border-[#f5dcc4] dark:border-[rgba(255,145,77,.20)]"
+                  : "text-stone-600 dark:text-[#bdbdbf] hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-900 dark:hover:text-white border border-transparent"
               }`}
             >
               <item.icon className="h-5 w-5" />
@@ -89,9 +89,9 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
         })}
       </nav>
 
-      <div className="p-4 border-t border-slate-200 dark:border-white/[0.10] shrink-0">
+      <div className="p-4 border-t border-[#ece4d8] dark:border-white/[0.10] shrink-0">
         <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1.5 items-start">
-          <p className="text-xs leading-snug text-slate-500 dark:text-[#bdbdbf] truncate min-w-0 col-start-1 row-start-1">
+          <p className="text-xs leading-snug text-stone-500 dark:text-[#bdbdbf] truncate min-w-0 col-start-1 row-start-1">
             {userEmail}
           </p>
           {websiteUrl && (
@@ -99,7 +99,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
               href={websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs leading-snug text-[#ff914d] hover:text-[#ffb07a] truncate block col-start-1 row-start-2 mb-2 transition-colors"
+              className="text-xs leading-snug text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] truncate block col-start-1 row-start-2 mb-2 transition-colors"
             >
               {formatWebsiteUrl(websiteUrl)}
             </a>
@@ -112,7 +112,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
         </div>
         <button
           onClick={handleSignOut}
-          className="flex items-center gap-2 text-sm text-slate-600 dark:text-[#bdbdbf] hover:text-slate-900 dark:hover:text-white transition-colors"
+          className="flex items-center gap-2 text-sm text-stone-600 dark:text-[#bdbdbf] hover:text-stone-900 dark:hover:text-white transition-colors"
         >
           <LogOut className="h-4 w-4" />
           Log Out
@@ -124,7 +124,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
   return (
     <>
       {/* Mobile header: logo left, menu right */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-3 bg-white/85 dark:bg-[rgba(18,18,20,0.92)] backdrop-blur-[14px] border-b border-slate-200/60 dark:border-white/[0.10]">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-3 bg-white/85 dark:bg-[rgba(18,18,20,0.92)] backdrop-blur-[14px] border-b border-[#ece4d8] dark:border-white/[0.10]">
         <Link href="/dashboard" className="flex items-center shrink-0 min-w-0" onClick={() => setMobileOpen(false)}>
           <Image
             src="/logo-dark.png"
@@ -148,7 +148,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
           onClick={() => setMobileOpen((o) => !o)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen}
-          className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[#FF8533] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF8533]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
+          className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[#ea580c] dark:text-[#ff914d] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50 dark:focus-visible:ring-[#ff914d]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
         >
           <StaggeredMenuIcon open={mobileOpen} />
         </button>
@@ -166,7 +166,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
       <aside
         className={`lg:hidden fixed z-50 w-[min(16rem,calc(100vw-1.5rem))] left-3 top-3 bottom-3 flex flex-col
           bg-white/95 dark:bg-[rgba(18,18,20,0.94)] backdrop-blur-[20px] backdrop-saturate-[1.4]
-          border border-slate-200/80 dark:border-white/[0.12]
+          border border-[#ece4d8] dark:border-white/[0.12]
           rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.18)] dark:shadow-[0_24px_64px_rgba(0,0,0,0.55)]
           transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] overflow-hidden
           ${mobileOpen ? "translate-x-0" : "-translate-x-[calc(100%+14px)]"}`}
@@ -179,7 +179,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
         className="hidden lg:flex flex-col flex-shrink-0 w-64 h-[calc(100dvh-2.5rem)] max-h-[calc(100dvh-2.5rem)]
           rounded-[28px] overflow-hidden
           bg-white/90 dark:bg-[rgba(20,20,24,0.92)] backdrop-blur-[20px] backdrop-saturate-[1.4]
-          border border-slate-200/80 dark:border-white/[0.12]
+          border border-[#ece4d8] dark:border-white/[0.12]
           shadow-[0_20px_60px_rgba(0,0,0,0.08)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.55)]
           lg:sticky lg:top-5 lg:self-start"
       >

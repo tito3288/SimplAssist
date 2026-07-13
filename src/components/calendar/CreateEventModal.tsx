@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { authInputClass, primaryCtaClass, textSecondary } from "@/lib/glass";
+import { inputField, btnPrimaryWide, body } from "@/lib/theme-v2/theme";
 import { Loader2 } from "lucide-react";
 
 interface CreateEventModalProps {
@@ -128,7 +128,7 @@ export default function CreateEventModal({
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Title */}
         <div>
-          <label className={`block text-xs font-medium mb-1.5 ${textSecondary}`}>
+          <label className={`block text-xs font-medium mb-1.5 ${body}`}>
             Title
           </label>
           <input
@@ -136,7 +136,7 @@ export default function CreateEventModal({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Event title"
-            className={authInputClass}
+            className={inputField}
             autoFocus
           />
         </div>
@@ -144,32 +144,32 @@ export default function CreateEventModal({
         {/* Time inputs */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={`block text-xs font-medium mb-1.5 ${textSecondary}`}>
+            <label className={`block text-xs font-medium mb-1.5 ${body}`}>
               Start Time
             </label>
             <input
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              className={`${authInputClass} [color-scheme:dark]`}
+              className={`${inputField} [color-scheme:light] dark:[color-scheme:dark]`}
             />
           </div>
           <div>
-            <label className={`block text-xs font-medium mb-1.5 ${textSecondary}`}>
+            <label className={`block text-xs font-medium mb-1.5 ${body}`}>
               End Time
             </label>
             <input
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
-              className={`${authInputClass} [color-scheme:dark]`}
+              className={`${inputField} [color-scheme:light] dark:[color-scheme:dark]`}
             />
           </div>
         </div>
 
         {/* Description */}
         <div>
-          <label className={`block text-xs font-medium mb-1.5 ${textSecondary}`}>
+          <label className={`block text-xs font-medium mb-1.5 ${body}`}>
             Description (optional)
           </label>
           <textarea
@@ -177,7 +177,7 @@ export default function CreateEventModal({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Add a description..."
             rows={3}
-            className={`${authInputClass} resize-none`}
+            className={`${inputField} resize-none`}
           />
         </div>
 
@@ -190,7 +190,7 @@ export default function CreateEventModal({
         <button
           type="submit"
           disabled={submitting}
-          className={primaryCtaClass}
+          className={btnPrimaryWide}
         >
           {submitting ? (
             <>
