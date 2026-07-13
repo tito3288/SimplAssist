@@ -29,6 +29,7 @@ import {
   SUPPORT_EMAIL,
   type RejectionKind,
 } from '@/lib/onboarding/rejectionGuidance';
+import { tile, statusWarning } from '@/lib/theme-v2/theme';
 import type { BusinessType } from '@/types/database';
 
 type StateResponse = {
@@ -136,7 +137,7 @@ export default function OnboardingPage() {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
         <PulsingDot />
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">Loading your setup...</p>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">Loading your setup...</p>
       </div>
     );
   }
@@ -222,7 +223,7 @@ export default function OnboardingPage() {
         {step === 'sms_use_case' && (
           <div className="space-y-4">
             {state.registration.status === 'failed' && state.registration.error && (
-              <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <div className={`rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}>
                 {state.registration.error}
               </div>
             )}
@@ -320,14 +321,14 @@ function ProgressNote({
     : null;
 
   return (
-    <div className="mb-5 rounded-[18px] border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-600 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
+    <div className="mb-5 rounded-[18px] border border-[#ede5d9] bg-[#faf7f2] px-4 py-3 text-sm text-stone-600 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <span>
           {savedAt
             ? `Your progress is saved. Last saved at ${savedAt}.`
             : 'This step saves when you continue.'}
         </span>
-        <span className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-[#888]">
+        <span className="inline-flex items-center gap-2 text-xs text-stone-500 dark:text-[#888]">
           {refreshing && <PulsingDot inline />}
           Continue setup: {ONBOARDING_STEP_LABELS[step]}
         </span>
@@ -350,11 +351,11 @@ function PhoneNumberStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-orange-100 dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))] border border-orange-200 dark:border-white/[0.10] mb-4">
-          <Phone className="w-6 h-6 text-[#ff914d]" />
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#fdf1e7] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))] border border-[#f5dcc4] dark:border-white/[0.10] mb-4">
+          <Phone className="w-6 h-6 text-[#c2410c] dark:text-[#ff914d]" />
         </div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Choose a phone number for your AI assistant</h2>
-        <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">Choose a phone number for your AI assistant</h2>
+        <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
           Customers can call or text this number. SMS activates after carrier approval.
         </p>
       </div>
@@ -370,7 +371,7 @@ function PhoneNumberStep({
         <button
           type="button"
           onClick={onBack}
-          className="py-2 px-6 border border-slate-200 dark:border-white/[0.12] text-slate-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors"
+          className="py-2 px-6 border border-[#e7e0d4] dark:border-white/[0.12] text-stone-700 dark:text-[#bdbdbf] font-medium rounded-full hover:bg-[#faf6ef] dark:hover:bg-white/[0.06] transition-colors"
         >
           Back
         </button>
@@ -378,7 +379,7 @@ function PhoneNumberStep({
           type="button"
           onClick={onNext}
           disabled={!state.phoneNumber}
-          className="py-2 px-6 bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] font-medium rounded-full shadow-[0_14px_34px_rgba(255,145,77,.26)] hover:bg-orange-600 dark:hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="py-2 px-6 bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] text-white font-medium rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Next
         </button>
@@ -391,11 +392,11 @@ function PhoneNumberStep({
 // variants: hover shows the address and right-click/long-press can copy it,
 // which a scripted window.location button can't offer.
 const SUPPORT_LINK_BASE =
-  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#ff914d]';
+  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#ea580c] dark:focus:ring-[#ff914d]';
 const SUPPORT_LINK_PRIMARY =
-  'bg-orange-500 dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] text-white dark:text-[#111] hover:bg-orange-600 dark:hover:brightness-110 shadow-[0_14px_34px_rgba(255,145,77,.26)]';
+  'bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33]';
 const SUPPORT_LINK_SECONDARY =
-  'bg-white dark:bg-transparent dark:bg-white/[0.08] text-slate-700 dark:text-white border border-slate-300 dark:border-white/[0.10] hover:bg-slate-50 dark:hover:bg-white/[0.12]';
+  'bg-white text-stone-700 border border-[#e7e0d4] hover:bg-[#faf6ef] hover:border-[#d9d0c1] dark:bg-white/[0.07] dark:text-white dark:border-white/[0.12] dark:hover:bg-white/[0.11]';
 
 function CarrierReviewStatus({
   state,
@@ -554,27 +555,27 @@ function CarrierReviewStatus({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-orange-200 bg-orange-100 dark:border-white/[0.10] dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]">
+        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[#f5dcc4] bg-[#fdf1e7] dark:border-white/[0.10] dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]">
           {registration.smsReady ? (
             <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
           ) : registration.status === 'failed' || registration.brandStatus === 'rejected' || registration.campaignStatus === 'rejected' ? (
-            <AlertTriangle className="h-6 w-6 text-[#ff914d]" />
+            <AlertTriangle className="h-6 w-6 text-[#c2410c] dark:text-[#ff914d]" />
           ) : (
-            <Clock className="h-6 w-6 text-[#ff914d]" />
+            <Clock className="h-6 w-6 text-[#c2410c] dark:text-[#ff914d]" />
           )}
         </div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">{title}</h2>
-        <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">{copy}</p>
+        <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">{title}</h2>
+        <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">{copy}</p>
         {registration.riskReview.registrationStarted &&
           registration.status !== 'failed' &&
           !registration.smsReady && (
-            <p className="mt-2 text-sm text-slate-500 dark:text-[#bdbdbf]">
+            <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
               Business and compliance details are locked until review completes. Contact support if you need to change them.
             </p>
           )}
       </div>
 
-      <div className="space-y-3 rounded-[22px] border border-slate-200 bg-white/60 p-4 dark:border-white/[0.10] dark:bg-white/[0.04]">
+      <div className={`space-y-3 p-4 ${tile}`}>
         <StatusLine label="Business verification" value={registration.brandStatus ?? 'not submitted'} />
         <StatusLine label="SMS campaign" value={registration.campaignStatus ?? 'not submitted'} />
         <StatusLine label="Phone number link" value={registration.assignmentStatus ?? 'not assigned'} />
@@ -582,7 +583,7 @@ function CarrierReviewStatus({
       </div>
 
       {(retryError || (rejectionKind && carrierReason) || secondaryCarrierReason || extraError || assignmentNote) && (
-        <div className="space-y-2 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className={`space-y-2 rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}>
           {retryError && <p>{retryError}</p>}
           {rejectionKind && carrierReason && (
             displayFriendlyReason ? (
@@ -676,7 +677,7 @@ function StatusLine({ label, value }: { label: string; value: string }) {
 
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-slate-600 dark:text-[#bdbdbf]">{label}</span>
+      <span className="text-sm text-stone-600 dark:text-[#bdbdbf]">{label}</span>
       <Badge variant={variant}>{normalized}</Badge>
     </div>
   );

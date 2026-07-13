@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { body, bodyFaint, card, statusDanger, statusNeutral, tile } from "@/lib/theme-v2/theme";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
@@ -105,7 +106,7 @@ export default async function AdminPage() {
     <main className="space-y-8">
       <section>
         <h1 className="text-2xl font-bold">Admin</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className={`mt-1 text-sm ${bodyFaint}`}>
           A2P review queue, billing flags, usage, and high-usage visibility.
         </p>
       </section>
@@ -118,7 +119,7 @@ export default async function AdminPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Accounts</h2>
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-white/[0.10] dark:bg-white/[0.04]">
+        <div className={`overflow-hidden ${card}`}>
           {(businesses ?? []).map((business) => {
             const subscription = subscriptionByBusiness.get(business.id);
             const usage = latestUsageByBusiness.get(business.id);
@@ -137,12 +138,12 @@ export default async function AdminPage() {
               <Link
                 key={business.id}
                 href={`/admin/${business.id}`}
-                className="block border-b border-slate-100 px-4 py-4 last:border-b-0 hover:bg-slate-50 dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
+                className="block border-b border-[#f0e9de] px-4 py-4 last:border-b-0 hover:bg-[#faf6ef] dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <p className="font-medium">{business.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
                       {business.website_url ?? "No website"} · {business.business_type ?? "unknown"}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -155,7 +156,7 @@ export default async function AdminPage() {
                       {business.billing_exempt && <Badge>Billing exempt</Badge>}
                     </div>
                   </div>
-                  <div className="text-sm text-slate-600 dark:text-[#bdbdbf] md:text-right">
+                  <div className={`text-sm ${body} md:text-right`}>
                     <p>{subscription?.plan ?? "no plan"} · {subscription?.status ?? "no subscription"}</p>
                     <p>{used.toLocaleString()} / {included.toLocaleString()} SMS parts ({usagePercent}%)</p>
                     <p>Rough margin: ${roughMargin.toFixed(2)}</p>
@@ -172,8 +173,8 @@ export default async function AdminPage() {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-white/[0.10] dark:bg-white/[0.04]">
-      <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">{label}</p>
+    <div className={`p-4 ${tile}`}>
+      <p className={`text-sm ${bodyFaint}`}>{label}</p>
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </div>
   );
@@ -189,9 +190,7 @@ function Badge({
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs ${
-        tone === "danger"
-          ? "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300"
-          : "bg-slate-100 text-slate-600 dark:bg-white/[0.08] dark:text-[#d8d8d8]"
+        tone === "danger" ? statusDanger : statusNeutral
       }`}
     >
       {children}

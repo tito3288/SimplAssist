@@ -6,6 +6,8 @@ import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 import type { OnboardingState } from '@/lib/onboarding/types';
 import type { SubscriptionPlan } from '@/types/database';
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
+import { tile, statusSuccess, statusWarning, statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
+import { cn } from "@/lib/utils";
 
 interface ReviewData {
   businessInfo: {
@@ -217,10 +219,10 @@ export default function ReviewAndLaunch({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">
+        <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">
           {isPaidSubscription ? 'Review & Setup Status' : 'Review & Pay'}
         </h2>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
           {isPaidSubscription
             ? 'Payment is complete. We will finish SMS setup from here without charging you again.'
             : 'Choose your plan and pay before we submit your SMS registration for carrier review.'}
@@ -230,7 +232,7 @@ export default function ReviewAndLaunch({
       <Section title={isPaidSubscription ? 'Paid Plan' : 'Plan & Setup Fee'}>
         {isPaidSubscription && paidPlan ? (
           <div className="space-y-3">
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+            <div className={cn("rounded-lg p-3 text-sm", statusSuccess)}>
               <p className="font-medium">{paidPlan.name}</p>
               <p className="mt-1">
                 ${paidPlan.price}/month · {paidPlan.includedSmsParts.toLocaleString()} included SMS parts/month
@@ -240,7 +242,7 @@ export default function ReviewAndLaunch({
               </p>
             </div>
             {launchHold && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
                 <p className="font-medium">SMS setup is paused</p>
                 <p className="mt-1">{launchHold.message}</p>
                 {launchHold.helper && (
@@ -258,8 +260,8 @@ export default function ReviewAndLaunch({
                   key={key}
                   className={`block cursor-pointer rounded-lg border p-3 text-sm ${
                     selectedPlan === key
-                      ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
-                      : 'border-slate-200 dark:border-white/[0.10]'
+                      ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                      : 'border-[#ece4d8] bg-[#faf7f2] dark:border-white/[0.10] dark:bg-white/[0.04]'
                   }`}
                 >
                   <input
@@ -271,17 +273,17 @@ export default function ReviewAndLaunch({
                     className="sr-only"
                   />
                   <span className="flex items-center justify-between gap-3">
-                    <span className="font-medium text-slate-900 dark:text-[#f5f5f5]">{plan.name}</span>
-                    <span className="text-slate-700 dark:text-[#d8d8d8]">${today} today</span>
+                    <span className="font-medium text-stone-900 dark:text-[#f5f5f5]">{plan.name}</span>
+                    <span className="text-stone-700 dark:text-[#d8d8d8]">${today} today</span>
                   </span>
-                  <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+                  <span className="mt-1 block text-xs text-stone-500 dark:text-[#bdbdbf]">
                     Then ${plan.price}/month. Includes {plan.includedSmsParts.toLocaleString()} SMS parts/month.
                   </span>
                 </label>
               );
             })}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
-              <p className="font-medium text-slate-800 dark:text-[#f5f5f5]">$25 one-time setup and SMS activation fee</p>
+            <div className={cn("rounded-lg p-3 text-xs", statusNeutral)}>
+              <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">$25 one-time setup and SMS activation fee</p>
               <p className="mt-1">
                 We use this to verify your business, register your SMS sending with carriers, activate your phone number, and set up compliance pages so your messages can be delivered reliably.
               </p>
@@ -311,8 +313,8 @@ export default function ReviewAndLaunch({
         <div className="space-y-1">
           {data.businessHours.map((day) => (
             <div key={day.day} className="flex justify-between text-sm">
-              <span className="capitalize text-slate-500 dark:text-[#bdbdbf]">{day.day}</span>
-              <span className={day.is_closed ? 'text-slate-400 dark:text-[#666]' : 'text-slate-900 dark:text-[#f5f5f5]'}>
+              <span className="capitalize text-stone-500 dark:text-[#bdbdbf]">{day.day}</span>
+              <span className={day.is_closed ? 'text-stone-400 dark:text-[#666]' : 'text-stone-900 dark:text-[#f5f5f5]'}>
                 {day.is_closed ? 'Closed' : `${formatTime(day.open_time)} - ${formatTime(day.close_time)}`}
               </span>
             </div>
@@ -405,9 +407,9 @@ export default function ReviewAndLaunch({
         {data.phoneNumber ? (
           <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
         ) : (
-          <div className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+          <div className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>
-            <p className="text-xs text-slate-400 dark:text-[#666] mt-1">
+            <p className="text-xs text-stone-400 dark:text-[#666] mt-1">
               Choose a SimplAssist number before submitting SMS registration.
             </p>
           </div>
@@ -415,7 +417,7 @@ export default function ReviewAndLaunch({
       </Section>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+        <div className={cn("rounded-lg px-4 py-3 text-sm", statusDanger)}>
           {error}
         </div>
       )}
@@ -542,13 +544,13 @@ function isNoEinHold(message: string | null): boolean {
 
 function Section({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-[22px] bg-white/50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.08] p-4">
+    <div className={cn("p-4", tile)}>
       <div className="flex justify-between items-center mb-3">
-        <h3 className="font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</h3>
+        <h3 className="font-medium text-stone-900 dark:text-[#f5f5f5]">{title}</h3>
         {onEdit && (
           <button
             onClick={onEdit}
-            className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
+            className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
           >
             Edit
           </button>
@@ -562,8 +564,8 @@ function Section({ title, onEdit, children }: { title: string; onEdit?: () => vo
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between text-sm">
-      <span className="text-slate-500 dark:text-[#bdbdbf]">{label}</span>
-      <span className="text-slate-900 dark:text-[#f5f5f5] font-medium">{value}</span>
+      <span className="text-stone-500 dark:text-[#bdbdbf]">{label}</span>
+      <span className="text-stone-900 dark:text-[#f5f5f5] font-medium">{value}</span>
     </div>
   );
 }

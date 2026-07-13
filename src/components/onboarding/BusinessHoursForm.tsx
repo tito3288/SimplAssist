@@ -75,24 +75,24 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
 
   return (
     <div className="space-y-5">
-      <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Set your business hours</h2>
-      <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">Let customers know when you&apos;re available.</p>
+      <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">Set your business hours</h2>
+      <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">Let customers know when you&apos;re available.</p>
 
       <div className="space-y-3">
         {hours.map((day, index) => (
           <div
             key={day.day}
             className={`flex items-center gap-4 p-3 rounded-lg border ${
-              day.is_closed ? 'bg-slate-50 dark:bg-white/[0.04] border-slate-200 dark:border-white/[0.10]' : 'border-slate-200 dark:border-white/[0.12]'
+              day.is_closed ? 'bg-[#faf6ef] dark:bg-white/[0.04] border-[#ece4d8] dark:border-white/[0.10]' : 'border-[#ece4d8] dark:border-white/[0.12]'
             }`}
           >
-            <span className="w-24 text-sm font-medium text-slate-700 dark:text-[#d4d4d8] capitalize">{day.day}</span>
+            <span className="w-24 text-sm font-medium text-stone-700 dark:text-[#d4d4d8] capitalize">{day.day}</span>
 
             <button
               type="button"
               onClick={() => updateDay(index, { is_closed: !day.is_closed })}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                !day.is_closed ? 'bg-[#ff914d]' : 'bg-gray-300 dark:bg-white/[0.12]'
+                !day.is_closed ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
               }`}
             >
               <span
@@ -101,7 +101,7 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
                 }`}
               />
             </button>
-            <span className="text-xs text-slate-500 dark:text-[#bdbdbf] w-12">
+            <span className="text-xs text-stone-500 dark:text-[#bdbdbf] w-12">
               {day.is_closed ? 'Closed' : 'Open'}
             </span>
 
@@ -111,14 +111,14 @@ export default function BusinessHoursForm({ businessId, initialData, onNext, onB
                   type="time"
                   value={day.open_time}
                   onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                  className="px-2 py-1 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent"
+                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d]"
                 />
-                <span className="text-slate-400 dark:text-[#666]">to</span>
+                <span className="text-stone-400 dark:text-[#666]">to</span>
                 <input
                   type="time"
                   value={day.close_time}
                   onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                  className="px-2 py-1 border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-transparent"
+                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d]"
                 />
               </div>
             )}

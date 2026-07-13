@@ -8,6 +8,7 @@ import {
 } from "@/lib/messaging/registration/riskScreening";
 import { AdminFlagForm } from "../AdminFlagForm";
 import { A2pApproveForm } from "../A2pApproveForm";
+import { card } from "@/lib/theme-v2/theme";
 
 export const dynamic = "force-dynamic";
 
@@ -94,13 +95,13 @@ export default async function AdminBusinessPage({
 
   return (
     <main className="space-y-6">
-      <Link href="/admin" className="text-sm text-[#ff914d]">
+      <Link href="/admin" className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]">
         Back to admin
       </Link>
 
       <section>
         <h1 className="text-2xl font-bold">{business.name}</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
           {business.website_url ?? "No website"} · {business.business_type_other ?? business.business_type ?? "unknown"}
         </p>
       </section>
@@ -167,7 +168,7 @@ export default async function AdminBusinessPage({
           <Block label="Opt-in description" value={business.opt_in_description} />
           <div>
             <p className="font-medium">Sample messages</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-600 dark:text-[#bdbdbf]">
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-stone-600 dark:text-[#bdbdbf]">
               {(business.sample_messages ?? []).map((sample, index) => (
                 <li key={`${index}-${sample}`}>{sample}</li>
               ))}
@@ -178,14 +179,14 @@ export default async function AdminBusinessPage({
 
       <Card title="Risk Findings">
         {(business.a2p_risk_review_findings ?? []).length === 0 ? (
-          <p className="text-sm text-slate-500">No findings stored.</p>
+          <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">No findings stored.</p>
         ) : (
           <div className="space-y-3">
             {(business.a2p_risk_review_findings ?? []).map((finding) => (
-              <div key={finding.ruleId} className="rounded-md border border-slate-200 p-3 text-sm dark:border-white/[0.10]">
+              <div key={finding.ruleId} className="rounded-md border border-[#ece4d8] p-3 text-sm dark:border-white/[0.10]">
                 <p className="font-medium">{finding.label}</p>
-                <p className="text-xs text-slate-500">{finding.severity} · {finding.source}</p>
-                <ul className="mt-2 list-disc pl-5 text-slate-600 dark:text-[#bdbdbf]">
+                <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">{finding.severity} · {finding.source}</p>
+                <ul className="mt-2 list-disc pl-5 text-stone-600 dark:text-[#bdbdbf]">
                   {finding.evidence.map((evidence) => (
                     <li key={evidence}>{evidence}</li>
                   ))}
@@ -201,7 +202,7 @@ export default async function AdminBusinessPage({
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-white/[0.10] dark:bg-white/[0.04]">
+    <section className={`${card} p-4`}>
       <h2 className="mb-3 text-lg font-semibold">{title}</h2>
       {children}
     </section>
@@ -211,7 +212,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-slate-500 dark:text-[#bdbdbf]">{label}</dt>
+      <dt className="text-stone-500 dark:text-[#bdbdbf]">{label}</dt>
       <dd className="text-right">{value}</dd>
     </div>
   );
@@ -221,7 +222,7 @@ function Block({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <p className="font-medium">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap text-slate-600 dark:text-[#bdbdbf]">
+      <p className="mt-1 whitespace-pre-wrap text-stone-600 dark:text-[#bdbdbf]">
         {value ?? "none"}
       </p>
     </div>

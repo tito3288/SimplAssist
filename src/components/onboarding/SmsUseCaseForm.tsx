@@ -22,6 +22,8 @@ import type {
 } from '@/types/database';
 import type { OnboardingRiskReviewSnapshot } from '@/lib/onboarding/types';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
+import { statusDanger, statusWarning } from '@/lib/theme-v2/theme';
+import { cn } from '@/lib/utils';
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const STOP_PATTERN = /\bstop\b/i;
@@ -118,10 +120,10 @@ const VOLUME_OPTIONS: { value: SmsUseCaseData['estimated_monthly_volume']; label
 ];
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30';
+  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30';
 
-const LABEL_CLASS = 'block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1';
-const SECTION_HEADER_CLASS = 'text-base font-semibold text-slate-900 dark:text-[#f5f5f5]';
+const LABEL_CLASS = 'block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1';
+const SECTION_HEADER_CLASS = 'text-base font-semibold text-stone-900 dark:text-[#f5f5f5]';
 
 export default function SmsUseCaseForm({
   businessId,
@@ -256,13 +258,13 @@ export default function SmsUseCaseForm({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">How your business will use SMS</h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">How your business will use SMS</h2>
+        <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
           Carriers review these examples before activating texting. Keep them limited to customer care, missed-call follow-up, and service coordination.
         </p>
       </div>
 
-      <div className="rounded-[18px] border border-orange-200 bg-orange-50/70 px-4 py-3 text-sm text-orange-900 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-100">
+      <div className="rounded-[18px] border border-[#f5dcc4] bg-[#fdf1e7] px-4 py-3 text-sm text-[#c2410c] dark:border-white/[0.10] dark:bg-[rgba(255,145,77,.12)] dark:text-[#ff914d]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>
             We prefilled this step with carrier-safe Customer Care wording to improve approval chances. Review it and edit anything that does not match {businessName || 'your business'}.
@@ -271,7 +273,7 @@ export default function SmsUseCaseForm({
             <button
               type="button"
               onClick={applyDraft}
-              className="self-start shrink-0 rounded-full border border-orange-300 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100 dark:border-orange-300/40 dark:text-orange-100 dark:hover:bg-orange-300/10"
+              className="self-start shrink-0 rounded-full border border-[#f5dcc4] px-3 py-1.5 text-xs font-semibold text-[#c2410c] hover:bg-[#fbe6d4] dark:border-white/[0.14] dark:text-[#ff914d] dark:hover:bg-[rgba(255,145,77,.10)]"
             >
               Restore recommended draft
             </button>
@@ -311,19 +313,19 @@ export default function SmsUseCaseForm({
 
       <div className="space-y-3">
         <h3 className={SECTION_HEADER_CLASS}>Sample messages (3-5)</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
           Use real examples with your actual business name. At least one sample must include STOP opt-out wording.
         </p>
 
         <div className="space-y-3">
           {sampleFields.map((field, index) => (
-            <div key={field.id} className="p-3 border border-slate-200 dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg">
+            <div key={field.id} className="p-3 border border-[#ece4d8] dark:border-white/[0.10] bg-[#faf7f2] dark:bg-white/[0.04] rounded-lg">
               <div className="flex gap-2">
                 <textarea
                   {...register(`sample_messages.${index}.value`)}
                   rows={2}
                   placeholder={`Sample message ${index + 1}`}
-                  className="flex-1 px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:border-[#ff914d] text-sm resize-none"
+                  className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d] text-sm resize-none"
                 />
                 {sampleFields.length > 3 && (
                   <button
@@ -355,7 +357,7 @@ export default function SmsUseCaseForm({
           <button
             type="button"
             onClick={() => appendSample({ value: '' })}
-            className="text-sm text-[#ff914d] hover:text-[#ffb07a] font-medium"
+            className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
           >
             + Add sample message
           </button>
@@ -364,7 +366,7 @@ export default function SmsUseCaseForm({
 
       <div className="space-y-3">
         <h3 className={SECTION_HEADER_CLASS}>Opt-in description</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
           Tell carriers how customers agree to receive customer-care texts from your business.
         </p>
         <textarea
@@ -380,10 +382,10 @@ export default function SmsUseCaseForm({
       <div className="space-y-4">
         <div>
           <h3 className={SECTION_HEADER_CLASS}>Restricted services check</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+          <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
             Carriers block or manually review some business types and website content before SMS can be submitted.
           </p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-[#888]">
+          <p className="mt-1 text-xs text-stone-500 dark:text-[#888]">
             Examples include lead generation, SEO services, affiliate marketing, cannabis/CBD, gambling, payday loans or debt relief, adult/dating, firearms, political messaging, and other regulated services.
           </p>
         </div>
@@ -414,13 +416,13 @@ export default function SmsUseCaseForm({
             {A2P_RISK_SELECTIONS.map((selection) => (
               <label
                 key={selection}
-                className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white/70 p-3 text-sm text-slate-700 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#d4d4d8]"
+                className="flex items-start gap-2 rounded-lg border border-[#ece4d8] bg-[#faf7f2] p-3 text-sm text-stone-700 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#d4d4d8]"
               >
                 <input
                   type="checkbox"
                   value={selection}
                   {...register('a2p_risk_checklist_selections')}
-                  className="mt-0.5 h-4 w-4 rounded accent-[#ff914d]"
+                  className="mt-0.5 h-4 w-4 rounded accent-[#ea580c] dark:accent-[#ff914d]"
                 />
                 <span>{A2P_RISK_SELECTION_LABELS[selection as A2pRiskSelection]}</span>
               </label>
@@ -494,16 +496,16 @@ function ChecklistRadio({
   description: string;
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white/70 p-3 dark:border-white/[0.10] dark:bg-white/[0.04]">
+    <label className="flex items-start gap-3 rounded-lg border border-[#ece4d8] bg-[#faf7f2] p-3 dark:border-white/[0.10] dark:bg-white/[0.04]">
       <input
         type="radio"
         value={value}
         {...register('a2p_risk_checklist_answer')}
-        className="mt-1 h-4 w-4 accent-[#ff914d]"
+        className="mt-1 h-4 w-4 accent-[#ea580c] dark:accent-[#ff914d]"
       />
       <span>
-        <span className="block text-sm font-medium text-slate-900 dark:text-[#f5f5f5]">{title}</span>
-        <span className="block text-xs text-slate-500 dark:text-[#bdbdbf]">{description}</span>
+        <span className="block text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">{title}</span>
+        <span className="block text-xs text-stone-500 dark:text-[#bdbdbf]">{description}</span>
       </span>
     </label>
   );
@@ -513,11 +515,10 @@ function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
   const isBlocked = review.status === 'blocked';
   const visibleFindings = dedupeRiskFindingsByCategory(review.findings).slice(0, 3);
   return (
-    <div className={`rounded-[18px] border px-4 py-3 text-sm ${
-      isBlocked
-        ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
-        : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
-    }`}>
+    <div className={cn(
+      'rounded-[18px] px-4 py-3 text-sm',
+      isBlocked ? statusDanger : statusWarning
+    )}>
       <p className="font-medium">
         {isBlocked ? 'SMS registration cannot be submitted yet.' : 'SimplAssist needs to review this before submitting.'}
       </p>
