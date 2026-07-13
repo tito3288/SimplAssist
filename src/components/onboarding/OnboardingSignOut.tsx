@@ -24,7 +24,7 @@ export default function OnboardingSignOut() {
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className={`${secondaryCtaCompactClass} min-h-10 gap-2 bg-white/70 dark:bg-white/[0.05]`}
+      className={`${secondaryCtaCompactClass} min-h-10 gap-2`}
     >
       <LogOut className="h-4 w-4" />
       {signingOut ? 'Signing out...' : 'Sign out'}

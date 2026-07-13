@@ -68,7 +68,7 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
                   [key]: event.target.checked,
                 }))
               }
-              className="h-4 w-4 rounded accent-[#ff914d]"
+              className="h-4 w-4 rounded accent-[#ea580c] dark:accent-[#ff914d]"
             />
             {label}
           </label>
@@ -83,7 +83,7 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
           }))
         }
         placeholder="Internal notes"
-        className="min-h-20 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5]"
+        className="min-h-20 w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button

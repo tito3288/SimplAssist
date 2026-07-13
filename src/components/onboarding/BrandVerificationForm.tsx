@@ -8,6 +8,8 @@ import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
+import { statusSuccess, statusWarning } from '@/lib/theme-v2/theme';
+import { cn } from '@/lib/utils';
 
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
 const IRS_EIN_URL =
@@ -138,11 +140,11 @@ const ENTITY_TYPE_OPTIONS: { value: Exclude<BusinessEntityType, 'sole_proprietor
 ];
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-slate-200 dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-slate-900 dark:text-[#f5f5f5] placeholder:text-slate-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30';
+  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30';
 
-const LABEL_CLASS = 'block text-sm font-medium text-slate-700 dark:text-[#d4d4d8] mb-1';
+const LABEL_CLASS = 'block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1';
 
-const SECTION_HEADER_CLASS = 'text-base font-semibold text-slate-900 dark:text-[#f5f5f5]';
+const SECTION_HEADER_CLASS = 'text-base font-semibold text-stone-900 dark:text-[#f5f5f5]';
 
 function initialHasEin(initialData?: BrandVerificationInitialData): BrandVerificationData['has_ein'] | undefined {
   if (initialData?.has_ein === false) return 'no';
@@ -259,8 +261,8 @@ export default function BrandVerificationForm({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-[#f5f5f5]">Brand verification info</h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">Brand verification info</h2>
+        <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
           Carriers require this exact business identity before we can activate SMS for your account.
         </p>
       </div>
@@ -271,8 +273,8 @@ export default function BrandVerificationForm({
           <label
             className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
               hasEinAnswer === 'yes'
-                ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
-                : 'border-slate-200 bg-white/60 dark:border-white/[0.10] dark:bg-white/[0.04]'
+                ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                : 'border-[#ece4d8] bg-[#faf7f2] dark:border-white/[0.10] dark:bg-white/[0.04]'
             }`}
           >
             <input
@@ -281,10 +283,10 @@ export default function BrandVerificationForm({
               value="yes"
               className="sr-only"
             />
-            <span className="block font-medium text-slate-900 dark:text-[#f5f5f5]">
+            <span className="block font-medium text-stone-900 dark:text-[#f5f5f5]">
               Yes, I have an EIN
             </span>
-            <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+            <span className="mt-1 block text-xs text-stone-500 dark:text-[#bdbdbf]">
               Use your legal business identity for Standard Brand registration.
             </span>
           </label>
@@ -292,8 +294,8 @@ export default function BrandVerificationForm({
           <label
             className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
               hasEinAnswer === 'no'
-                ? 'border-[#ff914d] bg-orange-50 dark:bg-orange-500/10'
-                : 'border-slate-200 bg-white/60 dark:border-white/[0.10] dark:bg-white/[0.04]'
+                ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                : 'border-[#ece4d8] bg-[#faf7f2] dark:border-white/[0.10] dark:bg-white/[0.04]'
             }`}
           >
             <input
@@ -302,10 +304,10 @@ export default function BrandVerificationForm({
               value="no"
               className="sr-only"
             />
-            <span className="block font-medium text-slate-900 dark:text-[#f5f5f5]">
+            <span className="block font-medium text-stone-900 dark:text-[#f5f5f5]">
               No, I need one
             </span>
-            <span className="mt-1 block text-xs text-slate-500 dark:text-[#bdbdbf]">
+            <span className="mt-1 block text-xs text-stone-500 dark:text-[#bdbdbf]">
               We will hold setup here and show the free IRS EIN link.
             </span>
           </label>
@@ -316,7 +318,7 @@ export default function BrandVerificationForm({
       </div>
 
       {hasEinAnswer === 'no' && (
-        <div className="space-y-3 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+        <div className={cn('space-y-3 rounded-[18px] p-4 text-sm', statusWarning)}>
           <p className="font-medium">Get an EIN before SMS launch</p>
           <p>
             Don&apos;t have an EIN? You can get one free from the IRS in about 15 minutes —{' '}
@@ -335,7 +337,7 @@ export default function BrandVerificationForm({
             and choose &quot;Yes&quot; after you have your EIN.
           </p>
           {waitlistSaved && (
-            <p className="rounded-[14px] border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+            <p className={cn('rounded-[14px] px-3 py-2 text-xs font-medium', statusSuccess)}>
               You&apos;re on the no-EIN waitlist. No email will be sent in this phase.
             </p>
           )}
@@ -398,7 +400,7 @@ export default function BrandVerificationForm({
             className={INPUT_CLASS}
           />
           {errors.ein && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.ein.message}</p>}
-          <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
+          <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-1">
             Use the EIN that matches your legal business records.
           </p>
         </div>
@@ -407,7 +409,7 @@ export default function BrandVerificationForm({
       {/* Authorized representative */}
       <div className="space-y-4">
         <h3 className={SECTION_HEADER_CLASS}>Authorized representative</h3>
-        <p className="text-sm text-slate-500 dark:text-[#bdbdbf]">
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
           The person at your business authorized to register with messaging carriers.
         </p>
 
@@ -418,7 +420,7 @@ export default function BrandVerificationForm({
             {errors.authorized_rep_name && (
               <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.authorized_rep_name.message}</p>
             )}
-            <p className="text-xs text-slate-500 dark:text-[#bdbdbf] mt-1">
+            <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-1">
               Full legal name of the authorized representative.
             </p>
           </div>

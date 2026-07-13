@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
-import { glassCard } from '@/lib/glass';
+import { card, pageShell, fontStack, lightAmbient, darkAmbient } from '@/lib/theme-v2/theme';
 import { ThemeToggleV2 } from '@/lib/theme-v2/ui';
 import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
 
@@ -37,20 +37,18 @@ export default async function OnboardingLayout({
 
   return (
     <div
-      className="
-        relative min-h-screen overflow-x-hidden
-        flex flex-col items-center justify-center p-4 sm:p-6
-        bg-gradient-to-b from-slate-50 via-white to-slate-100
-        dark:bg-none dark:bg-[#050505]
-      "
+      className={`${pageShell} isolate overflow-x-hidden flex flex-col items-center justify-center p-4 sm:p-6`}
+      style={{ fontFamily: fontStack }}
     >
+      {/* Light-mode ambient gradient */}
+      <div
+        className="pointer-events-none fixed inset-0 -z-10 dark:hidden"
+        style={{ background: lightAmbient }}
+      />
       {/* Dark-mode ambient gradient */}
       <div
         className="pointer-events-none fixed inset-0 -z-10 hidden dark:block"
-        style={{
-          background:
-            "radial-gradient(circle at 85% 8%, rgba(255,145,77,.20), transparent 28%), radial-gradient(circle at 10% 35%, rgba(255,145,77,.10), transparent 22%), linear-gradient(180deg, #080808 0%, #050505 45%, #0a0a0c 100%)",
-        }}
+        style={{ background: darkAmbient }}
       />
 
       {/* Orange orbs */}
@@ -82,7 +80,7 @@ export default async function OnboardingLayout({
           <OnboardingSignOut />
           <ThemeToggleV2 />
         </div>
-        <div className={`p-6 sm:p-8 ${glassCard}`}>{children}</div>
+        <div className={`p-6 sm:p-8 ${card}`}>{children}</div>
       </div>
     </div>
   );

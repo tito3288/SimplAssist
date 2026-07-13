@@ -74,10 +74,10 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 motion-reduce:transition-none ${
                     completed
-                      ? 'bg-[#ff914d] text-white'
+                      ? 'bg-[#ea580c] dark:bg-[#ff914d] text-white dark:text-[#16100b]'
                       : isCurrent
-                      ? 'bg-[#ff914d] text-white ring-4 ring-[rgba(255,145,77,.25)]'
-                      : 'bg-slate-200 dark:bg-white/[0.08] text-slate-500 dark:text-[#666]'
+                      ? 'bg-[#ea580c] dark:bg-[#ff914d] text-white dark:text-[#16100b]'
+                      : 'bg-stone-200 dark:bg-white/[0.08] text-stone-500 dark:text-[#666]'
                   } ${isPeek ? 'opacity-45 scale-90' : 'opacity-100 scale-100'}`}
                 >
                   {completed ? (
@@ -91,8 +91,8 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
                 <span
                   className={`mt-1 w-full truncate px-1 text-center text-xs transition-[color,opacity] duration-300 motion-reduce:transition-none ${
                     step <= safeStep
-                      ? 'text-[#ff914d] font-medium'
-                      : 'text-slate-400 dark:text-[#666]'
+                      ? 'text-[#c2410c] dark:text-[#ff914d] font-medium'
+                      : 'text-stone-400 dark:text-[#666]'
                   } ${isPeek ? 'opacity-45' : 'opacity-100'} ${
                     showAllLabels || isCurrent ? '' : 'invisible'
                   }`}
@@ -110,14 +110,14 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-slate-700 dark:text-[#d4d4d8]">
+        <span className="text-sm font-medium text-stone-700 dark:text-[#d4d4d8]">
           Step {safeStep} of {STEP_LABELS.length}
         </span>
-        <span className="text-sm text-slate-500 dark:text-[#bdbdbf]">{STEP_LABELS[safeStep - 1]}</span>
+        <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">{STEP_LABELS[safeStep - 1]}</span>
       </div>
-      <div className="w-full bg-slate-200 dark:bg-white/[0.08] rounded-full h-2">
+      <div className="w-full bg-stone-200 dark:bg-white/[0.10] rounded-full h-2">
         <div
-          className="bg-[#ff914d] h-2 rounded-full transition-all duration-300"
+          className="bg-[#ea580c] dark:bg-[#ff914d] h-2 rounded-full transition-all duration-300"
           style={{ width: `${(safeStep / STEP_LABELS.length) * 100}%` }}
         />
       </div>
