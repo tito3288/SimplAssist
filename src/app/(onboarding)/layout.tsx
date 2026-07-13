@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
 import { glassCard } from '@/lib/glass';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { ThemeToggleV2 } from '@/lib/theme-v2/ui';
 import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
 
 export default async function OnboardingLayout({
@@ -80,7 +80,7 @@ export default async function OnboardingLayout({
       <div className="relative z-[1] w-full max-w-[720px]">
         <div className="mb-4 flex items-center justify-end gap-2">
           <OnboardingSignOut />
-          <ThemeToggle />
+          <ThemeToggleV2 />
         </div>
         <div className={`p-6 sm:p-8 ${glassCard}`}>{children}</div>
       </div>

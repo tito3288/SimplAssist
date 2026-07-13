@@ -65,21 +65,25 @@ export const primaryCtaClass = `
 
 const ctaPillCore = `
   inline-flex items-center justify-center rounded-full font-medium text-center transition-colors
-  focus:outline-none focus:ring-2 focus:ring-[#ff914d] focus:ring-offset-2
+  focus:outline-none focus:ring-2 focus:ring-offset-2
+  focus:ring-[#ea580c] dark:focus:ring-[#ff914d]
   disabled:opacity-50 disabled:cursor-not-allowed
 `;
 
+/* Matte primary — flat orange, darker on hover, 1px press. No glow, no gradient. */
 const ctaPrimaryColors = `
-  bg-orange-500 text-white
-  dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:text-[#111]
-  shadow-[0_14px_34px_rgba(255,145,77,.26)]
-  hover:bg-orange-600 dark:hover:brightness-110
+  bg-[#ea580c] text-white
+  hover:bg-[#c2410c] active:bg-[#9a3412] active:translate-y-px
+  dark:bg-[#ff914d] dark:text-[#16100b]
+  dark:hover:bg-[#f57f33] dark:active:bg-[#e8752c]
 `;
 
+/* Matte secondary — quiet neutral pill, warm hairline border. */
 const ctaSecondaryColors = `
-  border border-slate-200 dark:border-white/[0.12]
-  text-slate-700 dark:text-[#bdbdbf]
-  hover:bg-slate-100 dark:hover:bg-white/[0.06]
+  bg-white text-stone-700 border border-[#e7e0d4]
+  hover:bg-[#faf6ef] hover:border-[#d9d0c1] active:translate-y-px
+  dark:bg-white/[0.07] dark:text-white dark:border-white/[0.12]
+  dark:hover:bg-white/[0.11] dark:hover:border-white/[0.16]
 `;
 
 /** Standard inline primary pill (Next, Save, Launch, Subscribe, …) */
