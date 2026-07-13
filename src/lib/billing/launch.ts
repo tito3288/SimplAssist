@@ -11,6 +11,7 @@ import {
   registerBrand,
   registerCampaign,
 } from "@/lib/messaging/registration";
+import { archiveAndClearRejectedBrand } from "@/lib/messaging/registration/brand";
 import { archiveAndClearRejectedCampaign } from "@/lib/messaging/registration/campaign";
 import {
   A2P_RISK_BLOCKED_MESSAGE,
@@ -134,8 +135,9 @@ export async function attemptPaidLaunch(
   }
 
   try {
-    // Exact Phase 9 order after checkout success:
-    // risk -> attempt gate -> brand -> campaign -> profile -> voice -> owned attach / purchase.
+    // Exact Phase 9 order after checkout success (brand-recovery step added):
+    // risk -> attempt gate -> brand archive -> brand -> campaign archive ->
+    // campaign -> profile -> voice -> owned attach / purchase.
     // The retry-only risk gate lives INSIDE the try so a transient failure
     // here funnels into the catch's markRegistrationFailed (immediately
     // retryable) instead of stranding the claimed row in 'submitting'.
@@ -177,10 +179,18 @@ export async function attemptPaidLaunch(
       }
     }
 
+    // Carrier-rejected brand? Archive its history, cascade-archive the child
+    // campaign (any status — it is bound to the dead brand at TCR), delete
+    // the brand at Telnyx (best-effort), and clear the pointer so
+    // registerBrand creates a replacement below. Runs AFTER the risk gate so
+    // a risk hold releases the claim without having touched the brand.
+    // No-op in every other state.
+    await archiveAndClearRejectedBrand(businessId);
     await registerBrand(businessId);
     // Carrier-rejected campaign? Archive its history, deactivate it at
     // Telnyx (best-effort), and clear the pointer so a replacement is
-    // created below. No-op in every other state.
+    // created below. After a brand re-file this is a no-op (the cascade
+    // already archived the campaign). No-op in every other state.
     await archiveAndClearRejectedCampaign(businessId);
     await registerCampaign(businessId);
     await createMessagingProfile(businessId);

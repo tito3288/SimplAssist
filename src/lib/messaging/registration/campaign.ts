@@ -24,19 +24,34 @@ const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
 const CAMPAIGN_USECASE = "CUSTOMER_CARE";
 
 /**
+ * Why the campaign is being archived. 'campaign_rejected' is the original
+ * carrier-rejection retry path. 'brand_refile' is brand-level recovery: a
+ * campaign is bound to its brandId at TCR and cannot be adopted by the
+ * replacement brand, and Telnyx refuses to delete a brand that still has
+ * active campaigns — so the brand recovery helper archives the child
+ * campaign whatever state it is in.
+ */
+export type CampaignArchiveCause = "campaign_rejected" | "brand_refile";
+
+/**
  * Retry recovery for a carrier-rejected campaign: preserve the rejected
  * campaign's ID and rejection details in rejected_campaigns, deactivate it at
  * Telnyx best-effort (stops its monthly billing; failure is recorded for
  * manual cleanup and never blocks the retry), then clear
  * businesses.telnyx_campaign_id so registerCampaign creates a replacement.
  *
- * No-op unless campaign_status is 'rejected' with a campaign ID present.
+ * Default cause 'campaign_rejected': no-op unless campaign_status is
+ * 'rejected' with a campaign ID present. Cause 'brand_refile' archives the
+ * campaign in ANY status (it only requires a campaign ID) — see
+ * CampaignArchiveCause for why brand recovery cannot keep the old campaign.
  * Safe to re-run after a partial failure: the history row is reused and an
  * already-deactivated campaign is not re-deactivated.
  */
 export async function archiveAndClearRejectedCampaign(
-  businessId: string
+  businessId: string,
+  options: { cause?: CampaignArchiveCause } = {}
 ): Promise<void> {
+  const cause = options.cause ?? "campaign_rejected";
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select("id, telnyx_campaign_id, campaign_status, campaign_rejection_reason")
@@ -54,7 +69,11 @@ export async function archiveAndClearRejectedCampaign(
     );
   }
 
-  if (!business.telnyx_campaign_id || business.campaign_status !== "rejected") {
+  if (!business.telnyx_campaign_id) {
+    return;
+  }
+
+  if (cause === "campaign_rejected" && business.campaign_status !== "rejected") {
     return;
   }
 
@@ -84,7 +103,14 @@ export async function archiveAndClearRejectedCampaign(
       .insert({
         business_id: businessId,
         telnyx_campaign_id: campaignId,
-        rejection_reason: business.campaign_rejection_reason,
+        // A brand re-file can archive a campaign that was never itself
+        // rejected (still pending under the dead brand) — record why the
+        // row exists instead of leaving the reason blank.
+        rejection_reason:
+          business.campaign_rejection_reason ??
+          (cause === "brand_refile"
+            ? "Archived during brand re-file: parent brand rejected"
+            : null),
       })
       .select("id")
       .single<{ id: string }>();
@@ -124,7 +150,8 @@ export async function archiveAndClearRejectedCampaign(
   //    campaign would otherwise be skipped by the lazy-refresh gate and
   //    strand the number when the replacement campaign is approved. (Done
   //    before the pointer clear so a failure here leaves the helper
-  //    re-runnable — campaign_status is still 'rejected'.)
+  //    re-runnable — the campaign pointer is still set, and under the
+  //    default cause campaign_status is still 'rejected'.)
   const { error: assignmentResetError } = await supabaseAdmin
     .from("phone_numbers")
     .update({

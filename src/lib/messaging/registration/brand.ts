@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BusinessEntityType, BusinessType } from "@/types/database";
 import { normalizeUsStateCode } from "@/lib/usStates";
 import { appendRegistrationEvent, serializeError } from "./audit";
+import { archiveAndClearRejectedCampaign } from "./campaign";
 import { buildBusinessLandingUrl } from "./legalUrls";
 
 type TelnyxEntityType =
@@ -100,6 +101,130 @@ function toE164(raw: string | null): string | undefined {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   return undefined;
+}
+
+/**
+ * Retry recovery for a carrier-rejected brand: preserve the rejected brand's
+ * ID and rejection details in rejected_brands, archive the child campaign
+ * whatever state it is in (it is bound to the dead brand at TCR, so the
+ * replacement brand cannot adopt it), delete the brand at Telnyx best-effort
+ * (failure is recorded for manual cleanup and never blocks the retry), then
+ * clear businesses.telnyx_brand_id so registerBrand creates a replacement.
+ * The messaging profile and voice application are untouched — neither
+ * references the brand.
+ *
+ * No-op unless brand_status is 'rejected' with a brand ID present. Safe to
+ * re-run after a partial failure: the history row is reused, the campaign
+ * cascade no-ops once its pointer is cleared, and an already-deleted brand
+ * is not re-deleted.
+ */
+export async function archiveAndClearRejectedBrand(
+  businessId: string
+): Promise<void> {
+  const { data: business, error: readError } = await supabaseAdmin
+    .from("businesses")
+    .select("id, telnyx_brand_id, brand_status, brand_rejection_reason")
+    .eq("id", businessId)
+    .single<{
+      id: string;
+      telnyx_brand_id: string | null;
+      brand_status: string | null;
+      brand_rejection_reason: string | null;
+    }>();
+
+  if (readError || !business) {
+    throw new Error(
+      `[registration:brand] Business ${businessId} not found for rejected-brand recovery: ${readError?.message}`
+    );
+  }
+
+  if (!business.telnyx_brand_id || business.brand_status !== "rejected") {
+    return;
+  }
+
+  const brandId = business.telnyx_brand_id;
+
+  // 1. Preserve history before anything is repointed (reuse the row if a
+  //    prior partial run already archived this brand).
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from("rejected_brands")
+    .select("id, telnyx_deleted")
+    .eq("business_id", businessId)
+    .eq("telnyx_brand_id", brandId)
+    .maybeSingle<{ id: string; telnyx_deleted: boolean }>();
+
+  if (existingError) {
+    // Fail loudly rather than risk duplicating history or re-deleting:
+    // the thrown error keeps the attempt in a retryable state.
+    throw new Error(
+      `[registration:brand] Failed to read rejected-brand history for ${businessId}: ${existingError.message}`
+    );
+  }
+
+  let historyId = existing?.id ?? null;
+  if (!historyId) {
+    const { data: inserted, error: historyError } = await supabaseAdmin
+      .from("rejected_brands")
+      .insert({
+        business_id: businessId,
+        telnyx_brand_id: brandId,
+        rejection_reason: business.brand_rejection_reason,
+      })
+      .select("id")
+      .single<{ id: string }>();
+
+    if (historyError || !inserted) {
+      throw new Error(
+        `[registration:brand] Failed to archive rejected brand ${brandId} for ${businessId}: ${historyError?.message}`
+      );
+    }
+    historyId = inserted.id;
+  }
+
+  // 2. Archive the child campaign BEFORE the Telnyx brand delete: Telnyx
+  //    refuses to delete a brand that still has active campaigns. Runs
+  //    while brand_status is still 'rejected', so a failure here leaves
+  //    this helper re-runnable.
+  await archiveAndClearRejectedCampaign(businessId, { cause: "brand_refile" });
+
+  // 3. Best-effort Telnyx brand deletion (there is no brand deactivate
+  //    API). Never blocks the retry.
+  if (!existing?.telnyx_deleted) {
+    try {
+      await telnyx.messaging10dlc.brand.delete(brandId);
+      await supabaseAdmin
+        .from("rejected_brands")
+        .update({ telnyx_deleted: true, deletion_error: null })
+        .eq("id", historyId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[registration:brand] Best-effort deletion of rejected brand ${brandId} failed for ${businessId} — needs manual cleanup:`,
+        err
+      );
+      await supabaseAdmin
+        .from("rejected_brands")
+        .update({ deletion_error: message })
+        .eq("id", historyId);
+    }
+  }
+
+  // 4. Clear the pointer so registerBrand creates the replacement.
+  const { error: clearError } = await supabaseAdmin
+    .from("businesses")
+    .update({
+      telnyx_brand_id: null,
+      brand_status: null,
+      brand_status_updated_at: new Date().toISOString(),
+      brand_rejection_reason: null,
+    })
+    .eq("id", businessId);
+
+  if (clearError) {
+    throw new Error(
+      `[registration:brand] Failed to clear rejected brand ${brandId} for ${businessId}: ${clearError.message}`
+    );
+  }
 }
 
 export async function registerBrand(businessId: string): Promise<void> {

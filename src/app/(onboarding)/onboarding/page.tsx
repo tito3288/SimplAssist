@@ -440,11 +440,15 @@ function CarrierReviewStatus({
     registration.status === 'submitting' &&
     (!registration.startedAt ||
       Date.now() - new Date(registration.startedAt).getTime() > 15 * 60 * 1000);
-  // A rejection stays actionable in the 'submitted' state too: a retry after
-  // a brand rejection re-submits without re-filing the brand, landing on
-  // submitted + brand_status 'rejected' with no webhook ever coming — the
-  // customer still needs the fix/support controls there (Retry itself is
-  // only offered where a claim can succeed: 'failed' or stale 'submitting').
+  // A rejection stays actionable in the 'submitted' state too. Before brand
+  // recovery shipped, a retry after a brand rejection re-submitted without
+  // re-filing the brand, stranding rows on submitted + brand_status
+  // 'rejected' with no webhook ever coming. The pipeline now archives and
+  // re-files rejected brands (archiveAndClearRejectedBrand), so that state
+  // can no longer be produced — but pre-recovery rows can still sit in it
+  // until the one-time backfill moves them to 'failed', so keep the
+  // fix/support controls there (Retry itself is only offered where a claim
+  // can succeed: 'failed' or stale 'submitting').
   const rejectionActionable =
     rejectionKind !== null &&
     !registration.smsReady &&
@@ -476,11 +480,12 @@ function CarrierReviewStatus({
   // already explains why editing is closed.
   const displayFriendlyReason = formsLocked ? null : friendlyReason;
   // Support action for classes the customer can't finish self-serve:
-  // opt-in/message-flow (we generate that text) and identity/brand
-  // re-filing (retry reuses the existing carrier brand record). From
-  // 'submitted' NO rejection is self-serve — the attempt isn't claimable, so
-  // a re-run reports success without re-filing anything — hence support
-  // always shows there.
+  // opt-in/message-flow (we generate that text) and campaign-kind identity
+  // (a campaign retry never re-files the approved brand those fields live
+  // on). Brand-kind rejections are self-serve now — retry archives and
+  // re-files the rejected brand. From 'submitted' NO rejection is
+  // self-serve — the attempt isn't claimable, so a re-run reports success
+  // without re-filing anything — hence support always shows there.
   const needsSupport =
     rejectionActionable &&
     rejectionKind !== null &&
