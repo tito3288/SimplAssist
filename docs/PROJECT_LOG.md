@@ -190,10 +190,13 @@ delta re-verify.
 
 ## 4. In progress
 
-- **Stripe deletion-billing fix** (Codex implementing): pause subscription +
-  void open invoices on account delete; resume on reactivate; cancel at
-  permanent cleanup using the durable-linkage pattern; webhook zombie guard so
-  events for tombstoned businesses can't resurrect billing state.
+- **Stripe deletion-billing fix** (Codex implementing): account deletion sets
+  `pause_collection: { behavior: "void" }` with no `resumes_at`, so invoices
+  generated during the 60-day grace period are voided; invoices already open
+  before deletion remain under the existing dunning policy and are not voided
+  or refunded. Reactivation clears the pause; permanent cleanup cancels using
+  the durable-linkage pattern; guarded webhooks cannot resurrect billing state
+  for deleted or tombstoned businesses.
 
 ---
 
@@ -239,3 +242,22 @@ Post-launch items:
 - **2026-07-14** — Created this log. Seeded from project memory + git history
   through PR #7 (`2321891`). Verification: cross-checked against
   `git log`, `docs/a2p-10dlc-roadmap.md`, and session memory.
+- **2026-07-14** — Shipped account-deletion Stripe billing hardening. Soft
+  deletion now durably schedules a reversible Stripe collection pause;
+  reactivation proves the matching resume generation before restoring the
+  account; permanent scrub preserves the subscription ID and requires an
+  immediate, no-proration/no-final-invoice cancellation before cleanup can
+  complete. Guarded subscription and invoice webhooks skip deleted businesses,
+  preventing zombie billing rows. Added CAS leases, stable per-generation
+  idempotency, transient-versus-blocked failure recording, a dry-run-default
+  orphan remediation utility with manual review hashes, and the cron-job.org
+  operations runbook. Rationale: the previous deletion flow removed only the
+  local subscription row and could leave Stripe charging a scrubbed account.
+  Verification: migration 029 passed 95/95 local database assertions, was
+  manually applied and catalog-verified in production; application tests passed
+  83/83; remediation safety mocks passed 12/12; TypeScript, ESLint, and diff
+  checks passed. The live scheduler was verified read-only as the sole cleanup
+  scheduler (`0 3 * * *`, `UTC`, displayed as 11 PM locally during the July
+  check); see `docs/account-cleanup-scheduler-operations.md`. Stripe end-to-end
+  rollout verification remains test-mode only; no live subscription was
+  created for testing.

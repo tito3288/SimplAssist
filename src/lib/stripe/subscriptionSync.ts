@@ -71,42 +71,38 @@ export async function syncStripeSubscription(
     ? new Date(primaryItem.current_period_end * 1000).toISOString()
     : null;
   const now = new Date().toISOString();
-  const { data: existing } = await supabaseAdmin
-    .from("subscriptions")
-    .select("stripe_setup_fee_price_id, stripe_checkout_session_id, setup_fee_paid_at")
-    .eq("business_id", businessId)
-    .maybeSingle<{
-      stripe_setup_fee_price_id: string | null;
-      stripe_checkout_session_id: string | null;
-      setup_fee_paid_at: string | null;
-    }>();
 
-  const { error } = await supabaseAdmin.from("subscriptions").upsert(
+  const { data: synced, error } = await supabaseAdmin.rpc(
+    "sync_stripe_subscription_if_business_active",
     {
-      business_id: businessId,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: subscriptionId,
-      stripe_price_id: priceId,
-      stripe_setup_fee_price_id:
-        options.setupFeePriceId ?? existing?.stripe_setup_fee_price_id ?? null,
-      stripe_checkout_session_id:
-        options.checkoutSessionId ?? existing?.stripe_checkout_session_id ?? null,
-      setup_fee_paid_at:
-        options.setupFeePaidAt ?? existing?.setup_fee_paid_at ?? null,
-      plan,
-      status,
-      current_period_start: periodStart,
-      current_period_end: periodEnd,
-      cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
-      pending_plan: null,
-      updated_at: now,
-    },
-    { onConflict: "business_id" }
+      p_business_id: businessId,
+      p_stripe_customer_id: customerId,
+      p_stripe_subscription_id: subscriptionId,
+      p_plan: plan,
+      p_status: status,
+      p_current_period_start: periodStart,
+      p_current_period_end: periodEnd,
+      p_stripe_price_id: priceId,
+      p_stripe_setup_fee_price_id: options.setupFeePriceId ?? null,
+      p_stripe_checkout_session_id: options.checkoutSessionId ?? null,
+      p_setup_fee_paid_at: options.setupFeePaidAt ?? null,
+      p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+      p_updated_at: now,
+    }
   );
 
   if (error) {
     throw new Error(
       `[stripe:sync] Failed to sync subscription ${subscriptionId} for business ${businessId}: ${error.message}`
+    );
+  }
+
+  if (synced === false) {
+    return null;
+  }
+  if (synced !== true) {
+    throw new Error(
+      `[stripe:sync] Guarded sync returned an invalid response for subscription ${subscriptionId} and business ${businessId}`
     );
   }
 
