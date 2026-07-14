@@ -403,6 +403,33 @@ export interface Subscription {
   updated_at: string;
 }
 
+export type AccountDeletionStripeAction = "pause" | "resume" | "cancel";
+
+export type AccountDeletionStripeActionStatus =
+  | "pending"
+  | "applied"
+  | "blocked";
+
+export interface AccountDeletionStripeActionRecord {
+  business_id: string;
+  stripe_subscription_id: string;
+  desired_action: AccountDeletionStripeAction;
+  applied_action: AccountDeletionStripeAction | null;
+  status: AccountDeletionStripeActionStatus;
+  generation: number;
+  idempotency_key: string;
+  lease_token: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  attempt_count: number;
+  last_attempted_at: string | null;
+  applied_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BillingUsagePeriod {
   id: string;
   business_id: string;

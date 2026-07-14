@@ -88,15 +88,30 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       const invoice = event.data.object as Stripe.Invoice;
       const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
       if (!customerId) return;
-      const { error } = await supabaseAdmin
-        .from("subscriptions")
-        .update({ status: "past_due", updated_at: new Date().toISOString() })
-        .eq("stripe_customer_id", customerId);
+
+      const { data: updated, error } = await supabaseAdmin.rpc(
+        "mark_stripe_subscription_past_due_if_business_active",
+        {
+          p_stripe_customer_id: customerId,
+          p_updated_at: new Date().toISOString(),
+        }
+      );
+
       if (error) {
         throw new Error(
           `[stripe:webhook] Failed to mark customer ${customerId} past_due: ${error.message}`
         );
       }
+
+      if (updated === false) {
+        return;
+      }
+      if (updated !== true) {
+        throw new Error(
+          `[stripe:webhook] Guarded past-due update returned an invalid response for customer ${customerId}`
+        );
+      }
+
       return;
     }
 
