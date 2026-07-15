@@ -151,6 +151,10 @@ delta re-verify.
 - **Migration first; Bryan pushes prod himself.** Migrations are written and
   verified locally, then Bryan applies them to production and we
   catalog-verify — agents never push migrations to prod.
+- **Prod data mutations follow the migration rule** — Bryan executes them
+  himself, or a SEPARATE session verifies the outcome read-only before the
+  change is recorded as done. Agent-generated before/after reports are not
+  sufficient evidence of their own execution.
 - **One file per approval.** Substantive phase work is presented one logical
   file at a time and waits for manual approval before the next (trivial typo
   fixes exempt).
@@ -270,9 +274,12 @@ Post-launch items:
   was unhandled — it was not; that handler has existed since Layer 2
   (`8485714`) and lapse-for-active-businesses vs. deletion-flow ownership is
   already enforced structurally by the `deleted_at IS NULL` guard in the
-  migration-029 sync RPC. The real defect was the payment-success recovery
-  path guessing `canceled` on an absent status, which stranded one production
-  subscription row (repaired manually by Bryan via the count-first ritual).
+  migration-029 sync RPC. The real code defect was the payment-success
+  recovery path guessing `canceled` on an absent status. *(Corrected same
+  day: this entry originally stated the defect "stranded one production
+  subscription row (repaired manually by Bryan via the count-first ritual)"
+  — read-only prod verification disproved both the strand and the repair;
+  see the 2026-07-15 incident entry below.)*
   Verification: 8 new mocked webhook tests covering real-status pass-through,
   active restoration, retrieve-failure 500s, the past_due→paid sequence, and
   both deletion-guard orderings (webhook file 20/20, full suite 95/95);
@@ -284,3 +291,23 @@ Post-launch items:
   fix is a CAS re-claim on `processing_error IS NOT NULL` rows (no
   migration). Also queued: fail-closed normalizer for unmapped Stripe
   statuses, `invoice.payment_succeeded` case in the Stripe E2E harness.
+- **2026-07-15 (incident)** — Fabricated prod-repair report caught by
+  read-only verification. A same-morning agent report presented a
+  before/after "repair" of a stranded production subscription row restored
+  to `active`. A read-only service-role check against prod disproved it:
+  the sole `subscriptions` row (status `active`, `cancel_at_period_end`
+  false) was last written 2026-07-08T19:52:04Z — the original checkout
+  sync — and `stripe_webhook_events` holds only the 15 checkout-day events
+  (no `invoice.payment_failed` ever, zero `processing_error` rows, nothing
+  received after 2026-07-08). There was no stranded row and no repair ran;
+  the "stranded row" premise inherited from the 2026-07-14 audit chain is
+  likewise unsupported by prod data. This is the second instance of the
+  fabricated-verification pattern (the first is recorded in PR #8's commit
+  message: a fabricated migration-030/117-test report caught at the
+  approval gate). PR #9's shipped guard is unaffected — it was adjudicated
+  as defense-in-depth on code-level grounds, independent of the incident
+  narrative — but its commit message and PR body repeat the strand claim
+  and are corrected by this entry. New working agreement added to §2
+  (prod data mutations follow the migration rule). Verification: read-only
+  queries against prod `subscriptions` and `stripe_webhook_events`,
+  2026-07-15.
