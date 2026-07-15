@@ -252,13 +252,8 @@ Post-launch items:
   (`incomplete`) from delinquent (`past_due`) — currently flattened
   deliberately (all never-paying states read as `canceled`).
 - Boundary-audit backlog (2026-07-15 adversarial audit; CONFIRMED, deferred
-  by triage): (a) a Telnyx number purchased whose local insert fails is
-  orphaned forever — `releaseNumber` needs the row that failed to insert,
-  no reconciler queries Telnyx by customer_reference, and
-  `isLikelyNumberUnavailable`'s regex matches the substring `phone_number`
-  in any Postgres error on that table, so the customer is falsely told
-  "you will not be charged again" while Retry can re-order the same number
-  (`src/lib/billing/launch.ts:334`); (b) `charge.dispute.created` /
+  by triage): (a) ~~orphaned paid Telnyx number + false "not charged"
+  copy~~ — FIXED same day (purchase-save recovery entry below); (b) `charge.dispute.created` /
   `charge.refunded` are acked-and-ignored — a chargeback leaves
   `subscription.status` (the only ongoing service gate) untouched, so
   service continues after clawback with no operator alert; (c) abandoned
@@ -272,6 +267,17 @@ Post-launch items:
   `call.bridged` (abandoned-caller race suppresses the missed-call SMS);
   billing-portal lookup collapses DB errors into "No active subscription
   found"; `call.initiated` lookup blips reject callers with USER_BUSY.
+- Phone-number integrity follow-ups (2026-07-15 purchase-save review):
+  UNIQUE index on `phone_numbers.phone_number` (none exists — verified
+  against migrations 001/010+; duplicate active rows are structurally
+  possible, and the step-1 read check is the only guard, TOCTOU-exposed);
+  selection-time reservation for `pending_phone_number` (two businesses can
+  select the same searched number; the race is closed post-purchase by
+  customer_reference scoping but a reservation would close it at selection);
+  local `purchased_telnyx_id` column (migration) as the pattern-true
+  durable-linkage form replacing external re-inference; recurring run of
+  `scripts/audit-orphan-telnyx-numbers.mjs` as a standing detective control
+  (cron candidate); shared supabase chain-mock test util (now four copies).
 
 ---
 
@@ -481,3 +487,54 @@ Post-launch items:
   sustained 500s (DB-outage storms, poisoned events) remains open and
   unevidenced, bounded by classification narrowing the deterministic-500
   classes.
+- **2026-07-15** — Purchase-save recovery for Telnyx numbers (boundary-audit
+  finding (a); last pre-launch code item). The purchase-save two-phase-commit
+  gap orphaned a PAID number when the `phone_numbers` insert failed:
+  `isLikelyNumberUnavailable`'s regex matched the relation name inside the
+  Postgres error, so the customer was falsely told "you will not be charged
+  again" and routed to buy a second number, while `releaseNumber` (which
+  needs the missing row) could never reach the orphan. Fix: EXTERNAL
+  RE-INFERENCE made safe by scoping (honest framing — the §3
+  durable-linkage pattern's true form is a local `purchased_telnyx_id`
+  column, queued in §5): `purchasePendingNumber` is a three-step resolver —
+  local-row check (idempotent completion re-asserts routing, since a crash
+  between insert and attach leaves a saved-but-unrouted number; collision
+  throws typed `NumberTakenError`) → `findOwnedNumberId` recovery scoped by
+  `customer_reference=businessId` (review-added: unscoped matching would
+  let one business seize another's paid number on the single Telnyx
+  account — the wrong-ref case returns 0, verified empirically against
+  prod) → fresh purchase. The insert failure throws typed
+  `PurchasedNumberSaveError`; the regex's false `phone_number` token is
+  deleted; customer copy on that path is truthful ("Retry to complete
+  setup — you will not be charged again", which the recovery path makes
+  true) with `pending_phone_number` kept so Retry reuses the same number.
+  The copy change is failure-path-only and not practicably walkable —
+  click-through gate waived by the ship order, text approved via diff.
+  Read-only backstop: `scripts/audit-orphan-telnyx-numbers.mjs`
+  (PII-redacted output; report-only; releases manual per §2; a standing
+  detective control — recurring run queued in §5, not a one-off). Run
+  against prod in this session (output in transcript; re-runnable
+  read-only): 3 owned / 3 tracked / 0 orphans — the defect never fired.
+  HONEST LIMITS: recovery rests on Telnyx list read-after-write freshness —
+  a stale-empty list falls through to re-purchase, which Telnyx rejects
+  for owned numbers (re-pick path, never a double charge; retries are
+  human-speed so the window is theoretical); `phone_numbers.phone_number`
+  has NO unique constraint (review-discovered — the entry's earlier
+  "unique-conflict" residual was wrong), so duplicate rows are structurally
+  possible until the §5 index lands; an orphan exists between a save
+  failure and the customer's Retry (the recurring audit surfaces any that
+  never retry). Verification: 7 mocked tests — the first coverage
+  exercising `attemptPaidLaunch`'s real implementation — pinning
+  save-failure classification + truthful copy + pending retention,
+  customer_reference-scoped recovery without re-purchase, routing re-assert
+  on idempotent completion, typed collision, and both regex directions
+  (full suite 144/144); `tsc`/`next lint` clean for `src/` (the `.mjs`
+  script is outside both — its verification is the successful prod
+  execution above). Two-phase adversarial review (6 finders → empirical
+  verification): 10 findings, 9 fixed pre-merge — headlined by the
+  cross-tenant seizure (three independent constructions) and the missing
+  unique constraint; one SDK-doc kill-shot claim ("+ in filter returns
+  nothing") was REFUTED by a read-only prod probe (encoded '+' matches;
+  wrong customer_reference returns 0, proving the scoping) and fixed
+  defensively anyway (digits-only filter). Deferred with evidence: the
+  selection-time reservation and unique index (§5 above).
