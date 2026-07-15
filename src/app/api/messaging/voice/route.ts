@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
-import { markProcessedOnce } from "@/lib/messaging/idempotency";
+import {
+  markProcessedOnce,
+  releaseProcessedEvent,
+  RetryableWebhookError,
+} from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
@@ -20,8 +24,23 @@ import { isE164PhoneNumber } from "@/lib/phone/e164";
 // State (callControlId, businessId, from, businessName) is threaded through every
 // command via Base64-encoded client_state because some later events (notably
 // call.recording.saved) don't include call_control_id in their payload.
+//
+// Retry semantics are SELECTIVE (claim/release contract in
+// @/lib/messaging/idempotency): failures in the DURABLE_EVENT_TYPES below,
+// OR any handler throwing RetryableWebhookError (durable side effects can
+// fail under real-time event types — e.g. the missed-call SMS on a
+// forwarding dial error under call.answered), release the idempotency
+// claim and return 500 so Telnyx redelivers. All other real-time
+// call-control failures keep the log-and-200 swallow: retrying
+// answer()/speak() seconds later on a dead call cannot help.
 
 const CALL_FORWARD_TIMEOUT_SECS = 18;
+
+const DURABLE_EVENT_TYPES = new Set([
+  "call.hangup",
+  "call.recording.saved",
+  "call.recording.error",
+]);
 
 type ForwardingRole = "inbound" | "forward_target";
 type ForwardingTerminalStatus = "abandoned" | "fallback_triggered" | "error";
@@ -131,6 +150,26 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     console.error(`[messaging:voice] Error handling ${eventType}:`, err);
+    const retryable =
+      err instanceof RetryableWebhookError ||
+      (typeof eventType === "string" && DURABLE_EVENT_TYPES.has(eventType));
+    if (retryable) {
+      // Record-and-let-retry: release our claim and 500 so Telnyx
+      // redelivers. A failed release dead-letters the row permanently
+      // (schema limits — see the claim/release contract); still return
+      // an explicit 500 rather than lie with a 200.
+      if (eventId) {
+        try {
+          await releaseProcessedEvent(eventId);
+        } catch (releaseErr) {
+          console.error(
+            `[messaging:voice] claim release failed for ${eventId} — event dead-lettered:`,
+            releaseErr
+          );
+        }
+      }
+      return new NextResponse("Handler Error", { status: 500 });
+    }
   }
 
   return new NextResponse("OK", { status: 200 });
@@ -526,9 +565,9 @@ async function handleRecordingSaved(payload: Record<string, unknown>) {
   console.log(
     `[messaging:voice] Triggering missed-call SMS to ${state.from} for ${state.businessId}`
   );
-  sendMissedCallSMS(state.from, state.businessId).catch((err) => {
-    console.error("[messaging:voice] sendMissedCallSMS failed:", err);
-  });
+  // Awaited so a send failure propagates: the dispatcher releases the event
+  // claim and 500s, and Telnyx's redelivered recording event re-attempts.
+  await sendMissedCallSMS(state.from, state.businessId);
 }
 
 async function handleRecordingError(payload: Record<string, unknown>) {
@@ -546,9 +585,8 @@ async function handleRecordingError(payload: Record<string, unknown>) {
   console.log(
     `[messaging:voice] Triggering missed-call SMS despite recording error`
   );
-  sendMissedCallSMS(state.from, state.businessId).catch((err) => {
-    console.error("[messaging:voice] sendMissedCallSMS failed:", err);
-  });
+  // Awaited so a send failure propagates (release + 500 + Telnyx retry).
+  await sendMissedCallSMS(state.from, state.businessId);
 }
 
 async function createForwardingAttempt(args: {
@@ -709,11 +747,12 @@ async function markForwardingConnected(
     .maybeSingle();
 
   if (error) {
-    console.warn(
-      `[messaging:voice] failed to mark forwarding attempt=${attemptId} connected:`,
-      error
+    // Retryable: a lost connected-mark makes a later hangup fire a spurious
+    // missed-call SMS. The CAS (status='dialing') makes the retry a no-op
+    // when the first write actually committed.
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to mark forwarding attempt=${attemptId} connected: ${error.message}`
     );
-    return;
   }
 
   if (!data) {
@@ -739,9 +778,11 @@ async function markForwardingEnded(attemptId: string): Promise<void> {
     .eq("status", "connected");
 
   if (error) {
-    console.warn(
-      `[messaging:voice] failed to mark forwarding attempt=${attemptId} ended:`,
-      error
+    // Retryable: silently losing the 'ended' transition strands the attempt
+    // in 'connected' — the durable bookkeeping this route promises to
+    // record-and-let-retry. CAS (status='connected') no-ops a redundant retry.
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to mark forwarding attempt=${attemptId} ended: ${error.message}`
     );
   }
 }
@@ -775,11 +816,12 @@ async function triggerForwardingFallback(args: {
     .maybeSingle();
 
   if (error) {
-    console.error(
-      `[messaging:voice] failed to claim forwarding fallback attempt=${args.attemptId}:`,
-      error
+    // Throw — a swallowed claim error loses the fallback (and its SMS)
+    // while the event is already consumed; the dispatcher releases the
+    // event claim and 500s so the redelivered hangup retries.
+    throw new Error(
+      `[messaging:voice] failed to claim forwarding fallback attempt=${args.attemptId}: ${error.message}`
     );
-    return;
   }
 
   const attempt = (data as ForwardingAttempt | null) ?? null;
@@ -806,9 +848,56 @@ async function triggerForwardingFallback(args: {
   console.log(
     `[messaging:voice] forwarding fallback attempt=${attempt.id} status=${args.status} reason=${args.reason}; sending missed-call SMS`
   );
-  sendMissedCallSMS(attempt.caller_phone, attempt.business_id).catch((err) => {
-    console.error("[messaging:voice] sendMissedCallSMS failed:", err);
-  });
+  try {
+    await sendMissedCallSMS(attempt.caller_phone, attempt.business_id);
+  } catch (err) {
+    // Record the failure AND re-open the fallback claim: handleCallHangup
+    // short-circuits on fallback_triggered_at, so without clearing it the
+    // redelivered hangup would ack without re-attempting the SMS. Status
+    // 'error' + error_message record what happened; the retry re-enters
+    // this claim (fallback_triggered_at null, status ≠ connected) and
+    // re-sends. Lost-ack caveat: if the SMS actually sent but our client
+    // saw an error, the retry double-texts — annoying, and strictly better
+    // than a caller who never hears back. Thrown as RetryableWebhookError:
+    // this path is reachable under call.answered (forwarding dial error),
+    // where a plain throw would be swallowed as a real-time verb failure.
+    await reopenForwardingFallbackAfterSmsFailure(attempt.id, err);
+    throw new RetryableWebhookError(
+      `[messaging:voice] missed-call SMS failed for attempt=${attempt.id}`,
+      { cause: err }
+    );
+  }
+}
+
+async function reopenForwardingFallbackAfterSmsFailure(
+  attemptId: string,
+  cause: unknown
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update({
+      status: "error",
+      fallback_triggered_at: null,
+      abandoned_at: null,
+      error_message: `missed_call_sms_failed: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    })
+    .eq("id", attemptId)
+    // Defensive symmetry with the claim's own guard: never overwrite a
+    // connected attempt (unreachable today per the state machine, cheap
+    // to enforce structurally).
+    .neq("status", "connected");
+
+  if (error) {
+    // The original SMS error still propagates (release + 500), but with the
+    // claim timestamp intact the redelivered hangup will short-circuit —
+    // this attempt's SMS is lost until the reaper follow-up. Log loudly.
+    console.error(
+      `[messaging:voice] FAILED TO RE-OPEN fallback attempt=${attemptId} after SMS failure — retry will not re-attempt this SMS:`,
+      error
+    );
+  }
 }
 
 async function bestEffortHangup(

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
-import { markProcessedOnce } from "@/lib/messaging/idempotency";
+import {
+  markProcessedOnce,
+  releaseProcessedEvent,
+} from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   appendRegistrationEvent,
@@ -28,11 +31,23 @@ import type { RegistrationStatus } from "@/types/database";
 //
 // Invariants (mirror the messaging webhook):
 // - Verify Ed25519 signature first; 403 on failure.
-// - From signature-verified onward, ALWAYS return 200 so Telnyx doesn't retry.
-// - Dedup webhook event IDs against processed_webhook_events.
+// - Deliberate-ack paths (duplicate, no resource id, genuine not-found —
+//   the archived/foreign-resource zombie guard) return 200 and keep the
+//   idempotency claim: a retry could never succeed for them.
+// - PROCESSING FAILURES (DB errors in lookup or transition) release the
+//   idempotency claim and return 500 so Telnyx's retry redelivers
+//   (record-and-let-retry). Recovery holds UNLESS a timeout-triggered
+//   duplicate already acked the event during the failing attempt's window —
+//   see the honest-limits note in @/lib/messaging/idempotency. Loss shrinks
+//   from "every failure" to that race; the §5 schema extension closes it.
 // - Status-transition guard via conditional UPDATE: race-safe against
-//   simultaneous webhook deliveries (no SELECT-then-UPDATE TOCTOU window).
-// - Email is fire-and-forget; never blocks the 200, never throws.
+//   simultaneous webhook deliveries (no SELECT-then-UPDATE TOCTOU window),
+//   and it makes retries idempotent: a retry after a mid-flight failure
+//   no-ops the already-applied transition, so emails/assignment never fire
+//   twice. (Corner: if the first attempt failed AFTER the transition but
+//   before email dispatch, the retry skips the email — status is correct
+//   everywhere, the courtesy email is lost. Email stays best-effort.)
+// - Email is fire-and-forget; never blocks the response, never throws.
 // - Once business is resolved, every code path audits — including
 //   BRAND_OTP_VERIFIED (Phase 11 placeholder) and post-lookup errors.
 //
@@ -59,7 +74,11 @@ export async function POST(request: NextRequest) {
   try {
     await handleEvent(event);
   } catch (err) {
+    // The claim was released inside handleEvent (or its release threw, in
+    // which case the row dead-letters until the reaper — same residual as
+    // a crash). Non-2xx makes Telnyx redeliver and reprocess.
     console.error("[registration:webhook] Handler error:", err);
+    return new NextResponse("Handler Error", { status: 500 });
   }
   return new NextResponse("OK", { status: 200 });
 }
@@ -88,6 +107,26 @@ async function handleEvent(event: unknown): Promise<void> {
     );
   }
 
+  try {
+    await processClaimedEvent(event, eventData);
+  } catch (err) {
+    // Release our claim so Telnyx's retry re-inserts and reprocesses. If the
+    // release itself throws, the row stays claimed (dead-letter until the
+    // reaper follow-up) and we still propagate for the 500.
+    if (eventId) {
+      await releaseProcessedEvent(eventId);
+    }
+    throw err;
+  }
+}
+
+async function processClaimedEvent(
+  event: unknown,
+  eventData:
+    | { id?: string; event_type?: string; payload?: unknown }
+    | undefined
+): Promise<void> {
+  const eventType = eventData?.event_type;
   const payload = (eventData?.payload ?? {}) as Record<string, unknown>;
   const innerEventType = pickString(payload, ["eventType", "event_type"]);
   const isOtpEvent =
@@ -245,6 +284,12 @@ async function handleEvent(event: unknown): Promise<void> {
         auditErr
       );
     }
+    // Rethrow so the claim is released and the response is 500; the retry
+    // performs the work. (The error-audit above is BEST-EFFORT only —
+    // appendRegistrationEvent swallows its own DB errors by design and
+    // never throws, so an audit-write failure cannot itself trigger this
+    // path.)
+    throw err;
   }
 }
 
@@ -267,11 +312,14 @@ async function lookupBusiness(
     .maybeSingle();
 
   if (error) {
-    console.error(
-      `[registration:webhook] lookup failed for ${column}=${resourceId}:`,
-      error
+    // Throw — never return null on a DB error: null means "genuinely no
+    // business for this resource id" (the archived/foreign-resource zombie
+    // guard, acked 200). Collapsing a transient error into not-found would
+    // permanently drop a terminal transition; throwing releases the claim
+    // and 500s so Telnyx retries.
+    throw new Error(
+      `[registration:webhook] lookup failed for ${column}=${resourceId}: ${error.message}`
     );
-    return null;
   }
   return data as BusinessRow | null;
 }
@@ -336,11 +384,12 @@ async function applyStatusTransition(args: {
     .select("id");
 
   if (error) {
-    console.error(
-      `[registration:webhook] conditional update failed for business ${args.businessId}:`,
-      error
+    // Throw — a swallowed conditional-update error loses the transition
+    // while the event is already consumed. False is reserved for "status
+    // already equals the new value" (the idempotent-retry no-op).
+    throw new Error(
+      `[registration:webhook] conditional update failed for business ${args.businessId}: ${error.message}`
     );
-    return false;
   }
   return Array.isArray(data) && data.length > 0;
 }

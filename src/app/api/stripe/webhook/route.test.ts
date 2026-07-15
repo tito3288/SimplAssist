@@ -133,6 +133,28 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
+  it("processes a live-mode checkout session (Phase 9 guard removed)", async () => {
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_live_real_customer",
+    });
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCheckoutSession).toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "stripe_webhook"
+    );
+  });
+
   it("attempts paid launch only when checkout synchronization returns an active business", async () => {
     const checkoutEvent = event("checkout.session.completed", {
       id: "cs_test_active_business",

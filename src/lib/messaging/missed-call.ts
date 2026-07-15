@@ -1,5 +1,6 @@
 import { telnyx } from "./client";
 import { getOutboundSendContext } from "./lookup";
+import { isE164PhoneNumber } from "@/lib/phone/e164";
 import { insertPausedSystemMessageIfNeeded } from "./pausedNotice";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
@@ -16,11 +17,26 @@ export async function sendMissedCallSMS(
   callerPhone: string,
   businessId: string
 ): Promise<void> {
+  // PERMANENT conditions return without throwing — a webhook retry can
+  // never fix them, and throwing would 500-loop the caller's event across
+  // the provider's whole retry schedule:
+  // - anonymous/withheld caller ID (nothing to text)
+  // - missing business / active number / messaging profile (provisioning
+  //   state; fixes take longer than any retry window)
+  // TRANSIENT conditions (DB read errors, Telnyx API failures) throw so the
+  // caller can record-and-let-retry.
+  if (!isE164PhoneNumber(callerPhone)) {
+    console.warn(
+      `[missed-call] caller phone is not textable (anonymous/withheld): ${callerPhone}`
+    );
+    return;
+  }
+
   try {
     const [
-      { data: business },
+      { data: business, error: businessError },
       { data: aiSettings },
-      { data: phoneNumberRow },
+      { data: phoneNumberRow, error: phoneError },
     ] = await Promise.all([
       supabaseAdmin
         .from("businesses")
@@ -39,6 +55,20 @@ export async function sendMissedCallSMS(
         .eq("is_active", true)
         .maybeSingle(),
     ]);
+
+    // Distinguish transient read errors (throw → retry) from genuine
+    // not-found (permanent → ack): collapsing an error into "not found"
+    // silently loses the SMS on a DB blip.
+    if (businessError) {
+      throw new Error(
+        `[missed-call] business read failed for ${businessId}: ${businessError.message}`
+      );
+    }
+    if (phoneError) {
+      throw new Error(
+        `[missed-call] phone number read failed for ${businessId}: ${phoneError.message}`
+      );
+    }
 
     if (!business) {
       console.warn(`[missed-call] Business not found: ${businessId}`);
@@ -92,9 +122,14 @@ export async function sendMissedCallSMS(
     }
 
     if (!sendContext.messagingProfileId) {
-      throw new Error(
-        `[missed-call] Missing messaging profile for business ${businessId}`
+      // Permanent for retry purposes: a missing profile is a provisioning
+      // problem measured in days, not a transient blip — throwing would
+      // 500-loop every missed call for this business across the provider's
+      // retry schedule with no chance of success.
+      console.error(
+        `[missed-call] Missing messaging profile for business ${businessId} — SMS skipped (provisioning problem, not retryable)`
       );
+      return;
     }
 
     const usage = await preflightOutboundSms({ businessId, text: smsBody });
@@ -145,7 +180,14 @@ export async function sendMissedCallSMS(
       );
     }
   } catch (error) {
+    // Rethrow so callers can record-and-let-retry: a swallowed send failure
+    // silently loses the product's core deliverable. This throws ONLY for
+    // genuine send-path failures — a usage-gate block returns normally above
+    // (retry can't help until the customer upgrades), and a post-send
+    // persistence failure is deliberately not rethrown (the customer got
+    // the text; a retry would double-send).
     console.error("[missed-call] Error sending missed call SMS:", error);
+    throw error;
   }
 }
 

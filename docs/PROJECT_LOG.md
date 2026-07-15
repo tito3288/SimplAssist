@@ -136,7 +136,12 @@ delta re-verify.
 
 ### Operations
 
-- **Stripe is in live mode** (live-mode guard removed).
+- **Stripe is in live mode.** *(Correction 2026-07-15: this bullet
+  originally said "live-mode guard removed," but the adversarial boundary
+  audit found the webhook-side Phase-9 guard had survived the switch —
+  `checkout.session.completed` threw on any `cs_live_` session. Removed
+  2026-07-15 in the record-and-let-retry PR, before any live checkout had
+  occurred.)*
 - **Cleanup cron** runs daily at 11 PM via cron-job.org.
 - Deploys on Railway; both apex and `www` are registered custom domains (a
   missing `www` once cost a day of webhook debugging — check
@@ -233,7 +238,12 @@ Post-launch items:
   (`INSERT … ON CONFLICT DO UPDATE … RETURNING`), and a freshness/ordering
   guard in `sync_stripe_subscription_if_business_active` (stale-event
   clobber via the business_id-keyed upsert — pre-existing, window widened
-  by re-claim).
+  by re-claim). EXTENDED 2026-07-15 to `processed_webhook_events` (Telnyx):
+  the bare seen-set cannot distinguish in-flight from processed duplicates
+  (the ack-race root cause), no reaper is possible on it (no `claimed_at`,
+  no stored payload to replay), and migration 009's 7-day TTL deletes
+  without replay — needs `claimed_at` + status + payload columns and an
+  attempt cap, mirroring the Stripe schema.
 - Billing-finalize failure contract (PR-C candidate): `/api/billing/finalize`
   has no catch around the sync, and the onboarding client swallows non-OK
   responses (`res.json()` without `res.ok`; verified silent strand) — add a
@@ -241,6 +251,27 @@ Post-launch items:
 - `SubscriptionStatus` enum widening (migration): distinguish never-paid
   (`incomplete`) from delinquent (`past_due`) — currently flattened
   deliberately (all never-paying states read as `canceled`).
+- Boundary-audit backlog (2026-07-15 adversarial audit; CONFIRMED, deferred
+  by triage): (a) a Telnyx number purchased whose local insert fails is
+  orphaned forever — `releaseNumber` needs the row that failed to insert,
+  no reconciler queries Telnyx by customer_reference, and
+  `isLikelyNumberUnavailable`'s regex matches the substring `phone_number`
+  in any Postgres error on that table, so the customer is falsely told
+  "you will not be charged again" while Retry can re-order the same number
+  (`src/lib/billing/launch.ts:334`); (b) `charge.dispute.created` /
+  `charge.refunded` are acked-and-ignored — a chargeback leaves
+  `subscription.status` (the only ongoing service gate) untouched, so
+  service continues after clawback with no operator alert; (c) abandoned
+  checkouts mint duplicate Stripe customers (`customers.create` with no
+  idempotency key, id unpersisted until completion) — two completed
+  sessions could double-bill on a customer invisible to the billing portal
+  (`src/lib/stripe/checkout.ts:37`).
+- Boundary-audit minors (confirmed, low frequency): `pending` number orders
+  treated as provisioned (`src/lib/messaging/numbers.ts:96`, no order
+  reconciliation); forwarding marked connected on owner answer instead of
+  `call.bridged` (abandoned-caller race suppresses the missed-call SMS);
+  billing-portal lookup collapses DB errors into "No active subscription
+  found"; `call.initiated` lookup blips reject callers with USER_BUSY.
 
 ---
 
@@ -386,3 +417,67 @@ Post-launch items:
   a paid onboarding user silently — client swallows non-OK responses;
   verified against source) as a PR-C candidate; local-status enum widening
   in §5.
+- **2026-07-15** — Webhook boundary hardening: record-and-let-retry on both
+  Telnyx surfaces + live-mode guard removal. Source: the same-day
+  read-only adversarial boundary audit of the Stripe and Telnyx boundaries
+  (six finder angles + verification; 10 CONFIRMED findings — top three
+  fixed here, remainder triaged to §5). The claim-before-process
+  dead-letter pattern PR #11 fixed for Stripe existed on both Telnyx
+  webhook surfaces: (1) the registration status route consumed the
+  idempotency claim before resolving the business and acked 200 on
+  failure — a transient DB error permanently lost a terminal
+  brand/campaign transition (customer stuck at "pending" forever; no
+  reconciler exists); (2) the voice route pre-marked events and swallowed
+  all handler errors, and `sendMissedCallSMS` swallowed send failures —
+  the missed-call SMS could vanish with no retry, no dead-letter, no
+  record. Both now follow the claim/release contract (new
+  `releaseProcessedEvent` in `src/lib/messaging/idempotency.ts`):
+  processing failures release the claim and 500 so Telnyx redelivers;
+  deliberate acks (duplicates, archived-resource zombies, real-time
+  call-control verb failures where a delayed retry cannot help) keep the
+  claim. The voice fallback path additionally re-opens its claimed attempt
+  (`status='error'`, cleared `fallback_triggered_at`) on SMS failure so
+  the redelivered hangup re-attempts the send. Also fixed:
+  `lookupBusiness` and `applyStatusTransition` no longer collapse DB
+  errors into not-found/no-change; and the Phase-9 live-mode guard — which
+  the Operations note above wrongly recorded as removed, and which would
+  have 500-looped every real customer checkout (worse post-PR #11:
+  re-claimed and re-processed across Stripe's full retry window, risking
+  endpoint auto-disable) — is deleted; live sessions flow through the
+  guarded sync like test sessions. HONEST LIMITS (review-corrected — the
+  original draft overstated recovery as total): (1) ack race — a
+  timeout-triggered duplicate that dedup-acks 200 during a slow/failing
+  holder's window likely ends the provider's retry sequence (standard
+  per-event semantics; not locally provable), so release+500 shrinks loss
+  from "every failure" to "failure racing a timeout-duplicate", not to
+  zero; (2) NO reaper can exist on `processed_webhook_events` — the table
+  has no `claimed_at` and stores no payload, and migration 009's 7-day TTL
+  cron deletes stale rows WITHOUT replay, so crash-stranded or
+  failed-release claims are permanent losses until the §5 schema extension;
+  (3) a retry after a transition-then-crash skips the courtesy email
+  (status stays correct); (4) a lost-ack SMS send can double-text once on
+  retry (strictly better than a caller who never hears back).
+  `message.received` semantics untouched. Verification: 18 tests in three
+  new test files plus one live-session pin in the existing Stripe suite
+  (19 new; full suite 137/137), TypeScript/ESLint clean. Two-phase
+  adversarial review (8 finders → verifiers): amendments applied pre-merge —
+  `RetryableWebhookError` so durability follows the SIDE EFFECT, not the
+  outer event type (a dial-error under call.answered could strand the
+  fallback SMS with its claim already re-opened); permanent-vs-transient
+  classification in `sendMissedCallSMS` (anonymous caller ID, missing
+  profile, genuine not-found → deliberate ack; transient read/send errors →
+  throw, closing a transient-blip-coerced-to-not-found swallow found
+  inside the fix itself); `markForwardingConnected`/`Ended` DB errors now
+  retryable (lost connected-mark = spurious-SMS class); re-open write
+  gained a status guard + `abandoned_at` reset; the voice release wrapped
+  for an explicit 500; a theater test deleted (it mocked an audit
+  rejection `appendRegistrationEvent` can never produce — audit stays
+  best-effort by design, comment corrected). Verified-refuted (not bugs):
+  the campaign-assignment escape (four independent lazy-refresh re-drive
+  paths), repeat double-texting (collapses to the one-double-text caveat),
+  and the re-open clobbering a connected attempt (state machine proof).
+  Telnyx retry/timeout/auto-disable semantics are NOT locally provable —
+  all bounds rest on our own code comments; endpoint-disable risk under
+  sustained 500s (DB-outage storms, poisoned events) remains open and
+  unevidenced, bounded by classification narrowing the deterministic-500
+  classes.
