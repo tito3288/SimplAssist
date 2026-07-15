@@ -79,7 +79,19 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       const invoice = event.data.object as Stripe.Invoice;
       const subscriptionId = resolveInvoiceSubscriptionId(invoice);
       if (!subscriptionId) return;
+      // The invoice payload carries no subscription status, so recovery reads
+      // the real status from Stripe and passes it through unchanged. An
+      // absent status throws instead of syncing: the normalizer maps unknown
+      // statuses to 'canceled', and writing that guess would strand a
+      // recovered payer behind the subscription gate. (Failed events
+      // dead-letter in stripe_webhook_events — same-id retries dedup to
+      // 200; CAS re-claim support is a queued follow-up.)
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      if (!subscription.status) {
+        throw new Error(
+          `[stripe:webhook] Retrieved subscription ${subscriptionId} has no status; refusing to sync a guessed status`
+        );
+      }
       await syncStripeSubscription(subscription);
       return;
     }
