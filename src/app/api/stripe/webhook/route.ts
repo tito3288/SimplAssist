@@ -83,9 +83,9 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       // the real status from Stripe and passes it through unchanged. An
       // absent status throws instead of syncing: the normalizer maps unknown
       // statuses to 'canceled', and writing that guess would strand a
-      // recovered payer behind the subscription gate. (Failed events
-      // dead-letter in stripe_webhook_events — same-id retries dedup to
-      // 200; CAS re-claim support is a queued follow-up.)
+      // recovered payer behind the subscription gate. (A failed event stays
+      // retryable: Stripe's same-id retry re-claims the finished-failed row
+      // in claimStripeEvent and reprocesses.)
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       if (!subscription.status) {
         throw new Error(
@@ -100,6 +100,26 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       const invoice = event.data.object as Stripe.Invoice;
       const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
       if (!customerId) return;
+
+      // Freshness check: a redelivered (possibly re-claimed) failure event
+      // can be days stale, and the past_due RPC has no status guard — a
+      // blind mark would re-gate a payer who has since recovered. When the
+      // invoice resolves to a subscription, read the live status and only
+      // mark past_due while Stripe still reports delinquency; otherwise
+      // write the live state through the guarded sync. A failed retrieve
+      // throws (500 → recorded → retryable) — never guess either way.
+      const failedSubscriptionId = resolveInvoiceSubscriptionId(invoice);
+      if (failedSubscriptionId) {
+        const liveSubscription =
+          await stripe.subscriptions.retrieve(failedSubscriptionId);
+        if (
+          liveSubscription.status !== "past_due" &&
+          liveSubscription.status !== "unpaid"
+        ) {
+          await syncStripeSubscription(liveSubscription);
+          return;
+        }
+      }
 
       const { data: updated, error } = await supabaseAdmin.rpc(
         "mark_stripe_subscription_past_due_if_business_active",
@@ -139,10 +159,39 @@ async function claimStripeEvent(event: Stripe.Event): Promise<boolean> {
   });
 
   if (!error) return true;
-  if (error.code === "23505") return false;
+  if (error.code === "23505") {
+    return reclaimFailedStripeEvent(event.id);
+  }
   throw new Error(
     `[stripe:webhook] Failed to claim event ${event.id}: ${error.message}`
   );
+}
+
+/**
+ * A duplicate delivery is claimable only when the prior attempt FINISHED and
+ * FAILED (processed_at NULL + processing_error set). Clearing the error IS
+ * taking the claim: the single-statement UPDATE serializes concurrent
+ * retries on the row lock, so exactly one wins. In-flight rows
+ * (processing_error NULL) and processed rows are never re-claimed, which
+ * preserves the duplicate suppression this table exists for.
+ */
+async function reclaimFailedStripeEvent(eventId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("stripe_webhook_events")
+    .update({ processing_error: null })
+    .eq("id", eventId)
+    .is("processed_at", null)
+    .not("processing_error", "is", null)
+    .select("id");
+
+  if (error) {
+    // Unknown claim state fails closed: a 500 here means Stripe retries
+    // later, rather than us processing without holding the claim.
+    throw new Error(
+      `[stripe:webhook] Failed to evaluate re-claim for event ${eventId}: ${error.message}`
+    );
+  }
+  return (data?.length ?? 0) > 0;
 }
 
 async function markStripeEventProcessed(eventId: string): Promise<void> {
@@ -152,9 +201,14 @@ async function markStripeEventProcessed(eventId: string): Promise<void> {
     .eq("id", eventId);
 
   if (error) {
-    console.error(
-      `[stripe:webhook] Failed to mark event ${eventId} processed:`,
-      error
+    // Throw so the catch records the failure and returns 500: a swallowed
+    // marker failure would ack 200 with the row still in-flight-shaped —
+    // Stripe stops retrying and the event becomes a phantom. Reprocessing
+    // after an already-successful run is safe: every handler is idempotent
+    // (guarded upsert RPCs; claimRegistrationAttempt short-circuits a
+    // completed launch before any Telnyx side effect).
+    throw new Error(
+      `[stripe:webhook] Failed to mark event ${eventId} processed: ${error.message}`
     );
   }
 }
@@ -166,10 +220,20 @@ async function markStripeEventFailed(
   const { error } = await supabaseAdmin
     .from("stripe_webhook_events")
     .update({ processing_error: message })
-    .eq("id", eventId);
+    .eq("id", eventId)
+    // Never stamp a failure onto a row a re-claimed retry has already
+    // completed — that would read as processed-and-failed simultaneously.
+    .is("processed_at", null);
 
   if (error) {
-    console.error(`[stripe:webhook] Failed to mark event ${eventId} failed:`, error);
+    // Deliberately swallowed: with no ownership token, any fallback write
+    // or delete can race a concurrent re-claimer into double processing
+    // (verified interleaving). Consequence: this row is stranded in-flight
+    // (unclaimable) until the claimed_at staleness reaper follow-up ships.
+    console.error(
+      `[stripe:webhook] FAILED TO RECORD FAILURE for event ${eventId} — row stranded in-flight until the reaper follow-up:`,
+      error
+    );
   }
 }
 
