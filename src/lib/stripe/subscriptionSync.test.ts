@@ -15,6 +15,7 @@ vi.mock("./client", () => ({
 }));
 
 import {
+  normalizeStripeSubscriptionStatus,
   syncCheckoutSession,
   syncStripeSubscription,
 } from "./subscriptionSync";
@@ -124,6 +125,57 @@ describe("syncStripeSubscription", () => {
     const missingBusiness = subscription({ metadata: {} });
 
     await expect(syncStripeSubscription(missingBusiness)).resolves.toBeNull();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("normalizeStripeSubscriptionStatus", () => {
+  it.each([
+    ["active", "active"],
+    ["trialing", "trialing"],
+    ["past_due", "past_due"],
+    ["canceled", "canceled"],
+    ["unpaid", "canceled"],
+    ["incomplete_expired", "canceled"],
+    ["incomplete", "canceled"],
+    ["paused", "canceled"],
+  ] as const)("maps documented status %s to %s", (stripeStatus, local) => {
+    expect(normalizeStripeSubscriptionStatus(stripeStatus)).toBe(local);
+  });
+
+  it("throws on a status outside Stripe's documented union", () => {
+    expect(() =>
+      normalizeStripeSubscriptionStatus(
+        "some_future_status" as Stripe.Subscription.Status
+      )
+    ).toThrow(/Unrecognized Stripe subscription status: some_future_status/);
+  });
+
+  it("throws on an absent status instead of guessing canceled", () => {
+    expect(() =>
+      normalizeStripeSubscriptionStatus(
+        undefined as unknown as Stripe.Subscription.Status
+      )
+    ).toThrow(/Unrecognized Stripe subscription status: undefined/);
+  });
+});
+
+describe("syncStripeSubscription status mapping", () => {
+  it("rejects before persistence when the status is unrecognized", async () => {
+    await expect(
+      syncStripeSubscription(subscription({ status: "garbage_status" }))
+    ).rejects.toThrow(/Unrecognized Stripe subscription status/);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unrecognized status even when linkage is also unresolvable", async () => {
+    // The normalizer runs BEFORE the linkage early-return: a bad status
+    // must 500 (retryable), never be silently acked as a linkage skip.
+    await expect(
+      syncStripeSubscription(
+        subscription({ status: "garbage_status", metadata: {} })
+      )
+    ).rejects.toThrow(/Unrecognized Stripe subscription status/);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

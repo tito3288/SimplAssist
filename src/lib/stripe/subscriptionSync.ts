@@ -58,12 +58,16 @@ export async function syncStripeSubscription(
   const primaryItem = subscription.items.data[0];
   const priceId = primaryItem?.price.id ?? null;
   const plan = planFromStripePriceId(priceId);
+  // Normalize BEFORE the linkage early-return: an absent/unknown status
+  // must throw unconditionally (the guarantee the old route-level guard
+  // provided), never be silently acked because linkage also failed to
+  // resolve. Valid-status events with unresolvable linkage keep their
+  // deliberate null-ack below.
+  const status = normalizeStripeSubscriptionStatus(subscription.status);
 
   if (!businessId || !customerId || !subscriptionId || !plan) {
     return null;
   }
-
-  const status = normalizeStripeSubscriptionStatus(subscription.status);
   const periodStart = primaryItem?.current_period_start
     ? new Date(primaryItem.current_period_start * 1000).toISOString()
     : null;
@@ -109,11 +113,38 @@ export async function syncStripeSubscription(
   return { businessId, customerId, subscriptionId, plan };
 }
 
+// Deliberate projection of Stripe's full documented status union onto the
+// 4-status local model. Never-successfully-paying states map to 'canceled'
+// so consumers route recovery through checkout (the plan cards) — the
+// billing portal cannot complete an initial payment. Typed as a complete
+// Record over the SDK union: a missing key fails the BUILD when an SDK
+// upgrade widens the union, and an absent/unknown runtime status misses
+// the lookup and throws below.
+const STRIPE_STATUS_PROJECTION: Record<
+  Stripe.Subscription.Status,
+  SubscriptionStatus
+> = {
+  active: "active",
+  trialing: "trialing",
+  past_due: "past_due",
+  canceled: "canceled",
+  unpaid: "canceled", // dunning exhausted — dead subscription
+  incomplete_expired: "canceled", // initial payment never completed
+  incomplete: "canceled", // never paid — recovery is checkout, not the portal
+  paused: "canceled", // never paid (trial ended without a payment method)
+};
+
 export function normalizeStripeSubscriptionStatus(
   status: Stripe.Subscription.Status
 ): SubscriptionStatus {
-  if (status === "active") return "active";
-  if (status === "trialing") return "trialing";
-  if (status === "past_due") return "past_due";
-  return "canceled";
+  const mapped = STRIPE_STATUS_PROJECTION[status];
+  if (mapped === undefined) {
+    // Fail closed on anything outside Stripe's documented union — including
+    // an absent status at runtime (types are compile-time only). Webhook
+    // callers surface this as a recorded, re-claimable failure.
+    throw new Error(
+      `[stripe:sync] Unrecognized Stripe subscription status: ${String(status)}`
+    );
+  }
+  return mapped;
 }

@@ -234,6 +234,13 @@ Post-launch items:
   guard in `sync_stripe_subscription_if_business_active` (stale-event
   clobber via the business_id-keyed upsert — pre-existing, window widened
   by re-claim).
+- Billing-finalize failure contract (PR-C candidate): `/api/billing/finalize`
+  has no catch around the sync, and the onboarding client swallows non-OK
+  responses (`res.json()` without `res.ok`; verified silent strand) — add a
+  catch returning structured JSON + a client `res.ok` check.
+- `SubscriptionStatus` enum widening (migration): distinguish never-paid
+  (`incomplete`) from delinquent (`past_due`) — currently flattened
+  deliberately (all never-paying states read as `canceled`).
 
 ---
 
@@ -276,7 +283,10 @@ Post-launch items:
   `invoice.payment_succeeded` handler now refuses to sync when the retrieved
   subscription lacks a status (throws instead), so an absent status can never
   be defaulted to `canceled` by the sync normalizer's fallthrough; the real
-  Stripe status is passed through unchanged. **Audit correction:** the
+  Stripe status is passed through unchanged. *(Superseded same-week by PR-B
+  below: the route-level guard was deleted and the fallthrough replaced — the
+  fail-closed check now lives in the normalizer itself, which throws on any
+  unmapped or absent status instead of coercing to `canceled`.)* **Audit correction:** the
   2026-07-14 read-only gating audit claimed `customer.subscription.deleted`
   was unhandled — it was not; that handler has existed since Layer 2
   (`8485714`) and lapse-for-active-businesses vs. deletion-flow ownership is
@@ -347,3 +357,32 @@ Post-launch items:
   fabricated-verification pattern, caught by the review itself). Remainder
   deferred to the §5 migration bundle. PR-B (fail-closed status normalizer)
   follows.
+- **2026-07-15** — Fail-closed status normalizer (PR-B of the resilience
+  pass; plan approved in-session 2026-07-15). `normalizeStripeSubscriptionStatus`
+  is now a complete `Record` over Stripe's documented 8-status union —
+  all four never-successfully-paying states (`unpaid`, `incomplete_expired`,
+  `incomplete`, `paused`) project to `canceled` so recovery routes through
+  checkout, not a portal that cannot take an initial payment — and THROWS
+  on anything else, including a runtime-absent status, instead of the old
+  bare `return "canceled"` fallthrough. Six flows pass through the
+  normalizer: webhook created/updated (one call site), deleted,
+  payment_succeeded recovery, payment_failed live-sync, and
+  checkout.session.completed + billing finalize via `syncCheckoutSession`.
+  The PR #9 route-level absent-status guard was deleted; the normalizer now
+  runs BEFORE the sync linkage early-return so a bad status always throws.
+  Verification: full suite 118/118, TypeScript/ESLint clean; two-phase
+  adversarial review returned 10 findings (8 CONFIRMED), with 7 amendments
+  applied pre-merge — review REVERSED the planned `incomplete`/`paused` →
+  `past_due` mapping on consumer evidence (billing page portal dead-end,
+  ReviewAndLaunch plan override, epoch billing date); normalize reordered
+  above the linkage guard (the guard deletion had silently weakened the
+  absent-status 500); payment_failed freshness check narrowed to live
+  `past_due` only (unpaid classification drift); switch converted to an
+  exhaustive `Record` (the switch's claimed compile-time exhaustiveness
+  was factually wrong); two tautological/redundant tests deleted; the
+  entry-point enumeration here corrected (an earlier draft said "five",
+  omitting payment_failed); the stale PR #9 entry annotated. Queued:
+  billing-finalize failure contract (normalizer throw at finalize strands
+  a paid onboarding user silently — client swallows non-OK responses;
+  verified against source) as a PR-C candidate; local-status enum widening
+  in §5.
