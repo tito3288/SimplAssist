@@ -3,6 +3,9 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   attachOwnedNumberToCustomerProfile,
+  findOwnedNumberId,
+  NumberTakenError,
+  PurchasedNumberSaveError,
   purchaseNumber,
 } from "@/lib/messaging/numbers";
 import {
@@ -31,6 +34,9 @@ import type { SubscriptionStatus } from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
+
+const NUMBER_SAVE_RETRY_MESSAGE =
+  "Your number was reserved, but we couldn't finish saving it. Retry to complete setup — you will not be charged again.";
 
 const BILLING_REQUIRED_MESSAGE =
   "Finish checkout before submitting SMS registration.";
@@ -214,7 +220,21 @@ export async function attemptPaidLaunch(
     await markRegistrationSubmitted(businessId);
     return { status: "submitted" };
   } catch (err) {
-    if (isLikelyNumberUnavailable(err)) {
+    if (err instanceof PurchasedNumberSaveError) {
+      // The number IS purchased and owned — never route to re-pick, never
+      // claim "not charged" is a fresh start. pending_phone_number is
+      // deliberately kept: Retry re-enters purchasePendingNumber, finds
+      // the owned number via findOwnedNumberId, and completes the save
+      // without a second charge. The copy is truthful for this path.
+      console.error(
+        `[billing:launch] Purchased-but-unsaved number for ${businessId}:`,
+        err
+      );
+      await markRegistrationFailed(businessId, NUMBER_SAVE_RETRY_MESSAGE);
+      return { status: "failed", message: NUMBER_SAVE_RETRY_MESSAGE };
+    }
+
+    if (err instanceof NumberTakenError || isLikelyNumberUnavailable(err)) {
       await persistNumberFailure(businessId, PAID_NUMBER_FAILED_MESSAGE);
       await markRegistrationFailed(businessId, PAID_NUMBER_FAILED_MESSAGE);
       return {
@@ -315,6 +335,10 @@ async function isBillingReady(
   return { ready: true };
 }
 
+// Three-step resolver for the purchase-save two-phase-commit gap. Telnyx
+// ownership is the durable "purchase completed" marker the local schema
+// lacks, so a retry after a failed save recovers the already-paid number
+// instead of charging again or telling the customer to re-pick.
 async function purchasePendingNumber(
   businessId: string,
   pendingPhoneNumber: string | null
@@ -323,18 +347,87 @@ async function purchasePendingNumber(
     throw new Error(`[billing:launch] Missing pending_phone_number for ${businessId}`);
   }
 
+  // Step 1: local row check — a prior attempt may have fully completed
+  // (idempotent completion: re-assert routing too, since a crash between
+  // insert and attach leaves a saved-but-unrouted number), or another
+  // business may hold the number (typed → the re-pick path). limit(1)
+  // guards the multi-row case: phone_numbers has NO unique constraint on
+  // phone_number (verified against migrations — §5 backlog), so duplicates
+  // are structurally possible and must not wedge this read.
+  const { data: existingRow, error: rowError } = await supabaseAdmin
+    .from("phone_numbers")
+    .select("business_id, telnyx_phone_number_id")
+    .eq("phone_number", pendingPhoneNumber)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle<{ business_id: string; telnyx_phone_number_id: string }>();
+
+  if (rowError) {
+    throw new Error(
+      `[billing:launch] Failed to check existing row for ${pendingPhoneNumber}: ${rowError.message}`
+    );
+  }
+  if (existingRow) {
+    if (existingRow.business_id === businessId) {
+      await attachOwnedNumberToCustomerProfile(
+        businessId,
+        existingRow.telnyx_phone_number_id
+      );
+      await clearPendingPhoneNumber(businessId);
+      return;
+    }
+    throw new NumberTakenError(pendingPhoneNumber);
+  }
+
+  // Step 2: ownership recovery — a prior attempt by THIS business purchased
+  // this number but the save failed (PurchasedNumberSaveError path); the
+  // lookup is customer_reference-scoped so another business's purchase can
+  // never be seized. Complete the save and re-assert routing; no second
+  // charge. (A stale-empty list within Telnyx's read-after-write window
+  // falls through to step 3, where re-ordering an owned number is rejected
+  // by Telnyx — re-pick path, never a double charge; retries here are
+  // human-speed, so the window is theoretical.)
+  const ownedId = await findOwnedNumberId(pendingPhoneNumber, businessId);
+  if (ownedId) {
+    console.warn(
+      `[billing:launch] Recovering purchased-but-unsaved number for ${businessId} (telnyx id=${ownedId})`
+    );
+    await savePurchasedNumber(businessId, pendingPhoneNumber, ownedId);
+    await attachOwnedNumberToCustomerProfile(businessId, ownedId);
+    return;
+  }
+
+  // Step 3: fresh purchase.
   const purchased = await purchaseNumber(pendingPhoneNumber, businessId);
+  await savePurchasedNumber(
+    businessId,
+    purchased.phoneNumber,
+    purchased.phoneNumberId
+  );
+}
+
+async function savePurchasedNumber(
+  businessId: string,
+  phoneNumber: string,
+  telnyxPhoneNumberId: string
+): Promise<void> {
   const { error: insertError } = await supabaseAdmin.from("phone_numbers").insert({
     business_id: businessId,
-    phone_number: purchased.phoneNumber,
-    telnyx_phone_number_id: purchased.phoneNumberId,
+    phone_number: phoneNumber,
+    telnyx_phone_number_id: telnyxPhoneNumberId,
     is_active: true,
   });
 
   if (insertError) {
-    throw new Error(
-      `[billing:launch] Number ${purchased.phoneNumber} purchased but failed to save: ${insertError.message}`
-    );
+    // Typed: the number is paid for and owned. Classification by
+    // construction — the old message-sniffing regex matched the
+    // phone_numbers relation name inside this very error and misrouted it
+    // to "unavailable / you will not be charged again" (false).
+    throw new PurchasedNumberSaveError({
+      phoneNumber,
+      telnyxPhoneNumberId,
+      cause: insertError,
+    });
   }
 
   await clearPendingPhoneNumber(businessId);
@@ -445,5 +538,9 @@ function isLikelyNumberUnavailable(err: unknown): boolean {
       ? `${err.message} ${JSON.stringify((err as Error & { cause?: unknown }).cause ?? "")}`
       : JSON.stringify(err);
 
-  return /already|unavailable|not available|taken|number order failed|phone_number/i.test(text);
+  // NOTE: the former `phone_number` token is deliberately gone — it matched
+  // the phone_numbers RELATION NAME inside any Postgres error on that
+  // table, misclassifying save failures as "unavailable". Save failures
+  // are now typed (PurchasedNumberSaveError) and never reach this sniffer.
+  return /already|unavailable|not available|taken|number order failed/i.test(text);
 }

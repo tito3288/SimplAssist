@@ -37,6 +37,74 @@ export interface PurchasedNumber {
   status: "pending" | "success" | "failure" | undefined;
 }
 
+// Thrown when a number was PURCHASED at Telnyx but the local phone_numbers
+// insert failed — the purchase-save two-phase-commit gap. Typed so callers
+// classify by construction instead of message-sniffing: this is NOT
+// "number unavailable" (the customer was charged; a retry must recover the
+// owned number, never re-purchase or re-pick).
+export class PurchasedNumberSaveError extends Error {
+  readonly phoneNumber: string;
+  readonly telnyxPhoneNumberId: string;
+
+  constructor(args: {
+    phoneNumber: string;
+    telnyxPhoneNumberId: string;
+    cause: unknown;
+  }) {
+    super(
+      `[messaging:numbers] Number ${args.phoneNumber} purchased at Telnyx (id=${args.telnyxPhoneNumberId}) but the local save failed`,
+      { cause: args.cause }
+    );
+    this.name = "PurchasedNumberSaveError";
+    this.phoneNumber = args.phoneNumber;
+    this.telnyxPhoneNumberId = args.telnyxPhoneNumberId;
+  }
+}
+
+// Thrown when the pending number is actively held by ANOTHER business —
+// typed so classification is by construction (the collision genuinely is
+// "unavailable", but message-sniffing for it would recreate the coupling
+// the save-error type exists to remove).
+export class NumberTakenError extends Error {
+  constructor(phoneNumber: string) {
+    super(
+      `[messaging:numbers] Number ${phoneNumber} is already held by another business`
+    );
+    this.name = "NumberTakenError";
+  }
+}
+
+// Recovery lookup for the purchase-save gap: did THIS BUSINESS already
+// purchase this exact number? Scoped by customer_reference (stamped on
+// every order) — on a single Telnyx account, matching by phone number
+// alone would let business B "recover" a number business A just paid for.
+// Used BEFORE purchasing so a retry after a failed save completes setup
+// without charging again. Throws on lookup failure; NOTE the honest limit:
+// a successful-but-stale list (Telnyx read-after-write lag) returns null
+// and the caller re-purchases — backstopped by Telnyx rejecting orders for
+// already-owned numbers (routing to re-pick, never a double charge) and by
+// retries here being human-speed (launch failures are not webhook-looped).
+export async function findOwnedNumberId(
+  phoneNumber: string,
+  businessId: string
+): Promise<string | null> {
+  // Digits-only for the filter: the SDK documents "non-numerical characters
+  // will result in no values being returned" for filter[phone_number].
+  // (Empirically a URL-encoded '+' also matches, verified against prod
+  // 2026-07-15 — digits-only satisfies both the documented contract and
+  // observed behavior.) The response itself is +E.164, so the equality
+  // check below keeps the full-format match.
+  const digitsOnly = phoneNumber.replace(/\D/g, "");
+  const result = await telnyx.phoneNumbers.list({
+    filter: { phone_number: digitsOnly, customer_reference: businessId },
+  });
+
+  const owned = result.data?.find(
+    (n) => typeof n.id === "string" && n.phone_number === phoneNumber
+  );
+  return owned?.id ?? null;
+}
+
 export async function getActivePhoneNumberForBusiness(
   businessId: string
 ): Promise<string | null> {
