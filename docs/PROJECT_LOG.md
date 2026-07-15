@@ -227,6 +227,13 @@ Post-launch items:
   deliberately excluded from the styling-only theme migration).
 - `glass.ts` deletion pass once no stragglers consume v1 tokens.
 - Sole Prop / OTP onboarding path (roadmap Phase 11 Option A).
+- Webhook-events hardening migration bundle: `claimed_at` staleness reaper
+  (recovers crash-stranded and marker-failure-stranded in-flight rows),
+  `attempt_count` retry cap, single-statement claim RPC
+  (`INSERT … ON CONFLICT DO UPDATE … RETURNING`), and a freshness/ordering
+  guard in `sync_stripe_subscription_if_business_active` (stale-event
+  clobber via the business_id-keyed upsert — pre-existing, window widened
+  by re-claim).
 
 ---
 
@@ -311,3 +318,32 @@ Post-launch items:
   (prod data mutations follow the migration rule). Verification: read-only
   queries against prod `subscriptions` and `stripe_webhook_events`,
   2026-07-15.
+- **2026-07-15** — Webhook dead-letter fix (PR-A of the resilience pass).
+  Failed Stripe webhook events are now re-claimable: on a duplicate-id
+  insert (23505), `claimStripeEvent` attempts a CAS re-claim — clearing
+  `processing_error` on rows with `processed_at` NULL and a recorded error —
+  so a Stripe same-id retry of a finished-failed event reprocesses instead
+  of being acked as a duplicate (closing the CONFIRMED dead-letter finding
+  from PR #9's review). In-flight and processed rows stay unclaimable; the
+  single-statement UPDATE serializes concurrent retries to one winner;
+  unknown claim state throws (fail closed, no processing without a claim).
+  Ownership boundary: events-table only — re-claimed events still flow
+  through the migration-029 guarded RPCs, and a null sync for a deleted
+  business remains a processed ack, so no retry loops against tombstones.
+  Residuals, documented: (1) a hard crash between claim and failure-marking,
+  and (2) a transiently-failed failure-marker write (deliberately swallowed —
+  no ownership token exists, so any fallback write/delete can race a
+  concurrent re-claimer into double processing, verified interleaving), both
+  leave an in-flight row unclaimable until the `claimed_at` staleness reaper
+  ships (§5 backlog; no migration in this change). Verification: mocked
+  webhook tests + TypeScript/ESLint clean; two-phase adversarial review
+  (8 finder angles → verifiers) returned 10 findings — 6 CONFIRMED — of
+  which 4 were fixed in this PR before merge: stale `payment_failed`
+  freshness check (a re-claimed stale failure event could re-gate a
+  recovered payer via the status-guard-less past_due RPC — verifier verdict
+  was do-not-ship unmitigated), processed-marker write now throws instead of
+  acking a phantom 200, failure-marker guarded on `processed_at IS NULL`,
+  and this very entry's premature "review pass" wording (the
+  fabricated-verification pattern, caught by the review itself). Remainder
+  deferred to the §5 migration bundle. PR-B (fail-closed status normalizer)
+  follows.

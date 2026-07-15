@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   update: vi.fn(),
   eq: vi.fn(),
+  is: vi.fn(),
+  not: vi.fn(),
+  select: vi.fn(),
   rpc: vi.fn(),
   syncCheckoutSession: vi.fn(),
   syncStripeSubscription: vi.fn(),
@@ -65,7 +68,29 @@ beforeEach(() => {
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test_only");
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.insert.mockResolvedValue({ error: null });
-  mocks.eq.mockResolvedValue({ error: null });
+  // The builder is both awaited mid-chain and chained onward, matching the
+  // real thenable query builder: markStripeEventProcessed awaits
+  // .update().eq(); markStripeEventFailed awaits .update().eq().is(); the
+  // re-claim chains .update().eq().is().not().select(). So eq and is each
+  // return a thenable that also carries the next chain step.
+  mocks.select.mockResolvedValue({ data: [], error: null });
+  mocks.not.mockImplementation(() => ({ select: mocks.select }));
+  mocks.is.mockImplementation(() => {
+    const result = Promise.resolve({ error: null });
+    return {
+      not: mocks.not,
+      then: result.then.bind(result),
+      catch: result.catch.bind(result),
+    };
+  });
+  mocks.eq.mockImplementation(() => {
+    const result = Promise.resolve({ error: null });
+    return {
+      is: mocks.is,
+      then: result.then.bind(result),
+      catch: result.catch.bind(result),
+    };
+  });
   mocks.update.mockImplementation(() => ({ eq: mocks.eq }));
   mocks.from.mockReturnValue({
     insert: mocks.insert,
@@ -217,7 +242,11 @@ describe("POST /api/stripe/webhook", () => {
       duplicate: true,
     });
     expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
-    expect(mocks.update).not.toHaveBeenCalled();
+    // The re-claim probe runs (update with a cleared error) but no
+    // processed marker is ever written for a suppressed duplicate.
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
   });
 
   it("ignores invoice failures without a string customer id", async () => {
@@ -406,5 +435,271 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ received: true });
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
+  });
+
+  it("re-claims a finished-failed event on Stripe redelivery and reprocesses it", async () => {
+    const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.deleted", subscription)
+    );
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    // Prior attempt finished-failed: the CAS re-claim wins a row.
+    mocks.select.mockResolvedValue({
+      data: [{ id: "evt_test_reclaim" }],
+      error: null,
+    });
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ received: true });
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
+    // The claim was taken by clearing the error, then the retry succeeded
+    // and wrote the processed marker.
+    expect(mocks.update).toHaveBeenCalledWith({ processing_error: null });
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
+  });
+
+  it("keeps acking duplicates while the first attempt is in flight", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+    );
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    // In-flight rows have processing_error NULL, so the CAS matches nothing.
+    mocks.select.mockResolvedValue({ data: [], error: null });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      duplicate: true,
+    });
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+  });
+
+  it("re-claims only finished-failed rows: the CAS predicate excludes processed and in-flight events", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+    );
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    mocks.select.mockResolvedValue({ data: [], error: null });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      duplicate: true,
+    });
+    // The claimability predicate itself: only rows that finished AND failed.
+    expect(mocks.update).toHaveBeenCalledWith({ processing_error: null });
+    expect(mocks.eq).toHaveBeenCalledWith("id", expect.any(String));
+    expect(mocks.is).toHaveBeenCalledWith("processed_at", null);
+    expect(mocks.not).toHaveBeenCalledWith("processing_error", "is", null);
+  });
+
+  it("lets exactly one of two simultaneous retries win the re-claim", async () => {
+    // The real serialization is Postgres single-statement atomicity (the
+    // loser's WHERE re-evaluates after the row lock); this pins the route's
+    // handling of the two outcomes.
+    const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.deleted", subscription)
+    );
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    mocks.select
+      .mockResolvedValueOnce({ data: [{ id: "evt_race" }], error: null })
+      .mockResolvedValueOnce({ data: [], error: null });
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const [first, second] = await Promise.all([
+      stripeWebhook(request()),
+      stripeWebhook(request()),
+    ]);
+    const bodies = await Promise.all([first.json(), second.json()]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledTimes(1);
+    expect(bodies.filter((body) => body.duplicate === true)).toHaveLength(1);
+  });
+
+  it("throws without processing when the re-claim query errors, so no event runs unclaimed", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+    );
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    mocks.select.mockResolvedValue({
+      data: null,
+      error: { message: "connection reset" },
+    });
+
+    // claimStripeEvent runs before the processing try/catch, so an unknown
+    // claim state propagates (Next.js turns it into a 500 → Stripe retries).
+    await expect(stripeWebhook(request())).rejects.toThrow(
+      /Failed to evaluate re-claim/
+    );
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
+  });
+
+  it("skips the past_due mark when the live subscription has recovered", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_failed", {
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    const live = { id: SUBSCRIPTION_ID, status: "active" };
+    mocks.retrieve.mockResolvedValue(live);
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    // The stale failure event never blind-marks past_due; the live state
+    // (recovered) is written instead.
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(live);
+  });
+
+  it.each(["past_due", "unpaid"])(
+    "marks past_due when the live subscription is still delinquent (%s)",
+    async (status) => {
+      mocks.constructEvent.mockReturnValue(
+        event("invoice.payment_failed", {
+          customer: CUSTOMER_ID,
+          subscription: SUBSCRIPTION_ID,
+        })
+      );
+      mocks.retrieve.mockResolvedValue({ id: SUBSCRIPTION_ID, status });
+      mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+      const response = await stripeWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        "mark_stripe_subscription_past_due_if_business_active",
+        expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+      );
+      expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    }
+  );
+
+  it("marks past_due directly when the invoice has no subscription", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+    );
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "mark_stripe_subscription_past_due_if_business_active",
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+    );
+  });
+
+  it("returns 500 when the payment-failed freshness check cannot read Stripe", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_failed", {
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    mocks.retrieve.mockRejectedValue(new Error("stripe unreachable"));
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(500);
+    // Never guess in either direction: no blind past_due mark, no sync.
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("stripe unreachable"),
+    });
+  });
+
+  it("returns 500 and records the failure when the processed marker cannot be written", async () => {
+    const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.deleted", subscription)
+    );
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+    // First .eq() call is markStripeEventProcessed's terminal await; make
+    // that write fail while later chain calls keep the default behavior.
+    mocks.eq.mockImplementationOnce(() => {
+      const result = Promise.resolve({
+        error: { message: "marker write failed" },
+      });
+      return {
+        is: mocks.is,
+        then: result.then.bind(result),
+        catch: result.catch.bind(result),
+      };
+    });
+
+    const response = await stripeWebhook(request());
+
+    // A phantom 200 would end Stripe's retries with the row in-flight; the
+    // marker failure must surface as a recorded failure + 500 instead.
+    expect(response.status).toBe(500);
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("marker write failed"),
+    });
+  });
+
+  it("guards the failure marker so it never stamps a processed row", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+    );
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "serialization failure" },
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(500);
+    // markStripeEventFailed's WHERE includes processed_at IS NULL.
+    expect(mocks.is).toHaveBeenCalledWith("processed_at", null);
   });
 });
