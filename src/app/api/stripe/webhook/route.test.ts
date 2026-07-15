@@ -230,4 +230,181 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  it("ignores payment successes without a resolvable subscription id", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_succeeded", { customer: CUSTOMER_ID })
+    );
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+  });
+
+  it("recovers payment success by retrieving the subscription and writing its real status", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_succeeded", {
+        customer: CUSTOMER_ID,
+        // Legacy invoice shape: subscription id on the invoice root.
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    // Payment success alone never fabricates a status — whatever Stripe
+    // reports (here still past_due) is what gets written.
+    const retrieved = { id: SUBSCRIPTION_ID, status: "past_due" };
+    mocks.retrieve.mockResolvedValue(retrieved);
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(retrieved);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
+  });
+
+  it("writes active when the retrieved subscription is active (modern invoice shape)", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_succeeded", {
+        customer: CUSTOMER_ID,
+        parent: { subscription_details: { subscription: SUBSCRIPTION_ID } },
+      })
+    );
+    const retrieved = { id: SUBSCRIPTION_ID, status: "active" };
+    mocks.retrieve.mockResolvedValue(retrieved);
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active" })
+    );
+  });
+
+  it("returns 500 when the recovery retrieve fails so Stripe retries", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_succeeded", {
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    mocks.retrieve.mockRejectedValue(new Error("stripe unreachable"));
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("stripe unreachable"),
+    });
+  });
+
+  it("returns 500 instead of guessing when the retrieved subscription has no status", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_succeeded", {
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    mocks.retrieve.mockResolvedValue({ id: SUBSCRIPTION_ID });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("has no status"),
+    });
+  });
+
+  it("restores active after the past_due then paid production sequence", async () => {
+    // 1. invoice.payment_failed marks the business past_due via the guard.
+    mocks.constructEvent.mockReturnValueOnce(
+      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+    );
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    const failed = await stripeWebhook(request());
+
+    expect(failed.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "mark_stripe_subscription_past_due_if_business_active",
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+    );
+
+    // 2. The customer fixes their card; invoice.payment_succeeded restores
+    //    the real Stripe status (active) through the guarded sync.
+    mocks.constructEvent.mockReturnValueOnce(
+      event("invoice.payment_succeeded", {
+        customer: CUSTOMER_ID,
+        parent: { subscription_details: { subscription: SUBSCRIPTION_ID } },
+      })
+    );
+    const retrieved = { id: SUBSCRIPTION_ID, status: "active" };
+    mocks.retrieve.mockResolvedValue(retrieved);
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const paid = await stripeWebhook(request());
+
+    expect(paid.status).toBe(200);
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active" })
+    );
+  });
+
+  it("passes a lapsed subscription through the guarded sync for an active business", async () => {
+    const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.deleted", subscription)
+    );
+    mocks.syncStripeSubscription.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
+  });
+
+  it("acknowledges a deleted-business lapse skip so the deletion flow keeps terminal ownership", async () => {
+    const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
+    mocks.constructEvent.mockReturnValue(
+      event("customer.subscription.deleted", subscription)
+    );
+    mocks.syncStripeSubscription.mockResolvedValue(null);
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ received: true });
+    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
+  });
 });

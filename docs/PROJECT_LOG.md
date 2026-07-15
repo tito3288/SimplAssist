@@ -261,3 +261,26 @@ Post-launch items:
   check); see `docs/account-cleanup-scheduler-operations.md`. Stripe end-to-end
   rollout verification remains test-mode only; no live subscription was
   created for testing.
+- **2026-07-15** — Stripe webhook recovery hardening. The
+  `invoice.payment_succeeded` handler now refuses to sync when the retrieved
+  subscription lacks a status (throws instead), so an absent status can never
+  be defaulted to `canceled` by the sync normalizer's fallthrough; the real
+  Stripe status is passed through unchanged. **Audit correction:** the
+  2026-07-14 read-only gating audit claimed `customer.subscription.deleted`
+  was unhandled — it was not; that handler has existed since Layer 2
+  (`8485714`) and lapse-for-active-businesses vs. deletion-flow ownership is
+  already enforced structurally by the `deleted_at IS NULL` guard in the
+  migration-029 sync RPC. The real defect was the payment-success recovery
+  path guessing `canceled` on an absent status, which stranded one production
+  subscription row (repaired manually by Bryan via the count-first ritual).
+  Verification: 8 new mocked webhook tests covering real-status pass-through,
+  active restoration, retrieve-failure 500s, the past_due→paid sequence, and
+  both deletion-guard orderings (webhook file 20/20, full suite 95/95);
+  TypeScript, ESLint clean; two-round adversarial review (8 finder angles →
+  4 verifiers; guard adjudicated as legitimate defense-in-depth).
+  **Confirmed follow-up from review (queued):** `stripe_webhook_events`
+  claims dead-letter failed events — Stripe retries reuse the event id and
+  dedup to a 200 duplicate ack, so "500 → Stripe retries" never reprocesses;
+  fix is a CAS re-claim on `processing_error IS NOT NULL` rows (no
+  migration). Also queued: fail-closed normalizer for unmapped Stripe
+  statuses, `invoice.payment_succeeded` case in the Stripe E2E harness.
