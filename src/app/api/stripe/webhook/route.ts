@@ -80,18 +80,11 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       const subscriptionId = resolveInvoiceSubscriptionId(invoice);
       if (!subscriptionId) return;
       // The invoice payload carries no subscription status, so recovery reads
-      // the real status from Stripe and passes it through unchanged. An
-      // absent status throws instead of syncing: the normalizer maps unknown
-      // statuses to 'canceled', and writing that guess would strand a
-      // recovered payer behind the subscription gate. (A failed event stays
-      // retryable: Stripe's same-id retry re-claims the finished-failed row
-      // in claimStripeEvent and reprocesses.)
+      // the real status from Stripe and passes it through unchanged. The
+      // fail-closed normalizer inside the sync throws on an absent or
+      // unrecognized status — never a guessed write — and a failed event
+      // stays retryable via the claimStripeEvent re-claim.
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      if (!subscription.status) {
-        throw new Error(
-          `[stripe:webhook] Retrieved subscription ${subscriptionId} has no status; refusing to sync a guessed status`
-        );
-      }
       await syncStripeSubscription(subscription);
       return;
     }
@@ -105,17 +98,15 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       // can be days stale, and the past_due RPC has no status guard — a
       // blind mark would re-gate a payer who has since recovered. When the
       // invoice resolves to a subscription, read the live status and only
-      // mark past_due while Stripe still reports delinquency; otherwise
-      // write the live state through the guarded sync. A failed retrieve
-      // throws (500 → recorded → retryable) — never guess either way.
+      // mark past_due while Stripe still reports exactly past_due; every
+      // other live state (including unpaid) syncs through the normalizer so
+      // status classification has a single source. A failed retrieve throws
+      // (500 → recorded → retryable) — never guess either way.
       const failedSubscriptionId = resolveInvoiceSubscriptionId(invoice);
       if (failedSubscriptionId) {
         const liveSubscription =
           await stripe.subscriptions.retrieve(failedSubscriptionId);
-        if (
-          liveSubscription.status !== "past_due" &&
-          liveSubscription.status !== "unpaid"
-        ) {
+        if (liveSubscription.status !== "past_due") {
           await syncStripeSubscription(liveSubscription);
           return;
         }

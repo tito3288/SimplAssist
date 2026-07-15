@@ -344,24 +344,6 @@ describe("POST /api/stripe/webhook", () => {
     });
   });
 
-  it("returns 500 instead of guessing when the retrieved subscription has no status", async () => {
-    mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_succeeded", {
-        customer: CUSTOMER_ID,
-        subscription: SUBSCRIPTION_ID,
-      })
-    );
-    mocks.retrieve.mockResolvedValue({ id: SUBSCRIPTION_ID });
-
-    const response = await stripeWebhook(request());
-
-    expect(response.status).toBe(500);
-    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
-    expect(mocks.update).toHaveBeenCalledWith({
-      processing_error: expect.stringContaining("has no status"),
-    });
-  });
-
   it("restores active after the past_due then paid production sequence", async () => {
     // 1. invoice.payment_failed marks the business past_due via the guard.
     mocks.constructEvent.mockReturnValueOnce(
@@ -569,33 +551,8 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
-  it("skips the past_due mark when the live subscription has recovered", async () => {
-    mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", {
-        customer: CUSTOMER_ID,
-        subscription: SUBSCRIPTION_ID,
-      })
-    );
-    const live = { id: SUBSCRIPTION_ID, status: "active" };
-    mocks.retrieve.mockResolvedValue(live);
-    mocks.syncStripeSubscription.mockResolvedValue({
-      businessId: BUSINESS_ID,
-      customerId: CUSTOMER_ID,
-      subscriptionId: SUBSCRIPTION_ID,
-      plan: "sms_only",
-    });
-
-    const response = await stripeWebhook(request());
-
-    expect(response.status).toBe(200);
-    // The stale failure event never blind-marks past_due; the live state
-    // (recovered) is written instead.
-    expect(mocks.rpc).not.toHaveBeenCalled();
-    expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(live);
-  });
-
-  it.each(["past_due", "unpaid"])(
-    "marks past_due when the live subscription is still delinquent (%s)",
+  it.each(["active", "unpaid"])(
+    "syncs the live state instead of blind-marking past_due (live %s)",
     async (status) => {
       mocks.constructEvent.mockReturnValue(
         event("invoice.payment_failed", {
@@ -603,19 +560,48 @@ describe("POST /api/stripe/webhook", () => {
           subscription: SUBSCRIPTION_ID,
         })
       );
-      mocks.retrieve.mockResolvedValue({ id: SUBSCRIPTION_ID, status });
-      mocks.rpc.mockResolvedValue({ data: true, error: null });
+      const live = { id: SUBSCRIPTION_ID, status };
+      mocks.retrieve.mockResolvedValue(live);
+      mocks.syncStripeSubscription.mockResolvedValue({
+        businessId: BUSINESS_ID,
+        customerId: CUSTOMER_ID,
+        subscriptionId: SUBSCRIPTION_ID,
+        plan: "sms_only",
+      });
 
       const response = await stripeWebhook(request());
 
       expect(response.status).toBe(200);
-      expect(mocks.rpc).toHaveBeenCalledWith(
-        "mark_stripe_subscription_past_due_if_business_active",
-        expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
-      );
-      expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+      // Only a live past_due blind-marks; everything else (recovered OR
+      // terminally unpaid) flows through the normalizer — single source of
+      // status classification.
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(live);
     }
   );
+
+  it("marks past_due only while the live subscription is still past_due", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("invoice.payment_failed", {
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+      })
+    );
+    mocks.retrieve.mockResolvedValue({
+      id: SUBSCRIPTION_ID,
+      status: "past_due",
+    });
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "mark_stripe_subscription_past_due_if_business_active",
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+    );
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+  });
 
   it("marks past_due directly when the invoice has no subscription", async () => {
     mocks.constructEvent.mockReturnValue(
