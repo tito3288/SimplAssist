@@ -54,9 +54,6 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (!session.id.startsWith("cs_test_")) {
-        throw new Error("Live-mode Checkout Sessions are disabled for Phase 9");
-      }
       const synced = await syncCheckoutSession(session);
       if (synced) {
         await attemptPaidLaunch(synced.businessId, "stripe_webhook");
