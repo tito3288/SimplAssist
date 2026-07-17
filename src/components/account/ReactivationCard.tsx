@@ -6,6 +6,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { AlertTriangle } from "lucide-react";
 import { textPrimary, textSecondary } from "@/lib/glass";
+import { supportHref } from "@/lib/support/constants";
 
 interface ReactivationCardProps {
   deletionDate: string;
@@ -125,7 +126,7 @@ export default function ReactivationCard({ deletionDate }: ReactivationCardProps
               <>
                 {" "}Please{" "}
                 <a
-                  href="mailto:support@simplassist.com"
+                  href={supportHref("billing")}
                   className="font-medium underline underline-offset-2 hover:text-red-950 dark:hover:text-red-100"
                 >
                   contact support

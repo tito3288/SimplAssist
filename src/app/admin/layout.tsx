@@ -30,9 +30,14 @@ export default async function AdminLayout({
           <Link href="/admin" className="text-lg font-semibold">
             SimplAssist Admin
           </Link>
-          <Link href="/" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
-            Back to app
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+              Tickets
+            </Link>
+            <Link href="/" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+              Back to app
+            </Link>
+          </div>
         </header>
         {children}
       </div>

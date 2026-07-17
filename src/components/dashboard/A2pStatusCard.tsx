@@ -4,6 +4,7 @@ import { Building2, Link2, MessageSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { orangeAccentIcon } from '@/lib/glass';
 import { card, ink, body, statusDanger } from '@/lib/theme-v2/theme';
+import { supportHref } from '@/lib/support/constants';
 import { formatDate } from '@/lib/utils';
 import type {
   CampaignAssignmentStatus,
@@ -24,10 +25,7 @@ export interface A2pStatusCardProps {
   smsBlockReason: SmsBlockReason | null;
 }
 
-const SUPPORT_MAILTO_BRAND =
-  'mailto:support@simplassist.com?subject=Brand%20registration%20update%20needed';
-const SUPPORT_MAILTO_CAMPAIGN =
-  'mailto:support@simplassist.com?subject=SMS%20campaign%20update%20needed';
+const SUPPORT_HREF = supportHref('number_registration');
 
 function StatusBadge({ status }: { status: RegistrationStatus | null }) {
   if (status === 'approved') return <Badge variant="success">Approved</Badge>;
@@ -49,10 +47,10 @@ function AssignmentBadge({
 
 function RejectionBanner({
   reason,
-  mailto,
+  href,
 }: {
   reason: string | null;
-  mailto: string;
+  href: string;
 }) {
   return (
     <div className={`mt-3 ml-11 rounded-[18px] px-4 py-3 ${statusDanger}`}>
@@ -63,7 +61,7 @@ function RejectionBanner({
         <p className="mt-1 text-xs text-red-600/90 dark:text-red-400/80">{reason}</p>
       )}
       <a
-        href={mailto}
+        href={href}
         className="mt-2 inline-block text-xs font-semibold text-red-700 underline decoration-red-300 underline-offset-2 hover:decoration-red-500 dark:text-red-400 dark:decoration-red-500/40"
       >
         Contact support
@@ -78,14 +76,14 @@ function StatusRow({
   status,
   updatedAt,
   rejectionReason,
-  rejectionMailto,
+  rejectionHref,
 }: {
   icon: typeof Building2;
   title: string;
   status: RegistrationStatus | null;
   updatedAt: string | null;
   rejectionReason: string | null;
-  rejectionMailto: string;
+  rejectionHref: string;
 }) {
   return (
     <div>
@@ -104,7 +102,7 @@ function StatusRow({
         <StatusBadge status={status} />
       </div>
       {status === 'rejected' && (
-        <RejectionBanner reason={rejectionReason} mailto={rejectionMailto} />
+        <RejectionBanner reason={rejectionReason} href={rejectionHref} />
       )}
     </div>
   );
@@ -132,7 +130,7 @@ function AssignmentRow({
         <AssignmentBadge status={status} />
       </div>
       {status === 'failed' && (
-        <RejectionBanner reason={failureReason} mailto={SUPPORT_MAILTO_CAMPAIGN} />
+        <RejectionBanner reason={failureReason} href={SUPPORT_HREF} />
       )}
     </div>
   );
@@ -215,7 +213,7 @@ export default function A2pStatusCard({
           status={brandStatus}
           updatedAt={brandStatusUpdatedAt}
           rejectionReason={brandRejectionReason}
-          rejectionMailto={SUPPORT_MAILTO_BRAND}
+          rejectionHref={SUPPORT_HREF}
         />
         <StatusRow
           icon={MessageSquare}
@@ -223,7 +221,7 @@ export default function A2pStatusCard({
           status={campaignStatus}
           updatedAt={campaignStatusUpdatedAt}
           rejectionReason={campaignRejectionReason}
-          rejectionMailto={SUPPORT_MAILTO_CAMPAIGN}
+          rejectionHref={SUPPORT_HREF}
         />
         <AssignmentRow
           status={assignmentStatus}

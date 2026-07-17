@@ -5,6 +5,7 @@ import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 import CallForwardingForm from '@/components/settings/CallForwardingForm';
 import { cn } from '@/lib/utils';
 import { statusSuccess, ink, body, inlineLink } from '@/lib/theme-v2/theme';
+import { supportHref } from '@/lib/support/constants';
 
 interface PhoneNumberSectionProps {
   phoneNumber: string | null;
@@ -37,9 +38,9 @@ export default function PhoneNumberSection({
           </div>
         </div>
         <p className="text-xs text-stone-400 dark:text-[#666]">
-          Need to change your number? Contact{' '}
-          <a href="mailto:bryan@simplassist.com" className={cn(inlineLink, "underline")}>
-            bryan@simplassist.com
+          Need to change your number?{' '}
+          <a href={supportHref('number_registration')} className={cn(inlineLink, "underline")}>
+            Contact support
           </a>
         </p>
         <CallForwardingForm

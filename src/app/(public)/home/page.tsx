@@ -588,6 +588,7 @@ export default function HomePage() {
               <div className="flex gap-x-5 gap-y-2 flex-wrap justify-center text-sm">
                 <a href="#features" className={navLink}>Features</a>
                 <a href="#pricing" className={navLink}>Pricing</a>
+                <Link href="/support" className={navLink}>Support</Link>
                 <Link href="/privacy" className={navLink}>Privacy</Link>
                 <Link href="/terms" className={navLink}>Terms</Link>
                 <Link href="/login" className={navLink}>Log In</Link>

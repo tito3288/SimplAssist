@@ -37,7 +37,7 @@ function smsPausedCopy(reason: SmsBlockReason | null): string {
     case "missing_phone_number":
       return "Add an active phone number before replying by SMS.";
     case "missing_messaging_profile":
-      return "Messaging setup is incomplete. Contact support before replying by SMS.";
+      return "Messaging setup is incomplete. Contact support from the Support page before replying by SMS.";
     case "campaign_not_approved":
     default:
       return "Your campaign is still under carrier review. You can reply once it is approved.";

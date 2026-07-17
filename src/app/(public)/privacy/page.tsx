@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
 import { inlineLink } from "@/lib/theme-v2/theme";
+import { SUPPORT_EMAIL, SUPPORT_PATH } from "@/lib/support/constants";
 
 const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
 
@@ -76,12 +78,11 @@ export default function PrivacyPage() {
           Getting Help
         </p>
         <p className="mb-4">
-          For assistance, reply <strong>HELP</strong> to any message, or contact SimplAssist support
-          at{" "}
-          <a href="mailto:bryan@simplassist.com" className={linkClass}>
-            bryan@simplassist.com
-          </a>
-          .
+          For assistance, reply <strong>HELP</strong> to any message, visit our{" "}
+          <Link href={SUPPORT_PATH} className={linkClass}>
+            Support page
+          </Link>
+          , or email SimplAssist support at <span className="select-all">{SUPPORT_EMAIL}</span>.
         </p>
 
         <p className="mb-4 font-semibold">
@@ -130,11 +131,11 @@ export default function PrivacyPage() {
 
       <LegalSection title="8. Contact Us">
         <p>
-          For privacy questions, contact us at{" "}
-          <a href="mailto:bryan@simplassist.com" className={linkClass}>
-            bryan@simplassist.com
-          </a>
-          .
+          For privacy questions, reach us from our{" "}
+          <Link href={SUPPORT_PATH} className={linkClass}>
+            Support page
+          </Link>{" "}
+          or email <span className="select-all">{SUPPORT_EMAIL}</span>.
         </p>
       </LegalSection>
     </LegalDocLayout>

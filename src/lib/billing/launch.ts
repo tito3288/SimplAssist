@@ -246,12 +246,12 @@ export async function attemptPaidLaunch(
     console.error(`[billing:launch] Paid launch failed for ${businessId}:`, err);
     await markRegistrationFailed(
       businessId,
-      "Couldn't submit your SMS registration right now. Please try again or contact support."
+      "Couldn't submit your SMS registration right now. Please try again or contact support from the Support page."
     );
     return {
       status: "failed",
       message:
-        "Couldn't submit your SMS registration right now. Please try again or contact support.",
+        "Couldn't submit your SMS registration right now. Please try again or contact support from the Support page.",
     };
   }
 }

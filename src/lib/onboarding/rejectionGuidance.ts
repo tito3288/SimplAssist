@@ -2,8 +2,6 @@ import type { OnboardingStep } from "@/types/database";
 
 export type RejectionKind = "brand" | "campaign";
 
-export const SUPPORT_EMAIL = "support@simplassist.com";
-
 // Ordered: identity checks run before content checks because carrier texts
 // citing brand identity often also contain generic words like "description".
 // Carrier codes: 808/810 = identity/EIN verification; 861 = missing opt-out
@@ -154,11 +152,11 @@ export function mapReasonToFriendly(
       // re-files — support path.
       return kind === "brand"
         ? "Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Update your details, then hit Retry registration — we'll re-file your verification with the carrier automatically. It's usually a quick fix."
-        : `Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Update your details, then contact support at ${SUPPORT_EMAIL} and we'll re-file your verification with you — it's usually a quick fix.`;
+        : "Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Update your details, then contact support from our Support page and we'll re-file your verification with you — it's usually a quick fix.";
     case "opt_out":
       return "One or more of your sample messages is missing opt-out wording. Add a line like 'Reply STOP to unsubscribe' to each sample message and resubmit — a quick fix.";
     case "opt_in":
-      return `This rejection is about the opt-in explanation SimplAssist generates for you — it's ours to fix, not yours. Contact support at ${SUPPORT_EMAIL} and we'll adjust it and resubmit with you.`;
+      return "This rejection is about the opt-in explanation SimplAssist generates for you — it's ours to fix, not yours. Contact support from our Support page and we'll adjust it and resubmit with you.";
     case "sample":
       return "Your example texts didn't pass review. Make sure your sample messages sound like real texts you'd send a customer, mention your business name, and at least one says 'Reply STOP to opt out.' A quick polish usually does it.";
     case "use_case":
@@ -178,7 +176,7 @@ export function mapReasonToFriendly(
       // value, our hosted pages) is support's.
       return kind === "brand"
         ? "Carriers couldn't verify your website or your privacy and terms pages. Make sure your website address is correct and loads for visitors, then hit Retry registration — we'll re-file your verification with the carrier automatically. (Your SimplAssist privacy and terms pages are generated automatically — if you use your own links, check those.)"
-        : `Carriers couldn't load the privacy or terms links on your SMS registration. If you use your own privacy and terms pages, make sure those links load for visitors, then retry. If they look fine — or you use the SimplAssist-generated pages — contact support at ${SUPPORT_EMAIL} and we'll fix it with you.`;
+        : "Carriers couldn't load the privacy or terms links on your SMS registration. If you use your own privacy and terms pages, make sure those links load for visitors, then retry. If they look fine — or you use the SimplAssist-generated pages — contact support from our Support page and we'll fix it with you.";
     default:
       return null;
   }

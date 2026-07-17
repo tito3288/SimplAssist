@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
 import { inlineLink } from "@/lib/theme-v2/theme";
+import { SUPPORT_EMAIL, SUPPORT_PATH } from "@/lib/support/constants";
 
 const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
 
@@ -116,11 +118,11 @@ export default function TermsPage() {
 
       <LegalSection title="9. Contact">
         <p>
-          For questions about these terms, contact us at{" "}
-          <a href="mailto:bryan@simplassist.com" className={linkClass}>
-            bryan@simplassist.com
-          </a>
-          .
+          For questions about these terms, reach us from our{" "}
+          <Link href={SUPPORT_PATH} className={linkClass}>
+            Support page
+          </Link>{" "}
+          or email <span className="select-all">{SUPPORT_EMAIL}</span>.
         </p>
       </LegalSection>
     </LegalDocLayout>

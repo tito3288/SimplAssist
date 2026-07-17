@@ -333,8 +333,8 @@ export default function BrandVerificationForm({
             . This unlocks higher message limits and faster approval.
           </p>
           <p className="text-xs">
-            Sole Proprietor registration is not open yet. Join the waitlist here, then come back
-            and choose &quot;Yes&quot; after you have your EIN.
+            Sole Proprietor registration is not open yet. Use the Join waitlist button below,
+            then come back and choose &quot;Yes&quot; after you have your EIN.
           </p>
           {waitlistSaved && (
             <p className={cn('rounded-[14px] px-3 py-2 text-xs font-medium', statusSuccess)}>

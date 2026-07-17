@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
+import { SUPPORT_PATH } from "@/lib/support/constants";
 import {
   body,
   card,
@@ -157,9 +158,16 @@ export function LegalDocLayout({
             &copy; {new Date().getFullYear()} {businessName}. Messaging service powered by SimplAssist.
           </p>
         ) : (
-          <p className={`mt-8 text-center text-xs ${body}`}>
-            &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
-          </p>
+          // SimplAssist branch only — per-business legal pages are
+          // carrier-facing and must not show SimplAssist support links.
+          <div className="mt-8 text-center">
+            <Link href={SUPPORT_PATH} className={`text-xs ${inlineLink}`}>
+              Support
+            </Link>
+            <p className={`mt-2 text-xs ${body}`}>
+              &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
+            </p>
+          </div>
         )
       }
     >

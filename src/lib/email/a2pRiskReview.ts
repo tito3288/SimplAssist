@@ -1,4 +1,5 @@
 import { resend, RESEND_FROM } from "./client";
+import { SUPPORT_EMAIL } from "@/lib/support/constants";
 import type { A2pRiskFinding } from "@/types/database";
 
 interface A2pRiskReviewEmailInput {
@@ -14,7 +15,7 @@ function reviewRecipients(): string[] {
   const configured =
     process.env.A2P_REVIEW_EMAIL ??
     process.env.SUPPORT_EMAIL ??
-    "support@simplassist.com";
+    SUPPORT_EMAIL;
   return configured
     .split(",")
     .map((email) => email.trim().toLowerCase())

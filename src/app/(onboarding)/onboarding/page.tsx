@@ -26,9 +26,9 @@ import {
   inferRejectionStep,
   mapReasonToFriendly,
   rejectionNeedsSupport,
-  SUPPORT_EMAIL,
   type RejectionKind,
 } from '@/lib/onboarding/rejectionGuidance';
+import { supportHref } from '@/lib/support/constants';
 import { tile, statusWarning } from '@/lib/theme-v2/theme';
 import type { BusinessType } from '@/types/database';
 
@@ -388,9 +388,9 @@ function PhoneNumberStep({
   );
 }
 
-// A real anchor (mailto) styled to match Button's primary/secondary
-// variants: hover shows the address and right-click/long-press can copy it,
-// which a scripted window.location button can't offer.
+// A real anchor (to the /support hub) styled to match Button's
+// primary/secondary variants — this is a navigation, not an action, so a
+// link beats a scripted button.
 const SUPPORT_LINK_BASE =
   'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#ea580c] dark:focus:ring-[#ff914d]';
 const SUPPORT_LINK_PRIMARY =
@@ -491,7 +491,7 @@ function CarrierReviewStatus({
     rejectionKind !== null &&
     (registration.status === 'submitted' ||
       rejectionNeedsSupport(rejectionKind, carrierReason));
-  const supportHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Help with my SMS registration')}`;
+  const supportLink = supportHref('number_registration');
   // When both brand and campaign are rejected, brand wins the headline slot;
   // the campaign's own carrier verdict still has to stay visible.
   const secondaryCarrierReason =
@@ -575,7 +575,11 @@ function CarrierReviewStatus({
           registration.status !== 'failed' &&
           !registration.smsReady && (
             <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
-              Business and compliance details are locked until review completes. Contact support if you need to change them.
+              Business and compliance details are locked until review completes.{' '}
+              <a href={supportLink} className="font-medium underline">
+                Contact support
+              </a>{' '}
+              if you need to change them.
             </p>
           )}
       </div>
@@ -603,7 +607,7 @@ function CarrierReviewStatus({
                 <p>{carrierReason}</p>
                 <p className="text-xs">
                   Not sure what this means?{' '}
-                  <a href={supportHref} className="font-medium underline">
+                  <a href={supportLink} className="font-medium underline">
                     Contact support
                   </a>{' '}
                   and we&apos;ll help you sort it out.
@@ -646,7 +650,7 @@ function CarrierReviewStatus({
             )}
             {needsSupport && (
               <a
-                href={supportHref}
+                href={supportLink}
                 className={`${SUPPORT_LINK_BASE} ${fixStep ? SUPPORT_LINK_SECONDARY : SUPPORT_LINK_PRIMARY}`}
               >
                 Contact support

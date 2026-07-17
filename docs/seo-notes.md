@@ -14,7 +14,7 @@ content is ever served in production, and `noindex` is authoritative for Google.
 ## Rules for future SEO work
 
 1. **Sitemap** (`src/app/sitemap.ts` or static): include ONLY intentionally public
-   marketing/legal pages (`/home`, `/privacy`, `/terms`, …). Never include `/demo/*`
+   marketing/legal pages (`/home`, `/privacy`, `/terms`, `/support`, …). Never include `/demo/*`
    or `/home-v2`, and never generate the sitemap by crawling the route tree
    (the gated routes exist in the tree and would leak into it).
 2. **robots.txt / robots.ts**: do NOT add `Disallow: /demo` or `Disallow: /home-v2`

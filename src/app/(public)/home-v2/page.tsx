@@ -495,6 +495,7 @@ export default function HomeV2Page() {
               <div className="flex gap-5 flex-wrap text-sm">
                 <a href="#features" className={navLink}>Features</a>
                 <a href="#pricing" className={navLink}>Pricing</a>
+                <Link href="/support" className={navLink}>Support</Link>
                 <Link href="/privacy" className={navLink}>Privacy</Link>
                 <Link href="/terms" className={navLink}>Terms</Link>
                 <Link href="/login" className={navLink}>Log In</Link>
