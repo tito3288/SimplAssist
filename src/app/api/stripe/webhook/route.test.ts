@@ -155,6 +155,46 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
+  it("processes a 100%-off checkout ($0 invoice, no payment_intent) like any other", async () => {
+    // A fully-discounted promotion code completes checkout with
+    // payment_status "no_payment_required" and no payment_intent at all.
+    // The route must pass the session through untouched — it never inspects
+    // amounts or dereferences payment_intent — and launch normally.
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_test_promo_zero",
+      payment_status: "no_payment_required",
+      payment_intent: null,
+      amount_total: 0,
+    });
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cs_test_promo_zero",
+        payment_status: "no_payment_required",
+      })
+    );
+    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "stripe_webhook"
+    );
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed_at: expect.any(String),
+        processing_error: null,
+      })
+    );
+  });
+
   it("attempts paid launch only when checkout synchronization returns an active business", async () => {
     const checkoutEvent = event("checkout.session.completed", {
       id: "cs_test_active_business",

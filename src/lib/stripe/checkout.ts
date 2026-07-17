@@ -40,6 +40,13 @@ export async function createCheckoutSession(
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
     mode: "subscription",
+    // Shows the optional "Add promotion code" field at checkout. The codes
+    // themselves (friends/colleagues incentives) are created and managed
+    // entirely in the Stripe dashboard. A 100%-off redemption produces a $0
+    // first invoice with payment_status "no_payment_required" — the setup-fee
+    // stamp in subscriptionSync relies on `session.status === "complete"` for
+    // that case (pinned by a regression test).
+    allow_promotion_codes: true,
     line_items: [
       { price: planPriceId, quantity: 1 },
       { price: setupFeePriceId, quantity: 1 },

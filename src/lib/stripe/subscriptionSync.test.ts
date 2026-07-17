@@ -212,4 +212,62 @@ describe("syncCheckoutSession", () => {
     expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  it("stamps the setup fee for a 100%-off checkout (no_payment_required + complete)", async () => {
+    // A fully-discounted promotion code produces a $0 first invoice: Stripe
+    // sets payment_status to "no_payment_required", NOT "paid". Only the
+    // `session.status === "complete"` half of the stamping condition covers
+    // it — if that clause is ever removed, discounted checkouts leave
+    // setup_fee_paid_at null and isBillingReady blocks launch forever.
+    mocks.retrieve.mockResolvedValue(subscription());
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    const session = {
+      id: "cs_test_promo_zero",
+      customer: CUSTOMER_ID,
+      subscription: SUBSCRIPTION_ID,
+      payment_status: "no_payment_required",
+      status: "complete",
+      metadata: {
+        business_id: BUSINESS_ID,
+        setup_fee_price_id: "price_setup_test",
+      },
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncCheckoutSession(session)).resolves.toEqual({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_stripe_subscription_if_business_active",
+      expect.objectContaining({
+        p_setup_fee_paid_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      })
+    );
+  });
+
+  it("does not stamp the setup fee for a session that never completed", async () => {
+    // The boundary of the stamping condition: an abandoned/open session
+    // (neither paid nor complete) must sync with a null setup-fee stamp.
+    mocks.retrieve.mockResolvedValue(subscription());
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    const session = {
+      id: "cs_test_open",
+      customer: CUSTOMER_ID,
+      subscription: SUBSCRIPTION_ID,
+      payment_status: "unpaid",
+      status: "open",
+      metadata: {
+        business_id: BUSINESS_ID,
+        setup_fee_price_id: "price_setup_test",
+      },
+    } as unknown as Stripe.Checkout.Session;
+
+    await syncCheckoutSession(session);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_stripe_subscription_if_business_active",
+      expect.objectContaining({ p_setup_fee_paid_at: null })
+    );
+  });
 });
