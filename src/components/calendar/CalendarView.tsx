@@ -17,7 +17,7 @@ import { Modal } from "@/components/ui/Modal";
 import { orangeAccentIcon } from "@/lib/glass";
 import { card, ink, body, tile, btnPrimary } from "@/lib/theme-v2/theme";
 
-interface CalendarEvent {
+export interface CalendarEvent {
   id: string;
   title: string;
   start: string;
@@ -29,6 +29,9 @@ interface CalendarEvent {
 interface CalendarViewProps {
   isConnected: boolean;
   googleEmail: string | null;
+  /** Dev-only demo mode (/demo routes): seed events and skip the Google
+   *  Calendar fetch entirely. Real dashboard callers never pass this. */
+  demoEvents?: CalendarEvent[];
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -84,13 +87,14 @@ function formatMonthYear(date: Date): string {
 export default function CalendarView({
   isConnected: initialConnected,
   googleEmail,
+  demoEvents,
 }: CalendarViewProps) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(
     new Date(today.getFullYear(), today.getMonth(), 1)
   );
   const [selectedDate, setSelectedDate] = useState<Date>(today);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>(demoEvents ?? []);
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(initialConnected);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -118,6 +122,7 @@ export default function CalendarView({
   }
 
   const fetchEvents = useCallback(async () => {
+    if (demoEvents) return;
     if (!connected) return;
     setLoading(true);
     try {
@@ -148,7 +153,7 @@ export default function CalendarView({
     } finally {
       setLoading(false);
     }
-  }, [currentMonth, connected]);
+  }, [currentMonth, connected, demoEvents]);
 
   useEffect(() => {
     fetchEvents();

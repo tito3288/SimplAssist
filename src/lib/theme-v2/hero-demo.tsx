@@ -19,11 +19,19 @@
  *
  * `prefers-reduced-motion` shows the static plumbing conversation, no loop.
  *
- * The chat area is fixed-height (messages pin to the bottom and older ones
- * scroll up out of view), so the surrounding page never shifts.
+ * The chat area is fixed-height so the surrounding page never shifts, and it
+ * behaves like a real messaging app: a fresh conversation fills from the TOP
+ * (first message under the header, appending downward), and once the content
+ * outgrows the window it scrolls down to keep the newest message in view —
+ * older messages scroll out the top, exactly like a chat thread. The window
+ * is an overflow-hidden box scrolled programmatically: on every message or
+ * typing change, scrollTop is pinned to the bottom each animation frame for
+ * the duration of the bubble's grow-in, so the scroll moves in lockstep with
+ * it and native clamping handles all the edge cases (short conversations,
+ * the typing-bubble swap, conversation resets).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { body, ink, tile } from "@/lib/theme-v2/theme";
 
 type Sender = "banner" | "ai" | "customer";
@@ -38,13 +46,13 @@ type Conversation = {
 
 const CONVERSATIONS: Conversation[] = [
   {
-    business: "Acme Plumbing",
+    business: "Manny's Plumbing",
     lead: { name: "Sarah M." },
     script: [
       { from: "banner", text: "Missed call from Sarah — new customer" },
       {
         from: "ai",
-        text: "Hi Sarah! This is Acme Plumbing's assistant — sorry we missed your call. How can we help?",
+        text: "Hi Sarah! This is the assistant at Manny's Plumbing — sorry we missed your call. How can we help?",
       },
       { from: "customer", text: "My water heater is leaking. Can someone come out this week?" },
       {
@@ -292,6 +300,26 @@ export function HeroDemo() {
   const [visible, setVisible] = useState(0);
   const [typing, setTyping] = useState<"ai" | "customer" | null>(null);
   const [faded, setFaded] = useState(false);
+  const chatWindowRef = useRef<HTMLDivElement | null>(null);
+
+  // Real-chat scroll: on every message/typing change, pin the window's
+  // scrollTop to the bottom each animation frame for the duration of the
+  // bubble's grow-in (500ms + buffer), so the scroll tracks the growth in
+  // lockstep. Native clamping does the rest: short conversations don't
+  // scroll at all (content sits at the top), and a conversation swap snaps
+  // back to the top on its own while faded out.
+  useEffect(() => {
+    const el = chatWindowRef.current;
+    if (!el) return;
+    let raf = 0;
+    const start = performance.now();
+    const pin = () => {
+      el.scrollTop = el.scrollHeight;
+      if (performance.now() - start < 650) raf = requestAnimationFrame(pin);
+    };
+    pin();
+    return () => cancelAnimationFrame(raf);
+  }, [visible, typing, activeIndex]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -415,10 +443,11 @@ export function HeroDemo() {
           </div>
         </div>
 
-        {/* Fixed-height message area: stack pinned to the bottom edge, messages
-            push upward as they arrive and older ones clip out the top */}
-        <div className="relative h-[380px] overflow-hidden" aria-live="polite">
-          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3">
+        {/* Fixed-height message area: the conversation fills from the top like
+            a real chat; once it outgrows the window, programmatic scrolling
+            (see the pin effect above) keeps the newest message in view */}
+        <div ref={chatWindowRef} className="relative h-[380px] overflow-hidden" aria-live="polite">
+          <div className="flex flex-col gap-3">
             {convo.script.slice(0, visible).map((m, i) => (
               <Enter key={`${activeIndex}-${i}`} animate={!reduceMotion}>
                 <Bubble from={m.from}>{m.text}</Bubble>

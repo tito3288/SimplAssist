@@ -32,7 +32,17 @@ function formatWebsiteUrl(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; websiteUrl: string | null }) {
+export default function Sidebar({
+  userEmail,
+  websiteUrl,
+  activePath,
+}: {
+  userEmail: string;
+  websiteUrl: string | null;
+  /** Override the active-nav match (used by the /demo routes, whose own
+   *  pathname never equals a real nav href). Real callers omit it. */
+  activePath?: string;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -70,7 +80,7 @@ export default function Sidebar({ userEmail, websiteUrl }: { userEmail: string; 
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = (activePath ?? pathname) === item.href;
           return (
             <Link
               key={item.href}

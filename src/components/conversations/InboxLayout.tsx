@@ -7,13 +7,17 @@ import { ConversationList } from "./ConversationList";
 import { MessageThread } from "./MessageThread";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
 import { card } from "@/lib/theme-v2/theme";
-import type { SmsBlockReason } from "@/types/database";
+import type { Message, SmsBlockReason } from "@/types/database";
 
 interface InboxLayoutProps {
   conversations: ConversationWithContact[];
   businessId: string;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
+  /** Dev-only demo mode (/demo routes): pre-select a conversation and serve
+   *  each thread's messages from fixtures. Real callers never pass these. */
+  initialSelectedId?: string;
+  demoMessagesById?: Record<string, Message[]>;
 }
 
 export function InboxLayout({
@@ -21,9 +25,13 @@ export function InboxLayout({
   businessId,
   smsReady,
   smsBlockReason,
+  initialSelectedId,
+  demoMessagesById,
 }: InboxLayoutProps) {
   const [conversations, setConversations] = useState(initialConversations);
-  const [selected, setSelected] = useState<ConversationWithContact | null>(null);
+  const [selected, setSelected] = useState<ConversationWithContact | null>(
+    initialConversations.find((c) => c.id === initialSelectedId) ?? null
+  );
 
   function handleDelete(id: string) {
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -74,6 +82,7 @@ export function InboxLayout({
                 businessId={businessId}
                 smsReady={smsReady}
                 smsBlockReason={smsBlockReason}
+                demoMessages={demoMessagesById?.[selected.id]}
               />
             </div>
           </div>

@@ -15,9 +15,13 @@ a future redesign can start from it instead of from scratch.
 | Grid system | `src/lib/theme-v2/grid.tsx` (reusable; nothing else imports it yet) |
 
 **Visibility:** works on the local dev server (`npm run dev` → localhost:3000/home-v2).
-In production builds it hard-404s via a `notFound()` gate at the top of the page
-component unless `ENABLE_HOME_V2_PREVIEW=1` is set at build time. Metadata is
-`robots: noindex`. Nothing on the live site links to it.
+In production builds a `notFound()` gate (in both `generateMetadata` and the page
+component) renders the 404 page with a `noindex` robots meta unless
+`ENABLE_HOME_V2_PREVIEW=1` is set at build time. Note: Next 14.2 serves this as a
+soft 404 (404 UI + noindex, HTTP status 200) — a framework limitation for
+`notFound()`-gated pages; no page content is ever served. Nothing on the live
+site links to it. The `/demo/*` screenshot pages use the same pattern
+(`ENABLE_DEMO_PAGES=1`).
 
 **To revive:** remove the `notFound()` gate (and, if replacing the live homepage,
 move the content into `/home` or repoint the `/` redirect target), reconcile any

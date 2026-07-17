@@ -32,10 +32,18 @@ import { ShowcaseTabs } from "./showcase-tabs";
  * docs/home-v2-design.md
  */
 
-export const metadata: Metadata = {
-  title: "SimplAssist — Home (v2 preview)",
-  robots: { index: false, follow: false },
-};
+// Gating in generateMetadata (as well as the component) makes the production
+// 404 a true HTTP 404 — metadata resolves before streaming starts, so the
+// status code can still be set (component-only gating yields a soft 404).
+export function generateMetadata(): Metadata {
+  if (process.env.NODE_ENV === "production" && process.env.ENABLE_HOME_V2_PREVIEW !== "1") {
+    notFound();
+  }
+  return {
+    title: "SimplAssist — Home (v2 preview)",
+    robots: { index: false, follow: false },
+  };
+}
 
 /* ── Local pieces ── */
 

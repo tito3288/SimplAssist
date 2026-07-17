@@ -70,19 +70,25 @@ const features = [
   },
 ];
 
-/** The two dashboard views shown in the "how it works" panel — panes are CSS
- *  skeletons until real dashboard screenshots exist (swap each Pane* for an
- *  <Image fill className="object-cover object-left-top" />). */
+/** The two dashboard views shown in the "how it works" panel — real product
+ *  screenshots (public/marketing/pane-*.png), cropped from the /demo pages.
+ *  `aspect` matches each crop's ratio exactly so nothing gets clipped. */
 const dashboardViews = [
   {
     title: "Messages & leads",
     description:
       "Every SMS and web-chat conversation lands in one inbox — with each lead tracked from first contact to booked.",
+    base: "pane-messages",
+    aspect: "aspect-video",
+    alt: "SimplAssist conversations inbox — a missed call turned into a booked water heater repair",
   },
   {
     title: "Calendar & bookings",
     description:
       "Appointments your assistant books land straight on your calendar, synced with Google Calendar.",
+    base: "pane-calendar",
+    aspect: "aspect-[15/8]",
+    alt: "SimplAssist calendar — a month full of AI-booked appointments",
   },
 ];
 
@@ -178,77 +184,28 @@ function SectionHeader({
 }
 
 /**
- * Placeholder dashboard panes — CSS skeletons of the inbox and calendar
- * views. Replace each with a real screenshot
- * (<Image fill className="object-cover object-left-top" />) when available.
+ * Paired light/dark product screenshot filling its pane (the homepage swaps
+ * them with the same hidden/dark:block pattern the logo uses). Parent must be
+ * `relative`. Screenshots are 16:9 crops taken from the /demo pages.
  */
-function PaneMessages() {
-  const dots = [
-    "bg-[#ea580c] dark:bg-[#ff914d]",
-    "bg-green-500 dark:bg-green-400",
-    "bg-stone-300 dark:bg-white/[0.18]",
-    "bg-[#ea580c] dark:bg-[#ff914d]",
-    "bg-stone-300 dark:bg-white/[0.18]",
-  ];
+function PaneShot({ base, alt, sizes }: { base: string; alt: string; sizes: string }) {
   return (
-    <div aria-hidden className="flex h-full">
-      {/* Conversation list */}
-      <div className="w-[34%] shrink-0 border-r border-black/[0.06] dark:border-white/[0.08] p-3 space-y-2">
-        <div className="h-2.5 w-1/2 rounded bg-black/[0.08] dark:bg-white/[0.12] mb-3" />
-        {dots.map((dot, i) => (
-          <div key={i} className="rounded-lg p-2.5 space-y-1.5 bg-black/[0.03] dark:bg-white/[0.04]">
-            <div className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-              <span className="h-2 w-2/3 rounded bg-black/[0.08] dark:bg-white/[0.10]" />
-            </div>
-            <div className="h-2 w-1/2 rounded bg-black/[0.05] dark:bg-white/[0.07]" />
-          </div>
-        ))}
-      </div>
-      {/* Thread */}
-      <div className="flex-1 p-4 flex flex-col gap-2">
-        <div className="flex items-center justify-between mb-2">
-          <div className="h-2.5 w-1/3 rounded bg-black/[0.08] dark:bg-white/[0.12]" />
-          <div className="h-4 w-16 rounded-full bg-green-50 border border-green-200 dark:bg-[rgba(74,222,128,.12)] dark:border-[rgba(74,222,128,.25)]" />
-        </div>
-        <div className="h-6 w-3/5 rounded-[10px] rounded-bl-[4px] bg-black/[0.05] dark:bg-white/[0.07]" />
-        <div className="h-6 w-2/5 self-end rounded-[10px] rounded-br-[4px] bg-[#ea580c]/80 dark:bg-[#ff914d]/70" />
-        <div className="h-6 w-1/2 rounded-[10px] rounded-bl-[4px] bg-black/[0.05] dark:bg-white/[0.07]" />
-        <div className="h-6 w-2/5 self-end rounded-[10px] rounded-br-[4px] bg-[#ea580c]/80 dark:bg-[#ff914d]/70" />
-      </div>
-    </div>
-  );
-}
-
-function PaneCalendar() {
-  // A few cells get event bars — orange = scheduled, green = AI-booked.
-  const events: Record<number, string> = {
-    3: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
-    9: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
-    10: "bg-green-500/60 dark:bg-green-400/50",
-    16: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
-    19: "bg-green-500/60 dark:bg-green-400/50",
-    24: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
-  };
-  return (
-    <div aria-hidden className="h-full p-4 flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="h-3 w-24 rounded bg-black/[0.10] dark:bg-white/[0.14]" />
-        <div className="flex gap-1.5">
-          <span className="h-5 w-5 rounded-full border border-black/[0.08] dark:border-white/[0.10]" />
-          <span className="h-5 w-5 rounded-full border border-black/[0.08] dark:border-white/[0.10]" />
-        </div>
-      </div>
-      <div className="grid grid-cols-7 gap-1.5 flex-1 min-h-0">
-        {Array.from({ length: 28 }, (_, i) => (
-          <div key={i} className="relative rounded-md bg-black/[0.025] dark:bg-white/[0.04]">
-            {events[i] && (
-              <span className={`absolute inset-x-1 top-1 h-1.5 rounded-full ${events[i]}`} />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <>
+      <Image
+        src={`/marketing/${base}-light.png`}
+        alt={alt}
+        fill
+        sizes={sizes}
+        className="object-cover object-left-top block dark:hidden"
+      />
+      <Image
+        src={`/marketing/${base}-dark.png`}
+        alt={alt}
+        fill
+        sizes={sizes}
+        className="object-cover object-left-top hidden dark:block"
+      />
+    </>
   );
 }
 
@@ -456,14 +413,22 @@ export default function HomePage() {
             <div className="hidden lg:block rounded-[28px] overflow-hidden px-10 pt-10 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
               <div className="group flex items-end">
                 <div
-                  className={`relative z-10 w-[59%] shrink-0 h-[440px] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.22)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                  className={`relative z-10 w-[59%] shrink-0 aspect-video ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.22)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
                 >
-                  <PaneMessages />
+                  <PaneShot
+                    base="pane-messages"
+                    alt="SimplAssist conversations inbox — a missed call turned into a booked water heater repair"
+                    sizes="(min-width: 1024px) 42rem, 90vw"
+                  />
                 </div>
                 <div
-                  className={`relative z-0 hover:z-20 w-[52%] -ml-[11%] shrink-0 h-[400px] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.18)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                  className={`relative z-0 hover:z-20 w-[52%] -ml-[11%] shrink-0 aspect-[15/8] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.18)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
                 >
-                  <PaneCalendar />
+                  <PaneShot
+                    base="pane-calendar"
+                    alt="SimplAssist calendar — a month full of AI-booked appointments"
+                    sizes="(min-width: 1024px) 37rem, 90vw"
+                  />
                 </div>
               </div>
             </div>
@@ -476,8 +441,8 @@ export default function HomePage() {
                 <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
                 <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
                 <div className="mt-4 rounded-2xl overflow-hidden p-3 pb-0 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
-                  <div className={`h-[240px] sm:h-[320px] ${paneFrame} rounded-t-xl`}>
-                    {i === 0 ? <PaneMessages /> : <PaneCalendar />}
+                  <div className={`relative ${view.aspect} ${paneFrame} rounded-t-xl`}>
+                    <PaneShot base={view.base} alt={view.alt} sizes="90vw" />
                   </div>
                 </div>
               </Reveal>

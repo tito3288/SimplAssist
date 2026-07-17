@@ -18,6 +18,9 @@ interface MessageThreadProps {
   businessId: string;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
+  /** Dev-only demo mode (/demo routes): seed messages and disable all
+   *  Supabase I/O. Real dashboard callers never pass this. */
+  demoMessages?: Message[];
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -46,8 +49,9 @@ export function MessageThread({
   businessId,
   smsReady,
   smsBlockReason,
+  demoMessages,
 }: MessageThreadProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(demoMessages ?? []);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [isAiHandling, setIsAiHandling] = useState(conversation.is_ai_handling);
@@ -58,6 +62,14 @@ export function MessageThread({
 
   // Fetch messages
   useEffect(() => {
+    if (demoMessages) {
+      // Demo mode: the setter (not just the useState seed) matters because the
+      // component instance persists when another conversation is selected.
+      setMessages(demoMessages);
+      setIsAiHandling(conversation.is_ai_handling);
+      return;
+    }
+
     async function fetchMessages() {
       const { data } = await supabase
         .from("messages")
@@ -70,10 +82,11 @@ export function MessageThread({
 
     fetchMessages();
     setIsAiHandling(conversation.is_ai_handling);
-  }, [conversation.id, conversation.is_ai_handling, supabase]);
+  }, [conversation.id, conversation.is_ai_handling, supabase, demoMessages]);
 
   // Real-time subscription
   useEffect(() => {
+    if (demoMessages) return;
     const channel = supabase
       .channel(`messages:${conversation.id}`)
       .on(
@@ -97,7 +110,7 @@ export function MessageThread({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversation.id, supabase]);
+  }, [conversation.id, supabase, demoMessages]);
 
   // Auto-scroll
   useEffect(() => {
@@ -105,7 +118,7 @@ export function MessageThread({
   }, [messages]);
 
   async function handleSend() {
-    if (!input.trim() || sending || isAiHandling || smsBlocked) return;
+    if (!input.trim() || sending || isAiHandling || smsBlocked || demoMessages) return;
 
     setSending(true);
     const content = input.trim();
@@ -157,6 +170,7 @@ export function MessageThread({
   }
 
   async function toggleAiHandling() {
+    if (demoMessages) return;
     setToggling(true);
     const newValue = !isAiHandling;
 
