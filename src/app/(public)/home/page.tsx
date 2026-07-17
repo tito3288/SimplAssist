@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
+import { CtaRace } from "@/lib/theme-v2/cta-race";
 import {
   accentText,
   body,
@@ -69,21 +70,19 @@ const features = [
   },
 ];
 
-const steps = [
+/** The two dashboard views shown in the "how it works" panel — panes are CSS
+ *  skeletons until real dashboard screenshots exist (swap each Pane* for an
+ *  <Image fill className="object-cover object-left-top" />). */
+const dashboardViews = [
   {
-    title: "Customer calls, you're busy",
+    title: "Messages & leads",
     description:
-      "You're with a client, driving, or closed for the day. The call goes unanswered, but the lead is still active.",
+      "Every SMS and web-chat conversation lands in one inbox — with each lead tracked from first contact to booked.",
   },
   {
-    title: "AI texts back instantly",
+    title: "Calendar & bookings",
     description:
-      "Within seconds, SimplAssist sends a branded message so customers know they've been heard.",
-  },
-  {
-    title: "You follow up with context",
-    description:
-      "Every message and contact lives in your dashboard so you can respond faster and close more leads.",
+      "Appointments your assistant books land straight on your calendar, synced with Google Calendar.",
   },
 ];
 
@@ -177,6 +176,85 @@ function SectionHeader({
     </Reveal>
   );
 }
+
+/**
+ * Placeholder dashboard panes — CSS skeletons of the inbox and calendar
+ * views. Replace each with a real screenshot
+ * (<Image fill className="object-cover object-left-top" />) when available.
+ */
+function PaneMessages() {
+  const dots = [
+    "bg-[#ea580c] dark:bg-[#ff914d]",
+    "bg-green-500 dark:bg-green-400",
+    "bg-stone-300 dark:bg-white/[0.18]",
+    "bg-[#ea580c] dark:bg-[#ff914d]",
+    "bg-stone-300 dark:bg-white/[0.18]",
+  ];
+  return (
+    <div aria-hidden className="flex h-full">
+      {/* Conversation list */}
+      <div className="w-[34%] shrink-0 border-r border-black/[0.06] dark:border-white/[0.08] p-3 space-y-2">
+        <div className="h-2.5 w-1/2 rounded bg-black/[0.08] dark:bg-white/[0.12] mb-3" />
+        {dots.map((dot, i) => (
+          <div key={i} className="rounded-lg p-2.5 space-y-1.5 bg-black/[0.03] dark:bg-white/[0.04]">
+            <div className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+              <span className="h-2 w-2/3 rounded bg-black/[0.08] dark:bg-white/[0.10]" />
+            </div>
+            <div className="h-2 w-1/2 rounded bg-black/[0.05] dark:bg-white/[0.07]" />
+          </div>
+        ))}
+      </div>
+      {/* Thread */}
+      <div className="flex-1 p-4 flex flex-col gap-2">
+        <div className="flex items-center justify-between mb-2">
+          <div className="h-2.5 w-1/3 rounded bg-black/[0.08] dark:bg-white/[0.12]" />
+          <div className="h-4 w-16 rounded-full bg-green-50 border border-green-200 dark:bg-[rgba(74,222,128,.12)] dark:border-[rgba(74,222,128,.25)]" />
+        </div>
+        <div className="h-6 w-3/5 rounded-[10px] rounded-bl-[4px] bg-black/[0.05] dark:bg-white/[0.07]" />
+        <div className="h-6 w-2/5 self-end rounded-[10px] rounded-br-[4px] bg-[#ea580c]/80 dark:bg-[#ff914d]/70" />
+        <div className="h-6 w-1/2 rounded-[10px] rounded-bl-[4px] bg-black/[0.05] dark:bg-white/[0.07]" />
+        <div className="h-6 w-2/5 self-end rounded-[10px] rounded-br-[4px] bg-[#ea580c]/80 dark:bg-[#ff914d]/70" />
+      </div>
+    </div>
+  );
+}
+
+function PaneCalendar() {
+  // A few cells get event bars — orange = scheduled, green = AI-booked.
+  const events: Record<number, string> = {
+    3: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
+    9: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
+    10: "bg-green-500/60 dark:bg-green-400/50",
+    16: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
+    19: "bg-green-500/60 dark:bg-green-400/50",
+    24: "bg-[#ea580c]/70 dark:bg-[#ff914d]/60",
+  };
+  return (
+    <div aria-hidden className="h-full p-4 flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <div className="h-3 w-24 rounded bg-black/[0.10] dark:bg-white/[0.14]" />
+        <div className="flex gap-1.5">
+          <span className="h-5 w-5 rounded-full border border-black/[0.08] dark:border-white/[0.10]" />
+          <span className="h-5 w-5 rounded-full border border-black/[0.08] dark:border-white/[0.10]" />
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1.5 flex-1 min-h-0">
+        {Array.from({ length: 28 }, (_, i) => (
+          <div key={i} className="relative rounded-md bg-black/[0.025] dark:bg-white/[0.04]">
+            {events[i] && (
+              <span className={`absolute inset-x-1 top-1 h-1.5 rounded-full ${events[i]}`} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Frame shared by both dashboard panes. */
+const paneFrame =
+  "rounded-t-2xl overflow-hidden border border-b-0 border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-[#101010]";
 
 /* ── Page ── */
 
@@ -346,34 +424,61 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ── How It Works ── */}
+        {/* ── How It Works — the dashboard, two views. Desktop: two labeled
+            columns over one soft panel with overlapping panes (inbox front by
+            default; hover the calendar to bring it forward). Below lg: the
+            ElevenLabs mobile pattern — each label + description is followed
+            by its own image. ── */}
         <section id="how-it-works" className="py-16 sm:py-24">
           <SectionHeader
             title={
               <>
-                Three simple steps to keep every <span className={accentText}>lead</span>.
+                One dashboard for every <span className={accentText}>conversation</span>.
               </>
             }
-            subtitle="Go from sign-up to live AI assistant in just a few guided steps."
+            subtitle="Messages, leads, and bookings — everything your assistant handles, in one place."
           />
 
-          <div className="grid md:grid-cols-3 gap-5">
-            {steps.map((step, i) => (
-              <Reveal key={step.title} delayMs={i * 90} className="h-full">
-                <div className={`p-6 sm:p-8 relative overflow-hidden h-full ${card} ${cardHover}`}>
-                  <div
-                    className="
-                      w-11 h-11 rounded-full grid place-items-center mb-4
-                      bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]
-                      font-extrabold text-lg
-                    "
-                  >
-                    {i + 1}
+          {/* Labeled columns (lg+) */}
+          <Reveal>
+            <div className="hidden lg:grid grid-cols-2 gap-10 max-w-[720px] mb-8">
+              {dashboardViews.map((view) => (
+                <div key={view.title}>
+                  <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
+                  <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
+                </div>
+              ))}
+            </div>
+          </Reveal>
+
+          {/* lg+: one soft panel, two overlapping dashboard views */}
+          <Reveal delayMs={100}>
+            <div className="hidden lg:block rounded-[28px] overflow-hidden px-10 pt-10 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
+              <div className="group flex items-end">
+                <div
+                  className={`relative z-10 w-[59%] shrink-0 h-[440px] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.22)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                >
+                  <PaneMessages />
+                </div>
+                <div
+                  className={`relative z-0 hover:z-20 w-[52%] -ml-[11%] shrink-0 h-[400px] ${paneFrame} shadow-[0_12px_40px_-12px_rgba(28,25,23,0.18)] transition-[opacity,transform] duration-300 group-hover:opacity-60 hover:!opacity-100 hover:-translate-y-1.5`}
+                >
+                  <PaneCalendar />
+                </div>
+              </div>
+            </div>
+          </Reveal>
+
+          {/* < lg: label, description, then its image — stacked per view */}
+          <div className="lg:hidden space-y-10">
+            {dashboardViews.map((view, i) => (
+              <Reveal key={view.title} delayMs={i * 90}>
+                <h3 className={`text-base font-bold ${ink} mb-1.5`}>{view.title}</h3>
+                <p className={`${body} text-[15px] leading-[1.65]`}>{view.description}</p>
+                <div className="mt-4 rounded-2xl overflow-hidden p-3 pb-0 bg-[#f2eee5] border border-black/[0.03] dark:bg-white/[0.05] dark:border-white/[0.07]">
+                  <div className={`h-[240px] sm:h-[320px] ${paneFrame} rounded-t-xl`}>
+                    {i === 0 ? <PaneMessages /> : <PaneCalendar />}
                   </div>
-                  <h3 className={`text-xl sm:text-[22px] font-bold ${ink} mb-2.5`}>
-                    {step.title}
-                  </h3>
-                  <p className={`${body} leading-[1.7]`}>{step.description}</p>
                 </div>
               </Reveal>
             ))}
@@ -444,22 +549,26 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ── CTA ── */}
+        {/* ── CTA — headline + the "two Tuesdays" race vignette; both columns
+            stretch so neither side leaves dead space ── */}
         <Reveal>
-          <section className={`my-6 p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 items-start ${card}`}>
-            <div className="lg:pt-1.5">
+          <section className={`my-6 p-6 sm:p-8 grid lg:grid-cols-[1.1fr_.9fr] gap-6 lg:gap-10 ${card}`}>
+            <div className="lg:pt-1.5 flex flex-col">
               <h2 className={`text-balance text-[clamp(28px,4vw,48px)] font-extrabold leading-[1.05] tracking-[-0.04em] mb-3 ${ink}`}>
                 Your voicemail isn&apos;t closing deals.
               </h2>
               <p className={`${body} leading-[1.7] max-w-[560px]`}>
                 SimplAssist texts customers back before they&apos;ve dialed your competitor.
               </p>
+              <div className="mt-7 flex-1">
+                <CtaRace />
+              </div>
             </div>
-            <div className={`${tile} p-6`}>
+            <div className={`${tile} p-6 h-full flex flex-col`}>
               <strong className={`block text-base mb-2.5 ${ink}`}>
                 What you get:
               </strong>
-              <ul className="space-y-2.5 mb-5">
+              <ul className="flex-1 flex flex-col justify-center gap-3 mb-5">
                 {[
                   "AI that texts back every missed call, day or night",
                   "Website chat widget — embed with one line of code",
@@ -475,6 +584,13 @@ export default function HomePage() {
               <Link href="/signup" className={btnPrimaryWide}>
                 Get Started
               </Link>
+              <p className="mt-3 flex items-center justify-center gap-2 text-[12px] text-stone-500 dark:text-[#bdbdbf]">
+                <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                  <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500/70 dark:bg-green-400/70" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500 dark:bg-green-400" />
+                </span>
+                Your AI assistant is standing by — no contracts, cancel anytime.
+              </p>
             </div>
           </section>
         </Reveal>

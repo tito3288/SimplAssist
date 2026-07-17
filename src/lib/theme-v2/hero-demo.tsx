@@ -5,8 +5,17 @@
  * conversations (plumbing → auto repair → lawn care → loop), each a missed
  * call / website chat that becomes a booked job. Plays at reading pace with
  * typing indicators, holds on the finished conversation, then cross-fades to
- * the next business — the mockup header and the top "New Leads" row change
- * with it, while "The Outcome" card stays constant.
+ * the next business.
+ *
+ * Below the chat, the dashboard strip is a single full-width "Lead
+ * Pipeline" tile at every width — Missed call → AI replies → Booked —
+ * whose nodes light up in sync with the chat (banner lands → step 1,
+ * typing bubble → step 2 pulses, booked → step 3 flips green with the
+ * appointment slot). The tile shell, queue chips, and footer stat stay
+ * constant across the cross-fade; only the pipeline row fades and remounts
+ * (keyed on the conversation) so connector bars reset invisibly instead of
+ * visibly draining. Below sm the step columns compress and the avatar
+ * chips hide.
  *
  * `prefers-reduced-motion` shows the static plumbing conversation, no loop.
  *
@@ -15,7 +24,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { body, ink, tile, tileRow } from "@/lib/theme-v2/theme";
+import { body, ink, tile } from "@/lib/theme-v2/theme";
 
 type Sender = "banner" | "ai" | "customer";
 type Message = { from: Sender; text: string };
@@ -23,14 +32,14 @@ type Message = { from: Sender; text: string };
 type Conversation = {
   business: string;
   script: Message[];
-  /** Active lead surfaced at the top of the New Leads list. */
-  lead: { name: string; pending: string; won: string };
+  /** Active lead shown under the pipeline's first step. */
+  lead: { name: string };
 };
 
 const CONVERSATIONS: Conversation[] = [
   {
     business: "Acme Plumbing",
-    lead: { name: "Sarah M.", pending: "Hot Lead", won: "Booked ✅" },
+    lead: { name: "Sarah M." },
     script: [
       { from: "banner", text: "Missed call from Sarah — new customer" },
       {
@@ -48,7 +57,7 @@ const CONVERSATIONS: Conversation[] = [
   },
   {
     business: "Summit Auto Repair",
-    lead: { name: "Mike R.", pending: "New Lead", won: "Booked ✅" },
+    lead: { name: "Mike R." },
     script: [
       { from: "banner", text: "Missed call from Mike — new customer" },
       {
@@ -66,7 +75,7 @@ const CONVERSATIONS: Conversation[] = [
   },
   {
     business: "GreenScape Lawn Care",
-    lead: { name: "Jessica L.", pending: "New Lead", won: "Quote scheduled ✅" },
+    lead: { name: "Jessica L." },
     script: [
       { from: "banner", text: "New website chat — Jessica, 7:42 PM" },
       { from: "ai", text: "Hi! Thanks for reaching out to GreenScape 🌱 How can we help?" },
@@ -98,15 +107,144 @@ const bannerPill = `
   dark:bg-white/[0.06] dark:border-white/[0.10] dark:text-[#cfcfcf]
 `;
 
-/* Lead badge tones */
-const badgePending =
-  "bg-[#fcebdd] text-[#9a3412] border-[#f6d9c0] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
-const badgeWon =
-  "bg-green-50 text-green-700 border-green-200 dark:bg-[rgba(74,222,128,.12)] dark:text-[#bbf7d0] dark:border-[rgba(74,222,128,.25)]";
-const badgeBlue =
-  "bg-blue-50 text-blue-700 border-blue-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
-const badgePurple =
-  "bg-purple-50 text-purple-700 border-purple-200 dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]";
+/** The rest of the lead queue — shown as initials chips in the strip header. */
+const QUEUE = ["James R.", "Alicia T."];
+
+/**
+ * Pipeline copy per conversation — index-aligned with CONVERSATIONS.
+ * `source` labels step 1, `won` labels step 3, `slot` is the appointment
+ * detail revealed on booking, `reply` is the per-business speed stat shown
+ * once the AI has answered (their average is the footer's "9 sec").
+ */
+const PIPELINE_META = [
+  { source: "Missed call", won: "Booked", slot: "Tue 9:00 AM", reply: "replied in 8s" },
+  { source: "Missed call", won: "Booked", slot: "Tomorrow 8 AM", reply: "replied in 11s" },
+  { source: "Website chat", won: "Quote set", slot: "Thu 1–4 PM", reply: "replied in 7s" },
+] as const;
+
+type StepState = "pending" | "active" | "done" | "won";
+
+/* Node tones — same tint families as the lead badges. Orange is the
+   "in motion" color; success green is reserved for the booked node only. */
+const NODE_TONES: Record<StepState, string> = {
+  pending: `bg-white border-[#f0e9de] text-stone-400
+    dark:bg-white/[0.04] dark:border-white/[0.08] dark:text-[#7c7c7e]`,
+  active: `bg-[#ea580c] border-[#ea580c] text-white
+    dark:bg-[#ff914d] dark:border-[#ff914d] dark:text-[#16100b]`,
+  done: `bg-[#fcebdd] border-[#f6d9c0] text-[#9a3412]
+    dark:bg-[rgba(255,145,77,.16)] dark:border-[rgba(255,145,77,.24)] dark:text-[#ffd5bc]`,
+  won: `bg-green-50 border-green-200 text-green-700
+    dark:bg-[rgba(74,222,128,.14)] dark:border-[rgba(74,222,128,.28)] dark:text-[#86efac]`,
+};
+
+function StepIcon({ kind, drawCheck }: { kind: "call" | "chat" | "reply" | "booked"; drawCheck?: boolean }) {
+  const p = {
+    width: 15,
+    height: 15,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2.2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  if (kind === "call")
+    return (
+      <svg {...p}>
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+      </svg>
+    );
+  if (kind === "chat")
+    return (
+      <svg {...p}>
+        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+      </svg>
+    );
+  if (kind === "reply")
+    return (
+      <svg {...p}>
+        <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
+      </svg>
+    );
+  return (
+    <svg {...p}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+      <path d="M3 10h18" />
+      <path
+        d="m9 16 2 2 4-4"
+        style={
+          drawCheck
+            ? { strokeDasharray: 20, animation: "sa-demo-draw .45s ease-out .3s both" }
+            : undefined
+        }
+      />
+    </svg>
+  );
+}
+
+/** One pipeline stage: 36px node over a label + sub-line. */
+function PipelineStep({
+  state,
+  icon,
+  label,
+  sub,
+  pulse,
+  pop,
+}: {
+  state: StepState;
+  icon: React.ReactNode;
+  label: string;
+  sub: string;
+  pulse?: boolean;
+  pop?: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 w-[72px] sm:w-[112px] shrink-0">
+      <span
+        className={`relative flex h-9 w-9 items-center justify-center rounded-full border transition-colors duration-500 ${NODE_TONES[state]}`}
+        style={pop ? { animation: "sa-demo-pop .5s cubic-bezier(.22,1,.36,1) both" } : undefined}
+      >
+        {pulse && (
+          <span
+            aria-hidden
+            className="absolute -inset-px rounded-full border-2 border-[#ea580c] dark:border-[#ff914d]"
+            style={{ animation: "sa-demo-ping 1.6s cubic-bezier(0,0,.2,1) infinite" }}
+          />
+        )}
+        {icon}
+      </span>
+      <span className="text-center leading-tight">
+        <span
+          className={`block text-[11px] sm:text-[12px] font-bold transition-colors duration-500 ${
+            state === "pending" ? "text-stone-400 dark:text-[#7c7c7e]" : ink
+          }`}
+        >
+          {label}
+        </span>
+        <span className={`block text-[10px] sm:text-[11px] mt-0.5 min-h-[14px] ${body}`}>{sub}</span>
+      </span>
+    </div>
+  );
+}
+
+/** Progress bar between stages — fills left→right when the stage is crossed. */
+function Connector({ filled }: { filled: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className="relative flex-1 min-w-[10px] sm:min-w-[14px] h-[3px] mt-[17px] -mx-2.5 sm:-mx-6 rounded-full overflow-hidden bg-[#ede5d9] dark:bg-white/[0.10]"
+    >
+      <div
+        className={`h-full rounded-full bg-[#ea580c] dark:bg-[#ff914d] transition-[width] duration-700 ease-out ${
+          filled ? "w-full" : "w-0"
+        }`}
+      />
+    </div>
+  );
+}
 
 function Bubble({ from, children }: { from: Sender; children: React.ReactNode }) {
   if (from === "banner") {
@@ -227,16 +365,9 @@ export function HeroDemo() {
 
   const convo = CONVERSATIONS[activeIndex];
   const booked = visible >= convo.script.length;
-
-  const leads = [
-    {
-      name: convo.lead.name,
-      badge: booked ? convo.lead.won : convo.lead.pending,
-      color: booked ? badgeWon : badgePending,
-    },
-    { name: "James R.", badge: "Website Chat", color: badgeBlue },
-    { name: "Alicia T.", badge: "Missed Call", color: badgePurple },
-  ];
+  // AI stage engages the moment the typing bubble appears (typing is set
+  // before visible hits 2), so the pipeline node lights in sync with the chat.
+  const aiEngaged = booked || typing !== null || visible >= 2;
 
   const fadeClass = `transition-opacity duration-700 ${faded ? "opacity-0" : "opacity-100"}`;
 
@@ -250,6 +381,19 @@ export function HeroDemo() {
         @keyframes sa-demo-blink {
           0%, 80%, 100% { opacity: .25; }
           40% { opacity: 1; }
+        }
+        @keyframes sa-demo-ping {
+          0% { transform: scale(1); opacity: .5; }
+          100% { transform: scale(1.65); opacity: 0; }
+        }
+        @keyframes sa-demo-pop {
+          0% { transform: scale(1); }
+          40% { transform: scale(1.18); }
+          100% { transform: scale(1); }
+        }
+        @keyframes sa-demo-draw {
+          from { stroke-dashoffset: 20; }
+          to { stroke-dashoffset: 0; }
         }
       `}</style>
 
@@ -289,44 +433,81 @@ export function HeroDemo() {
         </div>
       </div>
 
-      {/* Dashboard strip — single column on narrow screens, side-by-side from sm up */}
-      <div className="grid grid-cols-1 sm:grid-cols-[1.1fr_.9fr] gap-3.5 mt-3.5">
-        {/* New Leads — fades with the conversation so the active person swaps unseen */}
-        <div className={`${tile} rounded-[20px] p-5 ${fadeClass}`}>
-          <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
-            New Leads
-          </div>
-          <div className="space-y-2.5">
-            {leads.map((lead) => (
-              <div key={lead.name} className={`flex items-center justify-between gap-3 px-3.5 py-3 ${tileRow}`}>
-                <span className={`text-sm font-medium ${ink}`}>{lead.name}</span>
+      {/* Dashboard strip — live lead pipeline. The tile shell, header,
+          queue chips and footer stat stay constant; only the pipeline row
+          cross-fades (and remounts) with the conversation. */}
+      <div
+        className={`${tile} rounded-[20px] p-5 mt-3.5`}
+        role="group"
+        aria-label="Lead pipeline: lead comes in, AI replies, job gets booked"
+      >
+        {/* Header — label + the rest of the queue compressed to chips */}
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <span className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf]">
+            Lead Pipeline
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="hidden sm:flex -space-x-1.5" aria-hidden>
+              {QUEUE.map((name) => (
                 <span
-                  className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-[12px] font-bold border transition-colors duration-500 ${lead.color}`}
+                  key={name}
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold bg-white border border-[#ece4d8] text-stone-500 dark:bg-[#221d19] dark:border-white/[0.14] dark:text-[#cfcfcf]"
                 >
-                  {lead.badge}
+                  {name.split(" ").map((part) => part[0]).join("")}
                 </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </span>
+            <span className="text-[11px] font-semibold whitespace-nowrap text-stone-500 dark:text-[#9a9a9c]">
+              {QUEUE.length} more waiting
+            </span>
+          </span>
         </div>
 
-        {/* The Outcome — constant across all businesses (no fade) */}
-        <div className={`${tile} rounded-[20px] p-5`}>
-          <div className="text-[12px] font-bold tracking-[0.08em] uppercase text-[#c2410c] dark:text-[#ffd7bf] mb-2.5">
-            The Outcome
-          </div>
-          <div className="space-y-2.5">
-            {[
-              { label: "Auto-reply", value: "Before they call your competitor" },
-              { label: "Works 24/7", value: "Even after hours" },
-            ].map((item) => (
-              <div key={item.label} className={`flex flex-col gap-0.5 px-3.5 py-3 ${tileRow}`}>
-                <span className={`text-xs ${body}`}>{item.label}</span>
-                <span className={`text-sm font-bold leading-snug ${ink}`}>{item.value}</span>
-              </div>
-            ))}
-          </div>
+        {/* Pipeline — keyed on the conversation so connectors remount at w-0
+            during the opacity-0 swap instead of visibly draining on fade-in.
+            aria-hidden: the chat's aria-live region owns the narration. */}
+        <div
+          key={activeIndex}
+          aria-hidden
+          className={`flex items-start mx-auto w-full max-w-[520px] ${fadeClass}`}
+        >
+          <PipelineStep
+            state={visible >= 1 ? "done" : "pending"}
+            icon={
+              <StepIcon
+                kind={PIPELINE_META[activeIndex].source === "Website chat" ? "chat" : "call"}
+              />
+            }
+            label={PIPELINE_META[activeIndex].source}
+            sub={convo.lead.name}
+          />
+          <Connector filled={aiEngaged} />
+          <PipelineStep
+            state={booked ? "done" : aiEngaged ? "active" : "pending"}
+            icon={<StepIcon kind="reply" />}
+            label="AI replies"
+            sub={booked ? PIPELINE_META[activeIndex].reply : aiEngaged ? "replying…" : "—"}
+            pulse={!booked && aiEngaged && !reduceMotion}
+          />
+          <Connector filled={booked} />
+          <PipelineStep
+            state={booked ? "won" : "pending"}
+            icon={<StepIcon kind="booked" drawCheck={booked && !reduceMotion} />}
+            label={PIPELINE_META[activeIndex].won}
+            sub={booked ? PIPELINE_META[activeIndex].slot : "—"}
+            pop={booked && !reduceMotion}
+          />
         </div>
+
+        {/* Footer — constant diegetic stat carrying the marketing punch */}
+        <p
+          className={`mt-4 pt-3.5 border-t border-[#ede5d9] dark:border-white/[0.08] text-[12px] leading-relaxed ${body}`}
+        >
+          <span className="font-bold text-[#c2410c] dark:text-[#ff914d]">
+            Avg. first reply: 9 sec
+          </span>{" "}
+          — before they can call your competitor.
+        </p>
       </div>
     </div>
   );
