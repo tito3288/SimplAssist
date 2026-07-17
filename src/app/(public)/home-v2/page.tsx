@@ -30,6 +30,9 @@ import { ShowcaseTabs } from "./showcase-tabs";
  *
  * Full design record (decisions, ElevenLabs decode, how to resume):
  * docs/home-v2-design.md
+ *
+ * SEO: this route must never be crawlable or appear in any future sitemap
+ * or robots file — see docs/seo-notes.md before doing SEO work.
  */
 
 // Gating in generateMetadata (as well as the component) makes the production
@@ -486,8 +489,7 @@ export default function HomeV2Page() {
                   className="block dark:hidden h-[22px] w-auto object-contain"
                 />
                 <small className="text-stone-500 dark:text-[#bdbdbf] block mt-1">
-                  &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a
-                  product of ARAMBULA VENTURES LLC. All rights reserved.
+                  &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
                 </small>
               </div>
               <div className="flex gap-5 flex-wrap text-sm">

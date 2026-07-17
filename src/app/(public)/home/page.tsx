@@ -563,8 +563,10 @@ export default function HomePage() {
         {/* ── Footer ── */}
         <footer className="pb-10 pt-2">
           <Reveal>
-            <div className={`px-6 py-6 flex items-center justify-between gap-4 flex-wrap ${card}`}>
-              <div className="flex items-center gap-3.5">
+            {/* Mobile: stacked and centered (logo / copyright / links);
+                sm+: single row, logo+copyright left, links right */}
+            <div className={`px-6 py-7 sm:py-6 flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left ${card}`}>
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-3.5">
                 <Image
                   src="/logo-dark.png"
                   alt="SimplAssist"
@@ -579,11 +581,11 @@ export default function HomePage() {
                   height={22}
                   className="block dark:hidden h-[22px] w-auto object-contain"
                 />
-                <small className="text-stone-500 dark:text-[#bdbdbf] block mt-1">
-                  &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
+                <small className="text-stone-500 dark:text-[#bdbdbf] block sm:mt-1">
+                  &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
                 </small>
               </div>
-              <div className="flex gap-5 flex-wrap text-sm">
+              <div className="flex gap-x-5 gap-y-2 flex-wrap justify-center text-sm">
                 <a href="#features" className={navLink}>Features</a>
                 <a href="#pricing" className={navLink}>Pricing</a>
                 <Link href="/privacy" className={navLink}>Privacy</Link>

@@ -158,7 +158,7 @@ export function LegalDocLayout({
           </p>
         ) : (
           <p className={`mt-8 text-center text-xs ${body}`}>
-            &copy; {new Date().getFullYear()} ARAMBULA VENTURES LLC. SimplAssist is a product of ARAMBULA VENTURES LLC. All rights reserved.
+            &copy; {new Date().getFullYear()} SimplAssist, a product of Arambula Ventures LLC.
           </p>
         )
       }
