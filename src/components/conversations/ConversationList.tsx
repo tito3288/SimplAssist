@@ -1,17 +1,21 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Phone, MessageCircle, Search, Bot, User, Trash2, Loader2 } from "lucide-react";
+import { Phone, MessageCircle, Search, Bot, User, Trash2, Loader2, Lock } from "lucide-react";
 import { cn, formatPhoneNumber } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
 import { statusInfo, statusWarning, statusNeutral } from "@/lib/theme-v2/theme";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
+import { getConversationAccessState } from "./accessState";
 
 interface ConversationListProps {
   conversations: ConversationWithContact[];
   activeId: string | null;
   onSelect: (conversation: ConversationWithContact) => void;
   onDelete: (id: string) => void;
+  canUseManualSms: boolean;
+  canUseAiSms: boolean;
+  canUseWebChat: boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -37,6 +41,9 @@ export function ConversationList({
   activeId,
   onSelect,
   onDelete,
+  canUseManualSms,
+  canUseAiSms,
+  canUseWebChat,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterTab>("all");
@@ -130,6 +137,17 @@ export function ConversationList({
           </div>
         ) : (
           filtered.map((conv) => {
+            const {
+              webChatLocked,
+              smsPlanLocked: smsLocked,
+              effectiveIsAiHandling: aiHandling,
+            } = getConversationAccessState({
+              channel: conv.channel,
+              storedIsAiHandling: conv.is_ai_handling,
+              canUseManualSms,
+              canUseAiSms,
+              canUseWebChat,
+            });
             const contactName =
               conv.contact?.name ||
               (conv.contact?.phone_number
@@ -177,10 +195,18 @@ export function ConversationList({
                     <span
                       className={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                        conv.is_ai_handling ? statusInfo : statusWarning
+                        webChatLocked || smsLocked
+                          ? statusNeutral
+                          : aiHandling
+                          ? statusInfo
+                          : statusWarning
                       )}
                     >
-                      {conv.is_ai_handling ? (
+                      {webChatLocked || smsLocked ? (
+                        <>
+                          <Lock className="h-3 w-3" /> {smsLocked ? "Paused" : "Locked"}
+                        </>
+                      ) : aiHandling ? (
                         <>
                           <Bot className="h-3 w-3" /> AI
                         </>
@@ -201,20 +227,22 @@ export function ConversationList({
 
                 {/* Delete + Unread indicator */}
                 <div className="mt-1 flex flex-col items-center gap-1 flex-shrink-0">
-                  {conv.status === "active" && !conv.is_ai_handling && (
+                  {conv.status !== "closed" && !webChatLocked && !smsLocked && !aiHandling && (
                     <div className="h-2.5 w-2.5 rounded-full bg-[#ea580c] dark:bg-[#ff914d]" />
                   )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteTargetId(conv.id);
-                    }}
-                    className="p-1 rounded-lg text-stone-300 dark:text-white/[0.15] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
-                    title="Delete conversation"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {!webChatLocked && !smsLocked && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTargetId(conv.id);
+                      }}
+                      className="p-1 rounded-lg text-stone-300 dark:text-white/[0.15] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                      title="Delete conversation"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  rpc: vi.fn(),
   from: vi.fn(),
   upsert: vi.fn(),
   select: vi.fn(),
@@ -9,10 +10,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: { rpc: mocks.rpc, from: mocks.from },
 }));
 
-import { markProcessedOnce, releaseProcessedEvent } from "./idempotency";
+import {
+  claimMessagingWebhookEvent,
+  completeMessagingWebhookEvent,
+  markProcessedOnce,
+  releaseProcessedEvent,
+  releaseMessagingWebhookClaim,
+} from "./idempotency";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -21,7 +28,7 @@ beforeEach(() => {
   mocks.delete.mockReturnValue({ eq: mocks.eq });
 });
 
-describe("markProcessedOnce", () => {
+describe("legacy webhook claim lifecycle", () => {
   it("claims an unseen event id", async () => {
     mocks.select.mockResolvedValue({
       data: [{ event_id: "evt_1" }],
@@ -50,10 +57,8 @@ describe("markProcessedOnce", () => {
 
     await expect(markProcessedOnce("evt_1")).rejects.toBeTruthy();
   });
-});
 
-describe("releaseProcessedEvent", () => {
-  it("deletes the claim row by event id", async () => {
+  it("deletes a failed claim row by event id", async () => {
     mocks.eq.mockResolvedValue({ error: null });
 
     await expect(releaseProcessedEvent("evt_1")).resolves.toBeUndefined();
@@ -68,5 +73,75 @@ describe("releaseProcessedEvent", () => {
     await expect(releaseProcessedEvent("evt_1")).rejects.toThrow(
       /Failed to release claim for event evt_1/
     );
+  });
+});
+
+describe("messaging webhook claim lifecycle", () => {
+  it("returns an owned token for a newly claimed event", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{ outcome: "claimed", token: "token-1" }],
+      error: null,
+    });
+
+    await expect(claimMessagingWebhookEvent("event-1")).resolves.toEqual({
+      outcome: "claimed",
+      claimToken: "token-1",
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "claim_messaging_webhook_event",
+      { p_event_id: "event-1" }
+    );
+  });
+
+  it.each(["in_progress", "completed"] as const)(
+    "returns %s without an owner token",
+    async (outcome) => {
+      mocks.rpc.mockResolvedValue({
+        data: [{ outcome, token: null }],
+        error: null,
+      });
+
+      await expect(claimMessagingWebhookEvent("event-1")).resolves.toEqual({
+        outcome,
+        claimToken: null,
+      });
+    }
+  );
+
+  it("fails closed when the claim result is malformed", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{ outcome: "claimed", token: null }],
+      error: null,
+    });
+
+    await expect(claimMessagingWebhookEvent("event-1")).rejects.toThrow(
+      "invalid result"
+    );
+  });
+
+  it("completes only when the database confirms token ownership", async () => {
+    mocks.rpc
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({ data: false, error: null });
+
+    await expect(
+      completeMessagingWebhookEvent("event-1", "token-1")
+    ).resolves.toBeUndefined();
+    await expect(
+      completeMessagingWebhookEvent("event-1", "stale-token")
+    ).rejects.toThrow("Lost completion claim");
+  });
+
+  it("releases only when the database confirms token ownership", async () => {
+    mocks.rpc
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({ data: false, error: null });
+
+    await expect(
+      releaseMessagingWebhookClaim("event-1", "token-1")
+    ).resolves.toBeUndefined();
+    await expect(
+      releaseMessagingWebhookClaim("event-1", "stale-token")
+    ).rejects.toThrow("Lost release claim");
   });
 });

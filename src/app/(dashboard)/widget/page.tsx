@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import WidgetPageClient from './WidgetPageClient';
+import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
+import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 
 export default async function WidgetPage() {
   const supabase = await createClient();
@@ -14,6 +16,31 @@ export default async function WidgetPage() {
     .single();
 
   if (!business) redirect('/onboarding');
+
+  const entitlements = await resolveBusinessEntitlements(business.id);
+  const planActive = entitlements.active;
+  if (!canUseFeature(entitlements, 'web_chat')) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Website Chat Widget</h1>
+          <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">
+            Capture website visitors and continue the conversation with AI.
+          </p>
+        </div>
+        <LockedFeatureCard
+          title={planActive ? "Website chat is available on Growth" : "Website chat is paused"}
+          description={
+            planActive
+              ? "Upgrade to install the widget, capture web leads, and customize its branding."
+              : "Reactivate your subscription to make your saved website chat widget available again."
+          }
+          requiredPlan={planActive ? "Growth" : null}
+          preservedDetail="Any widget configuration you already saved is preserved while this feature is paused."
+        />
+      </div>
+    );
+  }
 
   let { data: widgetConfig } = await supabase
     .from('widget_configs')

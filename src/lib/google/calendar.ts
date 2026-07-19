@@ -1,6 +1,10 @@
 import { getAuthenticatedClient, getCalendarService } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BusinessHours } from "@/types/database";
+import {
+  canUseFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 const SLOT_DURATION_MINUTES = 30;
 
@@ -76,11 +80,26 @@ interface BookingResult {
   endTime: string;
 }
 
+export class DirectBookingNotEntitledError extends Error {
+  constructor() {
+    super("Direct booking is not available for this subscription.");
+    this.name = "DirectBookingNotEntitledError";
+  }
+}
+
+async function requireDirectBooking(businessId: string): Promise<void> {
+  const entitlements = await resolveBusinessEntitlements(businessId);
+  if (!canUseFeature(entitlements, "direct_booking")) {
+    throw new DirectBookingNotEntitledError();
+  }
+}
+
 export async function checkAvailability(
   businessId: string,
   date: string, // YYYY-MM-DD
   timezone: string
 ): Promise<string[]> {
+  await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
   if (!client) {
     throw new Error("Google Calendar not connected");
@@ -183,6 +202,7 @@ export async function createBooking(
   params: BookingParams,
   timezone: string
 ): Promise<BookingResult> {
+  await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
   if (!client) {
     throw new Error("Google Calendar not connected");

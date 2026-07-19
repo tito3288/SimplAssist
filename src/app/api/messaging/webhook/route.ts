@@ -1,13 +1,32 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
 import { getOutboundSendContext } from "@/lib/messaging/lookup";
 import { insertPausedSystemMessageIfNeeded } from "@/lib/messaging/pausedNotice";
-import { markProcessedOnce } from "@/lib/messaging/idempotency";
+import {
+  claimMessagingWebhookEvent,
+  completeMessagingWebhookEvent,
+  releaseMessagingWebhookClaim,
+} from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { processIncomingMessage } from "@/lib/ai/engine";
 import { findOrCreateContact } from "@/lib/ai/contacts";
-import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
-import type { SmsBlockReason } from "@/types/database";
+import {
+  addInboundMessageOnce,
+  addMessage,
+  getConversationAiState,
+  getOrCreateConversation,
+  isAiHandlingActive,
+} from "@/lib/ai/conversations";
+import {
+  canUseFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
+import type {
+  Contact,
+  Conversation,
+  SmsBlockReason,
+} from "@/types/database";
 import {
   preflightOutboundSms,
   recordInboundMessagingUsage,
@@ -18,165 +37,259 @@ import {
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
 
-// Telnyx posts every messaging webhook (received, sent, finalized, etc.) to the
-// same URL. We only act on message.received; other event types are acked and ignored.
-//
-// Critical invariants:
-// - Always return 200 to avoid Telnyx's retry loop. Errors during AI/send go to logs.
-// - Verify the Ed25519 signature first (telnyx.webhooks.unwrap throws on bad sig).
-// - Dedup on event.data.id before doing AI work, so retries don't duplicate replies.
-// - Ack the webhook BEFORE doing slow AI work (Telnyx's ack budget is ~10s).
-//   On Railway's long-lived Node runtime, a detached promise survives the response.
+interface TelnyxMessagePayload {
+  from?: { phone_number?: string };
+  to?: Array<{ phone_number?: string }>;
+  text?: string;
+  media?: unknown[];
+}
+
+interface PersistedInboundContext {
+  businessId: string;
+  from: string;
+  to: string;
+  text: string;
+  mediaCount: number;
+  appendAiOptOut: boolean;
+  contact: Contact;
+  conversation: Conversation;
+}
+
+// Telnyx posts all messaging event types to this endpoint. For an inbound
+// message we synchronously establish entitlement state and durably persist the
+// usage + transcript before acknowledging. Known plan/manual denials are
+// successful no-op automation decisions (200); indeterminate DB/persistence
+// failures release the claim and return 500 so Telnyx can redeliver the lead.
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const headers: Record<string, string> = {};
-  request.headers.forEach((v, k) => {
-    headers[k] = v;
+  request.headers.forEach((value, key) => {
+    headers[key] = value;
   });
 
   let event: unknown;
   try {
     event = await telnyx.webhooks.unwrap(rawBody, { headers });
-  } catch (err) {
-    console.warn("[messaging:webhook] Signature verification failed:", err);
+  } catch (error) {
+    console.warn("[messaging:webhook] Signature verification failed:", error);
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const eventData = (event as { data?: { id?: string; event_type?: string; payload?: unknown } }).data;
+  const eventData = (
+    event as {
+      data?: { id?: string; event_type?: string; payload?: unknown };
+    }
+  ).data;
   const eventType = eventData?.event_type;
-  const eventId = eventData?.id;
-  console.log(`[messaging:webhook] event_type=${eventType} event_id=${eventId}`);
+  const providerEventId = eventData?.id;
+
+  console.log(
+    `[messaging:webhook] event_type=${eventType} event_id=${providerEventId}`
+  );
 
   if (eventType !== "message.received") {
     console.log(`[messaging:webhook] Ignoring non-inbound event: ${eventType}`);
     return new NextResponse("OK", { status: 200 });
   }
 
-  if (eventId) {
-    const isFirstTime = await markProcessedOnce(eventId);
-    if (!isFirstTime) {
-      console.log(`[messaging:webhook] Idempotency: event ${eventId} already processed, skipping`);
+  const eventKey = messageEventKey(providerEventId, rawBody);
+  let claimToken: string | null = null;
+  try {
+    const claim = await claimMessagingWebhookEvent(eventKey);
+    if (claim.outcome === "completed") {
+      console.log(
+        `[messaging:webhook] Idempotency: event ${eventKey} already completed, skipping`
+      );
       return new NextResponse("OK", { status: 200 });
     }
-  } else {
-    console.warn("[messaging:webhook] Missing event.data.id, skipping idempotency check");
-  }
-
-  const payload = eventData?.payload as
-    | {
-        from?: { phone_number?: string };
-        to?: Array<{ phone_number?: string }>;
-        text?: string;
-        media?: unknown[];
-      }
-    | undefined;
-  if (!payload) {
-    console.warn("[messaging:webhook] Missing payload on message.received event");
-    return new NextResponse("OK", { status: 200 });
-  }
-
-  const from = payload.from?.phone_number;
-  const to = payload.to?.[0]?.phone_number;
-  const text = payload.text ?? "";
-  const media = payload.media ?? [];
-
-  if (!from || !to) {
-    console.warn(`[messaging:webhook] Missing from or to: from=${from} to=${to}`);
-    return new NextResponse("OK", { status: 200 });
-  }
-
-  console.log(
-    `[messaging:webhook] message.received from=${from} to=${to} text.length=${text.length} media.count=${media.length}`
-  );
-
-  // MMS fallback: media without substantive text gets a canned reply, no AI call.
-  // Threshold of 5 chars treats one-emoji or one-word captions as "no text".
-  if (media.length > 0 && text.trim().length < 5) {
-    console.log("[messaging:webhook] MMS without substantive text, sending fallback");
-    sendFallbackReply(to, from, {
-      inboundText: text,
-      mediaCount: media.length,
-      eventId,
-    }).catch((err) => {
-      console.error("[messaging:webhook] Failed to send MMS fallback:", err);
-    });
-    return new NextResponse("OK", { status: 200 });
-  }
-
-  const { data: phoneNumberRow, error: lookupError } = await supabaseAdmin
-    .from("phone_numbers")
-    .select("business_id")
-    .eq("phone_number", to)
-    .eq("is_active", true)
-    .single();
-
-  if (lookupError || !phoneNumberRow) {
-    console.warn(
-      `[messaging:webhook] No active business found for to=${to}`,
-      lookupError
+    if (claim.outcome === "in_progress") {
+      // Do not acknowledge a duplicate while its holder is still working. If
+      // that holder fails, this delivery's retry can acquire the released (or
+      // stale) claim instead of silently losing the lead.
+      console.warn(
+        `[messaging:webhook] Event ${eventKey} is still in progress; requesting retry`
+      );
+      return new NextResponse("Retry", { status: 500 });
+    }
+    claimToken = claim.claimToken;
+  } catch (error) {
+    console.error(
+      `[messaging:webhook] Failed to claim event ${eventKey}:`,
+      error
     );
-    return new NextResponse("OK", { status: 200 });
+    return new NextResponse("Retry", { status: 500 });
   }
 
-  const businessId = phoneNumberRow.business_id;
-  await recordInboundMessagingUsage({
-    businessId,
-    text,
-    mediaCount: media.length,
-    source: "telnyx_message_received",
-    providerEventId: eventId ?? null,
-    metadata: { from, to },
-  }).catch((err) =>
-    console.error("[messaging:webhook] Failed to record inbound usage:", err)
-  );
-  console.log(`[messaging:webhook] Resolved businessId=${businessId}, dispatching AI reply`);
-
-  // Detached background work: ack now, do AI + reply send in the background.
-  processAndReply(businessId, from, to, text).catch((err) => {
-    console.error("[messaging:webhook] Background processing error:", err);
-  });
-
-  return new NextResponse("OK", { status: 200 });
-}
-
-// `from` here is the business's own number (the webhook's `to`); `to` is the
-// customer who sent the MMS (the webhook's `from`). See call site line 86
-// where the args are intentionally swapped.
-async function sendFallbackReply(
-  from: string,
-  to: string,
-  inbound: { inboundText: string; mediaCount: number; eventId?: string }
-) {
-  const sendContext = await getOutboundSendContext(from);
-  await recordInboundMessagingUsage({
-    businessId: sendContext.businessId,
-    text: inbound.inboundText,
-    mediaCount: inbound.mediaCount,
-    source: "telnyx_mms_received",
-    providerEventId: inbound.eventId ?? null,
-    metadata: { from: to, to: from },
-  }).catch((err) =>
-    console.error("[messaging:webhook] Failed to record MMS inbound usage:", err)
-  );
-
-  if (!sendContext.smsReady) {
-    console.warn(
-      `[messaging:webhook] MMS fallback blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${sendContext.businessId}`
+  if (!claimToken) {
+    console.error(
+      `[messaging:webhook] Claim RPC did not provide an owner token for ${eventKey}`
     );
+    return new NextResponse("Retry", { status: 500 });
+  }
+  const ownedClaimToken = claimToken;
+
+  try {
+    const payload = eventData?.payload as TelnyxMessagePayload | undefined;
+    if (!payload) {
+      console.warn("[messaging:webhook] Missing message.received payload");
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
+    const from = payload.from?.phone_number;
+    const to = payload.to?.[0]?.phone_number;
+    const text = payload.text ?? "";
+    const mediaCount = payload.media?.length ?? 0;
+
+    if (!from || !to) {
+      console.warn(
+        `[messaging:webhook] Missing from or to: from=${from} to=${to}`
+      );
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
+    console.log(
+      `[messaging:webhook] message.received from=${from} to=${to} text.length=${text.length} media.count=${mediaCount}`
+    );
+
+    const { data: phoneNumberRow, error: lookupError } = await supabaseAdmin
+      .from("phone_numbers")
+      .select("business_id")
+      .eq("phone_number", to)
+      .eq("is_active", true)
+      .maybeSingle<{ business_id: string }>();
+
+    if (lookupError) {
+      throw new Error(
+        `[messaging:webhook] Phone lookup failed for ${to}: ${lookupError.message}`
+      );
+    }
+    if (!phoneNumberRow) {
+      // This destination is not ours. A retry cannot make the payload valid.
+      console.warn(`[messaging:webhook] No active business found for to=${to}`);
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
+    const businessId = phoneNumberRow.business_id;
+    const entitlements = await resolveBusinessEntitlements(businessId);
+    const canUseAi = canUseFeature(entitlements, "ai_sms_conversations");
+
     const contact = await findOrCreateContact(
-      sendContext.businessId,
-      to,
+      businessId,
+      from,
       null,
       "sms"
     );
     const conversation = await getOrCreateConversation(
-      sendContext.businessId,
+      businessId,
       contact.id,
-      "sms"
+      "sms",
+      { defaultAiHandling: canUseAi }
+    );
+
+    // These writes are independently idempotent by the same deterministic
+    // key. If either succeeds and the other fails, release+retry heals the
+    // missing side without double-counting or duplicating the transcript.
+    await recordInboundMessagingUsage({
+      businessId,
+      text,
+      mediaCount,
+      source: "telnyx_message_received",
+      providerEventId: eventKey,
+      metadata: { from, to, telnyxEventId: providerEventId ?? null },
+    });
+    await addInboundMessageOnce(
+      conversation.id,
+      businessId,
+      text,
+      "sms",
+      eventKey
+    );
+
+    if (!canUseAi) {
+      console.log(
+        `[messaging:webhook] Inbound message saved; AI SMS is not entitled for business ${businessId}`
+      );
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
+    if (!isAiHandlingActive(conversation)) {
+      console.log(
+        `[messaging:webhook] Inbound message saved in Human mode for conversation ${conversation.id}`
+      );
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
+    // Contact creation is not a retry-stable proxy for the first outbound
+    // message: a failed attempt may have created the contact but not sent a
+    // reply. Base compliance copy on the durable transcript instead.
+    const appendAiOptOut = await shouldAppendAiOptOut(conversation.id);
+    const context: PersistedInboundContext = {
+      businessId,
+      from,
+      to,
+      text,
+      mediaCount,
+      appendAiOptOut,
+      contact,
+      conversation,
+    };
+
+    // The durable inbound work is complete. Mark the claim finished before
+    // launching any best-effort automated reply so a claim database failure
+    // can never coexist with an outbound AI message.
+    await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+
+    if (mediaCount > 0 && text.trim().length < 5) {
+      dispatchInBackground(
+        sendFallbackReply(context),
+        "MMS fallback processing"
+      );
+    } else {
+      dispatchInBackground(processAndReply(context), "AI reply processing");
+    }
+
+    return new NextResponse("OK", { status: 200 });
+  } catch (error) {
+    console.error(
+      `[messaging:webhook] Retryable processing failure for ${eventKey}:`,
+      error
+    );
+    try {
+      await releaseMessagingWebhookClaim(eventKey, ownedClaimToken);
+    } catch (releaseError) {
+      console.error(
+        `[messaging:webhook] Failed to release event ${eventKey}:`,
+        releaseError
+      );
+    }
+    return new NextResponse("Retry", { status: 500 });
+  }
+}
+
+async function sendFallbackReply(
+  context: PersistedInboundContext
+): Promise<void> {
+  if (!(await canStillSendAutomatedReply(context))) return;
+
+  const fallbackReply = context.appendAiOptOut
+    ? `${MMS_FALLBACK_MESSAGE}\n\nReply STOP to opt out.`
+    : MMS_FALLBACK_MESSAGE;
+
+  const sendContext = await getOutboundSendContext(context.to);
+  assertSendContextBusiness(sendContext.businessId, context.businessId);
+
+  if (!sendContext.smsReady) {
+    console.warn(
+      `[messaging:webhook] MMS fallback blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`
     );
     await insertPausedSystemMessageIfNeeded({
-      conversationId: conversation.id,
-      businessId: sendContext.businessId,
+      conversationId: context.conversation.id,
+      businessId: context.businessId,
       channel: "sms",
       context: "mms_fallback",
       reason: toPausedReason(sendContext.blockReason),
@@ -185,27 +298,16 @@ async function sendFallbackReply(
   }
 
   const usage = await preflightOutboundSms({
-    businessId: sendContext.businessId,
-    text: MMS_FALLBACK_MESSAGE,
+    businessId: context.businessId,
+    text: fallbackReply,
   });
   if (!usage.allowed) {
     console.warn(
-      `[messaging:webhook] MMS fallback blocked by usage gate: reason=${usage.reason} for business ${sendContext.businessId}`
-    );
-    const contact = await findOrCreateContact(
-      sendContext.businessId,
-      to,
-      null,
-      "sms"
-    );
-    const conversation = await getOrCreateConversation(
-      sendContext.businessId,
-      contact.id,
-      "sms"
+      `[messaging:webhook] MMS fallback blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`
     );
     await insertPausedSystemMessageIfNeeded({
-      conversationId: conversation.id,
-      businessId: sendContext.businessId,
+      conversationId: context.conversation.id,
+      businessId: context.businessId,
       channel: "sms",
       context: "mms_fallback",
       reason: usageToPausedReason(usage.reason),
@@ -215,58 +317,52 @@ async function sendFallbackReply(
 
   if (!sendContext.messagingProfileId) {
     throw new Error(
-      `[messaging:webhook] Missing messaging profile for ${from}`
+      `[messaging:webhook] Missing messaging profile for ${context.to}`
     );
   }
 
+  // Human takeover or a downgrade may have happened while preflight ran.
+  if (!(await canStillSendAutomatedReply(context))) return;
+
   const result = await telnyx.messages.send({
-    from,
-    to,
-    text: MMS_FALLBACK_MESSAGE,
+    from: context.to,
+    to: context.from,
+    text: fallbackReply,
     messaging_profile_id: sendContext.messagingProfileId,
     type: "SMS",
   });
-  console.log(`[messaging:webhook] MMS fallback sent, telnyxId=${result.data?.id}`);
+  await addMessage(
+    context.conversation.id,
+    context.businessId,
+    "assistant",
+    fallbackReply,
+    "sms"
+  );
   await recordOutboundSmsUsage({
-    businessId: sendContext.businessId,
-    text: MMS_FALLBACK_MESSAGE,
+    businessId: context.businessId,
+    text: fallbackReply,
     source: "mms_fallback",
     providerMessageId: result.data?.id ?? null,
     idempotencyKey: result.data?.id
       ? `outbound:mms_fallback:${result.data.id}`
       : undefined,
-    metadata: { from, to },
+    metadata: { from: context.to, to: context.from },
   });
 }
 
 async function processAndReply(
-  businessId: string,
-  from: string,
-  to: string,
-  text: string
-) {
-  // Resolve the outbound context FIRST so we can gate the AI call on campaign
-  // approval. Same single-join query that the merged helper exposes — net DB
-  // cost vs. pre-Phase-5 is neutral (replaces a later getMessagingProfileForOutbound call).
-  const sendContext = await getOutboundSendContext(to);
+  context: PersistedInboundContext
+): Promise<void> {
+  const sendContext = await getOutboundSendContext(context.to);
+  assertSendContextBusiness(sendContext.businessId, context.businessId);
 
   if (!sendContext.smsReady) {
     console.warn(
-      `[messaging:webhook] AI reply blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${businessId}`
+      `[messaging:webhook] AI reply blocked: reason=${sendContext.blockReason} campaign_status=${sendContext.campaignStatus} assignment_status=${sendContext.assignmentStatus} for business ${context.businessId}`
     );
-    // The AI engine normally owns customer-message persistence — replicate
-    // just enough here so the inbound is still visible in the dashboard,
-    // followed by a dedupe-aware paused notice.
-    const contact = await findOrCreateContact(businessId, from, null, "sms");
-    const conversation = await getOrCreateConversation(
-      businessId,
-      contact.id,
-      "sms"
-    );
-    await addMessage(conversation.id, businessId, "customer", text, "sms");
     await insertPausedSystemMessageIfNeeded({
-      conversationId: conversation.id,
-      businessId,
+      conversationId: context.conversation.id,
+      businessId: context.businessId,
       channel: "sms",
       context: "ai_reply",
       reason: toPausedReason(sendContext.blockReason),
@@ -276,65 +372,64 @@ async function processAndReply(
 
   if (!sendContext.messagingProfileId) {
     throw new Error(
-      `[messaging:webhook] Missing messaging profile for ${to}`
+      `[messaging:webhook] Missing messaging profile for ${context.to}`
     );
   }
 
-  const { data: existingContact } = await supabaseAdmin
-    .from("contacts")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("phone_number", from)
-    .maybeSingle();
-  const isFirstContact = !existingContact;
-
   console.log(
-    `[messaging:webhook] Generating AI reply (firstContact=${isFirstContact})`
+    `[messaging:webhook] Generating AI reply (appendOptOut=${context.appendAiOptOut})`
   );
   const aiResponse = await processIncomingMessage(
-    businessId,
-    from,
+    context.businessId,
+    context.from,
     null,
-    text,
+    context.text,
     "sms",
     null,
-    { persistAssistant: false }
+    {
+      persistCustomer: false,
+      persistAssistant: false,
+      contact: context.contact,
+      conversation: context.conversation,
+    }
   );
-  console.log(`[messaging:webhook] AI reply generated (length=${aiResponse.length})`);
 
-  const { data: aiSettings } = await supabaseAdmin
+  const { data: aiSettings, error: settingsError } = await supabaseAdmin
     .from("ai_settings")
     .select("sms_response_delay_seconds")
-    .eq("business_id", businessId)
-    .single();
+    .eq("business_id", context.businessId)
+    .maybeSingle<{ sms_response_delay_seconds: number }>();
+  if (settingsError) {
+    throw new Error(
+      `[messaging:webhook] AI delay lookup failed: ${settingsError.message}`
+    );
+  }
 
   const delayMs = (aiSettings?.sms_response_delay_seconds ?? 0) * 1000;
   if (delayMs > 0) {
     console.log(`[messaging:webhook] Applying delay: ${delayMs}ms`);
-    await new Promise((r) => setTimeout(r, delayMs));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
-  const finalReply = isFirstContact
+  // Re-read both billing and takeover state immediately before billing/send.
+  // This prevents a delayed AI response from racing a downgrade or a human
+  // agent who took control while Anthropic was working.
+  if (!(await canStillSendAutomatedReply(context))) return;
+
+  const finalReply = context.appendAiOptOut
     ? `${aiResponse}\n\nReply STOP to opt out.`
     : aiResponse;
-
   const usage = await preflightOutboundSms({
-    businessId,
+    businessId: context.businessId,
     text: finalReply,
   });
   if (!usage.allowed) {
     console.warn(
-      `[messaging:webhook] AI reply blocked by usage gate: reason=${usage.reason} for business ${businessId}`
-    );
-    const contact = await findOrCreateContact(businessId, from, null, "sms");
-    const conversation = await getOrCreateConversation(
-      businessId,
-      contact.id,
-      "sms"
+      `[messaging:webhook] AI reply blocked by usage gate: reason=${usage.reason} for business ${context.businessId}`
     );
     await insertPausedSystemMessageIfNeeded({
-      conversationId: conversation.id,
-      businessId,
+      conversationId: context.conversation.id,
+      businessId: context.businessId,
       channel: "sms",
       context: "ai_reply",
       reason: usageToPausedReason(usage.reason),
@@ -342,32 +437,89 @@ async function processAndReply(
     return;
   }
 
-  console.log(`[messaging:webhook] Sending reply via Telnyx`);
+  if (!(await canStillSendAutomatedReply(context))) return;
+
   const result = await telnyx.messages.send({
-    from: to,
-    to: from,
+    from: context.to,
+    to: context.from,
     text: finalReply,
     messaging_profile_id: sendContext.messagingProfileId,
     type: "SMS",
   });
-  console.log(`[messaging:webhook] Reply sent, telnyxId=${result.data?.id}`);
-  const contact = await findOrCreateContact(businessId, from, null, "sms");
-  const conversation = await getOrCreateConversation(
-    businessId,
-    contact.id,
+  await addMessage(
+    context.conversation.id,
+    context.businessId,
+    "assistant",
+    finalReply,
     "sms"
   );
-  await addMessage(conversation.id, businessId, "assistant", finalReply, "sms");
   await recordOutboundSmsUsage({
-    businessId,
+    businessId: context.businessId,
     text: finalReply,
     source: "ai_reply",
     providerMessageId: result.data?.id ?? null,
     idempotencyKey: result.data?.id
       ? `outbound:ai_reply:${result.data.id}`
       : undefined,
-    metadata: { from: to, to: from },
+    metadata: { from: context.to, to: context.from },
   });
+}
+
+async function shouldAppendAiOptOut(conversationId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .eq("role", "assistant")
+    .eq("channel", "sms")
+    .limit(1)
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    throw new Error(
+      `[messaging:webhook] Failed to determine prior SMS replies for conversation ${conversationId}: ${error.message}`
+    );
+  }
+  return !data;
+}
+
+async function canStillSendAutomatedReply(
+  context: Pick<
+    PersistedInboundContext,
+    "businessId" | "conversation"
+  >
+): Promise<boolean> {
+  const [entitlements, conversation] = await Promise.all([
+    resolveBusinessEntitlements(context.businessId),
+    getConversationAiState(context.conversation.id),
+  ]);
+  return (
+    canUseFeature(entitlements, "ai_sms_conversations") &&
+    isAiHandlingActive(conversation)
+  );
+}
+
+function messageEventKey(eventId: string | undefined, rawBody: string): string {
+  const stableId =
+    eventId?.trim() || createHash("sha256").update(rawBody).digest("hex");
+  return `telnyx:message.received:${stableId}`;
+}
+
+function dispatchInBackground(promise: Promise<void>, label: string): void {
+  promise.catch((error) => {
+    console.error(`[messaging:webhook] ${label} failed:`, error);
+  });
+}
+
+function assertSendContextBusiness(
+  resolvedBusinessId: string,
+  expectedBusinessId: string
+): void {
+  if (resolvedBusinessId !== expectedBusinessId) {
+    throw new Error(
+      `[messaging:webhook] Outbound number resolved to business ${resolvedBusinessId}, expected ${expectedBusinessId}.`
+    );
+  }
 }
 
 function toPausedReason(
@@ -382,6 +534,8 @@ function usageToPausedReason(
   reason: UsageBlockReason
 ): "usage_limit_reached" | "billing_paused" | "submission_disabled" {
   if (reason === "usage_limit_reached") return "usage_limit_reached";
-  if (reason === "telnyx_submission_disabled") return "submission_disabled";
+  if (reason === "telnyx_submission_disabled") {
+    return "submission_disabled";
+  }
   return "billing_paused";
 }

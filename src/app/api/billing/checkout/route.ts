@@ -136,10 +136,6 @@ async function hasSatisfiedOnboardingBilling(
   supabase: Awaited<ReturnType<typeof createClient>>,
   business: CheckoutBusinessRow
 ): Promise<boolean> {
-  if (business.billing_pilot || business.billing_comped || business.billing_exempt) {
-    return true;
-  }
-
   const { data, error } = await supabase
     .from("subscriptions")
     .select("status, setup_fee_paid_at")
@@ -150,9 +146,19 @@ async function hasSatisfiedOnboardingBilling(
     throw error;
   }
 
-  if (!data || !data.setup_fee_paid_at) {
-    return false;
+  // Keep provisioning aligned with runtime entitlements: a synchronized
+  // subscription takes precedence, and protected overrides apply only when
+  // there is no subscription row at all.
+  if (!data) {
+    return (
+      business.billing_pilot ||
+      business.billing_comped ||
+      business.billing_exempt
+    );
   }
 
-  return data.status !== "past_due" && data.status !== "canceled";
+  return (
+    !!data.setup_fee_paid_at &&
+    (data.status === "active" || data.status === "trialing")
+  );
 }

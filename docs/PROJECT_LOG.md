@@ -207,6 +207,20 @@ delta re-verify.
   the durable-linkage pattern; guarded webhooks cannot resurrect billing state
   for deleted or tombstoned businesses.
 
+- **Server-enforced tier walls — implementation verified locally, production
+  rollout pending (2026-07-18):** migration 031 protects subscription/billing
+  authority, adds transactional inbound-usage recording, provider-message
+  deduplication, contact/open-conversation uniqueness, and a token-owned
+  completed/in-progress Telnyx claim lifecycle. Runtime walls now enforce
+  Starter manual SMS/static missed-call texting, Growth AI/widget/Calendar, and
+  Full advanced guardrails; `past_due` retains service while canceled/unpaid
+  stops paid execution. Human/handed-off SMS conversations independently block
+  AI on every tier. Dashboard locks, payment/paused-feature notices, truthful
+  pricing copy, and downgrade preservation are included. Verified with 322
+  Vitest tests, 169 local pgTAP assertions, TypeScript, lint, and a production
+  build. Bryan still needs to apply migration 031 and perform the test-mode
+  Stripe/provider click-through before this moves to "shipped and live."
+
 ---
 
 ## 5. Parked backlog

@@ -70,7 +70,7 @@ export default async function BillingPage() {
               <div className="mt-2 flex items-center gap-3">
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    subscription.status === "active"
+                    subscription.status === "active" || subscription.status === "trialing"
                       ? statusSuccess
                       : subscription.status === "past_due"
                         ? statusWarning

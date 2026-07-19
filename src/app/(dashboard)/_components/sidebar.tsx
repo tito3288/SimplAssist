@@ -12,6 +12,7 @@ import {
   AppWindow,
   CreditCard,
   LogOut,
+  Lock,
 } from "lucide-react";
 import Image from "next/image";
 import { createBrowserClient } from "@/lib/supabase/client";
@@ -36,12 +37,16 @@ export default function Sidebar({
   userEmail,
   websiteUrl,
   activePath,
+  canUseCalendar = true,
+  canUseWidget = true,
 }: {
   userEmail: string;
   websiteUrl: string | null;
   /** Override the active-nav match (used by the /demo routes, whose own
-   *  pathname never equals a real nav href). Real callers omit it. */
+  *  pathname never equals a real nav href). Real callers omit it. */
   activePath?: string;
+  canUseCalendar?: boolean;
+  canUseWidget?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -81,6 +86,9 @@ export default function Sidebar({
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">
         {navItems.map((item) => {
           const isActive = (activePath ?? pathname) === item.href;
+          const isLocked =
+            (item.href === "/calendar" && !canUseCalendar) ||
+            (item.href === "/widget" && !canUseWidget);
           return (
             <Link
               key={item.href}
@@ -93,7 +101,13 @@ export default function Sidebar({
               }`}
             >
               <item.icon className="h-5 w-5" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {isLocked && (
+                <Lock
+                  className="h-3.5 w-3.5 text-stone-400 dark:text-[#777]"
+                  aria-label={`${item.label} is unavailable on the current subscription`}
+                />
+              )}
             </Link>
           );
         })}

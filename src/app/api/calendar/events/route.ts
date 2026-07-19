@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getAuthenticatedClient, getCalendarService } from "@/lib/google/client";
+import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -14,37 +14,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const access = await requireAuthenticatedFeature("calendar");
+  if (!access.ok) return access.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
-
-  const { data: token } = await supabase
+  const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
     .select("calendar_id")
-    .eq("business_id", business.id)
-    .single();
+    .eq("business_id", access.businessId)
+    .maybeSingle();
+
+  if (tokenError) {
+    console.error("[calendar/events] Token lookup failed:", tokenError);
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!token) {
     return NextResponse.json({ connected: false });
   }
 
   try {
-    const client = await getAuthenticatedClient(business.id);
+    const client = await getAuthenticatedClient(access.businessId);
     if (!client) {
       return NextResponse.json({ connected: false });
     }
@@ -107,30 +99,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const access = await requireAuthenticatedFeature("calendar");
+  if (!access.ok) return access.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
-
-  const { data: token } = await supabase
+  const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
     .select("calendar_id")
-    .eq("business_id", business.id)
-    .single();
+    .eq("business_id", access.businessId)
+    .maybeSingle();
+
+  if (tokenError) {
+    console.error("[calendar/events] Token lookup failed:", tokenError);
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!token) {
     return NextResponse.json(
@@ -140,7 +124,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const client = await getAuthenticatedClient(business.id);
+    const client = await getAuthenticatedClient(access.businessId);
     if (!client) {
       return NextResponse.json(
         { error: "Google Calendar not connected" },
@@ -209,30 +193,22 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const access = await requireAuthenticatedFeature("calendar");
+  if (!access.ok) return access.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
-
-  const { data: token } = await supabase
+  const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
     .select("calendar_id")
-    .eq("business_id", business.id)
-    .single();
+    .eq("business_id", access.businessId)
+    .maybeSingle();
+
+  if (tokenError) {
+    console.error("[calendar/events] Token lookup failed:", tokenError);
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!token) {
     return NextResponse.json(
@@ -242,7 +218,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const client = await getAuthenticatedClient(business.id);
+    const client = await getAuthenticatedClient(access.businessId);
     if (!client) {
       return NextResponse.json(
         { error: "Google Calendar not connected" },
@@ -296,30 +272,22 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const access = await requireAuthenticatedFeature("calendar");
+  if (!access.ok) return access.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
-
-  const { data: token } = await supabase
+  const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
     .select("calendar_id")
-    .eq("business_id", business.id)
-    .single();
+    .eq("business_id", access.businessId)
+    .maybeSingle();
+
+  if (tokenError) {
+    console.error("[calendar/events] Token lookup failed:", tokenError);
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!token) {
     return NextResponse.json(
@@ -329,7 +297,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const client = await getAuthenticatedClient(business.id);
+    const client = await getAuthenticatedClient(access.businessId);
     if (!client) {
       return NextResponse.json(
         { error: "Google Calendar not connected" },

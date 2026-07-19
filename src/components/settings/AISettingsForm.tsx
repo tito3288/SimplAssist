@@ -5,7 +5,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { X } from 'lucide-react';
+import Link from 'next/link';
+import { Lock, X } from 'lucide-react';
 import type { AISettings } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import GoogleCalendarConnect from './GoogleCalendarConnect';
@@ -40,9 +41,44 @@ interface AISettingsFormProps {
   businessName: string;
   calendarEmail?: string | null;
   businessId?: string;
+  canCustomizeAi?: boolean;
+  canUseCalendar?: boolean;
+  canUseGuardrails?: boolean;
+  planActive?: boolean;
 }
 
-export default function AISettingsForm({ settings, businessName, calendarEmail = null, businessId }: AISettingsFormProps) {
+function UpgradeNotice({
+  plan,
+  planActive,
+  children,
+}: {
+  plan: 'Growth' | 'Full Suite';
+  planActive: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <p>
+        {planActive ? children : 'Your subscription is inactive. Reactivate it in'}{' '}
+        <Link href="/billing" className="font-semibold underline">
+          {planActive ? `${plan} plan` : 'Billing'}
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+export default function AISettingsForm({
+  settings,
+  businessName,
+  calendarEmail = null,
+  businessId,
+  canCustomizeAi = true,
+  canUseCalendar = true,
+  canUseGuardrails = true,
+  planActive = true,
+}: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [guardrails, setGuardrails] = useState<string[]>(settings.guardrails || []);
@@ -72,6 +108,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   const selectedTone = watch('tone');
 
   const addGuardrail = (text: string) => {
+    if (!canUseGuardrails) return;
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
     if (lines.length > 0) {
       setGuardrails((prev) => [...prev, ...lines]);
@@ -80,6 +117,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
   };
 
   const removeGuardrail = (index: number) => {
+    if (!canUseGuardrails) return;
     setGuardrails((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -94,17 +132,29 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
     setSuccess(false);
     try {
       const supabase = createClient();
-      const { error } = await supabase
-        .from('ai_settings')
-        .update({
+      const updates: Partial<AISettings> = {
+        language: data.language,
+      };
+      if (canCustomizeAi) {
+        Object.assign(updates, {
           tone: data.tone,
           business_voice: data.business_voice,
-          language: data.language,
           sms_response_delay_seconds: data.sms_response_delay_seconds,
-          guardrails: guardrails,
+        });
+      }
+      if (canUseCalendar) {
+        Object.assign(updates, {
           booking_enabled: data.booking_enabled,
           booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
-        })
+        });
+      }
+      if (canUseGuardrails) {
+        updates.guardrails = guardrails;
+      }
+
+      const { error } = await supabase
+        .from('ai_settings')
+        .update(updates)
         .eq('id', settings.id);
       if (error) throw error;
       setSuccess(true);
@@ -123,8 +173,15 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Tone & Voice</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">How your AI assistant communicates with customers.</p>
 
+        {!canCustomizeAi && (
+          <UpgradeNotice plan="Growth" planActive={planActive}>Tone and voice customization requires the</UpgradeNotice>
+        )}
+
         <div className="space-y-4">
-          <div>
+          <div
+            className={!canCustomizeAi ? 'pointer-events-none opacity-60' : undefined}
+            aria-disabled={!canCustomizeAi}
+          >
             <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">Tone</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {TONE_OPTIONS.map((opt) => (
@@ -136,7 +193,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                       : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                   }`}
                 >
-                  <input type="radio" value={opt.value} {...register('tone')} className="sr-only" />
+                  <input type="radio" value={opt.value} {...register('tone')} tabIndex={canCustomizeAi ? undefined : -1} className="sr-only" />
                   <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">{opt.label}</p>
                   <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-1">{opt.description}</p>
                 </label>
@@ -144,7 +201,10 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
             </div>
           </div>
 
-          <div>
+          <div
+            className={!canCustomizeAi ? 'pointer-events-none opacity-60' : undefined}
+            aria-disabled={!canCustomizeAi}
+          >
             <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">Business Voice</label>
             <div className="flex gap-3">
               <label
@@ -152,7 +212,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                   watch('business_voice') === 'we' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
-                <input type="radio" value="we" {...register('business_voice')} className="sr-only" />
+                <input type="radio" value="we" {...register('business_voice')} tabIndex={canCustomizeAi ? undefined : -1} className="sr-only" />
                 <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;We&rdquo;</p>
                 <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">We can help you with...</p>
               </label>
@@ -161,7 +221,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                   watch('business_voice') === 'business_name' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
-                <input type="radio" value="business_name" {...register('business_voice')} className="sr-only" />
+                <input type="radio" value="business_name" {...register('business_voice')} tabIndex={canCustomizeAi ? undefined : -1} className="sr-only" />
                 <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;{businessName}&rdquo;</p>
                 <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">{businessName} can help...</p>
               </label>
@@ -185,9 +245,13 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
       {/* Section 2: Web Chat Greeting */}
       <section>
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-          Configure your web chat greeting in <a href="/widget" className="text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] underline">Widget Settings</a>.
-        </p>
+        {canCustomizeAi ? (
+          <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+            Configure your web chat greeting in <a href="/widget" className="text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] underline">Widget Settings</a>.
+          </p>
+        ) : (
+          <UpgradeNotice plan="Growth" planActive={planActive}>Web chat settings require the</UpgradeNotice>
+        )}
       </section>
 
       {/* Section 3: Response Behavior */}
@@ -195,7 +259,14 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control how quickly your AI responds to SMS messages.</p>
 
-        <div>
+        {!canCustomizeAi && (
+          <UpgradeNotice plan="Growth" planActive={planActive}>AI response controls require the</UpgradeNotice>
+        )}
+
+        <div
+          className={!canCustomizeAi ? 'pointer-events-none opacity-60' : undefined}
+          aria-disabled={!canCustomizeAi}
+        >
           <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1">
             SMS Response Delay: <span className="text-[#c2410c] dark:text-[#ff914d]">{getDelayLabel(responseDelay)}</span>
           </label>
@@ -210,6 +281,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                 step={5}
                 value={field.value}
                 onChange={(e) => field.onChange(Number(e.target.value))}
+                tabIndex={canCustomizeAi ? undefined : -1}
                 className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[#ea580c] dark:accent-[#ff914d]"
               />
             )}
@@ -226,7 +298,11 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
 
-        <div className="flex items-center justify-between">
+        {!canUseCalendar && (
+          <UpgradeNotice plan="Growth" planActive={planActive}>Google Calendar and AI booking require the</UpgradeNotice>
+        )}
+
+        <div className={`flex items-center justify-between ${!canUseCalendar ? 'opacity-60' : ''}`}>
           <label className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
           <Controller
             name="booking_enabled"
@@ -234,7 +310,8 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
             render={({ field }) => (
               <button
                 type="button"
-                onClick={() => field.onChange(!field.value)}
+                onClick={() => canUseCalendar && field.onChange(!field.value)}
+                disabled={!canUseCalendar}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   field.value ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
                 }`}
@@ -251,16 +328,19 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
 
         {bookingEnabled && (
           <>
-            <div className="mt-3 pl-4 border-l-2 border-[#ea580c]/30 dark:border-[#ff914d]/30 space-y-2">
+            <div
+              className={`mt-3 space-y-2 border-l-2 border-[#ea580c]/30 pl-4 dark:border-[#ff914d]/30 ${!canUseCalendar ? 'pointer-events-none opacity-60' : ''}`}
+              aria-disabled={!canUseCalendar}
+            >
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="collect_info" {...register('booking_mode')} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
+                <input type="radio" value="collect_info" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
                 <div>
                   <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Collect customer info</p>
                   <p className="text-xs text-stone-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
                 </div>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="schedule_direct" {...register('booking_mode')} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
+                <input type="radio" value="schedule_direct" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
                 <div>
                   <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Direct scheduling</p>
                   <p className="text-xs text-stone-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
@@ -275,10 +355,21 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                 <GoogleCalendarConnect
                   businessId={businessId}
                   connectedEmail={calendarEmail ?? null}
+                  canConnect={canUseCalendar}
                 />
               </div>
             )}
           </>
+        )}
+
+        {!canUseCalendar && businessId && calendarEmail && !bookingEnabled && (
+          <div className="mt-4 rounded-xl border border-[#ece4d8] bg-white p-4 dark:border-white/[0.08] dark:bg-white/5">
+            <GoogleCalendarConnect
+              businessId={businessId}
+              connectedEmail={calendarEmail}
+              canConnect={false}
+            />
+          </div>
         )}
       </section>
 
@@ -287,6 +378,11 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
 
+        {!canUseGuardrails && (
+          <UpgradeNotice plan="Full Suite" planActive={planActive}>Advanced guardrails require the</UpgradeNotice>
+        )}
+
+        <div className={!canUseGuardrails ? 'opacity-60' : undefined}>
         {guardrails.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
             {guardrails.map((rule, index) => (
@@ -298,6 +394,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
                 <button
                   type="button"
                   onClick={() => removeGuardrail(index)}
+                  disabled={!canUseGuardrails}
                   className="text-stone-400 dark:text-[#666] hover:text-red-500"
                 >
                   <X className="w-3 h-3" />
@@ -321,6 +418,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
               }
             }
           }}
+          disabled={!canUseGuardrails}
         />
         <p className="text-xs text-stone-400 dark:text-[#666] mt-1">Type a rule and press Enter, or add multiple rules (one per line).</p>
         <button
@@ -329,10 +427,12 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
             const text = watch('guardrails_text');
             if (text?.trim()) addGuardrail(text);
           }}
+          disabled={!canUseGuardrails}
           className="text-xs text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] mt-1"
         >
           + Add rules
         </button>
+        </div>
       </section>
 
       {/* Save */}
@@ -348,7 +448,7 @@ export default function AISettingsForm({ settings, businessName, calendarEmail =
               Saving…
             </>
           ) : (
-            'Save Settings'
+            canCustomizeAi ? 'Save Settings' : 'Save Language'
           )}
         </button>
         {success && (

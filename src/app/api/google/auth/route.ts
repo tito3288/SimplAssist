@@ -1,30 +1,29 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { generateAuthUrl } from "@/lib/google/client";
+import { randomBytes } from "node:crypto";
+import { NextRequest, NextResponse } from "next/server";
+import {
+  generateAuthUrl,
+  GOOGLE_OAUTH_NONCE_COOKIE,
+  GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS,
+} from "@/lib/google/client";
+import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
 
-export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export async function GET(request: NextRequest) {
+  const access = await requireAuthenticatedFeature("calendar");
+  if (!access.ok) return access.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const nonce = randomBytes(32).toString("base64url");
+  const url = generateAuthUrl(access.businessId, nonce);
+  const response = NextResponse.redirect(url);
 
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
+  response.cookies.set(GOOGLE_OAUTH_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure:
+      request.nextUrl.protocol === "https:" ||
+      process.env.NODE_ENV === "production",
+    path: "/api/google/callback",
+    maxAge: GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS,
+  });
 
-  if (!business) {
-    return NextResponse.json(
-      { error: "Business not found" },
-      { status: 404 }
-    );
-  }
-
-  const url = generateAuthUrl(business.id);
-  return NextResponse.redirect(url);
+  return response;
 }

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   markProcessedOnce: vi.fn(),
   releaseProcessedEvent: vi.fn(),
   sendMissedCallSMS: vi.fn(),
+  resolveBusinessEntitlements: vi.fn(),
+  canUseFeature: vi.fn(),
   from: vi.fn(),
 }));
 
@@ -43,6 +45,10 @@ vi.mock("@/lib/messaging/idempotency", async (importOriginal) => {
 });
 vi.mock("@/lib/messaging/missed-call", () => ({
   sendMissedCallSMS: mocks.sendMissedCallSMS,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
+  canUseFeature: mocks.canUseFeature,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
@@ -134,6 +140,15 @@ beforeEach(() => {
   mocks.markProcessedOnce.mockResolvedValue(true);
   mocks.releaseProcessedEvent.mockResolvedValue(undefined);
   mocks.sendMissedCallSMS.mockResolvedValue(undefined);
+  mocks.resolveBusinessEntitlements.mockResolvedValue({
+    businessId: ATTEMPT.business_id,
+    plan: "sms_only",
+    status: "active",
+    source: "subscription",
+    active: true,
+    cancelAtPeriodEnd: false,
+  });
+  mocks.canUseFeature.mockReturnValue(true);
   mocks.hangup.mockResolvedValue({});
   mocks.reject.mockResolvedValue({});
   queueResults();
@@ -247,6 +262,149 @@ describe("POST /api/messaging/voice", () => {
     // real-time verbs ack 200 and keep the claim.
     expect(response.status).toBe(200);
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges and rejects a genuinely unknown destination number", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_unknown",
+      })
+    );
+    queueResults({ data: null, error: null });
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.reject).toHaveBeenCalledWith("cc_unknown", {
+      cause: "USER_BUSY",
+    });
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim and returns 500 when destination lookup errors", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_phone_lookup_error",
+      })
+    );
+    queueResults({ data: null, error: { message: "connection reset" } });
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
+      "evt_voice_call_initiated"
+    );
+  });
+
+  it("rejects a call without paid execution when the subscription is canceled", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_canceled",
+      })
+    );
+    queueResults({ data: { business_id: ATTEMPT.business_id }, error: null });
+    mocks.resolveBusinessEntitlements.mockResolvedValue({
+      businessId: ATTEMPT.business_id,
+      plan: "sms_and_chat",
+      status: "canceled",
+      source: "subscription",
+      active: false,
+      cancelAtPeriodEnd: false,
+    });
+    mocks.canUseFeature.mockReturnValue(false);
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.reject).toHaveBeenCalledWith("cc_canceled", {
+      cause: "USER_BUSY",
+    });
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim and returns 500 when paid access cannot be resolved", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_entitlement_error",
+      })
+    );
+    queueResults({ data: { business_id: ATTEMPT.business_id }, error: null });
+    mocks.resolveBusinessEntitlements.mockRejectedValue(
+      new Error("billing database unavailable")
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
+      "evt_voice_call_initiated"
+    );
+  });
+
+  it("releases the claim and returns 500 when business lookup errors", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_business_lookup_error",
+      })
+    );
+    queueResults(
+      { data: { business_id: ATTEMPT.business_id }, error: null },
+      { data: null, error: { message: "connection reset" } }
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
+      "evt_voice_call_initiated"
+    );
+  });
+
+  it("treats a provisioned number pointing to a missing business as retryable", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.initiated", {
+        direction: "incoming",
+        from: "+15745550100",
+        to: "+15745550300",
+        call_control_id: "cc_missing_business",
+      })
+    );
+    queueResults(
+      { data: { business_id: ATTEMPT.business_id }, error: null },
+      { data: null, error: null }
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.answer).not.toHaveBeenCalled();
+    expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
+      "evt_voice_call_initiated"
+    );
   });
 
   it("honors RetryableWebhookError from a non-durable event type (bridged connected-mark failure)", async () => {

@@ -1,7 +1,18 @@
 import { anthropic } from "@/lib/anthropic/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  canUseFeature,
+  EntitlementResolutionError,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 import { findOrCreateContact, incrementLeadScore, updateContactName, updateContactEmail } from "./contacts";
-import { getOrCreateConversation, addMessage, getConversationHistory } from "./conversations";
+import {
+  getOrCreateConversation,
+  addMessage,
+  getConversationAiState,
+  getConversationHistory,
+  isAiHandlingActive,
+} from "./conversations";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
 import { calendarTools, shouldIncludeCalendarTools } from "./tools";
 import { checkAvailability, createBooking } from "@/lib/google/calendar";
@@ -12,11 +23,41 @@ import type {
   FAQ,
   BusinessHours,
   Channel,
+  Contact,
+  Conversation,
 } from "@/types/database";
 import type Anthropic from "@anthropic-ai/sdk";
 
 const FALLBACK_MESSAGE =
   "Thanks for reaching out! We're having a brief technical issue. Please try again in a moment or call us directly.";
+
+export class AIProcessingBlockedError extends Error {
+  constructor(
+    readonly reason: "feature_not_entitled" | "conversation_in_manual_mode"
+  ) {
+    super(
+      reason === "feature_not_entitled"
+        ? "AI processing is not included in this business's current plan."
+        : "AI processing is disabled while this conversation is in Human mode."
+    );
+    this.name = "AIProcessingBlockedError";
+  }
+}
+
+export class AIProcessingStateError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "AIProcessingStateError";
+  }
+}
+
+export interface ProcessIncomingMessageOptions {
+  persistAssistant?: boolean;
+  /** Set false only when the caller has already durably stored this message. */
+  persistCustomer?: boolean;
+  contact?: Contact;
+  conversation?: Conversation;
+}
 
 function scoreMessage(message: string): number {
   const lower = message.toLowerCase();
@@ -140,77 +181,192 @@ export async function processIncomingMessage(
   message: string,
   channel: Channel,
   sessionId: string | null = null,
-  options: { persistAssistant?: boolean } = {}
+  options: ProcessIncomingMessageOptions = {}
 ): Promise<string> {
   try {
-    const contact = await findOrCreateContact(
-      businessId,
-      contactPhone,
-      contactEmail,
-      channel,
-      sessionId
-    );
+    // Resolve at the execution boundary even when an upstream webhook already
+    // checked the plan. This closes the downgrade/cancel race before any
+    // Anthropic request and avoids trusting a stale long-lived decision.
+    const entitlements = await resolveBusinessEntitlements(businessId);
+    const requiredFeature =
+      channel === "sms" ? "ai_sms_conversations" : "web_chat";
 
-    const conversation = await getOrCreateConversation(
-      businessId,
-      contact.id,
-      channel
-    );
-
-    await addMessage(conversation.id, businessId, "customer", message, channel);
-
-    const [
-      { data: business },
-      { data: aiSettings },
-      { data: services },
-      { data: faqs },
-      { data: businessHours },
-      { data: calendarToken },
-    ] = await Promise.all([
-      supabaseAdmin
-        .from("businesses")
-        .select("*")
-        .eq("id", businessId)
-        .single(),
-      supabaseAdmin
-        .from("ai_settings")
-        .select("*")
-        .eq("business_id", businessId)
-        .single(),
-      supabaseAdmin
-        .from("services")
-        .select("*")
-        .eq("business_id", businessId)
-        .eq("is_active", true),
-      supabaseAdmin
-        .from("faqs")
-        .select("*")
-        .eq("business_id", businessId)
-        .eq("is_active", true),
-      supabaseAdmin
-        .from("business_hours")
-        .select("*")
-        .eq("business_id", businessId),
-      supabaseAdmin
-        .from("google_calendar_tokens")
-        .select("id")
-        .eq("business_id", businessId)
-        .single(),
-    ]);
-
-    if (!business || !aiSettings) {
-      return FALLBACK_MESSAGE;
+    if (!canUseFeature(entitlements, requiredFeature)) {
+      throw new AIProcessingBlockedError("feature_not_entitled");
     }
 
-    const hasCalendar = !!calendarToken;
+    let contact: Contact;
+    try {
+      contact =
+        options.contact ??
+        (await findOrCreateContact(
+          businessId,
+          contactPhone,
+          contactEmail,
+          channel,
+          sessionId
+        ));
+    } catch (error) {
+      throw new AIProcessingStateError(
+        `Could not resolve a contact for business ${businessId}.`,
+        { cause: error }
+      );
+    }
+
+    if (contact.business_id !== businessId) {
+      throw new AIProcessingStateError(
+        `Contact ${contact.id} does not belong to business ${businessId}.`
+      );
+    }
+
+    let conversation: Conversation;
+    try {
+      conversation =
+        options.conversation ??
+        (await getOrCreateConversation(businessId, contact.id, channel));
+    } catch (error) {
+      throw new AIProcessingStateError(
+        `Could not resolve a conversation for contact ${contact.id}.`,
+        { cause: error }
+      );
+    }
+
+    if (
+      conversation.business_id !== businessId ||
+      conversation.contact_id !== contact.id ||
+      conversation.channel !== channel
+    ) {
+      throw new AIProcessingStateError(
+        `Conversation ${conversation.id} does not match the AI request context.`
+      );
+    }
+
+    // Defense in depth: the webhook checks this before dispatching AI, and the
+    // engine re-reads it so a human takeover that races processing still wins.
+    if (channel === "sms") {
+      let currentState: Pick<
+        Conversation,
+        "id" | "status" | "is_ai_handling"
+      >;
+      try {
+        currentState = await getConversationAiState(conversation.id);
+      } catch (error) {
+        throw new AIProcessingStateError(
+          `Could not determine AI state for conversation ${conversation.id}.`,
+          { cause: error }
+        );
+      }
+      if (!isAiHandlingActive(currentState)) {
+        throw new AIProcessingBlockedError("conversation_in_manual_mode");
+      }
+    }
+
+    if (options.persistCustomer !== false) {
+      try {
+        await addMessage(
+          conversation.id,
+          businessId,
+          "customer",
+          message,
+          channel
+        );
+      } catch (error) {
+        throw new AIProcessingStateError(
+          `Could not persist the customer message for conversation ${conversation.id}.`,
+          { cause: error }
+        );
+      }
+    }
+
+    let stateResults;
+    try {
+      stateResults = await Promise.all([
+        supabaseAdmin
+          .from("businesses")
+          .select("*")
+          .eq("id", businessId)
+          .single(),
+        supabaseAdmin
+          .from("ai_settings")
+          .select("*")
+          .eq("business_id", businessId)
+          .single(),
+        supabaseAdmin
+          .from("services")
+          .select("*")
+          .eq("business_id", businessId)
+          .eq("is_active", true),
+        supabaseAdmin
+          .from("faqs")
+          .select("*")
+          .eq("business_id", businessId)
+          .eq("is_active", true),
+        supabaseAdmin
+          .from("business_hours")
+          .select("*")
+          .eq("business_id", businessId),
+        supabaseAdmin
+          .from("google_calendar_tokens")
+          .select("id")
+          .eq("business_id", businessId)
+          .maybeSingle(),
+      ]);
+    } catch (error) {
+      throw new AIProcessingStateError(
+        `Could not load AI context for business ${businessId}.`,
+        { cause: error }
+      );
+    }
+
+    const [
+      businessResult,
+      aiSettingsResult,
+      servicesResult,
+      faqsResult,
+      businessHoursResult,
+      calendarTokenResult,
+    ] = stateResults;
+    const contextError = stateResults.find((result) => result.error)?.error;
+    if (contextError) {
+      throw new AIProcessingStateError(
+        `Could not load AI context for business ${businessId}.`,
+        { cause: contextError }
+      );
+    }
+
+    const business = businessResult.data;
+    const aiSettings = aiSettingsResult.data;
+    const services = servicesResult.data;
+    const faqs = faqsResult.data;
+    const businessHours = businessHoursResult.data;
+    const calendarToken = calendarTokenResult.data;
+
+    if (!business || !aiSettings) {
+      throw new AIProcessingStateError(
+        `Business ${businessId} is missing required AI configuration.`
+      );
+    }
+
+    const canBookDirectly = canUseFeature(entitlements, "direct_booking");
+    const hasCalendar = canBookDirectly && !!calendarToken;
     const useTools = shouldIncludeCalendarTools(
       aiSettings as AISettings,
       hasCalendar
     );
 
+    // Stored settings survive downgrades, but features above the current plan
+    // are made inert at execution time. Growth may customize AI while only
+    // Full may inject advanced guardrails into the model prompt.
+    const effectiveAiSettings: AISettings = {
+      ...(aiSettings as AISettings),
+      guardrails: canUseFeature(entitlements, "advanced_guardrails")
+        ? (aiSettings as AISettings).guardrails
+        : [],
+    };
+
     const systemPrompt = buildSystemPrompt(
       business as Business,
-      aiSettings as AISettings,
+      effectiveAiSettings,
       (services ?? []) as Service[],
       (faqs ?? []) as FAQ[],
       (businessHours ?? []) as BusinessHours[],
@@ -218,12 +374,19 @@ export async function processIncomingMessage(
       channel
     );
 
-    const history = await getConversationHistory(conversation.id);
+    let history;
+    try {
+      history = await getConversationHistory(conversation.id);
+    } catch (error) {
+      throw new AIProcessingStateError(
+        `Could not load conversation history for ${conversation.id}.`,
+        { cause: error }
+      );
+    }
 
-    const messages: Anthropic.MessageParam[] = buildConversationMessages(
-      history,
-      message
-    );
+    // The current customer message is already in history (either persisted
+    // above or by a durable webhook caller), so do not append it a second time.
+    const messages: Anthropic.MessageParam[] = buildConversationMessages(history);
 
     // Build tools array — contact tools are always available, calendar tools are conditional
     const tools: Anthropic.Tool[] = [...contactTools];
@@ -299,13 +462,20 @@ export async function processIncomingMessage(
     const responseText = textBlock?.text || FALLBACK_MESSAGE;
 
     if (options.persistAssistant !== false) {
-      await addMessage(
-        conversation.id,
-        businessId,
-        "assistant",
-        responseText,
-        channel
-      );
+      try {
+        await addMessage(
+          conversation.id,
+          businessId,
+          "assistant",
+          responseText,
+          channel
+        );
+      } catch (error) {
+        throw new AIProcessingStateError(
+          `Could not persist the assistant message for conversation ${conversation.id}.`,
+          { cause: error }
+        );
+      }
     }
 
     const leadScoreIncrease = scoreMessage(message);
@@ -315,6 +485,13 @@ export async function processIncomingMessage(
 
     return responseText;
   } catch (error) {
+    if (
+      error instanceof AIProcessingBlockedError ||
+      error instanceof AIProcessingStateError ||
+      error instanceof EntitlementResolutionError
+    ) {
+      throw error;
+    }
     console.error("Error processing incoming message:", error);
     return FALLBACK_MESSAGE;
   }

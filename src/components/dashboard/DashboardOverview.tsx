@@ -83,7 +83,7 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-medium ${ink}`}>
-                Your AI assistant doesn&apos;t have a phone number yet. Customers can&apos;t text you until you set one up.
+                Your SimplAssist account doesn&apos;t have a phone number yet. Customers can&apos;t text you until you set one up.
               </p>
             </div>
             <button
@@ -137,7 +137,7 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <p className={`text-sm ${body}`}>Your AI Number</p>
+                <p className={`text-sm ${body}`}>Your SimplAssist Number</p>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ff914d] dark:border-[rgba(255,145,77,.22)]">
                   {a2pStatus.smsReady ? 'Active' : 'Setup pending'}
                 </span>
@@ -303,7 +303,7 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
               Settings
             </h4>
             <p className={`text-sm leading-relaxed ${body}`}>
-              Tune tone, greetings, and guardrails so your assistant sounds like your brand.
+              Manage business details, hours, messaging, and the features included in your plan.
             </p>
           </Link>
           <Link
@@ -345,7 +345,7 @@ export default function DashboardOverview({ stats, recentConversations, hotLeads
               </button>
             </div>
             <p className={`text-sm mb-4 ${body}`}>
-              Search for an available phone number and set it up for your AI assistant.
+              Search for an available phone number and set it up for SimplAssist.
             </p>
             <PhoneNumberSelector />
           </div>

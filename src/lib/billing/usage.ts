@@ -2,6 +2,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { isSubscriptionPlan } from "./features";
 import { countSmsParts } from "./smsParts";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
 
@@ -10,8 +11,6 @@ const USAGE_BLOCK_MESSAGES = {
     "SMS sending is disabled for this account. Contact SimplAssist support if this looks wrong.",
   billing_required:
     "Choose an active plan before sending SMS.",
-  past_due:
-    "Your subscription payment needs attention before SMS sending can continue.",
   canceled:
     "Choose an active plan before SMS sending can continue.",
   usage_limit_reached:
@@ -74,9 +73,6 @@ export async function preflightOutboundSms(args: {
   if (!context.billingExempt) {
     if (!context.subscription) {
       return blocked("billing_required", smsParts);
-    }
-    if (context.subscription.status === "past_due") {
-      return blocked("past_due", smsParts);
     }
     if (context.subscription.status === "canceled") {
       return blocked("canceled", smsParts);
@@ -189,21 +185,23 @@ async function resolveUsageContext(businessId: string): Promise<{
   periodStart: string;
   periodEnd: string;
 }> {
-  const [{ data: business, error: businessError }, { data: subscription }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("businesses")
-        .select(
-          "id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
-        )
-        .eq("id", businessId)
-        .single<BusinessBillingRow>(),
-      supabaseAdmin
-        .from("subscriptions")
-        .select("plan, status, current_period_start, current_period_end")
-        .eq("business_id", businessId)
-        .maybeSingle<SubscriptionBillingRow>(),
-    ]);
+  const [
+    { data: business, error: businessError },
+    { data: subscription, error: subscriptionError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("businesses")
+      .select(
+        "id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
+      )
+      .eq("id", businessId)
+      .single<BusinessBillingRow>(),
+    supabaseAdmin
+      .from("subscriptions")
+      .select("plan, status, current_period_start, current_period_end")
+      .eq("business_id", businessId)
+      .maybeSingle<SubscriptionBillingRow>(),
+  ]);
 
   if (businessError || !business) {
     throw new Error(
@@ -211,9 +209,31 @@ async function resolveUsageContext(businessId: string): Promise<{
     );
   }
 
+  if (subscriptionError) {
+    throw new Error(
+      `[billing:usage] Failed to read subscription for ${businessId}: ${subscriptionError.message}`
+    );
+  }
+
+  if (
+    subscription &&
+    (!isSubscriptionPlan(subscription.plan) ||
+      !isKnownSubscriptionStatus(subscription.status))
+  ) {
+    throw new Error(
+      `[billing:usage] Subscription for ${businessId} has malformed billing values`
+    );
+  }
+
+  // Match the central entitlement contract: a synchronized subscription is
+  // authoritative, including a canceled one. Protected pilot/comped/exempt
+  // access applies only when there is no subscription row to take precedence.
   const billingExempt =
-    business.billing_exempt || business.billing_comped || business.billing_pilot;
-  const plan = subscription?.plan ?? "sms_only";
+    !subscription &&
+    (business.billing_exempt ||
+      business.billing_comped ||
+      business.billing_pilot);
+  const plan = subscription?.plan ?? (billingExempt ? "full" : "sms_only");
   const { start, end } =
     subscription?.current_period_start && subscription.current_period_end
       ? {
@@ -313,40 +333,31 @@ async function recordUsageEvent(args: {
   idempotencyKey: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  const { error } = await supabaseAdmin.from("billing_usage_events").insert({
-    business_id: args.businessId,
-    usage_period_id: args.periodId,
-    idempotency_key: args.idempotencyKey,
-    direction: args.direction,
-    channel: args.channel,
-    source: args.source,
-    sms_parts: args.smsParts,
-    mms_events: args.mmsEvents,
-    provider_message_id: args.providerMessageId,
-    metadata: args.metadata ?? null,
-  });
-
-  if (error) {
-    if (error.code === "23505") return;
-    throw new Error(
-      `[billing:usage] Failed to insert usage event ${args.idempotencyKey}: ${error.message}`
-    );
-  }
-
-  const { error: incrementError } = await supabaseAdmin.rpc(
-    "increment_billing_usage_period",
+  const { data, error } = await supabaseAdmin.rpc(
+    "record_billing_usage_event",
     {
+      p_business_id: args.businessId,
       p_usage_period_id: args.periodId,
+      p_idempotency_key: args.idempotencyKey,
       p_direction: args.direction,
       p_channel: args.channel,
+      p_source: args.source,
       p_sms_parts: args.smsParts,
       p_mms_events: args.mmsEvents,
+      p_provider_message_id: args.providerMessageId,
+      p_metadata: args.metadata ?? null,
     }
   );
 
-  if (incrementError) {
+  if (error) {
     throw new Error(
-      `[billing:usage] Failed to increment usage period ${args.periodId}: ${incrementError.message}`
+      `[billing:usage] Failed to record usage event ${args.idempotencyKey}: ${error.message}`
+    );
+  }
+
+  if (typeof data !== "boolean") {
+    throw new Error(
+      `[billing:usage] Usage RPC returned an invalid response for ${args.idempotencyKey}`
     );
   }
 }
@@ -372,4 +383,15 @@ function currentUtcMonthPeriod(): { start: string; end: string } {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function isKnownSubscriptionStatus(
+  status: unknown
+): status is SubscriptionStatus {
+  return (
+    status === "active" ||
+    status === "trialing" ||
+    status === "past_due" ||
+    status === "canceled"
+  );
 }

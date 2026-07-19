@@ -9,6 +9,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { isE164PhoneNumber } from "@/lib/phone/e164";
+import {
+  canUseFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
@@ -189,12 +193,19 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     `[messaging:voice] call.initiated from=${from} to=${to} call_control_id=${callControlId}`
   );
 
-  const { data: phoneNumberRow } = await supabaseAdmin
+  const { data: phoneNumberRow, error: phoneLookupError } = await supabaseAdmin
     .from("phone_numbers")
     .select("business_id")
     .eq("phone_number", to)
     .eq("is_active", true)
-    .single();
+    .maybeSingle();
+
+  if (phoneLookupError) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] Failed to resolve destination number ${to}`,
+      { cause: phoneLookupError }
+    );
+  }
 
   if (!phoneNumberRow) {
     console.warn(`[messaging:voice] No active business for to=${to}, rejecting call`);
@@ -203,13 +214,43 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
   }
 
   const businessId = phoneNumberRow.business_id;
-  const { data: business } = await supabaseAdmin
+  let entitlements;
+  try {
+    entitlements = await resolveBusinessEntitlements(businessId);
+  } catch (error) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] Failed to resolve paid access for business ${businessId}`,
+      { cause: error }
+    );
+  }
+
+  if (!canUseFeature(entitlements, "missed_call_sms")) {
+    console.warn(
+      `[messaging:voice] Paid voice execution is paused for business ${businessId}; rejecting incoming call`
+    );
+    await telnyx.calls.actions.reject(callControlId, { cause: "USER_BUSY" });
+    return;
+  }
+
+  const { data: business, error: businessLookupError } = await supabaseAdmin
     .from("businesses")
     .select(
       "name, email, phone_number, telnyx_voice_application_id, call_forwarding_enabled, forward_to_number"
     )
     .eq("id", businessId)
-    .single();
+    .maybeSingle();
+
+  if (businessLookupError) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] Failed to load business ${businessId}`,
+      { cause: businessLookupError }
+    );
+  }
+  if (!business) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] Destination ${to} points to missing business ${businessId}`
+    );
+  }
   const businessName = business?.name ?? "us";
 
   const state = encodeState({

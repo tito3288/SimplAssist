@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { InboxLayout } from "@/components/conversations/InboxLayout";
 import type { Conversation, Contact } from "@/types/database";
 import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
+import { canUseFeature, resolveBusinessEntitlements } from "@/lib/billing/entitlements";
 
 export type ConversationWithContact = Conversation & {
   contact: Pick<Contact, "id" | "name" | "phone_number" | "email">;
@@ -26,6 +27,7 @@ export default async function ConversationsPage() {
 
   if (!business) redirect("/onboarding");
 
+  const entitlements = await resolveBusinessEntitlements(business.id);
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
 
   const { data: conversations } = await supabase
@@ -69,6 +71,9 @@ export default async function ConversationsPage() {
         businessId={business.id}
         smsReady={smsReadiness.smsReady}
         smsBlockReason={smsReadiness.blockReason}
+        canUseManualSms={canUseFeature(entitlements, "manual_sms")}
+        canUseAiSms={canUseFeature(entitlements, "ai_sms_conversations")}
+        canUseWebChat={canUseFeature(entitlements, "web_chat")}
       />
     </div>
   );

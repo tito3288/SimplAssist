@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  decideFeatureAccess,
+  isEntitlementResolutionError,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 export async function DELETE(
   _request: NextRequest,
@@ -14,29 +19,68 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: business } = await supabase
+  const { data: business, error: businessError } = await supabase
     .from("businesses")
     .select("id")
     .eq("owner_id", user.id)
     .single();
+
+  if (businessError) {
+    console.error("[conversations] Business lookup failed:", businessError);
+    return NextResponse.json(
+      { error: "Unable to verify business", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!business) {
     return NextResponse.json({ error: "Business not found" }, { status: 404 });
   }
 
   // Verify conversation belongs to this business
-  const { data: conversation } = await supabase
+  const { data: conversation, error: conversationError } = await supabase
     .from("conversations")
-    .select("id")
+    .select("id, channel")
     .eq("id", params.id)
     .eq("business_id", business.id)
-    .single();
+    .maybeSingle();
+
+  if (conversationError) {
+    console.error("[conversations] Conversation lookup failed:", conversationError);
+    return NextResponse.json(
+      { error: "Unable to verify conversation", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!conversation) {
     return NextResponse.json(
       { error: "Conversation not found" },
       { status: 404 }
     );
+  }
+
+  try {
+    const entitlements = await resolveBusinessEntitlements(business.id);
+    const access = decideFeatureAccess(
+      entitlements,
+      conversation.channel === "web_chat" ? "web_chat" : "contacts_inbox"
+    );
+    if (!access.allowed) {
+      return NextResponse.json(
+        { error: "This conversation is read-only on the current plan" },
+        { status: 403 }
+      );
+    }
+  } catch (error) {
+    if (isEntitlementResolutionError(error)) {
+      console.error("[conversations] Entitlement lookup failed:", error);
+      return NextResponse.json(
+        { error: "Unable to verify plan access", retryable: true },
+        { status: 503 }
+      );
+    }
+    throw error;
   }
 
   const { error } = await supabase

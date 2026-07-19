@@ -227,7 +227,7 @@ export function buildSystemPrompt(
 
 export function buildConversationMessages(
   history: Message[],
-  newMessage: string
+  newMessage?: string
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 
@@ -241,7 +241,9 @@ export function buildConversationMessages(
     }
   }
 
-  messages.push({ role: "user", content: newMessage });
+  if (newMessage !== undefined) {
+    messages.push({ role: "user", content: newMessage });
+  }
 
   return messages;
 }

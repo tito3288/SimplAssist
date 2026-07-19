@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { closeConversation } from "@/lib/ai/conversations";
+import {
+  canUseFeature,
+  EntitlementResolutionError,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,36 +27,103 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const { data: widgetConfig, error: widgetError } = await supabaseAdmin
+      .from("widget_configs")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (widgetError) {
+      console.error("Widget end config lookup error:", widgetError);
+      return NextResponse.json(
+        { error: "Service temporarily unavailable", retryable: true },
+        { status: 503, headers: corsHeaders }
+      );
+    }
+
+    if (!widgetConfig) {
+      return NextResponse.json(
+        { success: true, available: false },
+        { headers: corsHeaders }
+      );
+    }
+
+    try {
+      const entitlements = await resolveBusinessEntitlements(businessId);
+      if (!canUseFeature(entitlements, "web_chat")) {
+        return NextResponse.json(
+          { success: true, available: false },
+          { headers: corsHeaders }
+        );
+      }
+    } catch (error) {
+      if (error instanceof EntitlementResolutionError) {
+        return NextResponse.json(
+          { error: "Service temporarily unavailable", retryable: true },
+          { status: 503, headers: corsHeaders }
+        );
+      }
+      throw error;
+    }
+
     // Find contact by session_id
-    const { data: contact } = await supabaseAdmin
+    const { data: contact, error: contactError } = await supabaseAdmin
       .from("contacts")
       .select("id")
       .eq("business_id", businessId)
       .eq("session_id", sessionId)
-      .single();
+      .maybeSingle();
+
+    if (contactError) {
+      console.error("Widget end contact lookup error:", contactError);
+      return NextResponse.json(
+        { error: "Service temporarily unavailable", retryable: true },
+        { status: 503, headers: corsHeaders }
+      );
+    }
 
     if (!contact) {
       return NextResponse.json(
-        { success: true },
+        { success: true, available: true },
         { headers: corsHeaders }
       );
     }
 
     // Find active conversation for this contact
-    const { data: conversation } = await supabaseAdmin
+    const { data: conversation, error: conversationError } = await supabaseAdmin
       .from("conversations")
       .select("id")
       .eq("business_id", businessId)
       .eq("contact_id", contact.id)
       .eq("status", "active")
-      .single();
+      .maybeSingle();
+
+    if (conversationError) {
+      console.error("Widget end conversation lookup error:", conversationError);
+      return NextResponse.json(
+        { error: "Service temporarily unavailable", retryable: true },
+        { status: 503, headers: corsHeaders }
+      );
+    }
 
     if (conversation) {
-      await closeConversation(conversation.id);
+      const { error: closeError } = await supabaseAdmin
+        .from("conversations")
+        .update({ status: "closed" })
+        .eq("id", conversation.id);
+
+      if (closeError) {
+        console.error("Widget end close error:", closeError);
+        return NextResponse.json(
+          { error: "Service temporarily unavailable", retryable: true },
+          { status: 503, headers: corsHeaders }
+        );
+      }
     }
 
     return NextResponse.json(
-      { success: true },
+      { success: true, available: true },
       { headers: corsHeaders }
     );
   } catch (error) {

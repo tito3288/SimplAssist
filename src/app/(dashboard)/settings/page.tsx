@@ -10,6 +10,8 @@ import TimezoneSelector from '@/components/settings/TimezoneSelector';
 import CompliancePanel from '@/components/settings/CompliancePanel';
 import { card } from '@/lib/theme-v2/theme';
 import DangerZone from '@/components/settings/DangerZone';
+import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
+import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -23,6 +25,11 @@ export default async function SettingsPage() {
     .single();
 
   if (!business) redirect('/onboarding');
+
+  const entitlements = await resolveBusinessEntitlements(business.id);
+  const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
+  const canUseCalendar = canUseFeature(entitlements, 'calendar');
+  const canUseGuardrails = canUseFeature(entitlements, 'advanced_guardrails');
 
   const [
     { data: aiSettings },
@@ -104,6 +111,10 @@ export default async function SettingsPage() {
           businessName={business.name}
           calendarEmail={calendarToken?.google_email ?? null}
           businessId={business.id}
+          canCustomizeAi={canCustomizeAi}
+          canUseCalendar={canUseCalendar}
+          canUseGuardrails={canUseGuardrails}
+          planActive={entitlements.active}
         />
       </div>
 
@@ -111,14 +122,38 @@ export default async function SettingsPage() {
       <div className={`p-6 ${card}`}>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Services</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Manage the services your business offers. Your AI will use this information when talking to customers.</p>
-        <ServicesManager businessId={business.id} initialServices={services || []} />
+        {canCustomizeAi ? (
+          <ServicesManager businessId={business.id} initialServices={services || []} />
+        ) : (
+          <LockedFeatureCard
+            compact
+            title="Service customization is paused"
+            description={entitlements.active
+              ? "Growth lets your AI use your service catalog when answering customers."
+              : "Reactivate your subscription to use your saved service catalog in AI conversations."}
+            requiredPlan={entitlements.active ? "Growth" : null}
+            preservedDetail={`${services?.length ?? 0} saved service${services?.length === 1 ? '' : 's'} will remain available after upgrading.`}
+          />
+        )}
       </div>
 
       {/* FAQs */}
       <div className={`p-6 ${card}`}>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">FAQs</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Common questions and answers your AI can use to help customers.</p>
-        <FAQManager businessId={business.id} initialFaqs={faqs || []} />
+        {canCustomizeAi ? (
+          <FAQManager businessId={business.id} initialFaqs={faqs || []} />
+        ) : (
+          <LockedFeatureCard
+            compact
+            title="FAQ customization is paused"
+            description={entitlements.active
+              ? "Growth lets your AI answer from your saved business FAQs."
+              : "Reactivate your subscription to use your saved FAQs in AI conversations."}
+            requiredPlan={entitlements.active ? "Growth" : null}
+            preservedDetail={`${faqs?.length ?? 0} saved FAQ${faqs?.length === 1 ? '' : 's'} will remain available after upgrading.`}
+          />
+        )}
       </div>
 
       {/* Business Hours */}

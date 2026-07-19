@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import Sidebar from "./_components/sidebar";
 import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
+import { canUseFeature, resolveBusinessEntitlements } from "@/lib/billing/entitlements";
 
 export default async function DashboardLayout({
   children,
@@ -38,6 +39,8 @@ export default async function DashboardLayout({
   if (!onboardingState?.dashboardReady) {
     redirect("/onboarding");
   }
+
+  const entitlements = await resolveBusinessEntitlements(business.id);
 
   return (
     <div
@@ -78,7 +81,12 @@ export default async function DashboardLayout({
         }}
       />
 
-      <Sidebar userEmail={user.email ?? ""} websiteUrl={business.website_url ?? null} />
+      <Sidebar
+        userEmail={user.email ?? ""}
+        websiteUrl={business.website_url ?? null}
+        canUseCalendar={canUseFeature(entitlements, "calendar")}
+        canUseWidget={canUseFeature(entitlements, "web_chat")}
+      />
       <main className="flex-1 bg-transparent px-4 pt-[4.75rem] pb-6 lg:pt-5 lg:pr-6 lg:pb-6 lg:pl-0 relative z-[1] min-w-0 lg:min-h-0 lg:overflow-y-auto">
         {children}
       </main>

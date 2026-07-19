@@ -30,7 +30,6 @@ import {
   markRegistrationFailed,
   markRegistrationSubmitted,
 } from "@/lib/onboarding/registrationAttempt";
-import type { SubscriptionStatus } from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
@@ -82,7 +81,7 @@ interface ActiveNumberRow {
 }
 
 interface SubscriptionRow {
-  status: SubscriptionStatus;
+  status: string;
   setup_fee_paid_at: string | null;
 }
 
@@ -298,10 +297,6 @@ async function readActiveNumber(
 async function isBillingReady(
   business: BusinessLaunchRow
 ): Promise<{ ready: true } | { ready: false; message: string }> {
-  if (business.billing_exempt || business.billing_comped || business.billing_pilot) {
-    return { ready: true };
-  }
-
   const { data, error } = await supabaseAdmin
     .from("subscriptions")
     .select("status, setup_fee_paid_at")
@@ -314,9 +309,21 @@ async function isBillingReady(
     );
   }
 
+  // A synchronized subscription is authoritative. Internal pilot/comped/
+  // exempt access applies only when no subscription row exists, matching the
+  // runtime entitlement resolver and preventing a canceled paid account from
+  // provisioning new Telnyx resources through an old override flag.
   if (!data) {
+    if (
+      business.billing_exempt ||
+      business.billing_comped ||
+      business.billing_pilot
+    ) {
+      return { ready: true };
+    }
     return { ready: false, message: BILLING_REQUIRED_MESSAGE };
   }
+
   if (data.status === "past_due") {
     return {
       ready: false,
@@ -328,6 +335,11 @@ async function isBillingReady(
       ready: false,
       message: "Choose an active plan before SMS registration can continue.",
     };
+  }
+  if (data.status !== "active" && data.status !== "trialing") {
+    throw new Error(
+      `[billing:launch] Subscription for ${business.id} has unknown status ${data.status}`
+    );
   }
   if (!data.setup_fee_paid_at) {
     return { ready: false, message: BILLING_REQUIRED_MESSAGE };

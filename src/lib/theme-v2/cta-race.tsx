@@ -5,7 +5,7 @@
  *
  * A single missed call ("2:47 PM — Missed call from Dana") forks into two
  * lanes: the voicemail lane (gray — waits an hour, four hours, a day, then
- * Dana books elsewhere) and the SimplAssist lane (orange — texts back in
+ * Dana books elsewhere) and the SimplAssist lane (orange — sends an automatic text in
  * 8 seconds and books the job while the other lane is still waiting).
  * The race starts when the section scrolls into view (~30% visible), plays
  * out over ~9 seconds, holds on the finished contrast, fades, and loops.
@@ -69,7 +69,7 @@ type LaneFrame = {
   metaTone: keyof typeof META_TONES;
   /** Dim the whole row (the lead is gone). */
   dim?: boolean;
-  /** Hero-style pulse ring while the AI is replying. */
+  /** Hero-style pulse ring while SimplAssist is replying. */
   pulse?: boolean;
   /** Node pop + check-draw on booking. */
   pop?: boolean;
@@ -276,10 +276,10 @@ export function CtaRace() {
         setFaded(false);
         await wait(560);
         if (!alive) return;
-        setPhase(1); // call lands: voicemail beeps, AI starts typing
+        setPhase(1); // call lands: voicemail beeps, automatic text starts
         await wait(1500);
         if (!alive) return;
-        setPhase(2); // AI replied — 8 seconds
+        setPhase(2); // SimplAssist replied — 8 seconds
         await wait(1400);
         if (!alive) return;
         setPhase(3); // booked; voicemail lane: 1 hr, nothing
@@ -341,7 +341,7 @@ export function CtaRace() {
 
       <p className="sr-only">
         Without SimplAssist, the missed call goes to voicemail and by the next day the
-        customer has booked elsewhere. With SimplAssist, the AI texts back in 8 seconds
+        customer has booked elsewhere. With SimplAssist, an automatic text goes out in 8 seconds
         and the job is booked for Tuesday at 9 AM.
       </p>
 

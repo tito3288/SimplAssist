@@ -1,4 +1,4 @@
-import { OAuth2Client } from "google-auth-library";
+import { OAuth2Client, type Credentials } from "google-auth-library";
 import { google, calendar_v3 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -10,6 +10,13 @@ const SCOPES = [
 ];
 
 export { SCOPES };
+export const GOOGLE_OAUTH_NONCE_COOKIE = "sa_google_calendar_oauth_nonce";
+export const GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS = 10 * 60;
+
+export interface GoogleOAuthState {
+  businessId: string;
+  nonce: string;
+}
 
 export function getGoogleOAuth2Client(): OAuth2Client {
   return new OAuth2Client(
@@ -19,24 +26,58 @@ export function getGoogleOAuth2Client(): OAuth2Client {
   );
 }
 
-export function generateAuthUrl(businessId: string): string {
+export function encodeGoogleOAuthState(state: GoogleOAuthState): string {
+  return Buffer.from(
+    JSON.stringify({
+      version: 1,
+      businessId: state.businessId,
+      nonce: state.nonce,
+    })
+  ).toString("base64url");
+}
+
+export function decodeGoogleOAuthState(value: string): GoogleOAuthState | null {
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf-8"));
+    if (
+      decoded?.version !== 1 ||
+      typeof decoded.businessId !== "string" ||
+      decoded.businessId.length === 0 ||
+      typeof decoded.nonce !== "string" ||
+      decoded.nonce.length < 32
+    ) {
+      return null;
+    }
+    return { businessId: decoded.businessId, nonce: decoded.nonce };
+  } catch {
+    return null;
+  }
+}
+
+export function generateAuthUrl(businessId: string, nonce: string): string {
   const client = getGoogleOAuth2Client();
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES,
-    state: Buffer.from(businessId).toString("base64"),
+    state: encodeGoogleOAuthState({ businessId, nonce }),
   });
 }
 
 export async function getAuthenticatedClient(
   businessId: string
 ): Promise<OAuth2Client | null> {
-  const { data: token } = await supabaseAdmin
+  const { data: token, error: tokenError } = await supabaseAdmin
     .from("google_calendar_tokens")
     .select("*")
     .eq("business_id", businessId)
-    .single();
+    .maybeSingle();
+
+  if (tokenError) {
+    throw new Error(
+      `Failed to load Google Calendar credentials: ${tokenError.message}`
+    );
+  }
 
   if (!token) return null;
 
@@ -51,19 +92,9 @@ export async function getAuthenticatedClient(
   const fiveMinutes = 5 * 60 * 1000;
 
   if (Date.now() > expiresAt - fiveMinutes) {
+    let credentials: Credentials;
     try {
-      const { credentials } = await client.refreshAccessToken();
-      client.setCredentials(credentials);
-
-      await supabaseAdmin
-        .from("google_calendar_tokens")
-        .update({
-          access_token: credentials.access_token,
-          token_expiry: credentials.expiry_date
-            ? new Date(credentials.expiry_date).toISOString()
-            : token.token_expiry,
-        })
-        .eq("business_id", businessId);
+      ({ credentials } = await client.refreshAccessToken());
     } catch {
       // Refresh token revoked or invalid — clean up
       await supabaseAdmin
@@ -71,6 +102,23 @@ export async function getAuthenticatedClient(
         .delete()
         .eq("business_id", businessId);
       return null;
+    }
+
+    client.setCredentials(credentials);
+    const { error: updateError } = await supabaseAdmin
+      .from("google_calendar_tokens")
+      .update({
+        access_token: credentials.access_token,
+        token_expiry: credentials.expiry_date
+          ? new Date(credentials.expiry_date).toISOString()
+          : token.token_expiry,
+      })
+      .eq("business_id", businessId);
+
+    if (updateError) {
+      throw new Error(
+        `Failed to save refreshed Google Calendar credentials: ${updateError.message}`
+      );
     }
   }
 

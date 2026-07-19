@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { SubscriptionPlan } from "@/types/database";
 import { PulsingDot } from "@/components/ui/pulsing-dot";
 import { primaryCtaInlineClass } from "@/lib/glass";
+import { BillingPortalButton } from "@/components/billing/BillingPortalButton";
 
 export function BillingActions({
   mode,
@@ -33,32 +34,13 @@ export function BillingActions({
     }
   }
 
-  async function handlePortal() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/billing/portal", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } catch (error) {
-      console.error("Portal error:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   if (mode === "portal") {
     return (
-      <button
-        onClick={handlePortal}
-        disabled={loading}
+      <BillingPortalButton
         className={`${primaryCtaInlineClass} text-sm`}
-      >
-        {loading ? "Loading..." : "Manage Subscription"}
-      </button>
+        label="Manage Subscription"
+        loadingLabel="Loading..."
+      />
     );
   }
 

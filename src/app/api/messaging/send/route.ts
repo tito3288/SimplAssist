@@ -10,6 +10,11 @@ import {
   preflightOutboundSms,
   recordOutboundSmsUsage,
 } from "@/lib/billing/usage";
+import {
+  decideFeatureAccess,
+  isEntitlementResolutionError,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,12 +37,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: business } = await supabase
+    const { data: business, error: businessLookupError } = await supabase
       .from("businesses")
       .select("id")
       .eq("id", businessId)
       .eq("owner_id", user.id)
-      .single();
+      .maybeSingle();
+
+    if (businessLookupError) {
+      console.error(
+        "[messaging/send] Business authorization lookup failed:",
+        businessLookupError
+      );
+      return NextResponse.json(
+        { error: "Unable to verify business access", retryable: true },
+        { status: 503 }
+      );
+    }
 
     if (!business) {
       return NextResponse.json(
@@ -46,12 +62,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: phoneNumberRow } = await supabase
+    let entitlements;
+    try {
+      entitlements = await resolveBusinessEntitlements(businessId);
+    } catch (error) {
+      if (isEntitlementResolutionError(error)) {
+        console.error("[messaging/send] Entitlement lookup failed:", error);
+        return NextResponse.json(
+          { error: "Unable to verify plan access", retryable: true },
+          { status: 503 }
+        );
+      }
+      throw error;
+    }
+
+    const access = decideFeatureAccess(entitlements, "manual_sms");
+    if (!access.allowed) {
+      return NextResponse.json(
+        { error: "SMS sending is not available on the current plan" },
+        { status: 403 }
+      );
+    }
+
+    const { data: phoneNumberRow, error: phoneLookupError } = await supabase
       .from("phone_numbers")
       .select("phone_number")
       .eq("business_id", businessId)
       .eq("is_active", true)
-      .single();
+      .maybeSingle();
+
+    if (phoneLookupError) {
+      console.error(
+        "[messaging/send] Active phone number lookup failed:",
+        phoneLookupError
+      );
+      return NextResponse.json(
+        { error: "Unable to verify the sending number", retryable: true },
+        { status: 503 }
+      );
+    }
 
     if (!phoneNumberRow) {
       return NextResponse.json(

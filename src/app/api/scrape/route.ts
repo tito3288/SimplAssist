@@ -6,6 +6,7 @@ import {
   type CrawlResult,
 } from "@/lib/firecrawl/crawl";
 import { extractBusinessInfo } from "@/lib/firecrawl/extract";
+import { createClient } from "@/lib/supabase/server";
 
 const scrapeSchema = z.object({
   url: z.string().url().refine(
@@ -54,6 +55,43 @@ function isRateLimited(identifier: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  // This is the one Anthropic-backed pre-checkout exception: it only prefills
+  // the editable onboarding form. Require an authenticated owner whose
+  // onboarding is still incomplete so it cannot become a public or post-sale
+  // plan-wall bypass.
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: business, error: businessError } = await supabase
+    .from("businesses")
+    .select("id, onboarding_completed_at")
+    .eq("owner_id", user.id)
+    .maybeSingle<{ id: string; onboarding_completed_at: string | null }>();
+
+  if (businessError) {
+    console.error("[scrape] Onboarding authorization lookup failed:", businessError);
+    return NextResponse.json(
+      { error: "Service temporarily unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
+  if (!business) {
+    return NextResponse.json({ error: "Business not found" }, { status: 404 });
+  }
+  if (business.onboarding_completed_at) {
+    return NextResponse.json(
+      { error: "Website scan is only available during onboarding" },
+      { status: 403 }
+    );
+  }
+
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown";

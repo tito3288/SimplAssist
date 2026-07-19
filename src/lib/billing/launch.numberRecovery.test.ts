@@ -75,7 +75,7 @@ const LAUNCH_BUSINESS = {
   telnyx_campaign_id: null,
   billing_pilot: false,
   billing_comped: false,
-  billing_exempt: true, // skips the subscription read
+  billing_exempt: true,
 };
 
 // Chainable, awaitable supabase mock; from() consumes queued results FIFO
@@ -108,13 +108,15 @@ function queueResults(...results: unknown[]) {
   });
 }
 
-// Query order for the fresh-purchase flow (billing_exempt business):
-// 1 businesses launch-row read; 2 phone_numbers readActiveNumber (pre-claim);
-// 3 phone_numbers readActiveNumber (post-registration); 4 phone_numbers
-// step-1 collision check; 5 phone_numbers insert; 6 businesses clearPending.
+// Query order for the fresh-purchase flow (billing-exempt business with no
+// synchronized subscription): 1 businesses launch-row read; 2 subscriptions;
+// 3 phone_numbers readActiveNumber (pre-claim); 4 phone_numbers
+// readActiveNumber (post-registration); 5 phone_numbers step-1 collision
+// check; 6 phone_numbers insert; 7 businesses clearPending.
 function queueHappyPathThrough(...tail: unknown[]) {
   queueResults(
     { data: LAUNCH_BUSINESS, error: null },
+    { data: null, error: null },
     { data: null, error: null },
     { data: null, error: null },
     ...tail
@@ -159,6 +161,29 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it.each(["past_due", "canceled"])(
+    "does not let a billing override bypass an existing %s subscription",
+    async (status) => {
+      queueResults(
+        { data: LAUNCH_BUSINESS, error: null },
+        {
+          data: {
+            status,
+            setup_fee_paid_at: "2026-07-01T00:00:00.000Z",
+          },
+          error: null,
+        }
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result.status).toBe("billing_required");
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+      expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    }
+  );
+
   it("submits on the fresh-purchase happy path", async () => {
     queueHappyPathThrough(
       { data: null, error: null }, // step-1 collision check

@@ -363,6 +363,7 @@ export interface Message {
   id: string;
   conversation_id: string;
   business_id: string;
+  provider_event_id: string | null;
   role: MessageRole;
   content: string;
   channel: Channel;

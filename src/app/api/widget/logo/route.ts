@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  canUseFeature,
+  EntitlementResolutionError,
+  requiredPlanForFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"];
@@ -15,14 +21,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: business } = await supabase
+  const { data: business, error: businessError } = await supabase
     .from("businesses")
     .select("id")
     .eq("owner_id", user.id)
-    .single();
+    .maybeSingle();
+
+  if (businessError) {
+    console.error("[logo-upload] Business lookup error:", businessError);
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
 
   if (!business) {
     return NextResponse.json({ error: "Business not found" }, { status: 404 });
+  }
+
+  try {
+    const entitlements = await resolveBusinessEntitlements(business.id);
+    if (!canUseFeature(entitlements, "widget_branding")) {
+      return NextResponse.json(
+        {
+          error: "feature_unavailable",
+          feature: "widget_branding",
+          requiredPlan: requiredPlanForFeature("widget_branding"),
+        },
+        { status: 403 }
+      );
+    }
+  } catch (error) {
+    if (error instanceof EntitlementResolutionError) {
+      return NextResponse.json(
+        { error: "service_unavailable", retryable: true },
+        { status: 503 }
+      );
+    }
+    throw error;
   }
 
   try {
@@ -75,10 +111,18 @@ export async function POST(request: NextRequest) {
     const publicUrl = urlData.publicUrl;
 
     // Update widget config with the logo URL
-    await supabaseAdmin
+    const { error: configError } = await supabaseAdmin
       .from("widget_configs")
       .update({ logo_url: publicUrl })
       .eq("business_id", business.id);
+
+    if (configError) {
+      console.error("[logo-upload] Config update error:", configError);
+      return NextResponse.json(
+        { error: "service_unavailable", retryable: true },
+        { status: 503 }
+      );
+    }
 
     return NextResponse.json({ url: publicUrl });
   } catch (error) {

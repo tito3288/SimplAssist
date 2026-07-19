@@ -34,7 +34,7 @@ import {
 export const features = [
   {
     icon: Phone,
-    title: "AI Missed-Call Texting",
+    title: "Automatic Missed-Call Texting",
     description:
       "Automatically reply when you can't answer the phone so potential customers never hear silence.",
   },
@@ -77,7 +77,7 @@ export const steps = [
       "You're with a client, driving, or closed for the day. The call goes unanswered, but the lead is still active.",
   },
   {
-    title: "AI texts back instantly",
+    title: "SimplAssist texts back instantly",
     description:
       "Within seconds, SimplAssist sends a branded message so customers know they've been heard.",
   },
@@ -94,10 +94,9 @@ export const plans = [
     price: "$25",
     description: "Missed-call texting for small teams that want fast coverage.",
     features: [
-      "One local AI phone number",
+      "One local SimplAssist number",
       "Manual SMS inbox and replies",
-      "Missed-call auto text",
-      "Basic AI missed-call response",
+      "Automatic missed-call text",
       "500 included SMS parts/month",
     ],
     highlighted: false,
@@ -105,13 +104,15 @@ export const plans = [
   {
     name: "SMS + Web Chat",
     price: "$45",
-    description: "Add website chat to capture more leads and unify conversations.",
+    description: "Capture leads from calls and your website, then turn them into booked appointments.",
     features: [
       "Everything in SMS Only",
       "Website chat widget",
       "Web chat lead capture",
       "Full AI SMS conversations",
       "Customize your AI's answers and tone",
+      "Google Calendar connection",
+      "AI appointment scheduling",
       "1,500 included SMS parts/month",
     ],
     highlighted: true,
@@ -119,12 +120,16 @@ export const plans = [
   {
     name: "Full Suite",
     price: "$65",
-    description: "The complete communication platform for growing businesses.",
+    description: "Measure performance and automate follow-up as your business grows.",
     features: [
       "Everything in SMS + Web Chat",
-      "Google Calendar booking",
-      "AI appointment scheduling",
       "Advanced AI guardrails",
+      "Advanced analytics dashboard",
+      "Lead-to-appointment conversion reporting",
+      "Weekly performance summary",
+      "Real-time new-lead alerts",
+      "Review-request workflow",
+      "Automated follow-up and no-show workflows",
       "Priority support",
       "2,500 included SMS parts/month",
     ],
@@ -133,7 +138,7 @@ export const plans = [
 ];
 
 export const heroStats = [
-  { stat: "24/7", label: "AI response coverage for calls and website visitors" },
+  { stat: "24/7", label: "Lead response coverage for missed calls and website visitors" },
   { stat: "1 inbox", label: "SMS and web chat conversations in one place" },
   { stat: "Fast setup", label: "Built for small teams that want results without complexity" },
 ];
@@ -141,7 +146,7 @@ export const heroStats = [
 /** /home's "What you get" checklist — not rendered on v2 (the split intro and
  *  features cover it), kept here ready to re-add if the quiet CTA misses it. */
 export const whatYouGet = [
-  "AI that texts back every missed call, day or night",
+  "Automatic missed-call texts, day or night",
   "Website chat widget — embed with one line of code",
   "Every lead and conversation in one dashboard",
   "Live the same week, once your number's approved to send",

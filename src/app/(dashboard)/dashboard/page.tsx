@@ -5,6 +5,8 @@ import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
+import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
+import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -18,6 +20,9 @@ export default async function DashboardPage() {
     .single();
 
   if (!business) redirect('/onboarding');
+
+  const entitlements = await resolveBusinessEntitlements(business.id);
+  const canUseCalendar = canUseFeature(entitlements, 'calendar');
 
   // Calculate date for "this week" queries
   const now = new Date();
@@ -33,8 +38,9 @@ export default async function DashboardPage() {
     { data: recentConversationsRaw },
     { data: hotLeads },
     { data: phoneNumberRow },
-    ,
+    { data: aiSettings },
     { data: calendarToken },
+    { data: widgetConfig },
   ] = await Promise.all([
     supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
     supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
@@ -59,8 +65,9 @@ export default async function DashboardPage() {
       .eq('business_id', business.id)
       .eq('is_active', true)
       .single(),
-    supabase.from('ai_settings').select('booking_enabled, booking_mode').eq('business_id', business.id).single(),
+    supabase.from('ai_settings').select('booking_enabled, booking_mode, guardrails').eq('business_id', business.id).single(),
     supabase.from('google_calendar_tokens').select('id').eq('business_id', business.id).single(),
+    supabase.from('widget_configs').select('is_active').eq('business_id', business.id).maybeSingle(),
   ]);
 
   // Fetch last message for each recent conversation
@@ -82,6 +89,22 @@ export default async function DashboardPage() {
   const firstName = getFirstNameFromAuthMetadata(user);
   const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const pausedFeatures = [
+    !canUseFeature(entitlements, 'ai_sms_conversations') &&
+      (entitlements.plan === 'sms_only' || !entitlements.active)
+      ? 'AI SMS conversations'
+      : null,
+    widgetConfig?.is_active && !canUseFeature(entitlements, 'web_chat')
+      ? 'Website chat widget'
+      : null,
+    (calendarToken || aiSettings?.booking_enabled) && !canUseCalendar
+      ? 'Google Calendar and AI booking'
+      : null,
+    Array.isArray(aiSettings?.guardrails) && aiSettings.guardrails.length > 0 &&
+      !canUseFeature(entitlements, 'advanced_guardrails')
+      ? 'Advanced AI guardrails'
+      : null,
+  ].filter((feature): feature is string => Boolean(feature));
 
   return (
     <div className="space-y-6">
@@ -93,8 +116,15 @@ export default async function DashboardPage() {
         <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Overview of your business activity.</p>
       </div>
 
+      <FeatureStatusBanners
+        businessId={business.id}
+        plan={entitlements.plan}
+        status={entitlements.status}
+        pausedFeatures={pausedFeatures}
+      />
+
       {/* Calendar connection warning */}
-      {!calendarToken && (
+      {canUseCalendar && !calendarToken && (
         <div className={`p-4 ${card} border-amber-200 dark:border-amber-500/30`}>
           <div className="flex items-center gap-3">
             <div className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />

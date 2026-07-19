@@ -1,0 +1,164 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ from: vi.fn() }));
+
+vi.mock("@/lib/supabase/admin", () => ({
+  supabaseAdmin: { from: mocks.from },
+}));
+
+import { findOrCreateContact } from "./contacts";
+
+const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
+const CONTACT_ID = "00000000-0000-4000-8000-000000000002";
+
+const chains: Array<Record<string, ReturnType<typeof vi.fn>>> = [];
+
+function queueResults(...results: unknown[]) {
+  const queue = [...results];
+  chains.length = 0;
+  mocks.from.mockImplementation(() => {
+    const result = queue.shift() ?? {
+      data: null,
+      error: { message: "Unexpected query" },
+    };
+    const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of [
+      "select",
+      "eq",
+      "order",
+      "limit",
+      "maybeSingle",
+      "single",
+      "insert",
+      "update",
+    ]) {
+      chain[method] = vi.fn(() => chain);
+    }
+    const promise = Promise.resolve(result);
+    (chain as Record<string, unknown>).then = promise.then.bind(promise);
+    (chain as Record<string, unknown>).catch = promise.catch.bind(promise);
+    chains.push(chain);
+    return chain;
+  });
+}
+
+function contact(overrides: Record<string, unknown> = {}) {
+  return {
+    id: CONTACT_ID,
+    business_id: BUSINESS_ID,
+    name: null,
+    phone_number: null,
+    email: "visitor@example.com",
+    session_id: "session-1",
+    source_channel: "web_chat",
+    lead_score: 0,
+    notes: null,
+    created_at: "2026-07-18T12:00:00.000Z",
+    last_contacted_at: "2026-07-18T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  queueResults();
+});
+
+describe("findOrCreateContact", () => {
+  it("uses the stable widget session before an optional email address", async () => {
+    const existing = contact();
+    const refreshed = contact({ last_contacted_at: "2026-07-18T12:01:00.000Z" });
+    queueResults(
+      { data: existing, error: null },
+      { data: refreshed, error: null }
+    );
+
+    await expect(
+      findOrCreateContact(
+        BUSINESS_ID,
+        null,
+        "visitor@example.com",
+        "web_chat",
+        "session-1"
+      )
+    ).resolves.toEqual(refreshed);
+
+    expect(chains[0].eq.mock.calls).toEqual([
+      ["business_id", BUSINESS_ID],
+      ["session_id", "session-1"],
+    ]);
+    expect(mocks.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to email only when the widget session is unknown", async () => {
+    const existing = contact({ session_id: "older-session" });
+    queueResults(
+      { data: null, error: null },
+      { data: existing, error: null },
+      { data: existing, error: null }
+    );
+
+    await expect(
+      findOrCreateContact(
+        BUSINESS_ID,
+        null,
+        "visitor@example.com",
+        "web_chat",
+        "session-2"
+      )
+    ).resolves.toEqual(existing);
+
+    expect(chains[0].eq).toHaveBeenCalledWith("session_id", "session-2");
+    expect(chains[1].eq).toHaveBeenCalledWith(
+      "email",
+      "visitor@example.com"
+    );
+  });
+
+  it("converges parallel find-or-create callers on the contact that wins the unique insert", async () => {
+    const created = contact({
+      phone_number: "+13175550100",
+      email: null,
+      session_id: null,
+      source_channel: "sms",
+    });
+    const refreshed = contact({
+      phone_number: "+13175550100",
+      email: null,
+      session_id: null,
+      source_channel: "sms",
+      last_contacted_at: "2026-07-18T12:01:00.000Z",
+    });
+    queueResults(
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: created, error: null },
+      { data: null, error: { code: "23505", message: "duplicate" } },
+      { data: created, error: null },
+      { data: refreshed, error: null }
+    );
+
+    const [first, second] = await Promise.all([
+      findOrCreateContact(
+        BUSINESS_ID,
+        "+13175550100",
+        null,
+        "sms"
+      ),
+      findOrCreateContact(
+        BUSINESS_ID,
+        "+13175550100",
+        null,
+        "sms"
+      ),
+    ]);
+
+    expect(first.id).toBe(CONTACT_ID);
+    expect(second.id).toBe(CONTACT_ID);
+    expect(chains[4].eq).toHaveBeenCalledWith(
+      "phone_number",
+      "+13175550100"
+    );
+    expect(mocks.from).toHaveBeenCalledTimes(6);
+  });
+});

@@ -504,16 +504,16 @@ Keep the entry plan affordable, but do **not** sell unlimited SMS/MMS/AI usage. 
 **Recommended ladder:**
 - **Starter / SMS Only — $25/month**
   - Purpose: affordable entry point for small service businesses.
-  - Include: one local phone number, A2P compliance handling, missed-call auto text, manual SMS inbox, contacts/conversation history, basic AI missed-call response, hosted compliance pages.
+  - Include: one local phone number, A2P compliance handling, automatic missed-call text, manual SMS inbox, contacts/conversation history, hosted compliance pages.
   - Exclude or upsell: website chat widget, booking, analytics, custom branding, MMS, high-volume automations.
   - Included usage target: **300–500 SMS parts/month**. Default recommendation: start at **500 SMS parts/month** only if usage enforcement is live.
 - **Growth / SMS + Web Chat — $45/month**
   - Purpose: main value tier and expected "Most Popular" plan.
-  - Include: everything in Starter, AI SMS conversations, website chat widget, lead capture, widget/custom-brand settings, business FAQ/services/tone customization.
+  - Include: everything in Starter, AI SMS conversations, website chat widget, lead capture, widget/custom-brand settings, business FAQ/services/tone customization, Google Calendar connection, and AI direct appointment scheduling.
   - Included usage target: **1,500 SMS parts/month**.
 - **Pro / Full Suite — $65/month initially, consider $79/month before broad launch**
   - Purpose: advanced customers who need automation and reporting.
-  - Include: everything in Growth, review requests, appointment booking/calendar integration, analytics, weekly summary, priority support, advanced AI guardrails/custom instructions.
+  - Include: everything in Growth, advanced AI guardrails, advanced analytics, lead-to-appointment conversion reporting, weekly performance summary, real-time new-lead alerts, review requests, automated follow-up/no-show workflows, and priority support.
   - Included usage target at $65: **2,500 SMS parts/month**.
   - If priced at $79: can include roughly **3,000 SMS parts/month** with healthier margin.
   - MMS should be Pro-only or add-on, with separate metering/overage.
@@ -522,22 +522,25 @@ Keep the entry plan affordable, but do **not** sell unlimited SMS/MMS/AI usage. 
 
 | Feature / capability | Starter / SMS Only | Growth / SMS + Web Chat | Pro / Full Suite |
 |----------------------|--------------------|--------------------------|------------------|
-| One local AI phone number | Included | Included | Included |
+| One local SimplAssist phone number | Included | Included | Included |
 | A2P 10DLC registration + hosted legal pages | Included | Included | Included |
 | Manual SMS inbox/replies | Included | Included | Included |
 | Missed-call auto text | Included | Included | Included |
 | Contacts + conversation history | Included | Included | Included |
-| Basic AI missed-call response | Included | Included | Included |
-| Full AI SMS conversations | Locked or limited trial | Included | Included |
+| Automatic missed-call template | Included | Included | Included |
+| Full AI SMS conversations | Locked; manual SMS remains available | Included | Included |
 | Website chat widget | Locked; upgrade prompt | Included | Included |
 | Web chat lead capture | Locked; upgrade prompt | Included | Included |
 | Widget branding/customization | Locked; upgrade prompt | Included | Included, with advanced options |
-| Business FAQ/services/tone customization | Basic only | Included | Included, with advanced guardrails |
+| Business FAQ/services/tone customization | Locked; upgrade prompt | Included | Included, with advanced guardrails |
 | MMS | Locked by default | Paid add-on only if margin supports it | Pro/add-on only; meter separately |
-| Appointment booking / calendar integration | Locked | Locked or upgrade prompt | Included |
+| Appointment booking / calendar integration | Locked | Included | Included |
 | Review requests | Locked | Locked or upgrade prompt | Included |
 | Analytics dashboard | Basic usage only | Basic usage only | Full analytics |
-| Weekly email summary | Locked | Locked or upgrade prompt | Included |
+| Lead-to-appointment conversion reporting | Locked | Locked or upgrade prompt | Included |
+| Weekly performance summary | Locked | Locked or upgrade prompt | Included |
+| Real-time new-lead alerts | Locked | Locked or upgrade prompt | Included |
+| Automated follow-up / no-show workflows | Locked | Locked or upgrade prompt | Included |
 | Priority support | Locked | Locked | Included |
 | Extra phone numbers | Paid add-on | Paid add-on | Paid add-on |
 | Higher-volume SMS pool | Upgrade or custom plan | Upgrade or custom plan | Custom plan |

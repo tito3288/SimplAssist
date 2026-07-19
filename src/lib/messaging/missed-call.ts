@@ -12,6 +12,10 @@ import {
   recordOutboundSmsUsage,
   type UsageBlockReason,
 } from "@/lib/billing/usage";
+import {
+  canUseFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 export async function sendMissedCallSMS(
   callerPhone: string,
@@ -33,9 +37,17 @@ export async function sendMissedCallSMS(
   }
 
   try {
+    const entitlements = await resolveBusinessEntitlements(businessId);
+    if (!canUseFeature(entitlements, "missed_call_sms")) {
+      console.warn(
+        `[missed-call] Automatic SMS is not entitled for inactive business ${businessId}`
+      );
+      return;
+    }
+
     const [
       { data: business, error: businessError },
-      { data: aiSettings },
+      { data: aiSettings, error: aiSettingsError },
       { data: phoneNumberRow, error: phoneError },
     ] = await Promise.all([
       supabaseAdmin
@@ -67,6 +79,11 @@ export async function sendMissedCallSMS(
     if (phoneError) {
       throw new Error(
         `[missed-call] phone number read failed for ${businessId}: ${phoneError.message}`
+      );
+    }
+    if (aiSettingsError) {
+      throw new Error(
+        `[missed-call] AI language setting read failed for ${businessId}: ${aiSettingsError.message}`
       );
     }
 
@@ -104,7 +121,13 @@ export async function sendMissedCallSMS(
     const conversation = await getOrCreateConversation(
       businessId,
       contact.id,
-      "sms"
+      "sms",
+      {
+        defaultAiHandling: canUseFeature(
+          entitlements,
+          "ai_sms_conversations"
+        ),
+      }
     );
 
     if (!sendContext.smsReady) {

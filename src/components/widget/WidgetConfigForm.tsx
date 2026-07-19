@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { useForm } from 'react-hook-form';
-import { createBrowserClient } from '@/lib/supabase/client';
 import type { WidgetConfig, WidgetPosition, LeadCaptureTiming } from '@/types/database';
 import { cn } from '@/lib/utils';
 import {
@@ -205,32 +204,35 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
     setSaving(true);
     setSaved(false);
     setSaveError('');
-    const supabase = createBrowserClient();
 
-    const { error } = await supabase
-      .from('widget_configs')
-      .update({
-        brand_color: data.brand_color,
-        position: data.position,
-        show_logo: data.show_logo,
-        logo_url: data.logo_url || null,
-        welcome_message: data.welcome_message,
-        lead_capture_enabled: data.lead_capture_enabled,
-        lead_capture_timing: data.lead_capture_timing,
-        quick_replies: data.quick_replies.filter(q => q.trim() !== ''),
-        is_active: data.is_active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', config.id);
+    try {
+      const response = await fetch('/api/widget/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brand_color: data.brand_color,
+          position: data.position,
+          show_logo: data.show_logo,
+          logo_url: data.logo_url || null,
+          welcome_message: data.welcome_message,
+          lead_capture_enabled: data.lead_capture_enabled,
+          lead_capture_timing: data.lead_capture_timing,
+          quick_replies: data.quick_replies.filter(q => q.trim() !== ''),
+          is_active: data.is_active,
+        }),
+      });
 
-    setSaving(false);
+      if (!response.ok) {
+        throw new Error('Widget settings update failed.');
+      }
 
-    if (!error) {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       onSaved?.();
-    } else {
+    } catch {
       setSaveError('Could not save your widget settings. Please try again.');
+    } finally {
+      setSaving(false);
     }
   };
 

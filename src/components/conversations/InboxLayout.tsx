@@ -14,6 +14,9 @@ interface InboxLayoutProps {
   businessId: string;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
+  canUseManualSms?: boolean;
+  canUseAiSms?: boolean;
+  canUseWebChat?: boolean;
   /** Dev-only demo mode (/demo routes): pre-select a conversation and serve
    *  each thread's messages from fixtures. Real callers never pass these. */
   initialSelectedId?: string;
@@ -25,6 +28,9 @@ export function InboxLayout({
   businessId,
   smsReady,
   smsBlockReason,
+  canUseManualSms = true,
+  canUseAiSms = true,
+  canUseWebChat = true,
   initialSelectedId,
   demoMessagesById,
 }: InboxLayoutProps) {
@@ -54,6 +60,9 @@ export function InboxLayout({
           activeId={selected?.id ?? null}
           onSelect={setSelected}
           onDelete={handleDelete}
+          canUseManualSms={canUseManualSms}
+          canUseAiSms={canUseAiSms}
+          canUseWebChat={canUseWebChat}
         />
       </div>
 
@@ -82,6 +91,9 @@ export function InboxLayout({
                 businessId={businessId}
                 smsReady={smsReady}
                 smsBlockReason={smsBlockReason}
+                canUseManualSms={canUseManualSms}
+                canUseAiSms={canUseAiSms}
+                canUseWebChat={canUseWebChat}
                 demoMessages={demoMessagesById?.[selected.id]}
               />
             </div>

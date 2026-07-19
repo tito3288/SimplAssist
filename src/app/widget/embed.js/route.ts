@@ -49,6 +49,12 @@ export async function GET() {
   var visitorName = '';
   var visitorEmail = '';
   var pendingPreviewPatch = null;
+  var configInitialized = false;
+  var configRequestInFlight = false;
+  var configRetryTimer = null;
+  var CONFIG_RETRY_DELAYS = [750, 1500, 3000];
+  var configRetryAttempt = 0;
+  var CONFIG_REFRESH_INTERVAL = 60 * 1000;
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -250,13 +256,51 @@ export async function GET() {
     avatarFallback.style.display = 'flex';
   });
 
+  function hideWidgetForUnavailable() {
+    config = null;
+    isOpen = false;
+    isLoading = false;
+    sendBtn.disabled = false;
+    input.disabled = false;
+    hideLoading();
+    panel.classList.remove('sa-visible');
+    panel.classList.add('sa-hidden');
+    container.classList.remove('sa-open');
+    btn.classList.remove('sa-btn-visible');
+    btn.classList.add('sa-btn-hidden');
+  }
+
   function endConversation() {
+    endBtn.disabled = true;
     fetch(baseUrl + '/api/widget/end', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ businessId: businessId, sessionId: sessionId })
-    }).catch(function() {});
+    })
+    .then(function(r) {
+      return r.json()
+        .catch(function() { return {}; })
+        .then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(result) {
+      endBtn.disabled = false;
+      if (result.data.available === false) {
+        hideWidgetForUnavailable();
+        return;
+      }
+      if (!result.ok) {
+        showTransientNotice('We could not end this conversation yet. Please try again.');
+        return;
+      }
+      resetAfterConversationEnd();
+    })
+    .catch(function() {
+      endBtn.disabled = false;
+      showTransientNotice('We could not end this conversation yet. Please try again.');
+    });
+  }
 
+  function resetAfterConversationEnd() {
     // Clear chat UI
     messagesArea.innerHTML = '';
     messages = [];
@@ -276,6 +320,12 @@ export async function GET() {
 
     // Show ended message then welcome
     addMsg('Conversation ended. Feel free to start a new one!', 'bot', showQuickReplies);
+  }
+
+  function showTransientNotice(text) {
+    var notice = el('div', { class: 'sa-widget-msg sa-widget-msg-bot' }, text);
+    messagesArea.appendChild(notice);
+    scrollToBottom();
   }
 
   function togglePanel() {
@@ -340,6 +390,7 @@ export async function GET() {
     } else if (callback) {
       callback();
     }
+    return msg;
   }
 
   function showQuickReplies() {
@@ -500,10 +551,10 @@ export async function GET() {
 
   function sendMessage() {
     var text = input.value.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !config) return;
     var qr = document.getElementById('sa-quick-replies'); if (qr) qr.remove();
     input.value = '';
-    addMsg(text, 'user');
+    var userMessageEl = addMsg(text, 'user');
     endArea.style.display = '';
     messageCount++;
     try { localStorage.setItem(timestampKey, String(Date.now())); } catch(e) {}
@@ -526,9 +577,36 @@ export async function GET() {
         visitorName: visitorName || undefined
       })
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+    .then(function(r) {
+      return r.json()
+        .catch(function() { return {}; })
+        .then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(result) {
+      var data = result.data;
       hideLoading();
+      if (data.available === false) {
+        if (userMessageEl && userMessageEl.parentNode) userMessageEl.parentNode.removeChild(userMessageEl);
+        var lastUnavailableMessage = messages[messages.length - 1];
+        if (lastUnavailableMessage && lastUnavailableMessage.type === 'user' && lastUnavailableMessage.text === text) messages.pop();
+        messageCount = Math.max(0, messageCount - 1);
+        isLoading = false;
+        sendBtn.disabled = false;
+        hideWidgetForUnavailable();
+        return;
+      }
+      if (!result.ok) {
+        if (result.status >= 500 || data.retryable) {
+          restoreTypedMessage(text, userMessageEl);
+          return;
+        }
+        isLoading = true;
+        addMsg('Sorry, that message could not be sent. Please try again.', 'bot', function() {
+          sendBtn.disabled = false;
+          isLoading = false;
+        });
+        return;
+      }
       isLoading = true;
       if (data.response) {
         addMsg(data.response, 'bot', function() {
@@ -537,7 +615,7 @@ export async function GET() {
           messageCount++;
           if (needsLeadCapture()) showLeadForm();
         });
-      } else if (data.error) {
+      } else {
         addMsg('Sorry, something went wrong. Please try again.', 'bot', function() {
           sendBtn.disabled = false;
           isLoading = false;
@@ -546,48 +624,95 @@ export async function GET() {
     })
     .catch(function() {
       hideLoading();
-      isLoading = true;
-      addMsg('Sorry, something went wrong. Please try again.', 'bot', function() {
-        sendBtn.disabled = false;
-        isLoading = false;
-      });
+      restoreTypedMessage(text, userMessageEl);
     });
   }
 
-  // Initialize — hide button until config loads
-  btn.classList.add('sa-btn-hidden');
-  positionWidget('bottom_right');
+  function restoreTypedMessage(text, userMessageEl) {
+    if (userMessageEl && userMessageEl.parentNode) userMessageEl.parentNode.removeChild(userMessageEl);
+    var lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.type === 'user' && lastMessage.text === text) messages.pop();
+    messageCount = Math.max(0, messageCount - 1);
+    if (messageCount === 0) endArea.style.display = 'none';
+    var leadForm = document.getElementById('sa-lead-form');
+    if (leadForm) leadForm.remove();
+    inputArea.style.display = 'flex';
+    input.value = text;
+    sendBtn.disabled = false;
+    isLoading = false;
+    showTransientNotice("We couldn't send that message. It's back in the text box — please try again.");
+    input.focus();
+  }
 
-  fetch(baseUrl + '/api/widget/config?businessId=' + encodeURIComponent(businessId))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.error) { console.error('SimplAssist:', data.error); return; }
-      config = data;
-      titleH3.textContent = data.businessName || 'Chat';
-      applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
-      applyBrandColor(data.brandColor || '#0066FF');
-      positionWidget(data.position || 'bottom_right');
-      btn.classList.remove('sa-btn-hidden');
-      btn.classList.add('sa-btn-visible');
+  function applyLoadedConfig(data) {
+    var firstLoad = !configInitialized;
+    config = data;
+    configInitialized = true;
+    titleH3.textContent = data.businessName || 'Chat';
+    applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
+    applyBrandColor(data.brandColor || '#0066FF');
+    positionWidget(data.position || 'bottom_right');
+    btn.classList.remove('sa-btn-hidden');
+    btn.classList.add('sa-btn-visible');
+    if (firstLoad) {
       addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot', showQuickReplies);
       unreadCount = 0;
       attentionDismissed = false;
       updateLauncherIndicators();
       if (needsLeadCapture()) showLeadForm();
-      if (pendingPreviewPatch) applyPreviewPatch(pendingPreviewPatch);
-    })
-    .catch(function(err) {
-      console.error('SimplAssist: failed to load config', err);
-      titleH3.textContent = 'SimplAssist';
-      applyHeaderAvatar('SimplAssist', false, '');
-      applyBrandColor('#0066FF');
-      btn.classList.remove('sa-btn-hidden');
-      btn.classList.add('sa-btn-visible');
-      addMsg('Hi! How can we help you today?', 'bot', showQuickReplies);
-      unreadCount = 0;
-      attentionDismissed = false;
-      updateLauncherIndicators();
-    });
+    }
+    if (pendingPreviewPatch) applyPreviewPatch(pendingPreviewPatch);
+  }
+
+  function scheduleConfigRetry() {
+    if (configRetryTimer || configRetryAttempt >= CONFIG_RETRY_DELAYS.length) return;
+    var delay = CONFIG_RETRY_DELAYS[configRetryAttempt++];
+    configRetryTimer = setTimeout(function() {
+      configRetryTimer = null;
+      loadWidgetConfig();
+    }, delay);
+  }
+
+  function loadWidgetConfig() {
+    if (configRequestInFlight) return;
+    configRequestInFlight = true;
+    fetch(baseUrl + '/api/widget/config?businessId=' + encodeURIComponent(businessId), { cache: 'no-store' })
+      .then(function(r) {
+        return r.json()
+          .catch(function() { return {}; })
+          .then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+      })
+      .then(function(result) {
+        configRequestInFlight = false;
+        if (result.ok && result.data.available === false) {
+          configRetryAttempt = 0;
+          if (configRetryTimer) clearTimeout(configRetryTimer);
+          configRetryTimer = null;
+          hideWidgetForUnavailable();
+          return;
+        }
+        if (!result.ok) {
+          if (result.status >= 500 || result.data.retryable) scheduleConfigRetry();
+          else hideWidgetForUnavailable();
+          return;
+        }
+        configRetryAttempt = 0;
+        if (configRetryTimer) clearTimeout(configRetryTimer);
+        configRetryTimer = null;
+        applyLoadedConfig(result.data);
+      })
+      .catch(function(err) {
+        configRequestInFlight = false;
+        console.error('SimplAssist: failed to load config', err);
+        scheduleConfigRetry();
+      });
+  }
+
+  // Initialize — hide button until config loads
+  btn.classList.add('sa-btn-hidden');
+  positionWidget('bottom_right');
+  loadWidgetConfig();
+  setInterval(loadWidgetConfig, CONFIG_REFRESH_INTERVAL);
 })();`;
 
   return new NextResponse(js, {

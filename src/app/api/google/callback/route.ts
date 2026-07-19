@@ -1,44 +1,79 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { getGoogleOAuth2Client } from "@/lib/google/client";
+import {
+  decodeGoogleOAuthState,
+  getGoogleOAuth2Client,
+  GOOGLE_OAUTH_NONCE_COOKIE,
+} from "@/lib/google/client";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  canUseFeature,
+  EntitlementResolutionError,
+  requiredPlanForFeature,
+  resolveBusinessEntitlements,
+} from "@/lib/billing/entitlements";
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
-  const state = searchParams.get("state");
-  const error = searchParams.get("error");
+  const stateValue = searchParams.get("state");
+  const oauthError = searchParams.get("error");
+  const appUrl = getAppUrl(request);
 
-  // Use NEXT_PUBLIC_APP_URL for production, fall back to request origin for local dev
-  const origin = new URL(request.url).origin;
-  const isLocalhost = origin.includes("localhost:3000");
-  const appUrl = isLocalhost ? origin : (process.env.NEXT_PUBLIC_APP_URL || origin);
-
-  if (error || !code || !state) {
-    return NextResponse.redirect(
-      `${appUrl}/settings`
+  if (oauthError || !code || !stateValue) {
+    return clearNonce(
+      NextResponse.redirect(`${appUrl}/settings`)
     );
   }
 
-  let businessId: string;
-  try {
-    businessId = Buffer.from(state, "base64").toString("utf-8");
-  } catch {
-    return NextResponse.redirect(
-      `${appUrl}/settings`
+  const state = decodeGoogleOAuthState(stateValue);
+  const cookieNonce = request.cookies.get(GOOGLE_OAUTH_NONCE_COOKIE)?.value;
+  if (!state || !cookieNonce || !noncesMatch(state.nonce, cookieNonce)) {
+    return clearNonce(
+      NextResponse.json({ error: "Invalid OAuth state" }, { status: 400 })
     );
   }
 
-  // Verify business exists
-  const { data: business } = await supabaseAdmin
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return clearNonce(
+      NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    );
+  }
+
+  const { data: business, error: businessError } = await supabase
     .from("businesses")
     .select("id")
-    .eq("id", businessId)
-    .single();
+    .eq("id", state.businessId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (businessError) {
+    console.error("[google-callback] Owner lookup failed:", businessError);
+    return clearNonce(
+      NextResponse.json(
+        { error: "service_unavailable", retryable: true },
+        { status: 503 }
+      )
+    );
+  }
 
   if (!business) {
-    return NextResponse.redirect(
-      `${appUrl}/settings`
+    return clearNonce(
+      NextResponse.json({ error: "Forbidden" }, { status: 403 })
     );
+  }
+
+  const initialEntitlementFailure = await calendarEntitlementFailure(
+    business.id
+  );
+  if (initialEntitlementFailure) {
+    return clearNonce(initialEntitlementFailure);
   }
 
   try {
@@ -47,12 +82,12 @@ export async function GET(request: NextRequest) {
 
     if (!tokens.access_token || !tokens.refresh_token) {
       console.error("[google-callback] Missing tokens");
-      return NextResponse.redirect(
-        `${appUrl}/settings`
+      return clearNonce(
+        NextResponse.redirect(`${appUrl}/settings`)
       );
     }
 
-    // Try to extract email from the ID token (if present)
+    // Try to extract email from the ID token (if present).
     let googleEmail: string | null = null;
     if (tokens.id_token) {
       try {
@@ -63,7 +98,7 @@ export async function GET(request: NextRequest) {
         const payload = ticket.getPayload();
         googleEmail = payload?.email || null;
       } catch {
-        // ID token parsing failed — continue without email
+        // ID token parsing failed — continue without email.
       }
     }
 
@@ -71,40 +106,110 @@ export async function GET(request: NextRequest) {
       ? new Date(tokens.expiry_date).toISOString()
       : new Date(Date.now() + 3600 * 1000).toISOString();
 
-    // Upsert token (one calendar connection per business)
-    const { error: dbError } = await supabaseAdmin.from("google_calendar_tokens").upsert(
-      {
-        business_id: businessId,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        token_expiry: tokenExpiry,
-        google_email: googleEmail,
-        calendar_id: "primary",
-      },
-      { onConflict: "business_id" }
+    // Token exchange is a network hop. Re-resolve immediately before the
+    // durable write so a downgrade while Google was responding cannot connect
+    // Calendar after access was removed.
+    const writeEntitlementFailure = await calendarEntitlementFailure(
+      business.id
     );
+    if (writeEntitlementFailure) {
+      return clearNonce(writeEntitlementFailure);
+    }
+
+    const { error: dbError } = await supabaseAdmin
+      .from("google_calendar_tokens")
+      .upsert(
+        {
+          business_id: business.id,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expiry: tokenExpiry,
+          google_email: googleEmail,
+          calendar_id: "primary",
+        },
+        { onConflict: "business_id" }
+      );
 
     if (dbError) {
-      console.error("[google-callback] DB error:", dbError);
-      return NextResponse.redirect(
-        `${appUrl}/settings`
+      console.error("[google-callback] Token save failed:", dbError);
+      return clearNonce(
+        NextResponse.json(
+          { error: "service_unavailable", retryable: true },
+          { status: 503 }
+        )
       );
     }
 
-    // Auto-set booking mode to direct scheduling since they connected their calendar
-    await supabaseAdmin
+    // Connecting Calendar opts the business into direct scheduling.
+    const { error: settingsError } = await supabaseAdmin
       .from("ai_settings")
       .update({ booking_enabled: true, booking_mode: "schedule_direct" })
-      .eq("business_id", businessId);
+      .eq("business_id", business.id);
 
-    console.log("[google-callback] Success! Token saved for business:", businessId);
-    return NextResponse.redirect(
-      `${appUrl}/settings`
+    if (settingsError) {
+      console.error("[google-callback] Booking settings update failed:", settingsError);
+    }
+
+    return clearNonce(
+      NextResponse.redirect(`${appUrl}/settings`)
     );
-  } catch (err) {
-    console.error("[google-callback] Error:", err);
-    return NextResponse.redirect(
-      `${appUrl}/settings`
+  } catch (error) {
+    console.error("[google-callback] Google OAuth exchange failed:", error);
+    return clearNonce(
+      NextResponse.redirect(`${appUrl}/settings`)
     );
   }
+}
+
+function noncesMatch(stateNonce: string, cookieNonce: string): boolean {
+  const stateBuffer = Buffer.from(stateNonce);
+  const cookieBuffer = Buffer.from(cookieNonce);
+  return (
+    stateBuffer.length === cookieBuffer.length &&
+    timingSafeEqual(stateBuffer, cookieBuffer)
+  );
+}
+
+async function calendarEntitlementFailure(
+  businessId: string
+): Promise<NextResponse | null> {
+  try {
+    const entitlements = await resolveBusinessEntitlements(businessId);
+    if (canUseFeature(entitlements, "calendar")) return null;
+
+    return NextResponse.json(
+      {
+        error: "feature_unavailable",
+        feature: "calendar",
+        requiredPlan: requiredPlanForFeature("calendar"),
+      },
+      { status: 403 }
+    );
+  } catch (error) {
+    if (error instanceof EntitlementResolutionError) {
+      return NextResponse.json(
+        { error: "service_unavailable", retryable: true },
+        { status: 503 }
+      );
+    }
+    throw error;
+  }
+}
+
+function clearNonce(response: NextResponse): NextResponse {
+  response.cookies.set(GOOGLE_OAUTH_NONCE_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/api/google/callback",
+    maxAge: 0,
+  });
+  return response;
+}
+
+function getAppUrl(request: NextRequest): string {
+  const origin = request.nextUrl.origin;
+  return origin.includes("localhost:3000")
+    ? origin
+    : process.env.NEXT_PUBLIC_APP_URL || origin;
 }

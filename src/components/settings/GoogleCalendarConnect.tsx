@@ -6,10 +6,12 @@ import { useRouter } from 'next/navigation';
 interface GoogleCalendarConnectProps {
   businessId: string;
   connectedEmail: string | null;
+  canConnect?: boolean;
 }
 
 export default function GoogleCalendarConnect({
   connectedEmail,
+  canConnect = true,
 }: GoogleCalendarConnectProps) {
   const router = useRouter();
   const [disconnecting, setDisconnecting] = useState(false);
@@ -55,6 +57,14 @@ export default function GoogleCalendarConnect({
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
         </button>
       </div>
+    );
+  }
+
+  if (!canConnect) {
+    return (
+      <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+        Google Calendar connection requires the Growth plan.
+      </p>
     );
   }
 

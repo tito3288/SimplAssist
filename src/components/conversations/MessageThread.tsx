@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info } from "lucide-react";
+import Link from "next/link";
+import { Send, Bot, User, ArrowLeftRight, Phone, MessageCircle, Info, Lock } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { cn, formatPhoneNumber } from "@/lib/utils";
 import {
@@ -12,12 +13,16 @@ import {
 } from "@/lib/theme-v2/theme";
 import type { Message, SmsBlockReason } from "@/types/database";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
+import { getConversationAccessState } from "./accessState";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
   businessId: string;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
+  canUseManualSms: boolean;
+  canUseAiSms: boolean;
+  canUseWebChat: boolean;
   /** Dev-only demo mode (/demo routes): seed messages and disable all
    *  Supabase I/O. Real dashboard callers never pass this. */
   demoMessages?: Message[];
@@ -49,16 +54,33 @@ export function MessageThread({
   businessId,
   smsReady,
   smsBlockReason,
+  canUseManualSms,
+  canUseAiSms,
+  canUseWebChat,
   demoMessages,
 }: MessageThreadProps) {
   const [messages, setMessages] = useState<Message[]>(demoMessages ?? []);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [isAiHandling, setIsAiHandling] = useState(conversation.is_ai_handling);
   const [toggling, setToggling] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createBrowserClient();
   const smsBlocked = conversation.channel === "sms" && !smsReady;
+  const {
+    smsPlanLocked,
+    webChatLocked,
+    effectiveIsAiHandling,
+    canToggleAi,
+  } = getConversationAccessState({
+    channel: conversation.channel,
+    storedIsAiHandling: isAiHandling,
+    canUseManualSms,
+    canUseAiSms,
+    canUseWebChat,
+  });
 
   // Fetch messages
   useEffect(() => {
@@ -67,6 +89,8 @@ export function MessageThread({
       // component instance persists when another conversation is selected.
       setMessages(demoMessages);
       setIsAiHandling(conversation.is_ai_handling);
+      setToggleError(null);
+      setSendError(null);
       return;
     }
 
@@ -82,6 +106,8 @@ export function MessageThread({
 
     fetchMessages();
     setIsAiHandling(conversation.is_ai_handling);
+    setToggleError(null);
+    setSendError(null);
   }, [conversation.id, conversation.is_ai_handling, supabase, demoMessages]);
 
   // Real-time subscription
@@ -118,15 +144,46 @@ export function MessageThread({
   }, [messages]);
 
   async function handleSend() {
-    if (!input.trim() || sending || isAiHandling || smsBlocked || demoMessages) return;
+    if (
+      !input.trim() ||
+      sending ||
+      effectiveIsAiHandling ||
+      smsBlocked ||
+      smsPlanLocked ||
+      webChatLocked ||
+      demoMessages
+    ) return;
 
     setSending(true);
+    setSendError(null);
     const content = input.trim();
     setInput("");
+    let providerSent = false;
 
     try {
-      // Save the message
-      const { data: newMsg } = await supabase
+      if (conversation.channel === "sms" && conversation.contact?.phone_number) {
+        const response = await fetch("/api/messaging/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: conversation.contact.phone_number,
+            message: content,
+            businessId,
+          }),
+        });
+        const responseBody = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(
+            typeof responseBody.message === "string"
+              ? responseBody.message
+              : "The SMS could not be sent."
+          );
+        }
+        providerSent = true;
+      }
+
+      // Only show an agent message as sent after the provider accepted it.
+      const { data: newMsg, error: messageError } = await supabase
         .from("messages")
         .insert({
           conversation_id: conversation.id,
@@ -138,54 +195,68 @@ export function MessageThread({
         .select("*")
         .single();
 
-      if (newMsg) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === newMsg.id)) return prev;
-          return [...prev, newMsg as Message];
-        });
+      if (messageError || !newMsg) {
+        throw messageError ?? new Error("Transcript insert returned no row.");
       }
 
-      // Update last_message_at
-      await supabase
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg as Message];
+      });
+
+      const { error: conversationError } = await supabase
         .from("conversations")
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversation.id);
-
-      if (conversation.channel === "sms" && conversation.contact?.phone_number) {
-        await fetch("/api/messaging/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to: conversation.contact.phone_number,
-            message: content,
-            businessId,
-          }),
-        });
+      if (conversationError) {
+        console.error("Error updating conversation timestamp:", conversationError);
       }
     } catch (error) {
       console.error("Error sending message:", error);
+      if (!providerSent) {
+        setInput(content);
+        setSendError(
+          error instanceof Error
+            ? error.message
+            : "The SMS could not be sent. Please try again."
+        );
+      } else {
+        setSendError(
+          "The SMS was sent, but the dashboard could not save its transcript. Please do not resend it."
+        );
+      }
     } finally {
       setSending(false);
     }
   }
 
   async function toggleAiHandling() {
-    if (demoMessages) return;
+    if (demoMessages || !canToggleAi) return;
     setToggling(true);
+    setToggleError(null);
     const newValue = !isAiHandling;
 
     try {
-      await supabase
+      const { data, error } = await supabase
         .from("conversations")
         .update({
           is_ai_handling: newValue,
           status: newValue ? "active" : "handed_off",
         })
-        .eq("id", conversation.id);
+        .eq("id", conversation.id)
+        .select("is_ai_handling")
+        .single();
 
-      setIsAiHandling(newValue);
+      if (error || !data) {
+        throw error ?? new Error("Conversation update returned no row.");
+      }
+
+      setIsAiHandling(data.is_ai_handling);
     } catch (error) {
       console.error("Error toggling AI handling:", error);
+      setToggleError(
+        "We couldn’t change who is handling this conversation. Please try again."
+      );
     } finally {
       setToggling(false);
     }
@@ -224,14 +295,22 @@ export function MessageThread({
               <span
                 className={cn(
                   "rounded-full px-1.5 py-0.5 font-medium",
-                  conversation.status === "active"
+                  webChatLocked || smsPlanLocked || (conversation.channel === "sms" && !canUseAiSms)
+                    ? statusWarning
+                    : conversation.status === "active"
                     ? statusSuccess
                     : conversation.status === "handed_off"
                     ? statusWarning
                     : statusNeutral
                 )}
               >
-                {conversation.status === "handed_off"
+                {webChatLocked
+                  ? "Locked"
+                  : smsPlanLocked
+                  ? "Paused"
+                  : conversation.channel === "sms" && !canUseAiSms
+                  ? "Manual"
+                  : conversation.status === "handed_off"
                   ? "Handed Off"
                   : conversation.status.charAt(0).toUpperCase() +
                     conversation.status.slice(1)}
@@ -240,21 +319,49 @@ export function MessageThread({
           </div>
         </div>
 
-        <button
-          onClick={toggleAiHandling}
-          disabled={toggling}
-          className={cn(
-            "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isAiHandling
-              ? "bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-[#d4d4d8] hover:bg-stone-200 dark:hover:bg-white/[0.12]"
-              : "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.16)] text-[#c2410c] dark:text-[#ffd5bc] hover:bg-[#fbe6d4] dark:hover:bg-[rgba(255,145,77,.24)]",
-            toggling && "opacity-50"
-          )}
-        >
-          <ArrowLeftRight className="h-4 w-4" />
-          {isAiHandling ? "Take Over" : "Let AI Handle"}
-        </button>
+        {canToggleAi ? (
+          <button
+            onClick={toggleAiHandling}
+            disabled={toggling}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              effectiveIsAiHandling
+                ? "bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-[#d4d4d8] hover:bg-stone-200 dark:hover:bg-white/[0.12]"
+                : "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.16)] text-[#c2410c] dark:text-[#ffd5bc] hover:bg-[#fbe6d4] dark:hover:bg-[rgba(255,145,77,.24)]",
+              toggling && "opacity-50"
+            )}
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            {effectiveIsAiHandling ? "Take Over" : "Let AI Handle"}
+          </button>
+        ) : (
+          <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium", statusWarning)}>
+            {webChatLocked || smsPlanLocked ? (
+              <Lock className="h-3.5 w-3.5" />
+            ) : conversation.channel === "web_chat" ? (
+              <Bot className="h-3.5 w-3.5" />
+            ) : (
+              <User className="h-3.5 w-3.5" />
+            )}
+            {webChatLocked
+              ? "Growth plan"
+              : smsPlanLocked
+              ? "Plan inactive"
+              : conversation.channel === "web_chat"
+              ? "AI chat"
+              : "Manual replies"}
+          </span>
+        )}
       </div>
+
+      {toggleError && (
+        <div
+          role="alert"
+          className="border-b border-red-200 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+        >
+          {toggleError}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -341,7 +448,40 @@ export function MessageThread({
 
       {/* Input */}
       <div className="border-t border-[#ece4d8] dark:border-white/[0.10] px-4 py-3">
-        {isAiHandling ? (
+        {sendError && (
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+          >
+            {sendError}
+          </div>
+        )}
+        {webChatLocked ? (
+          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">This saved web-chat conversation is read-only.</p>
+              <Link href="/billing" className="mt-1 inline-flex text-xs font-semibold underline">
+                Manage plan
+              </Link>
+            </div>
+          </div>
+        ) : smsPlanLocked ? (
+          <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">SMS sending is paused because this plan is inactive.</p>
+              <Link href="/billing" className="mt-1 inline-flex text-xs font-semibold underline">
+                Manage billing
+              </Link>
+            </div>
+          </div>
+        ) : conversation.channel === "web_chat" ? (
+          <div className={cn("flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm", statusInfo)}>
+            <Bot className="h-4 w-4" />
+            Website chat replies are handled automatically by AI.
+          </div>
+        ) : effectiveIsAiHandling ? (
           <div className={cn("flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm", statusInfo)}>
             <Bot className="h-4 w-4" />
             AI is handling this conversation. Click &quot;Take Over&quot; to reply manually.
