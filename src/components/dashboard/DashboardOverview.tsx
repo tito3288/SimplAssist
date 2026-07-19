@@ -7,6 +7,7 @@ import { formatDate } from '@/lib/utils';
 import type { Conversation, Contact } from '@/types/database';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 import A2pStatusCard, { type A2pStatusCardProps } from '@/components/dashboard/A2pStatusCard';
+import CallForwardingNudge from '@/components/dashboard/CallForwardingNudge';
 import { orangeAccentIcon } from '@/lib/glass';
 import { card as cardSurface, ink, body, statusSuccess, statusInfo } from '@/lib/theme-v2/theme';
 
@@ -28,6 +29,7 @@ interface DashboardOverviewProps {
   hotLeads: Contact[];
   phoneNumber: string | null;
   a2pStatus: A2pStatusCardProps;
+  showCallForwardingNudge: boolean;
 }
 
 const statCards = [
@@ -67,13 +69,22 @@ function EmptyConversationsIllustration() {
   );
 }
 
-export default function DashboardOverview({ stats, recentConversations, hotLeads, phoneNumber, a2pStatus }: DashboardOverviewProps) {
+export default function DashboardOverview({
+  stats,
+  recentConversations,
+  hotLeads,
+  phoneNumber,
+  a2pStatus,
+  showCallForwardingNudge,
+}: DashboardOverviewProps) {
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   return (
     <div className="space-y-6">
+      {showCallForwardingNudge && <CallForwardingNudge />}
+
       {/* Phone Number Banner */}
       {!phoneNumber && !bannerDismissed && (
         <div className={`p-4 ${cardSurface}`}>

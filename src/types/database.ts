@@ -190,6 +190,7 @@ export interface Business {
   pending_phone_number_failure_reason: string | null;
   call_forwarding_enabled: boolean;
   forward_to_number: string | null;
+  call_forwarding_nudge_resolved_at: string | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;

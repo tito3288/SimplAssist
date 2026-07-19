@@ -7,6 +7,7 @@ import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
 import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
+import { shouldShowCallForwardingNudge } from '@/components/dashboard/callForwardingNudgeEligibility';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -89,6 +90,13 @@ export default async function DashboardPage() {
   const firstName = getFirstNameFromAuthMetadata(user);
   const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const activePhoneNumber = smsReadiness.phoneNumber || phoneNumberRow?.phone_number || null;
+  const showCallForwardingNudge = shouldShowCallForwardingNudge({
+    hasActivePhoneNumber: Boolean(activePhoneNumber),
+    canUseMissedCallSms: canUseFeature(entitlements, 'missed_call_sms'),
+    callForwardingEnabled: business.call_forwarding_enabled ?? false,
+    resolvedAt: business.call_forwarding_nudge_resolved_at ?? null,
+  });
   const pausedFeatures = [
     !canUseFeature(entitlements, 'ai_sms_conversations') &&
       (entitlements.plan === 'sms_only' || !entitlements.active)
@@ -155,7 +163,8 @@ export default async function DashboardPage() {
         }}
         recentConversations={recentConversations}
         hotLeads={hotLeads || []}
-        phoneNumber={smsReadiness.phoneNumber || phoneNumberRow?.phone_number || null}
+        phoneNumber={activePhoneNumber}
+        showCallForwardingNudge={showCallForwardingNudge}
         a2pStatus={{
           brandStatus: business.brand_status ?? null,
           brandStatusUpdatedAt: business.brand_status_updated_at ?? null,

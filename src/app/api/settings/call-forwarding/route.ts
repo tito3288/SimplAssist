@@ -5,9 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const CallForwardingUpdateSchema = z.object({
-  enabled: z.boolean(),
+  enabled: z.boolean().optional(),
   forwardToNumber: z.string().nullable().optional(),
-});
+}).refine(
+  (data) => data.enabled !== undefined || data.forwardToNumber !== undefined,
+  { message: "At least one call forwarding setting is required" }
+);
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -34,20 +37,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const enabled = parsed.data.enabled;
-  const forwardToNumber = normalizeE164Input(parsed.data.forwardToNumber);
+  const hasEnabledUpdate = parsed.data.enabled !== undefined;
+  const hasForwardToNumberUpdate = parsed.data.forwardToNumber !== undefined;
+  const requestedForwardToNumber = hasForwardToNumberUpdate
+    ? normalizeE164Input(parsed.data.forwardToNumber) || null
+    : undefined;
 
-  if (enabled && !forwardToNumber) {
-    return NextResponse.json(
-      {
-        error: "Forward-to number is required when call forwarding is enabled",
-        field: "forwardToNumber",
-      },
-      { status: 400 }
-    );
-  }
-
-  if (forwardToNumber && !isE164PhoneNumber(forwardToNumber)) {
+  if (
+    requestedForwardToNumber &&
+    !isE164PhoneNumber(requestedForwardToNumber)
+  ) {
     return NextResponse.json(
       {
         error: "Enter a valid E.164 phone number, like +13175551234",
@@ -59,20 +58,84 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: businessError } = await supabaseAdmin
     .from("businesses")
-    .select("id")
+    .select(
+      "id, call_forwarding_enabled, forward_to_number, call_forwarding_nudge_resolved_at"
+    )
     .eq("owner_id", user.id)
-    .single();
+    .maybeSingle();
 
-  if (businessError || !business) {
+  if (businessError) {
+    console.error(
+      `[settings:call-forwarding] Failed to load business for user ${user.id}:`,
+      businessError
+    );
+    return NextResponse.json(
+      { error: "Failed to load call forwarding settings" },
+      { status: 500 }
+    );
+  }
+
+  if (!business) {
     return NextResponse.json({ error: "Business not found" }, { status: 404 });
   }
 
-  const { data: phoneNumberRow } = await supabaseAdmin
-    .from("phone_numbers")
-    .select("phone_number")
-    .eq("business_id", business.id)
-    .eq("is_active", true)
-    .maybeSingle();
+  const enabled = hasEnabledUpdate
+    ? parsed.data.enabled!
+    : business.call_forwarding_enabled;
+  const forwardToNumber = hasForwardToNumberUpdate
+    ? requestedForwardToNumber!
+    : business.forward_to_number;
+
+  if (enabled && !forwardToNumber) {
+    return NextResponse.json(
+      {
+        error: "Forward-to number is required when call forwarding is enabled",
+        field: "forwardToNumber",
+      },
+      { status: 400 }
+    );
+  }
+
+  const shouldValidateForwardToNumber = Boolean(
+    forwardToNumber && (enabled || hasForwardToNumberUpdate)
+  );
+
+  if (
+    shouldValidateForwardToNumber &&
+    forwardToNumber &&
+    !isE164PhoneNumber(forwardToNumber)
+  ) {
+    return NextResponse.json(
+      {
+        error: "Enter a valid E.164 phone number, like +13175551234",
+        field: "forwardToNumber",
+      },
+      { status: 400 }
+    );
+  }
+
+  let phoneNumberRow: { phone_number: string } | null = null;
+  if (shouldValidateForwardToNumber) {
+    const { data, error: phoneNumberError } = await supabaseAdmin
+      .from("phone_numbers")
+      .select("phone_number")
+      .eq("business_id", business.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (phoneNumberError) {
+      console.error(
+        `[settings:call-forwarding] Failed to load active number for business ${business.id}:`,
+        phoneNumberError
+      );
+      return NextResponse.json(
+        { error: "Failed to validate call forwarding settings" },
+        { status: 500 }
+      );
+    }
+
+    phoneNumberRow = data;
+  }
 
   if (
     forwardToNumber &&
@@ -88,18 +151,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { error: updateError } = await supabaseAdmin
-    .from("businesses")
-    .update({
-      call_forwarding_enabled: enabled,
-      forward_to_number: forwardToNumber || null,
-    })
-    .eq("id", business.id);
+  const settingsUpdate: Record<string, boolean | string | null> = {
+    call_forwarding_nudge_resolved_at:
+      business.call_forwarding_nudge_resolved_at ?? new Date().toISOString(),
+  };
+  if (hasEnabledUpdate) {
+    settingsUpdate.call_forwarding_enabled = parsed.data.enabled!;
+  }
+  if (hasForwardToNumberUpdate) {
+    settingsUpdate.forward_to_number = requestedForwardToNumber!;
+  }
 
-  if (updateError) {
+  const { data: updatedBusiness, error: updateError } = await supabaseAdmin
+    .from("businesses")
+    .update(settingsUpdate)
+    .eq("id", business.id)
+    .select("call_forwarding_enabled, forward_to_number")
+    .single();
+
+  if (updateError || !updatedBusiness) {
     console.error(
       `[settings:call-forwarding] Failed to update for user ${user.id}:`,
-      updateError
+      updateError ?? "No updated business returned"
     );
     return NextResponse.json(
       { error: "Failed to save call forwarding settings" },
@@ -109,7 +182,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    callForwardingEnabled: enabled,
-    forwardToNumber: forwardToNumber || null,
+    callForwardingEnabled: updatedBusiness.call_forwarding_enabled,
+    forwardToNumber: updatedBusiness.forward_to_number,
   });
 }

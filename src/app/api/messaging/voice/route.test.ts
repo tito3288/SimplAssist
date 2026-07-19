@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   speak: vi.fn(),
   startRecording: vi.fn(),
   dial: vi.fn(),
+  bridge: vi.fn(),
   markProcessedOnce: vi.fn(),
   releaseProcessedEvent: vi.fn(),
   sendMissedCallSMS: vi.fn(),
@@ -21,13 +22,14 @@ vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
     webhooks: { unwrap: mocks.unwrap },
     calls: {
+      dial: mocks.dial,
       actions: {
         reject: mocks.reject,
         answer: mocks.answer,
         hangup: mocks.hangup,
         speak: mocks.speak,
         startRecording: mocks.startRecording,
-        dial: mocks.dial,
+        bridge: mocks.bridge,
       },
     },
   },
@@ -151,10 +153,226 @@ beforeEach(() => {
   mocks.canUseFeature.mockReturnValue(true);
   mocks.hangup.mockResolvedValue({});
   mocks.reject.mockResolvedValue({});
+  mocks.answer.mockResolvedValue({});
+  mocks.speak.mockResolvedValue({});
+  mocks.bridge.mockResolvedValue({});
   queueResults();
 });
 
 describe("POST /api/messaging/voice", () => {
+  it("uses forwarding-disabled configuration captured at initiation and speaks voicemail without dialing", async () => {
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.initiated",
+        {
+          direction: "incoming",
+          from: ATTEMPT.caller_phone,
+          to: "+15745550300",
+          call_control_id: "cc_forwarding_off",
+        },
+        "evt_voice_initiated_forwarding_off"
+      )
+    );
+    queueResults(
+      { data: { business_id: ATTEMPT.business_id }, error: null },
+      {
+        data: {
+          name: "Test Biz",
+          email: "owner@example.test",
+          phone_number: "+15745550400",
+          telnyx_voice_application_id: "voice_app_1",
+          call_forwarding_enabled: false,
+          // A saved number must not override the disabled setting.
+          forward_to_number: ATTEMPT.forward_to_number,
+        },
+        error: null,
+      }
+    );
+
+    const initiatedResponse = await voiceWebhook(request());
+
+    expect(initiatedResponse.status).toBe(200);
+    expect(mocks.answer).toHaveBeenCalledWith(
+      "cc_forwarding_off",
+      expect.objectContaining({ client_state: expect.any(String) })
+    );
+    const initiatedState = mocks.answer.mock.calls[0][1]
+      .client_state as string;
+    expect(
+      JSON.parse(Buffer.from(initiatedState, "base64").toString())
+    ).toEqual(
+      expect.objectContaining({
+        callForwardingEnabled: false,
+        forwardToNumber: ATTEMPT.forward_to_number,
+      })
+    );
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: "cc_forwarding_off",
+          call_session_id: "sess_forwarding_off",
+          client_state: initiatedState,
+        },
+        "evt_voice_answered_forwarding_off"
+      )
+    );
+    queueResults();
+
+    const answeredResponse = await voiceWebhook(request());
+
+    expect(answeredResponse.status).toBe(200);
+    expect(mocks.speak).toHaveBeenCalledWith(
+      "cc_forwarding_off",
+      expect.objectContaining({
+        payload: expect.any(String),
+        voice: "AWS.Polly.Joanna-Neural",
+        language: "en-US",
+        client_state: initiatedState,
+      })
+    );
+    expect(mocks.dial).not.toHaveBeenCalled();
+    expect(mocks.bridge).not.toHaveBeenCalled();
+    expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
+      "phone_numbers",
+      "businesses",
+    ]);
+  });
+
+  it("uses forwarding-enabled configuration captured at initiation to create, dial, and bridge an attempt", async () => {
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.initiated",
+        {
+          direction: "incoming",
+          from: ATTEMPT.caller_phone,
+          to: "+15745550300",
+          call_control_id: "cc_inbound",
+        },
+        "evt_voice_initiated_forwarding_on"
+      )
+    );
+    queueResults(
+      { data: { business_id: ATTEMPT.business_id }, error: null },
+      {
+        data: {
+          name: "Test Biz",
+          email: "owner@example.test",
+          phone_number: "+15745550400",
+          telnyx_voice_application_id: "voice_app_1",
+          call_forwarding_enabled: true,
+          forward_to_number: ATTEMPT.forward_to_number,
+        },
+        error: null,
+      }
+    );
+
+    const initiatedResponse = await voiceWebhook(request());
+
+    expect(initiatedResponse.status).toBe(200);
+    const initiatedState = mocks.answer.mock.calls[0][1]
+      .client_state as string;
+    expect(
+      JSON.parse(Buffer.from(initiatedState, "base64").toString())
+    ).toEqual(
+      expect.objectContaining({
+        telnyxVoiceApplicationId: "voice_app_1",
+        smsPhoneNumber: "+15745550300",
+        callForwardingEnabled: true,
+        forwardToNumber: ATTEMPT.forward_to_number,
+      })
+    );
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: "cc_inbound",
+          call_leg_id: "leg_inbound",
+          call_session_id: ATTEMPT.call_session_id,
+          client_state: initiatedState,
+        },
+        "evt_voice_answered_forwarding_on"
+      )
+    );
+    mocks.dial.mockResolvedValue({
+      data: {
+        call_control_id: ATTEMPT.outbound_call_control_id,
+        call_leg_id: "leg_outbound",
+      },
+    });
+    queueResults(
+      {
+        data: { ...ATTEMPT, outbound_call_control_id: null },
+        error: null,
+      }, // createForwardingAttempt
+      { error: null }, // updateForwardingAttemptOutbound
+      { data: ATTEMPT, error: null } // pre-bridge fallback check
+    );
+
+    const answeredResponse = await voiceWebhook(request());
+
+    expect(answeredResponse.status).toBe(200);
+    expect(chains[0].insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        business_id: ATTEMPT.business_id,
+        inbound_call_control_id: "cc_inbound",
+        inbound_call_leg_id: "leg_inbound",
+        call_session_id: ATTEMPT.call_session_id,
+        caller_phone: ATTEMPT.caller_phone,
+        forward_to_number: ATTEMPT.forward_to_number,
+        status: "dialing",
+      })
+    );
+    expect(mocks.dial).toHaveBeenCalledWith({
+      connection_id: "voice_app_1",
+      from: "+15745550300",
+      to: ATTEMPT.forward_to_number,
+      timeout_secs: 18,
+      client_state: expect.any(String),
+    });
+    expect(chains[1].update).toHaveBeenCalledWith({
+      outbound_call_control_id: ATTEMPT.outbound_call_control_id,
+      outbound_call_leg_id: "leg_outbound",
+    });
+    expect(mocks.bridge).toHaveBeenCalledWith("cc_inbound", {
+      call_control_id_to_bridge_with: ATTEMPT.outbound_call_control_id,
+      play_ringtone: true,
+      prevent_double_bridge: true,
+      client_state: expect.any(String),
+    });
+
+    const outboundState = mocks.dial.mock.calls[0][0].client_state as string;
+    expect(
+      JSON.parse(Buffer.from(outboundState, "base64").toString())
+    ).toEqual(
+      expect.objectContaining({
+        forwardingRole: "forward_target",
+        forwardingAttemptId: ATTEMPT.id,
+      })
+    );
+    const inboundState = mocks.bridge.mock.calls[0][1]
+      .client_state as string;
+    expect(
+      JSON.parse(Buffer.from(inboundState, "base64").toString())
+    ).toEqual(
+      expect.objectContaining({
+        forwardingRole: "inbound",
+        forwardingAttemptId: ATTEMPT.id,
+        outboundCallControlId: ATTEMPT.outbound_call_control_id,
+      })
+    );
+    expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
+      "phone_numbers",
+      "businesses",
+      "call_forwarding_attempts",
+      "call_forwarding_attempts",
+      "call_forwarding_attempts",
+    ]);
+  });
+
   it("sends the fallback SMS and keeps the claim on success", async () => {
     mocks.unwrap.mockResolvedValue(
       voiceEvent("call.hangup", {
