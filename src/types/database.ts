@@ -62,6 +62,10 @@ export type NoEinHoldStatus =
 
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 
+export type TelnyxBrandSource =
+  | "created_by_simplassist"
+  | "linked_existing";
+
 export type OnboardingStep =
   | "business_info"
   | "business_hours"
@@ -226,6 +230,7 @@ export interface Business {
   privacy_url_override: string | null;
   terms_url_override: string | null;
   telnyx_brand_id: string | null;
+  telnyx_brand_source: TelnyxBrandSource | null;
   telnyx_campaign_id: string | null;
   telnyx_messaging_profile_id: string | null;
   telnyx_voice_application_id: string | null;

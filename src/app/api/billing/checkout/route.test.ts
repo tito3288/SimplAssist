@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   attemptPaidLaunch: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
   createCheckoutSession: vi.fn(),
+  getExistingTelnyxBrandLinkState: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -31,6 +32,9 @@ vi.mock("@/lib/stripe/config", () => ({
     full: "price_full",
   }),
   stripeSetupFeePriceId: () => "price_setup",
+}));
+vi.mock("@/lib/messaging/registration/existingBrand", () => ({
+  getExistingTelnyxBrandLinkState: mocks.getExistingTelnyxBrandLinkState,
 }));
 
 import { POST } from "./route";
@@ -79,6 +83,7 @@ beforeEach(() => {
   mocks.attemptPaidLaunch.mockResolvedValue({ status: "submitted" });
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({ step: "complete" });
   mocks.createCheckoutSession.mockResolvedValue("https://checkout.test/session");
+  mocks.getExistingTelnyxBrandLinkState.mockResolvedValue(null);
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {
@@ -130,5 +135,43 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     );
     expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
     expect(await response.json()).toMatchObject({ success: true });
+  });
+
+  it.each(["pending_admin", "blocked"])(
+    "blocks checkout while an existing-brand link is %s",
+    async (status) => {
+      queueResults({ data: BUSINESS, error: null });
+      mocks.getExistingTelnyxBrandLinkState.mockResolvedValue({
+        status,
+        tcrBrandId: "BL69PDP",
+      });
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: "existing_brand_review_required",
+        error: expect.stringContaining("before checkout can continue"),
+      });
+      expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("allows an approved existing-brand link to continue to checkout", async () => {
+    queueResults(
+      { data: { ...BUSINESS, billing_exempt: false }, error: null },
+      { data: null, error: null }
+    );
+    mocks.getExistingTelnyxBrandLinkState.mockResolvedValue({
+      status: "approved",
+      tcrBrandId: "BL69PDP",
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
   });
 });

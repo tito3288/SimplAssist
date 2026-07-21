@@ -1,17 +1,11 @@
 import { telnyx } from "@/lib/messaging/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { BusinessEntityType, BusinessType } from "@/types/database";
+import type { BusinessType, TelnyxBrandSource } from "@/types/database";
 import { normalizeUsStateCode } from "@/lib/usStates";
 import { appendRegistrationEvent, serializeError } from "./audit";
 import { archiveAndClearRejectedCampaign } from "./campaign";
 import { buildBusinessLandingUrl } from "./legalUrls";
-
-type TelnyxEntityType =
-  | "PRIVATE_PROFIT"
-  | "PUBLIC_PROFIT"
-  | "NON_PROFIT"
-  | "GOVERNMENT"
-  | "SOLE_PROPRIETOR";
+import { toTelnyxEntityType } from "./identity";
 
 // Subset of the Telnyx `Vertical` enum we map to. Sourced from
 // node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
@@ -26,6 +20,29 @@ type TelnyxVertical =
   | "REAL_ESTATE"
   | "RETAIL";
 
+export const LINKED_EXISTING_BRAND_NEEDS_SUPPORT_CODE =
+  "linked_brand_needs_support" as const;
+
+export const LINKED_EXISTING_BRAND_NEEDS_SUPPORT_MESSAGE =
+  "This existing Telnyx brand cannot be replaced automatically. Contact SimplAssist Support for help.";
+
+/**
+ * A manually linked brand is an existing customer asset, so the automatic
+ * rejected-brand recovery path must never archive or delete it. Launch turns
+ * this stable domain error into a support-required customer outcome.
+ */
+export class LinkedExistingBrandSupportRequiredError extends Error {
+  readonly code = LINKED_EXISTING_BRAND_NEEDS_SUPPORT_CODE;
+  readonly retryable = false;
+  readonly businessId: string;
+
+  constructor(businessId: string) {
+    super(LINKED_EXISTING_BRAND_NEEDS_SUPPORT_MESSAGE);
+    this.name = "LinkedExistingBrandSupportRequiredError";
+    this.businessId = businessId;
+  }
+}
+
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
   if (!url) {
@@ -34,23 +51,6 @@ function appBaseUrl(): string {
     );
   }
   return url.replace(/\/+$/, "");
-}
-
-function toTelnyxEntityType(entity: BusinessEntityType): TelnyxEntityType {
-  switch (entity) {
-    case "llc":
-    case "c_corp":
-    case "s_corp":
-    case "partnership":
-      return "PRIVATE_PROFIT";
-    case "nonprofit":
-      return "NON_PROFIT";
-    case "sole_proprietor":
-      // Sole Proprietor brand path requires SMS OTP verification — deferred to
-      // Phase 11. The BrandVerificationForm currently blocks sole_proprietor
-      // entity types, so reaching this branch indicates a schema/UI mismatch.
-      return "SOLE_PROPRIETOR";
-  }
 }
 
 // Maps our business_type domain to Telnyx's Vertical enum. Carriers (especially
@@ -123,11 +123,14 @@ export async function archiveAndClearRejectedBrand(
 ): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
-    .select("id, telnyx_brand_id, brand_status, brand_rejection_reason")
+    .select(
+      "id, telnyx_brand_id, telnyx_brand_source, brand_status, brand_rejection_reason"
+    )
     .eq("id", businessId)
     .single<{
       id: string;
       telnyx_brand_id: string | null;
+      telnyx_brand_source: TelnyxBrandSource | null;
       brand_status: string | null;
       brand_rejection_reason: string | null;
     }>();
@@ -140,6 +143,13 @@ export async function archiveAndClearRejectedBrand(
 
   if (!business.telnyx_brand_id || business.brand_status !== "rejected") {
     return;
+  }
+
+  // A linked brand existed before SimplAssist attached it. Treat a rejection
+  // as a support case: do not archive its local history, touch its campaign,
+  // delete it at Telnyx, or clear the business pointer automatically.
+  if (business.telnyx_brand_source === "linked_existing") {
+    throw new LinkedExistingBrandSupportRequiredError(businessId);
   }
 
   const brandId = business.telnyx_brand_id;

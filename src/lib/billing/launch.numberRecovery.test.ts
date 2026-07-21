@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createVoiceApplication: vi.fn(),
   archiveAndClearRejectedBrand: vi.fn(),
   archiveAndClearRejectedCampaign: vi.fn(),
+  prepareExistingTelnyxBrandLinkForLaunch: vi.fn(),
   getA2pRiskClearanceForBusiness: vi.fn(),
   screenA2pRiskForBusiness: vi.fn(),
   ensureCampaignAssignmentForBusiness: vi.fn(),
@@ -43,9 +44,16 @@ vi.mock("@/lib/messaging/registration", () => ({
 }));
 vi.mock("@/lib/messaging/registration/brand", () => ({
   archiveAndClearRejectedBrand: mocks.archiveAndClearRejectedBrand,
+  LinkedExistingBrandSupportRequiredError: class extends Error {},
 }));
 vi.mock("@/lib/messaging/registration/campaign", () => ({
   archiveAndClearRejectedCampaign: mocks.archiveAndClearRejectedCampaign,
+  CampaignRegistrationError: class extends Error {},
+}));
+vi.mock("@/lib/messaging/registration/existingBrand", () => ({
+  ExistingBrandLinkError: class extends Error {},
+  prepareExistingTelnyxBrandLinkForLaunch:
+    mocks.prepareExistingTelnyxBrandLinkForLaunch,
 }));
 vi.mock("@/lib/messaging/registration/riskScreening", () => ({
   getA2pRiskClearanceForBusiness: mocks.getA2pRiskClearanceForBusiness,
@@ -153,6 +161,9 @@ beforeEach(() => {
     fn.mockResolvedValue(undefined);
   }
   mocks.findOwnedNumberId.mockResolvedValue(null);
+  mocks.prepareExistingTelnyxBrandLinkForLaunch.mockResolvedValue({
+    status: "not_requested",
+  });
   mocks.purchaseNumber.mockResolvedValue({
     phoneNumber: PENDING_NUMBER,
     phoneNumberId: TELNYX_NUMBER_ID,

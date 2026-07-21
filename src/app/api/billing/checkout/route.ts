@@ -4,6 +4,7 @@ import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { createCheckoutSession } from "@/lib/stripe/checkout";
 import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
+import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import type { SubscriptionPlan } from "@/types/database";
 
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
@@ -69,6 +70,30 @@ export async function POST(request: NextRequest) {
           state,
         },
         { status: 400 }
+      );
+    }
+
+    // An identity edit invalidates an approved manual-brand link in the
+    // database. Stop before creating a Stripe Checkout Session until an
+    // administrator has compared and approved the current identity again.
+    // Normal customers have no link row and pass through unchanged.
+    const existingBrandLink = await getExistingTelnyxBrandLinkState(
+      business.id
+    );
+    if (
+      existingBrandLink &&
+      existingBrandLink.status !== "approved" &&
+      existingBrandLink.status !== "consumed"
+    ) {
+      const state = await getOnboardingStateForBusinessId(business.id);
+      return NextResponse.json(
+        {
+          error:
+            "Your existing Telnyx brand link needs SimplAssist review before checkout can continue. Contact SimplAssist Support.",
+          code: "existing_brand_review_required",
+          state,
+        },
+        { status: 409 }
       );
     }
 

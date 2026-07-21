@@ -8,6 +8,8 @@ import {
 } from "@/lib/messaging/registration/riskScreening";
 import { AdminFlagForm } from "../AdminFlagForm";
 import { A2pApproveForm } from "../A2pApproveForm";
+import { ExistingTelnyxBrandForm } from "../ExistingTelnyxBrandForm";
+import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { card } from "@/lib/theme-v2/theme";
 
 export const dynamic = "force-dynamic";
@@ -65,24 +67,26 @@ export default async function AdminBusinessPage({
 }) {
   await requireAdminUser();
 
-  const [{ data: business }, { data: usage }] = await Promise.all([
-    supabaseAdmin
-      .from("businesses")
-      .select(
-        "id, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes"
-      )
-      .eq("id", params.businessId)
-      .maybeSingle<DetailBusiness>(),
-    supabaseAdmin
-      .from("billing_usage_periods")
-      .select(
-        "included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start, period_end"
-      )
-      .eq("business_id", params.businessId)
-      .order("period_start", { ascending: false })
-      .limit(1)
-      .maybeSingle<UsageRow>(),
-  ]);
+  const [{ data: business }, { data: usage }, existingBrandLinkState] =
+    await Promise.all([
+      supabaseAdmin
+        .from("businesses")
+        .select(
+          "id, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes"
+        )
+        .eq("id", params.businessId)
+        .maybeSingle<DetailBusiness>(),
+      supabaseAdmin
+        .from("billing_usage_periods")
+        .select(
+          "included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start, period_end"
+        )
+        .eq("business_id", params.businessId)
+        .order("period_start", { ascending: false })
+        .limit(1)
+        .maybeSingle<UsageRow>(),
+      getExistingTelnyxBrandLinkState(params.businessId),
+    ]);
 
   if (!business) notFound();
 
@@ -161,6 +165,13 @@ export default async function AdminBusinessPage({
           </dl>
         </Card>
       </section>
+
+      <Card title="Existing Telnyx Brand">
+        <ExistingTelnyxBrandForm
+          businessId={business.id}
+          initialLinkState={existingBrandLinkState}
+        />
+      </Card>
 
       <Card title="Carrier-Safe Review Fields">
         <div className="space-y-4 text-sm">

@@ -14,8 +14,18 @@ import {
   registerBrand,
   registerCampaign,
 } from "@/lib/messaging/registration";
-import { archiveAndClearRejectedBrand } from "@/lib/messaging/registration/brand";
-import { archiveAndClearRejectedCampaign } from "@/lib/messaging/registration/campaign";
+import {
+  archiveAndClearRejectedBrand,
+  LinkedExistingBrandSupportRequiredError,
+} from "@/lib/messaging/registration/brand";
+import {
+  archiveAndClearRejectedCampaign,
+  CampaignRegistrationError,
+} from "@/lib/messaging/registration/campaign";
+import {
+  ExistingBrandLinkError,
+  prepareExistingTelnyxBrandLinkForLaunch,
+} from "@/lib/messaging/registration/existingBrand";
 import {
   A2P_RISK_BLOCKED_MESSAGE,
   A2P_RISK_CUSTOMER_REVIEW_MESSAGE,
@@ -46,6 +56,15 @@ const SUBMISSION_DISABLED_MESSAGE =
 const NO_EIN_HELD_MESSAGE =
   "Add your EIN before SMS registration can continue.";
 
+const EXISTING_BRAND_REVIEW_REQUIRED_MESSAGE =
+  "Your existing Telnyx brand link needs SimplAssist review before SMS registration can continue. Contact SimplAssist Support.";
+
+const LINKED_BRAND_NEEDS_SUPPORT_MESSAGE =
+  "Your linked Telnyx brand needs SimplAssist Support before SMS registration can continue. Its existing Telnyx resources were not replaced.";
+
+const EXISTING_BRAND_RETRY_MESSAGE =
+  "SimplAssist could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.";
+
 type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry";
 
 type LaunchResult =
@@ -55,6 +74,8 @@ type LaunchResult =
         | "billing_required"
         | "held_no_ein"
         | "risk_review_required"
+        | "existing_brand_review_required"
+        | "linked_brand_needs_support"
         | "submission_disabled"
         | "missing_phone_number"
         | "number_unavailable"
@@ -139,10 +160,13 @@ export async function attemptPaidLaunch(
     };
   }
 
+  let linkedExistingBrandConsumed = false;
+
   try {
-    // Exact Phase 9 order after checkout success (brand-recovery step added):
-    // risk -> attempt gate -> brand archive -> brand -> campaign archive ->
-    // campaign -> profile -> voice -> owned attach / purchase.
+    // Exact Phase 9 order after checkout success:
+    // risk -> attempt gate -> existing-brand revalidate/consume -> brand
+    // archive -> brand -> campaign archive -> campaign -> profile -> voice ->
+    // owned attach / purchase.
     // The retry-only risk gate lives INSIDE the try so a transient failure
     // here funnels into the catch's markRegistrationFailed (immediately
     // retryable) instead of stranding the claimed row in 'submitting'.
@@ -184,6 +208,16 @@ export async function attemptPaidLaunch(
       }
     }
 
+    // This is the final authorization boundary before any Telnyx mutation.
+    // It is a no-op for normal onboarding. For an existing-brand request it
+    // captures one private request tuple, revalidates that exact brand and
+    // local identity, then consumes the same tuple atomically. Pending or
+    // blocked requests stop here, before rejected-resource cleanup or create.
+    const existingBrandPreparation =
+      await prepareExistingTelnyxBrandLinkForLaunch(businessId);
+    linkedExistingBrandConsumed =
+      existingBrandPreparation.status === "consumed";
+
     // Carrier-rejected brand? Archive its history, cascade-archive the child
     // campaign (any status — it is bound to the dead brand at TCR), delete
     // the brand at Telnyx (best-effort), and clear the pointer so
@@ -219,6 +253,58 @@ export async function attemptPaidLaunch(
     await markRegistrationSubmitted(businessId);
     return { status: "submitted" };
   } catch (err) {
+    if (err instanceof ExistingBrandLinkError) {
+      const status =
+        err.launchDisposition === "review_required"
+          ? "existing_brand_review_required"
+          : err.launchDisposition === "support_required"
+            ? "linked_brand_needs_support"
+            : "failed";
+      const message =
+        status === "existing_brand_review_required"
+          ? EXISTING_BRAND_REVIEW_REQUIRED_MESSAGE
+          : status === "linked_brand_needs_support"
+            ? LINKED_BRAND_NEEDS_SUPPORT_MESSAGE
+            : EXISTING_BRAND_RETRY_MESSAGE;
+      console.error(
+        `[billing:launch] Existing-brand launch stopped for ${businessId} (${err.code}, ${err.kind})`
+      );
+      await markRegistrationFailed(businessId, message);
+      return { status, message };
+    }
+
+    if (err instanceof LinkedExistingBrandSupportRequiredError) {
+      console.error(
+        `[billing:launch] Linked brand needs support for ${businessId} (${err.code})`
+      );
+      await markRegistrationFailed(
+        businessId,
+        LINKED_BRAND_NEEDS_SUPPORT_MESSAGE
+      );
+      return {
+        status: "linked_brand_needs_support",
+        message: LINKED_BRAND_NEEDS_SUPPORT_MESSAGE,
+      };
+    }
+
+    if (err instanceof CampaignRegistrationError) {
+      const needsLinkedBrandSupport =
+        linkedExistingBrandConsumed && err.kind === "permanent";
+      const message = needsLinkedBrandSupport
+        ? LINKED_BRAND_NEEDS_SUPPORT_MESSAGE
+        : err.message;
+      console.error(
+        `[billing:launch] Campaign launch stopped for ${businessId} (${err.code}, ${err.kind})`
+      );
+      await markRegistrationFailed(businessId, message);
+      return {
+        status: needsLinkedBrandSupport
+          ? "linked_brand_needs_support"
+          : "failed",
+        message,
+      };
+    }
+
     if (err instanceof PurchasedNumberSaveError) {
       // The number IS purchased and owned — never route to re-pick, never
       // claim "not charged" is a fresh start. pending_phone_number is
@@ -233,7 +319,7 @@ export async function attemptPaidLaunch(
       return { status: "failed", message: NUMBER_SAVE_RETRY_MESSAGE };
     }
 
-    if (err instanceof NumberTakenError || isLikelyNumberUnavailable(err)) {
+    if (err instanceof NumberTakenError) {
       await persistNumberFailure(businessId, PAID_NUMBER_FAILED_MESSAGE);
       await markRegistrationFailed(businessId, PAID_NUMBER_FAILED_MESSAGE);
       return {
@@ -410,7 +496,19 @@ async function purchasePendingNumber(
   }
 
   // Step 3: fresh purchase.
-  const purchased = await purchaseNumber(pendingPhoneNumber, businessId);
+  let purchased: Awaited<ReturnType<typeof purchaseNumber>>;
+  try {
+    // This legacy provider-message classifier is intentionally limited to
+    // the fresh Telnyx order call. Local reads/saves, owned-number recovery,
+    // attachment, routing, and all later launch work remain generic or use
+    // their own typed errors, so an already-owned number is never discarded.
+    purchased = await purchaseNumber(pendingPhoneNumber, businessId);
+  } catch (error) {
+    if (isLikelyNumberUnavailable(error)) {
+      throw new NumberTakenError(pendingPhoneNumber);
+    }
+    throw error;
+  }
   await savePurchasedNumber(
     businessId,
     purchased.phoneNumber,

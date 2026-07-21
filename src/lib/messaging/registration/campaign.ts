@@ -7,6 +7,7 @@ import {
   buildA2pRiskInputForBusiness,
   hashA2pRiskInput,
 } from "./riskScreening";
+import { mapCampaignStatus } from "./statusMapper";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -22,6 +23,311 @@ const HELP_KEYWORDS = "HELP,INFO";
 const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
 const CAMPAIGN_USECASE = "CUSTOMER_CARE";
+const TELNYX_BRAND_CAMPAIGN_CAP = 5;
+const TELNYX_BRAND_CAMPAIGN_CAP_MESSAGE =
+  "This Telnyx brand is at Telnyx's campaign cap: it already has 5 campaigns, the maximum allowed per brand. SimplAssist cannot create the additional campaign required for this account. Use a different eligible brand or contact Telnyx Support before approving this link.";
+
+export type CampaignRegistrationErrorCode =
+  | "campaign_recovery_provider_unavailable"
+  | "campaign_recovery_malformed_response"
+  | "campaign_recovery_multiple_matches"
+  | "campaign_recovery_persist_failed"
+  | "campaign_recovery_history_unavailable"
+  | "campaign_recovery_history_invalid"
+  | "campaign_recovered_rejected"
+  | "campaign_submit_malformed_response"
+  | "telnyx_brand_campaign_cap_reached";
+
+export type CampaignRegistrationErrorKind = "transient" | "permanent";
+
+/** Stable, provider-payload-free failures that launch can classify safely. */
+export class CampaignRegistrationError extends Error {
+  readonly code: CampaignRegistrationErrorCode;
+  readonly kind: CampaignRegistrationErrorKind;
+
+  constructor(options: {
+    code: CampaignRegistrationErrorCode;
+    kind: CampaignRegistrationErrorKind;
+    message: string;
+  }) {
+    super(options.message);
+    this.name = "CampaignRegistrationError";
+    this.code = options.code;
+    this.kind = options.kind;
+  }
+}
+
+type RecoveredCampaignStatus = "pending" | "approved" | "rejected";
+
+interface CampaignListItem {
+  brandId?: string | null;
+  campaignId?: string | null;
+  campaignStatus?: string | null;
+  failureReasons?: string | null;
+  referenceId?: string | null;
+}
+
+const CAMPAIGN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const TELNYX_CAMPAIGN_STATUSES = new Set([
+  "TCR_PENDING",
+  "TCR_SUSPENDED",
+  "TCR_EXPIRED",
+  "TCR_ACCEPTED",
+  "TCR_FAILED",
+  "TELNYX_ACCEPTED",
+  "TELNYX_FAILED",
+  "MNO_PENDING",
+  "MNO_ACCEPTED",
+  "MNO_REJECTED",
+  "MNO_PROVISIONED",
+  "MNO_PROVISIONING_FAILED",
+]);
+
+function campaignRecoveryError(
+  code: CampaignRegistrationErrorCode,
+  kind: CampaignRegistrationErrorKind,
+  message: string
+): CampaignRegistrationError {
+  return new CampaignRegistrationError({ code, kind, message });
+}
+
+function isValidCampaignId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    CAMPAIGN_ID_PATTERN.test(value.trim())
+  );
+}
+
+async function readArchivedCampaignIds(businessId: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin
+    .from("rejected_campaigns")
+    .select("telnyx_campaign_id")
+    .eq("business_id", businessId);
+
+  if (error) {
+    throw campaignRecoveryError(
+      "campaign_recovery_history_unavailable",
+      "transient",
+      "SimplAssist could not verify the prior campaign history. No new campaign was created; try again shortly."
+    );
+  }
+
+  if (!Array.isArray(data)) {
+    throw campaignRecoveryError(
+      "campaign_recovery_history_invalid",
+      "permanent",
+      "SimplAssist found invalid prior campaign history. Contact SimplAssist Support before retrying."
+    );
+  }
+
+  const archived = new Set<string>();
+  for (const row of data ?? []) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw campaignRecoveryError(
+        "campaign_recovery_history_invalid",
+        "permanent",
+        "SimplAssist found invalid prior campaign history. Contact SimplAssist Support before retrying."
+      );
+    }
+    const campaignId = (row as { telnyx_campaign_id?: unknown })
+      .telnyx_campaign_id;
+    if (!isValidCampaignId(campaignId)) {
+      throw campaignRecoveryError(
+        "campaign_recovery_history_invalid",
+        "permanent",
+        "SimplAssist found invalid prior campaign history. Contact SimplAssist Support before retrying."
+      );
+    }
+    archived.add(campaignId.trim());
+  }
+  return archived;
+}
+
+function recoveredCampaignStatus(campaignStatus: string): RecoveredCampaignStatus {
+  const mapped = mapCampaignStatus({ campaignStatus });
+  return mapped.dbStatus ?? "pending";
+}
+
+/**
+ * Recover a campaign created by an earlier submit whose local save failed.
+ * The caller-supplied referenceId is the business UUID, so an exact match is
+ * safe to adopt. This runs on every registration attempt while the local
+ * campaign pointer is empty; a failed save therefore relists on the retry.
+ */
+async function recoverCampaignBeforeCreate(
+  businessId: string,
+  telnyxBrandId: string
+): Promise<boolean> {
+  const matches: CampaignListItem[] = [];
+  let totalCampaigns = 0;
+  const archivedCampaignIds = await readArchivedCampaignIds(businessId);
+
+  try {
+    const campaigns = telnyx.messaging10dlc.campaign.list({
+      brandId: telnyxBrandId,
+      recordsPerPage: 10,
+    });
+
+    for await (const listed of campaigns) {
+      if (!listed || typeof listed !== "object" || Array.isArray(listed)) {
+        throw campaignRecoveryError(
+          "campaign_recovery_malformed_response",
+          "permanent",
+          "Telnyx returned an incomplete campaign list. Contact SimplAssist Support before retrying."
+        );
+      }
+      const campaign = listed as CampaignListItem;
+      // campaignId is the stable identity of every list row. Without it we
+      // cannot safely distinguish or recover provider resources.
+      if (!isValidCampaignId(campaign.campaignId)) {
+        throw campaignRecoveryError(
+          "campaign_recovery_malformed_response",
+          "permanent",
+          "Telnyx returned an incomplete campaign list. Contact SimplAssist Support before retrying."
+        );
+      }
+
+      const campaignId = campaign.campaignId.trim();
+      // Rejected-campaign retry deliberately archives, deactivates, and
+      // clears the old pointer before asking for a replacement. Telnyx keeps
+      // terminated campaign records in list results; never re-adopt or count
+      // one that this business already archived.
+      if (archivedCampaignIds.has(campaignId)) continue;
+
+      totalCampaigns += 1;
+
+      if (
+        campaign.referenceId !== undefined &&
+        campaign.referenceId !== null &&
+        typeof campaign.referenceId !== "string"
+      ) {
+        throw campaignRecoveryError(
+          "campaign_recovery_malformed_response",
+          "permanent",
+          "Telnyx returned an incomplete campaign list. Contact SimplAssist Support before retrying."
+        );
+      }
+
+      if (campaign.referenceId !== businessId) continue;
+
+      if (
+        typeof campaign.brandId !== "string" ||
+        campaign.brandId.length === 0 ||
+        campaign.brandId.trim().toLowerCase() !== telnyxBrandId.toLowerCase() ||
+        typeof campaign.campaignStatus !== "string" ||
+        !TELNYX_CAMPAIGN_STATUSES.has(campaign.campaignStatus)
+      ) {
+        throw campaignRecoveryError(
+          "campaign_recovery_malformed_response",
+          "permanent",
+          "Telnyx returned an incomplete matching campaign. Contact SimplAssist Support before retrying."
+        );
+      }
+      if (
+        campaign.failureReasons !== undefined &&
+        campaign.failureReasons !== null &&
+        typeof campaign.failureReasons !== "string"
+      ) {
+        throw campaignRecoveryError(
+          "campaign_recovery_malformed_response",
+          "permanent",
+          "Telnyx returned an incomplete matching campaign. Contact SimplAssist Support before retrying."
+        );
+      }
+
+      matches.push({
+        ...campaign,
+        campaignId,
+        brandId: campaign.brandId.trim(),
+      });
+    }
+  } catch (error) {
+    if (error instanceof CampaignRegistrationError) throw error;
+    throw campaignRecoveryError(
+      "campaign_recovery_provider_unavailable",
+      "transient",
+      "Telnyx could not check for an existing campaign. No new campaign was created; try again shortly."
+    );
+  }
+
+  if (matches.length > 1) {
+    throw campaignRecoveryError(
+      "campaign_recovery_multiple_matches",
+      "permanent",
+      "More than one Telnyx campaign matches this SimplAssist business. Contact SimplAssist Support before retrying."
+    );
+  }
+
+  if (matches.length === 0) {
+    if (totalCampaigns >= TELNYX_BRAND_CAMPAIGN_CAP) {
+      throw campaignRecoveryError(
+        "telnyx_brand_campaign_cap_reached",
+        "permanent",
+        TELNYX_BRAND_CAMPAIGN_CAP_MESSAGE
+      );
+    }
+    return false;
+  }
+
+  // Recovery takes precedence over the cap: this does not create a sixth
+  // campaign, so it remains safe even when the brand currently has five.
+  const recovered = matches[0];
+  const status = recoveredCampaignStatus(recovered.campaignStatus!);
+  const rejectionReason =
+    status === "rejected"
+      ? recovered.failureReasons?.trim() ||
+        "Telnyx reported that the recovered campaign was rejected."
+      : null;
+  const now = new Date().toISOString();
+
+  const { data: persisted, error: updateError } = await supabaseAdmin
+    .from("businesses")
+    .update({
+      telnyx_campaign_id: recovered.campaignId,
+      campaign_status: status,
+      campaign_status_updated_at: now,
+      campaign_rejection_reason: rejectionReason,
+    })
+    .eq("id", businessId)
+    // Never overwrite a campaign another request persisted concurrently.
+    .is("telnyx_campaign_id", null)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (updateError || !persisted) {
+    throw campaignRecoveryError(
+      "campaign_recovery_persist_failed",
+      "transient",
+      "SimplAssist found the existing Telnyx campaign but could not save it. No new campaign was created; retry shortly."
+    );
+  }
+
+  await appendRegistrationEvent({
+    businessId,
+    eventType: "campaign_submitted",
+    resourceType: "campaign",
+    resourceId: recovered.campaignId,
+    status,
+    rejectionReason,
+    rawPayload: {
+      _recovery: {
+        source: "telnyx_campaign_list",
+        referenceIdMatched: true,
+      },
+    },
+  });
+
+  if (status === "rejected") {
+    throw campaignRecoveryError(
+      "campaign_recovered_rejected",
+      "permanent",
+      "The existing Telnyx campaign is rejected. Its carrier reason was saved for review."
+    );
+  }
+
+  return true;
+}
 
 /**
  * Why the campaign is being archived. 'campaign_rejected' is the original
@@ -239,6 +545,15 @@ export async function registerCampaign(businessId: string): Promise<void> {
     );
   }
 
+  // Submit is not atomic with our database write. If a prior attempt reached
+  // Telnyx but failed while persisting the returned ID, recover that exact
+  // referenceId before doing any preflight work or creating another campaign.
+  if (
+    await recoverCampaignBeforeCreate(businessId, business.telnyx_brand_id)
+  ) {
+    return;
+  }
+
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
 
   // Phase 6: privacy + terms URLs submitted to Telnyx. Resolved BEFORE the
@@ -371,12 +686,15 @@ export async function registerCampaign(businessId: string): Promise<void> {
       webhookFailoverURL: webhookURL,
     });
 
-    const campaignId = response.campaignId;
-    if (!campaignId) {
-      throw new Error(
-        `[registration:campaign] Telnyx returned no campaignId for business ${businessId}`
+    const rawCampaignId = response.campaignId;
+    if (!isValidCampaignId(rawCampaignId)) {
+      throw campaignRecoveryError(
+        "campaign_submit_malformed_response",
+        "permanent",
+        "Telnyx returned an invalid campaign identifier. Contact SimplAssist Support before retrying."
       );
     }
+    const campaignId = rawCampaignId.trim();
 
     const { error: updateError } = await supabaseAdmin
       .from("businesses")
