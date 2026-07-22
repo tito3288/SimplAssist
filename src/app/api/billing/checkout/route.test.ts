@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
@@ -65,16 +65,17 @@ function queueResults(...results: unknown[]) {
   });
 }
 
-function request() {
-  return new NextRequest("http://localhost/api/billing/checkout", {
+function request(mode: "onboarding" | "billing" = "onboarding") {
+  return new NextRequest("http://localhost:8080/api/billing/checkout", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ plan: "sms_and_chat", mode: "onboarding" }),
+    body: JSON.stringify({ plan: "sms_and_chat", mode }),
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://simplassist.com/");
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.getUser.mockResolvedValue({
     data: { user: { id: "owner-1" } },
@@ -84,6 +85,10 @@ beforeEach(() => {
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({ step: "complete" });
   mocks.createCheckoutSession.mockResolvedValue("https://checkout.test/session");
   mocks.getExistingTelnyxBrandLinkState.mockResolvedValue(null);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {
@@ -110,8 +115,8 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
         "sms_and_chat",
         "price_growth",
         "price_setup",
-        expect.stringContaining("/onboarding?checkout=success"),
-        expect.stringContaining("/onboarding?checkout=canceled"),
+        "https://simplassist.com/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}",
+        "https://simplassist.com/onboarding?checkout=canceled",
         "onboarding"
       );
       expect(await response.json()).toEqual({
@@ -173,5 +178,55 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/billing/checkout redirect URLs", () => {
+  it("uses the configured public origin instead of Railway's localhost origin", async () => {
+    queueResults(
+      { data: { ...BUSINESS, billing_exempt: false }, error: null },
+      { data: null, error: null }
+    );
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(
+      BUSINESS.id,
+      "sms_and_chat",
+      "price_growth",
+      "price_setup",
+      "https://simplassist.com/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}",
+      "https://simplassist.com/onboarding?checkout=canceled",
+      "onboarding"
+    );
+  });
+
+  it("uses the configured public origin for billing success and cancel URLs", async () => {
+    queueResults({ data: BUSINESS, error: null });
+
+    const response = await POST(request("billing"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(
+      BUSINESS.id,
+      "sms_and_chat",
+      "price_growth",
+      "price_setup",
+      "https://simplassist.com/billing?success=true&session_id={CHECKOUT_SESSION_ID}",
+      "https://simplassist.com/billing?canceled=true",
+      "billing"
+    );
+  });
+
+  it("fails before creating a Stripe session when production has no public URL", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+    queueResults({ data: BUSINESS, error: null });
+
+    const response = await POST(request("billing"));
+
+    expect(response.status).toBe(500);
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
   });
 });

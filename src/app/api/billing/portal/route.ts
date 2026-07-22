@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createBillingPortalSession } from "@/lib/stripe/checkout";
+import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const origin = request.nextUrl.origin;
+    const origin = publicAppOrigin(request.nextUrl.origin);
     const portalUrl = await createBillingPortalSession(
       subscription.stripe_customer_id,
       `${origin}/billing`

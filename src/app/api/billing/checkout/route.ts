@@ -5,6 +5,7 @@ import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { createCheckoutSession } from "@/lib/stripe/checkout";
 import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
+import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import type { SubscriptionPlan } from "@/types/database";
 
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
@@ -127,7 +128,7 @@ export async function POST(request: NextRequest) {
 
     const priceId = stripePriceIds()[plan as SubscriptionPlan];
     const setupFeePriceId = stripeSetupFeePriceId();
-    const origin = request.nextUrl.origin;
+    const origin = publicAppOrigin(request.nextUrl.origin);
     const successPath =
       mode === "onboarding"
         ? "/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}"
