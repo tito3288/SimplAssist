@@ -226,10 +226,8 @@ describe("POST /api/account/reactivate", () => {
   });
 
   it("rejects a missing reactivation reservation before calling Stripe", async () => {
-    const {
-      reactivation_reservation_token: _reservationToken,
-      ...invalidPreparation
-    } = preparedReactivation();
+    const invalidPreparation = { ...preparedReactivation() };
+    Reflect.deleteProperty(invalidPreparation, "reactivation_reservation_token");
     mocks.rpc.mockResolvedValue({ data: invalidPreparation, error: null });
 
     const response = await reactivateAccount();
