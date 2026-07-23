@@ -17,6 +17,8 @@ type PreparedStripeAction = {
 type PreparedReactivation = {
   alreadyActive: boolean;
   stripeAction: PreparedStripeAction | null;
+  reservationToken: string | null;
+  reservationExpiresAt: string | null;
 };
 
 export async function POST() {
@@ -39,17 +41,6 @@ export async function POST() {
     return NextResponse.json(
       { error: "Account not found or not scheduled for deletion" },
       { status: 404 }
-    );
-  }
-
-  if (
-    business.deleted_at &&
-    business.deletion_scheduled_for &&
-    new Date(business.deletion_scheduled_for) <= new Date()
-  ) {
-    return NextResponse.json(
-      { error: "Account has been permanently deleted and cannot be reactivated" },
-      { status: 410 }
     );
   }
 
@@ -127,6 +118,7 @@ export async function POST() {
       p_business_id: business.id,
       p_owner_id: user.id,
       p_generation: stripeAction?.generation ?? null,
+      p_reactivation_reservation_token: prepared.reservationToken,
     }
   );
 
@@ -173,15 +165,30 @@ function parsePreparedReactivation(
 
   if (value.already_active) {
     return value.stripe_action === null
-      ? { alreadyActive: true, stripeAction: null }
+      ? {
+          alreadyActive: true,
+          stripeAction: null,
+          reservationToken: null,
+          reservationExpiresAt: null,
+        }
       : null;
   }
 
-  if (typeof value.deletion_scheduled_for !== "string") {
+  if (
+    typeof value.deletion_scheduled_for !== "string" ||
+    !isUuid(value.reactivation_reservation_token) ||
+    typeof value.reactivation_reservation_expires_at !== "string" ||
+    !Number.isFinite(Date.parse(value.reactivation_reservation_expires_at))
+  ) {
     return null;
   }
   if (value.stripe_action === null) {
-    return { alreadyActive: false, stripeAction: null };
+    return {
+      alreadyActive: false,
+      stripeAction: null,
+      reservationToken: value.reactivation_reservation_token,
+      reservationExpiresAt: value.reactivation_reservation_expires_at,
+    };
   }
 
   const stripeAction = value.stripe_action;
@@ -207,12 +214,23 @@ function parsePreparedReactivation(
 
   return {
     alreadyActive: false,
+    reservationToken: value.reactivation_reservation_token,
+    reservationExpiresAt: value.reactivation_reservation_expires_at,
     stripeAction: {
       generation: stripeAction.generation as number,
       status: stripeAction.status,
       appliedAction: stripeAction.applied_action,
     },
   };
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    )
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

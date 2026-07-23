@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   hashRiskInput: vi.fn(),
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: {
     messaging10dlc: {

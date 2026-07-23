@@ -22,6 +22,8 @@ import { POST as reactivateAccount } from "./reactivate/route";
 const USER_ID = "00000000-0000-4000-8000-000000000010";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const GENERATION = 4;
+const REACTIVATION_RESERVATION_TOKEN =
+  "00000000-0000-4000-8000-000000000014";
 
 function userClient(
   business: Record<string, unknown> | null,
@@ -65,6 +67,8 @@ function preparedReactivation(
     business_id: BUSINESS_ID,
     already_active: false,
     deletion_scheduled_for: "2026-09-12T16:00:00.000Z",
+    reactivation_reservation_token: REACTIVATION_RESERVATION_TOKEN,
+    reactivation_reservation_expires_at: "2099-09-12T16:30:00.000Z",
     stripe_action: {
       business_id: BUSINESS_ID,
       desired_action: "resume",
@@ -217,7 +221,40 @@ describe("POST /api/account/reactivate", () => {
       p_business_id: BUSINESS_ID,
       p_owner_id: USER_ID,
       p_generation: GENERATION,
+      p_reactivation_reservation_token: REACTIVATION_RESERVATION_TOKEN,
     });
+  });
+
+  it("rejects a missing reactivation reservation before calling Stripe", async () => {
+    const {
+      reactivation_reservation_token: _reservationToken,
+      ...invalidPreparation
+    } = preparedReactivation();
+    mocks.rpc.mockResolvedValue({ data: invalidPreparation, error: null });
+
+    const response = await reactivateAccount();
+
+    expect(response.status).toBe(500);
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalledWith(
+      "complete_account_reactivation",
+      expect.anything()
+    );
+  });
+
+  it("rejects a malformed reactivation reservation before calling Stripe", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: {
+        ...preparedReactivation(),
+        reactivation_reservation_token: "not-a-uuid",
+      },
+      error: null,
+    });
+
+    const response = await reactivateAccount();
+
+    expect(response.status).toBe(500);
+    expect(mocks.reconcile).not.toHaveBeenCalled();
   });
 
   it("accepts terminal cancel as applied when Stripe reports the subscription missing", async () => {
@@ -378,7 +415,7 @@ describe("POST /api/account/reactivate", () => {
     );
   });
 
-  it("rejects reactivation after the grace period before preparing Stripe work", async () => {
+  it("lets the authoritative preparation RPC reject an expired grace period", async () => {
     mocks.createClient.mockResolvedValue(
       userClient({
         id: BUSINESS_ID,
@@ -386,10 +423,18 @@ describe("POST /api/account/reactivate", () => {
         deletion_scheduled_for: "2025-03-02T00:00:00.000Z",
       })
     );
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "55000", message: "outside grace period" },
+    });
 
     const response = await reactivateAccount();
 
     expect(response.status).toBe(410);
-    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith("prepare_account_reactivation", {
+      p_business_id: BUSINESS_ID,
+      p_owner_id: USER_ID,
+    });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
   });
 });

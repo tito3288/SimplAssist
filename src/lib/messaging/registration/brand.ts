@@ -6,6 +6,11 @@ import { appendRegistrationEvent, serializeError } from "./audit";
 import { archiveAndClearRejectedCampaign } from "./campaign";
 import { buildBusinessLandingUrl } from "./legalUrls";
 import { toTelnyxEntityType } from "./identity";
+import {
+  deleteTelnyxBrand,
+  preauthorizeTelnyxBrandDeletion,
+  TelnyxRemoteMutationAuthorizationError,
+} from "@/lib/messaging/telnyxDestructive";
 
 // Subset of the Telnyx `Vertical` enum we map to. Sourced from
 // node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
@@ -108,10 +113,13 @@ function toE164(raw: string | null): string | undefined {
  * ID and rejection details in rejected_brands, archive the child campaign
  * whatever state it is in (it is bound to the dead brand at TCR, so the
  * replacement brand cannot adopt it), delete the brand at Telnyx best-effort
- * (failure is recorded for manual cleanup and never blocks the retry), then
+ * (provider failure is recorded for manual cleanup and does not block the
+ * retry), then
  * clear businesses.telnyx_brand_id so registerBrand creates a replacement.
  * The messaging profile and voice application are untouched — neither
  * references the brand.
+ * A typed safety-boundary denial aborts recovery and preserves local provider
+ * pointers; it is never downgraded to a best-effort provider failure.
  *
  * No-op unless brand_status is 'rejected' with a brand ID present. Safe to
  * re-run after a partial failure: the history row is reused, the campaign
@@ -191,22 +199,41 @@ export async function archiveAndClearRejectedBrand(
     historyId = inserted.id;
   }
 
+  // Authorize the brand deletion BEFORE touching its child campaign. The
+  // actual delete authorizes again so a protection/configuration change made
+  // during the campaign operation still fails closed.
+  if (!existing?.telnyx_deleted) {
+    await preauthorizeTelnyxBrandDeletion({
+      businessId,
+      context: "rejection_recovery",
+      providerId: brandId,
+    });
+  }
+
   // 2. Archive the child campaign BEFORE the Telnyx brand delete: Telnyx
   //    refuses to delete a brand that still has active campaigns. Runs
   //    while brand_status is still 'rejected', so a failure here leaves
   //    this helper re-runnable.
   await archiveAndClearRejectedCampaign(businessId, { cause: "brand_refile" });
 
-  // 3. Best-effort Telnyx brand deletion (there is no brand deactivate
-  //    API). Never blocks the retry.
+  // 3. Best-effort Telnyx brand deletion (there is no brand deactivate API).
+  //    Provider failures do not block the retry; a typed safety-boundary
+  //    denial does.
   if (!existing?.telnyx_deleted) {
     try {
-      await telnyx.messaging10dlc.brand.delete(brandId);
+      await deleteTelnyxBrand({
+        businessId,
+        context: "rejection_recovery",
+        providerId: brandId,
+      });
       await supabaseAdmin
         .from("rejected_brands")
         .update({ telnyx_deleted: true, deletion_error: null })
         .eq("id", historyId);
     } catch (err) {
+      if (err instanceof TelnyxRemoteMutationAuthorizationError) {
+        throw err;
+      }
       const message = err instanceof Error ? err.message : String(err);
       console.error(
         `[registration:brand] Best-effort deletion of rejected brand ${brandId} failed for ${businessId} — needs manual cleanup:`,

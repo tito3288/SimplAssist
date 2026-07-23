@@ -217,7 +217,3 @@ export async function attachOwnedNumberToCustomerProfile(
     messaging_profile_id: business.telnyx_messaging_profile_id,
   });
 }
-
-export async function releaseNumber(phoneNumberId: string): Promise<void> {
-  await telnyx.phoneNumbers.delete(phoneNumberId);
-}

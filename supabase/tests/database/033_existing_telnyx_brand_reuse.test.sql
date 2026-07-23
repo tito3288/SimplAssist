@@ -49,14 +49,17 @@ SELECT ok(
     SELECT 1
     FROM pg_index AS index_row
     JOIN pg_class AS class_row ON class_row.oid = index_row.indexrelid
-    WHERE class_row.relname = 'businesses_telnyx_brand_id_lower_unique'
+    WHERE class_row.relname =
+            'businesses_live_telnyx_brand_id_lower_unique'
       AND index_row.indisunique
       AND pg_get_expr(index_row.indpred, index_row.indrelid)
-        = '(telnyx_brand_id IS NOT NULL)'
+        LIKE '%telnyx_brand_id IS NOT NULL%'
+      AND pg_get_expr(index_row.indpred, index_row.indrelid)
+        LIKE '%telnyx_unique_claims_released_at IS NULL%'
       AND pg_get_indexdef(index_row.indexrelid)
-        LIKE '%lower(telnyx_brand_id)%'
+        LIKE '%lower(btrim(telnyx_brand_id))%'
   ),
-  'attached Telnyx brand IDs are unique regardless of letter case'
+  'live Telnyx brand claims are unique and terminal tombstones release them'
 );
 
 SELECT ok(

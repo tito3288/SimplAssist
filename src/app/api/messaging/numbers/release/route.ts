@@ -1,65 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { releaseNumber } from "@/lib/messaging/numbers";
+import { NextResponse } from "next/server";
 
-export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { numberId } = await request.json();
-
-  if (!numberId) {
-    return NextResponse.json(
-      { error: "Number ID is required" },
-      { status: 400 }
-    );
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json(
-      { error: "Business not found" },
-      { status: 404 }
-    );
-  }
-
-  const { data: phoneNumberRow, error: lookupError } = await supabase
-    .from("phone_numbers")
-    .select("*")
-    .eq("id", numberId)
-    .eq("business_id", business.id)
-    .single();
-
-  if (lookupError || !phoneNumberRow) {
-    return NextResponse.json(
-      { error: "Number not found" },
-      { status: 404 }
-    );
-  }
-
-  try {
-    await releaseNumber(phoneNumberRow.telnyx_phone_number_id);
-
-    await supabase.from("phone_numbers").delete().eq("id", numberId);
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Error releasing number:", error);
-    return NextResponse.json(
-      { error: "Failed to release number" },
-      { status: 500 }
-    );
-  }
+/**
+ * Retired fail-closed endpoint.
+ *
+ * Number release is a lifecycle-worker operation. A customer-facing request
+ * must never call Telnyx or delete the local ownership record directly.
+ */
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: "Direct phone-number release is no longer supported.",
+      code: "number_release_managed_by_lifecycle",
+    },
+    { status: 410 }
+  );
 }

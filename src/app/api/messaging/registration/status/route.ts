@@ -309,6 +309,12 @@ async function lookupBusiness(
     .from("businesses")
     .select("id, name, owner_id, authorized_rep_email")
     .eq(column, resourceId)
+    // Terminal-cleanup tombstones may retain provider IDs for audit while
+    // relinquishing their uniqueness claims. Late carrier events must never
+    // resolve either a deleted account or a tombstone whose claims were
+    // explicitly released.
+    .is("deleted_at", null)
+    .is("telnyx_unique_claims_released_at", null)
     .maybeSingle();
 
   if (error) {

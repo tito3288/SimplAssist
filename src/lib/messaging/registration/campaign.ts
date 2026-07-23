@@ -1,4 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { telnyx } from "@/lib/messaging/client";
+import {
+  deactivateTelnyxCampaign,
+  TelnyxRemoteMutationAuthorizationError,
+} from "@/lib/messaging/telnyxDestructive";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { appendRegistrationEvent, serializeError } from "./audit";
@@ -55,6 +60,45 @@ export class CampaignRegistrationError extends Error {
     this.code = options.code;
     this.kind = options.kind;
   }
+}
+
+export type CampaignDeactivationStateErrorCode =
+  | "campaign_deactivation_fence_unavailable"
+  | "campaign_deactivation_reconciliation_required"
+  | "campaign_deactivation_outcome_persist_failed";
+
+/**
+ * A local durability failure around the at-most-once campaign-deactivation
+ * fence. These errors always stop pointer cleanup; Retry may either acquire a
+ * never-persisted fence or fail closed on an unresolved prior attempt.
+ */
+export class CampaignDeactivationStateError extends Error {
+  readonly code: CampaignDeactivationStateErrorCode;
+
+  constructor(
+    code: CampaignDeactivationStateErrorCode,
+    message: string,
+    options?: { cause?: unknown }
+  ) {
+    super(message, options);
+    this.name = "CampaignDeactivationStateError";
+    this.code = code;
+  }
+}
+
+const CAMPAIGN_DEACTIVATION_ATTEMPT_PREFIX =
+  "SIMPLASSIST_CAMPAIGN_DEACTIVATION_ATTEMPT_V1:";
+const CAMPAIGN_DEACTIVATION_READY =
+  "SIMPLASSIST_CAMPAIGN_DEACTIVATION_READY_V1";
+const CAMPAIGN_DEACTIVATION_PROVIDER_ERROR_PREFIX =
+  "SIMPLASSIST_CAMPAIGN_DEACTIVATION_PROVIDER_ERROR_V1:";
+const CAMPAIGN_DEACTIVATION_SUCCESS_UNCONFIRMED =
+  "Telnyx campaign deactivation returned success, but SimplAssist could not persist confirmation. Manual reconciliation is required; automatic deactivation will not be retried.";
+
+interface RejectedCampaignDeactivationState {
+  id: string;
+  telnyx_deactivated: boolean | null;
+  deactivation_error: string | null;
 }
 
 type RecoveredCampaignStatus = "pending" | "approved" | "rejected";
@@ -329,6 +373,204 @@ async function recoverCampaignBeforeCreate(
   return true;
 }
 
+function isCampaignDeactivationAttempt(value: string | null): boolean {
+  return value?.startsWith(CAMPAIGN_DEACTIVATION_ATTEMPT_PREFIX) ?? false;
+}
+
+function isCampaignDeactivationReady(value: string | null): boolean {
+  return value === CAMPAIGN_DEACTIVATION_READY;
+}
+
+async function readCampaignDeactivationState({
+  historyId,
+  businessId,
+  campaignId,
+  errorCode,
+}: {
+  historyId: string;
+  businessId: string;
+  campaignId: string;
+  errorCode: CampaignDeactivationStateErrorCode;
+}): Promise<RejectedCampaignDeactivationState> {
+  const { data, error } = await supabaseAdmin
+    .from("rejected_campaigns")
+    .select("id, telnyx_deactivated, deactivation_error")
+    .eq("id", historyId)
+    .eq("business_id", businessId)
+    .eq("telnyx_campaign_id", campaignId)
+    .single<RejectedCampaignDeactivationState>();
+
+  if (error || !data) {
+    throw new CampaignDeactivationStateError(
+      errorCode,
+      `[registration:campaign] Could not verify campaign-deactivation state for ${businessId}: ${error?.message ?? "history row not found"}`
+    );
+  }
+  return data;
+}
+
+async function claimCampaignDeactivationAttempt({
+  historyId,
+  businessId,
+  campaignId,
+}: {
+  historyId: string;
+  businessId: string;
+  campaignId: string;
+}): Promise<{ decision: "proceed"; token: string } | { decision: "skip" }> {
+  const token = `${CAMPAIGN_DEACTIVATION_ATTEMPT_PREFIX}${new Date().toISOString()}:${randomUUID()}`;
+  const { data: claimed, error } = await supabaseAdmin
+    .from("rejected_campaigns")
+    .update({ deactivation_error: token })
+    .eq("id", historyId)
+    .eq("business_id", businessId)
+    .eq("telnyx_campaign_id", campaignId)
+    .eq("telnyx_deactivated", false)
+    .eq("deactivation_error", CAMPAIGN_DEACTIVATION_READY)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_fence_unavailable",
+      `[registration:campaign] Could not persist the campaign-deactivation fence for ${businessId}: ${error.message}`
+    );
+  }
+  if (claimed) return { decision: "proceed", token };
+
+  // A zero-row CAS is never permission to call Telnyx. Re-read the exact
+  // history row: a completed/terminal owner lets local cleanup resume, while
+  // an unresolved owner fails closed so a concurrent request cannot race
+  // ahead and clear the campaign pointer during its provider call.
+  const current = await readCampaignDeactivationState({
+    historyId,
+    businessId,
+    campaignId,
+    errorCode: "campaign_deactivation_fence_unavailable",
+  });
+  if (current.telnyx_deactivated === true) return { decision: "skip" };
+  if (current.telnyx_deactivated !== false) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign-deactivation state is invalid for ${businessId}; reconcile it before retrying`
+    );
+  }
+  if (isCampaignDeactivationAttempt(current.deactivation_error)) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign deactivation for ${businessId} has an unresolved provider attempt; reconcile it before retrying`
+    );
+  }
+  if (isCampaignDeactivationReady(current.deactivation_error)) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_fence_unavailable",
+      `[registration:campaign] Campaign-deactivation fence ownership could not be confirmed for ${businessId}`
+    );
+  }
+  if (current.deactivation_error === null) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign ${campaignId} has legacy ambiguous deactivation state; reconcile it before retrying`
+    );
+  }
+  return { decision: "skip" };
+}
+
+async function transitionOwnedCampaignDeactivationAttempt({
+  historyId,
+  businessId,
+  campaignId,
+  token,
+  values,
+  errorCode,
+  detail,
+}: {
+  historyId: string;
+  businessId: string;
+  campaignId: string;
+  token: string;
+  values: { telnyx_deactivated?: boolean; deactivation_error: string | null };
+  errorCode: CampaignDeactivationStateErrorCode;
+  detail: string;
+}): Promise<void> {
+  const { data: transitioned, error } = await supabaseAdmin
+    .from("rejected_campaigns")
+    .update(values)
+    .eq("id", historyId)
+    .eq("business_id", businessId)
+    .eq("telnyx_campaign_id", campaignId)
+    .eq("telnyx_deactivated", false)
+    .eq("deactivation_error", token)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (!error && transitioned) return;
+
+  const current = await readCampaignDeactivationState({
+    historyId,
+    businessId,
+    campaignId,
+    errorCode,
+  });
+  // An ambiguous database response may have committed the requested terminal
+  // state. Any state no longer owned by this attempt is durably closed to a
+  // second automatic provider call, so the caller can preserve the original
+  // operation outcome instead of attempting another transition.
+  if (
+    current.telnyx_deactivated === true ||
+    (current.telnyx_deactivated === false &&
+      current.deactivation_error !== null &&
+      !isCampaignDeactivationAttempt(current.deactivation_error) &&
+      !isCampaignDeactivationReady(current.deactivation_error) &&
+      current.deactivation_error !== token)
+  ) {
+    return;
+  }
+
+  throw new CampaignDeactivationStateError(
+    errorCode,
+    `[registration:campaign] ${detail} for ${businessId}: ${error?.message ?? "state transition affected no row"}`
+  );
+}
+
+async function releaseCampaignDeactivationAttempt({
+  historyId,
+  businessId,
+  campaignId,
+  token,
+}: {
+  historyId: string;
+  businessId: string;
+  campaignId: string;
+  token: string;
+}): Promise<void> {
+  const { data: released, error } = await supabaseAdmin
+    .from("rejected_campaigns")
+    .update({ deactivation_error: CAMPAIGN_DEACTIVATION_READY })
+    .eq("id", historyId)
+    .eq("business_id", businessId)
+    .eq("telnyx_campaign_id", campaignId)
+    .eq("telnyx_deactivated", false)
+    .eq("deactivation_error", token)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (!error && released) return;
+
+  const current = await readCampaignDeactivationState({
+    historyId,
+    businessId,
+    campaignId,
+    errorCode: "campaign_deactivation_fence_unavailable",
+  });
+  if (current.deactivation_error !== token) return;
+
+  throw new CampaignDeactivationStateError(
+    "campaign_deactivation_fence_unavailable",
+    `[registration:campaign] Could not release the unused campaign-deactivation fence for ${businessId}: ${error?.message ?? "state transition affected no row"}`
+  );
+}
+
 /**
  * Why the campaign is being archived. 'campaign_rejected' is the original
  * carrier-rejection retry path. 'brand_refile' is brand-level recovery: a
@@ -342,9 +584,11 @@ export type CampaignArchiveCause = "campaign_rejected" | "brand_refile";
 /**
  * Retry recovery for a carrier-rejected campaign: preserve the rejected
  * campaign's ID and rejection details in rejected_campaigns, deactivate it at
- * Telnyx best-effort (stops its monthly billing; failure is recorded for
- * manual cleanup and never blocks the retry), then clear
+ * Telnyx best-effort (stops its monthly billing; provider failure is recorded
+ * for manual cleanup and does not block the retry), then clear
  * businesses.telnyx_campaign_id so registerCampaign creates a replacement.
+ * A typed safety-boundary denial is never treated as a provider failure: it
+ * aborts recovery with every local provider pointer intact.
  *
  * Default cause 'campaign_rejected': no-op unless campaign_status is
  * 'rejected' with a campaign ID present. Cause 'brand_refile' archives the
@@ -389,10 +633,10 @@ export async function archiveAndClearRejectedCampaign(
   //    prior partial run already archived this campaign).
   const { data: existing, error: existingError } = await supabaseAdmin
     .from("rejected_campaigns")
-    .select("id, telnyx_deactivated")
+    .select("id, telnyx_deactivated, deactivation_error")
     .eq("business_id", businessId)
     .eq("telnyx_campaign_id", campaignId)
-    .maybeSingle<{ id: string; telnyx_deactivated: boolean }>();
+    .maybeSingle<RejectedCampaignDeactivationState>();
 
   if (existingError) {
     // Fail loudly rather than risk duplicating history or re-deactivating:
@@ -402,13 +646,18 @@ export async function archiveAndClearRejectedCampaign(
     );
   }
 
-  let historyId = existing?.id ?? null;
-  if (!historyId) {
+  let historyState = existing ?? null;
+  if (!historyState) {
     const { data: inserted, error: historyError } = await supabaseAdmin
       .from("rejected_campaigns")
       .insert({
         business_id: businessId,
         telnyx_campaign_id: campaignId,
+        telnyx_deactivated: false,
+        // Explicitly distinguish a new, never-attempted row from legacy
+        // false/null rows whose old best-effort marker write may have failed
+        // after Telnyx was already called.
+        deactivation_error: CAMPAIGN_DEACTIVATION_READY,
         // A brand re-file can archive a campaign that was never itself
         // rejected (still pending under the dead brand) — record why the
         // row exists instead of leaving the reason blank.
@@ -418,36 +667,171 @@ export async function archiveAndClearRejectedCampaign(
             ? "Archived during brand re-file: parent brand rejected"
             : null),
       })
-      .select("id")
-      .single<{ id: string }>();
+      .select("id, telnyx_deactivated, deactivation_error")
+      .single<RejectedCampaignDeactivationState>();
 
     if (historyError || !inserted) {
       throw new Error(
         `[registration:campaign] Failed to archive rejected campaign ${campaignId} for ${businessId}: ${historyError?.message}`
       );
     }
-    historyId = inserted.id;
+    historyState = inserted;
+  }
+
+  const historyId = historyState.id;
+
+  if (historyState.telnyx_deactivated === null) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign-deactivation state is invalid for ${businessId}; reconcile it before retrying`
+    );
+  }
+  if (isCampaignDeactivationAttempt(historyState.deactivation_error)) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign deactivation for ${businessId} has an unresolved provider attempt; reconcile it before retrying`
+    );
+  }
+  if (
+    historyState.telnyx_deactivated === false &&
+    historyState.deactivation_error === null
+  ) {
+    throw new CampaignDeactivationStateError(
+      "campaign_deactivation_reconciliation_required",
+      `[registration:campaign] Campaign ${campaignId} has legacy ambiguous deactivation state; reconcile it before retrying`
+    );
   }
 
   // 2. Best-effort Telnyx deactivation — stops the rejected campaign's
-  //    monthly billing. Never blocks the retry.
-  if (!existing?.telnyx_deactivated) {
+  //    monthly billing. A durable compare-and-set fence is claimed inside the
+  //    guarded adapter after preauthorization, then database authorization is
+  //    checked once more before the SDK request. Once claimed, no Retry may
+  //    issue another automatic request.
+  //    Confirmed provider failures remain best-effort only after their
+  //    terminal diagnostic is durably stored.
+  if (
+    historyState.telnyx_deactivated === false &&
+    isCampaignDeactivationReady(historyState.deactivation_error)
+  ) {
+    let ownedAttemptToken: string | null = null;
     try {
-      await telnyx.messaging10dlc.campaign.deactivate(campaignId);
-      await supabaseAdmin
-        .from("rejected_campaigns")
-        .update({ telnyx_deactivated: true, deactivation_error: null })
-        .eq("id", historyId);
+      const result = await deactivateTelnyxCampaign(
+        {
+          businessId,
+          context: "rejection_recovery",
+          providerId: campaignId,
+        },
+        {
+          beforeMutation: async () => {
+            const claim = await claimCampaignDeactivationAttempt({
+              historyId,
+              businessId,
+              campaignId,
+            });
+            if (claim.decision === "proceed") {
+              ownedAttemptToken = claim.token;
+            }
+            return claim.decision;
+          },
+        }
+      );
+
+      if (result === "deactivated") {
+        if (!ownedAttemptToken) {
+          throw new CampaignDeactivationStateError(
+            "campaign_deactivation_reconciliation_required",
+            `[registration:campaign] Telnyx campaign deactivation for ${businessId} completed without confirmed fence ownership`
+          );
+        }
+
+        try {
+          await transitionOwnedCampaignDeactivationAttempt({
+            historyId,
+            businessId,
+            campaignId,
+            token: ownedAttemptToken,
+            values: {
+              telnyx_deactivated: true,
+              deactivation_error: null,
+            },
+            errorCode: "campaign_deactivation_outcome_persist_failed",
+            detail: "Could not persist confirmed Telnyx campaign deactivation",
+          });
+        } catch (confirmationError) {
+          // Keep a terminal non-null outcome when the true/null marker cannot
+          // be confirmed. Retry may finish local cleanup but may never issue a
+          // second provider request.
+          let terminalizationError: unknown = null;
+          try {
+            await transitionOwnedCampaignDeactivationAttempt({
+              historyId,
+              businessId,
+              campaignId,
+              token: ownedAttemptToken,
+              values: {
+                deactivation_error:
+                  CAMPAIGN_DEACTIVATION_SUCCESS_UNCONFIRMED,
+              },
+              errorCode: "campaign_deactivation_outcome_persist_failed",
+              detail:
+                "Could not close the uncertain Telnyx campaign-deactivation outcome",
+            });
+          } catch (error) {
+            terminalizationError = error;
+          }
+
+          throw new CampaignDeactivationStateError(
+            "campaign_deactivation_outcome_persist_failed",
+            `[registration:campaign] Telnyx campaign deactivation returned success for ${businessId}, but local confirmation failed; retry local cleanup without another provider call`,
+            { cause: terminalizationError ?? confirmationError }
+          );
+        }
+      }
     } catch (err) {
+      if (err instanceof TelnyxRemoteMutationAuthorizationError) {
+        if (ownedAttemptToken) {
+          try {
+            await releaseCampaignDeactivationAttempt({
+              historyId,
+              businessId,
+              campaignId,
+              token: ownedAttemptToken,
+            });
+          } catch (releaseError) {
+            console.error(
+              `[registration:campaign] Failed to release an unused campaign-deactivation fence for ${businessId}:`,
+              releaseError
+            );
+          }
+        }
+        throw err;
+      }
+      if (err instanceof CampaignDeactivationStateError) throw err;
+      if (!ownedAttemptToken) throw err;
+
       const message = err instanceof Error ? err.message : String(err);
+      const terminalProviderError =
+        `${CAMPAIGN_DEACTIVATION_PROVIDER_ERROR_PREFIX}${message}`.slice(
+          0,
+          2_000
+        );
       console.error(
         `[registration:campaign] Best-effort deactivation of rejected campaign ${campaignId} failed for ${businessId} — needs manual cleanup:`,
         err
       );
-      await supabaseAdmin
-        .from("rejected_campaigns")
-        .update({ deactivation_error: message })
-        .eq("id", historyId);
+      await transitionOwnedCampaignDeactivationAttempt({
+        historyId,
+        businessId,
+        campaignId,
+        token: ownedAttemptToken,
+        values: {
+          // Provider-controlled text is namespaced so it can never collide
+          // with READY or an in-flight attempt control value.
+          deactivation_error: terminalProviderError,
+        },
+        errorCode: "campaign_deactivation_outcome_persist_failed",
+        detail: "Could not persist the Telnyx campaign-deactivation failure",
+      });
     }
   }
 
@@ -468,7 +852,10 @@ export async function archiveAndClearRejectedCampaign(
       telnyx_campaign_assignment_updated_at: new Date().toISOString(),
     })
     .eq("business_id", businessId)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    // Never erase assignment state for a replacement campaign installed by
+    // a concurrent recovery attempt.
+    .eq("telnyx_campaign_assignment_campaign_id", campaignId);
 
   if (assignmentResetError) {
     throw new Error(
@@ -477,7 +864,7 @@ export async function archiveAndClearRejectedCampaign(
   }
 
   // 4. Clear the pointer so registerCampaign creates the replacement.
-  const { error: clearError } = await supabaseAdmin
+  const { data: cleared, error: clearError } = await supabaseAdmin
     .from("businesses")
     .update({
       telnyx_campaign_id: null,
@@ -485,12 +872,35 @@ export async function archiveAndClearRejectedCampaign(
       campaign_status_updated_at: new Date().toISOString(),
       campaign_rejection_reason: null,
     })
-    .eq("id", businessId);
+    .eq("id", businessId)
+    .eq("telnyx_campaign_id", campaignId)
+    .select("id")
+    .maybeSingle<{ id: string }>();
 
   if (clearError) {
     throw new Error(
       `[registration:campaign] Failed to clear rejected campaign ${campaignId} for ${businessId}: ${clearError.message}`
     );
+  }
+  if (!cleared) {
+    const { data: current, error: currentError } = await supabaseAdmin
+      .from("businesses")
+      .select("telnyx_campaign_id")
+      .eq("id", businessId)
+      .single<{ telnyx_campaign_id: string | null }>();
+
+    if (currentError || !current) {
+      throw new Error(
+        `[registration:campaign] Could not verify concurrent campaign cleanup for ${businessId}: ${currentError?.message ?? "business not found"}`
+      );
+    }
+    if (current.telnyx_campaign_id === campaignId) {
+      throw new Error(
+        `[registration:campaign] Rejected campaign ${campaignId} remained attached to ${businessId} after cleanup`
+      );
+    }
+    // Null means another cleanup won; a different ID means a replacement was
+    // already installed. In both cases this stale invocation must not write.
   }
 }
 
