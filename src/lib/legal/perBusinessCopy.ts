@@ -9,8 +9,8 @@
  * The privacy template intentionally hits all four carrier-required clauses
  * called out in the Compliance panel's "existing mode" self-check:
  *   1. Explicit mention of SMS/text messaging (Section 3 + 4)
- *   2. "Mobile information will not be shared with third parties for marketing"
- *      (Section 4, last paragraph — verbatim, do not paraphrase)
+ *   2. "We will not share mobile information with third parties for promotional
+ *      or marketing purposes" (Section 4, last paragraph — verbatim)
  *   3. Instructions to opt out via STOP (Section 4)
  *   4. Message frequency varies + msg & data rates may apply (Section 4)
  *
@@ -18,7 +18,10 @@
  * registrations that reference these URLs may be rejected by MNO review.
  */
 
-import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import {
+  buildSmsComplianceCopy,
+  MOBILE_INFORMATION_SHARING_DISCLOSURE,
+} from "@/lib/messaging/complianceCopy";
 
 export interface LegalSection {
   title: string;
@@ -51,7 +54,7 @@ export interface LegalTemplateBusiness {
   opt_in_description: string | null;
 }
 
-const LAST_UPDATED = "2026-05-15";
+const LAST_UPDATED = "2026-07-22";
 
 function contactEmail(b: LegalTemplateBusiness): string {
   // business.email is required in onboarding Step 1 (BusinessInfoForm), so it
@@ -69,7 +72,7 @@ function postalAddress(b: LegalTemplateBusiness): string | null {
 }
 
 function smsNumber(b: LegalTemplateBusiness): string {
-  return b.sms_phone_number ?? b.phone_number ?? "the number you texted or called";
+  return b.sms_phone_number ?? "the number you texted or called";
 }
 
 function phoneClause(b: LegalTemplateBusiness): string {
@@ -93,8 +96,10 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
   const email = contactEmail(b);
   const address = postalAddress(b);
   const phone = phoneClause(b);
-  const optIn =
-    b.opt_in_description?.trim() || legalOptInDescription(b);
+  // opt_in_description is a persisted campaign-submission snapshot and may
+  // remain stale during a manual appeal. Public policy copy must be rebuilt
+  // from the live shared model and currently active SMS number on every render.
+  const optIn = legalOptInDescription(b);
 
   return {
     lastUpdated: LAST_UPDATED,
@@ -126,7 +131,7 @@ export function buildPrivacyContent(b: LegalTemplateBusiness): LegalDoc {
           `By providing your phone number to ${name} — whether by texting us ${phone} first, or by calling us ${phone}, hearing our voicemail disclosure, and leaving a message after that disclosure — you consent to receive automated and AI-assisted customer-care text messages from ${name} at the mobile number you provided. These messages may include responses to your questions, missed-call follow-ups, service coordination, and other messages related to a conversation you started with us. Consent is not a condition of any purchase.`,
           `Message frequency varies based on your conversation and our follow-up needs. Message and data rates may apply depending on your mobile plan. You are responsible for any charges from your wireless carrier.`,
           `You can opt out of SMS messages at any time by replying STOP to any message from us. After you opt out, you will receive a single confirmation message and no further messages will be sent unless you opt back in by replying START. For help, reply HELP or contact us at ${email}.`,
-          `Mobile information, including your phone number and the contents of any text messages you send to us, will not be shared with third parties or affiliates for marketing or promotional purposes. We share this information only with our messaging service provider (Telnyx), our technology platform provider (SimplAssist), and other service providers strictly necessary to deliver and respond to your messages.`,
+          `${MOBILE_INFORMATION_SHARING_DISCLOSURE} We share mobile information only with our messaging service provider (Telnyx), our technology platform provider (SimplAssist), and other service providers strictly necessary to deliver and respond to your messages.`,
         ],
       },
       {

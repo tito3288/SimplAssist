@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resolveLegalUrls: vi.fn(),
   buildRiskInput: vi.fn(),
   hashRiskInput: vi.fn(),
+  getActiveSmsNumber: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -41,6 +42,9 @@ vi.mock("./audit", () => ({
 }));
 vi.mock("@/lib/messaging/complianceCopy", () => ({
   buildSmsComplianceCopy: mocks.buildSmsComplianceCopy,
+}));
+vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
+  getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
 }));
 vi.mock("./legalUrls", () => ({
   resolveLegalUrls: mocks.resolveLegalUrls,
@@ -79,6 +83,8 @@ const business = {
 
 const complianceCopy = {
   messageFlow: "Customers opt in on the website.",
+  confirmationSms: "You are subscribed.",
+  voicemailGreeting: "Press 1 to agree to receive texts.",
   optinMessage: "You are subscribed.",
   optoutMessage: "You are unsubscribed.",
   helpMessage: "Reply STOP to opt out.",
@@ -201,6 +207,7 @@ beforeEach(() => {
   });
   mocks.appendRegistrationEvent.mockResolvedValue(undefined);
   mocks.buildSmsComplianceCopy.mockReturnValue(complianceCopy);
+  mocks.getActiveSmsNumber.mockResolvedValue("+15551234567");
   mocks.resolveLegalUrls.mockReturnValue({
     privacyUrl: "https://app.simplassist.com/c/simplassist/privacy",
     termsUrl: "https://app.simplassist.com/c/simplassist/terms",
@@ -227,10 +234,113 @@ describe("registerCampaign recover-before-create", () => {
     });
     expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(mocks.submit).toHaveBeenCalledWith(
-      expect.objectContaining({ referenceId: BUSINESS_ID, brandId: BRAND_ID })
+      expect.objectContaining({ referenceId: BUSINESS_ID, brandId: BRAND_ID }),
+      { maxRetries: 0 }
     );
     expect(updates).toContainEqual(
       expect.objectContaining({ telnyx_campaign_id: NEW_CAMPAIGN_ID })
+    );
+  });
+
+  it("fails before every campaign fee/preflight operation when the active SMS number is missing", async () => {
+    mocks.getActiveSmsNumber.mockResolvedValue(null);
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
+      code: "campaign_sms_number_missing",
+      kind: "transient",
+    });
+
+    expect(mocks.buildSmsComplianceCopy).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.appendRegistrationEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "campaign_submitted",
+        status: "error",
+        rawPayload: expect.not.objectContaining({ _submitted: expect.anything() }),
+      })
+    );
+  });
+
+  it("rejects an over-limit message flow before rewriting copy, running preflight, or submitting", async () => {
+    mocks.buildSmsComplianceCopy.mockReturnValueOnce({
+      ...complianceCopy,
+      messageFlow: "x".repeat(2_049),
+    });
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
+      code: "campaign_message_flow_too_long",
+      kind: "permanent",
+    });
+
+    expect(updates).toEqual([]);
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.appendRegistrationEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "campaign_submitted",
+        status: "error",
+        rawPayload: expect.not.objectContaining({ _submitted: expect.anything() }),
+      })
+    );
+  });
+
+  it("audits the exact real number, message flow, and quoted scripts used for submit", async () => {
+    await registerCampaign(BUSINESS_ID);
+
+    expect(mocks.buildSmsComplianceCopy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        smsPhoneNumber: "+15551234567",
+        smsEntryPoint: "https://app.simplassist.com/c/simplassist",
+      })
+    );
+    expect(mocks.appendRegistrationEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "campaign_submitted",
+        resourceId: NEW_CAMPAIGN_ID,
+        status: "pending",
+        rawPayload: expect.objectContaining({
+          _submitted: {
+            privacyPolicyLink:
+              "https://app.simplassist.com/c/simplassist/privacy",
+            termsAndConditionsLink:
+              "https://app.simplassist.com/c/simplassist/terms",
+            messageFlow: complianceCopy.messageFlow,
+            messageFlowCharacterCount: complianceCopy.messageFlow.length,
+            smsPhoneNumber: "+15551234567",
+            smsEntryPoint: "https://app.simplassist.com/c/simplassist",
+            confirmationSms: complianceCopy.confirmationSms,
+            voicemailGreeting: complianceCopy.voicemailGreeting,
+            optinMessage: complianceCopy.optinMessage,
+            optoutMessage: complianceCopy.optoutMessage,
+            helpMessage: complianceCopy.helpMessage,
+          },
+        }),
+      })
+    );
+  });
+
+  it("recovers an ambiguously successful charged submit by referenceId without charging again", async () => {
+    mocks.submit.mockRejectedValueOnce(
+      new Error("connection closed after Telnyx accepted the campaign")
+    );
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toThrow(
+      "connection closed"
+    );
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+
+    setCampaigns([campaignItem()]);
+    await expect(registerCampaign(BUSINESS_ID)).resolves.toBeUndefined();
+
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(mocks.getCost).toHaveBeenCalledTimes(1);
+    expect(mocks.qualify).toHaveBeenCalledTimes(1);
+    expect(updates).toContainEqual(
+      expect.objectContaining({ telnyx_campaign_id: CAMPAIGN_ID })
     );
   });
 

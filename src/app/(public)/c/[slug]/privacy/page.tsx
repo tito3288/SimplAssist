@@ -7,6 +7,7 @@ import {
   buildPrivacyContent,
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
+import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import { isPendingSlug } from "@/lib/util/slug";
 
 /**
@@ -18,11 +19,13 @@ import { isPendingSlug } from "@/lib/util/slug";
  * IMPORTANT — column projection: this page MUST only read public-safe
  * fields. NEVER project ein, last_4_ssn, registrant_mobile, authorized_rep_*,
  * tax_id_type, or any other PII column on `businesses`. The select() below
- * includes id only so the server can read the active SimpleAssist number; id
+ * includes id only so the server can read the active SimplAssist number; id
  * is not rendered into the public page.
  */
 
 type PageProps = { params: Promise<{ slug: string }> };
+
+export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
   "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description";
@@ -45,18 +48,11 @@ async function loadBusiness(
     slug: string;
   };
 
-  const { data: phoneNumber } = await supabaseAdmin
-    .from("phone_numbers")
-    .select("phone_number")
-    .eq("business_id", business.id)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const smsPhoneNumber = await getActiveSmsNumberForBusiness(business.id);
 
   return {
     ...business,
-    sms_phone_number: phoneNumber?.phone_number ?? null,
+    sms_phone_number: smsPhoneNumber,
   };
 }
 

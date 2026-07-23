@@ -1,6 +1,19 @@
 import { telnyx } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+const TELNYX_PHONE_NUMBER_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function normalizeTelnyxPhoneNumberId(value: unknown, context: string): string {
+  if (
+    typeof value !== "string" ||
+    !TELNYX_PHONE_NUMBER_ID_PATTERN.test(value.trim())
+  ) {
+    throw new Error(`[messaging:numbers] Invalid Telnyx phone number id ${context}`);
+  }
+  return value.trim().toLowerCase();
+}
+
 export interface AvailableNumber {
   phoneNumber: string;
   friendlyName: string;
@@ -99,10 +112,13 @@ export async function findOwnedNumberId(
     filter: { phone_number: digitsOnly, customer_reference: businessId },
   });
 
-  const owned = result.data?.find(
-    (n) => typeof n.id === "string" && n.phone_number === phoneNumber
-  );
-  return owned?.id ?? null;
+  const owned = result.data?.find((n) => n.phone_number === phoneNumber);
+  return owned
+    ? normalizeTelnyxPhoneNumberId(
+        owned.id,
+        `returned while recovering ${phoneNumber} for business ${businessId}`
+      )
+    : null;
 }
 
 export async function getActivePhoneNumberForBusiness(
@@ -154,12 +170,18 @@ export async function purchaseNumber(
     );
   }
 
-  const order = await telnyx.numberOrders.create({
-    phone_numbers: [{ phone_number: phoneNumber }],
-    connection_id: business.telnyx_voice_application_id,
-    messaging_profile_id: business.telnyx_messaging_profile_id,
-    customer_reference: businessId,
-  });
+  const order = await telnyx.numberOrders.create(
+    {
+      phone_numbers: [{ phone_number: phoneNumber }],
+      connection_id: business.telnyx_voice_application_id,
+      messaging_profile_id: business.telnyx_messaging_profile_id,
+      customer_reference: businessId,
+    },
+    // Avoid an unkeyed automatic second order after an ambiguous transport
+    // failure. Retry recovers this exact business-scoped owned number before
+    // it can place another order.
+    { maxRetries: 0 }
+  );
 
   if (order.data?.status === "failure") {
     throw new Error(
@@ -173,10 +195,14 @@ export async function purchaseNumber(
       `Telnyx number order returned no phone_numbers entry for ${phoneNumber}`
     );
   }
+  const phoneNumberId = normalizeTelnyxPhoneNumberId(
+    purchased.id,
+    `returned by the number order for business ${businessId}`
+  );
 
   return {
     phoneNumber: purchased.phone_number,
-    phoneNumberId: purchased.id,
+    phoneNumberId,
     status: order.data?.status,
   };
 }
@@ -185,6 +211,14 @@ export async function attachOwnedNumberToCustomerProfile(
   businessId: string,
   phoneNumberId: string
 ): Promise<void> {
+  // Migration 034 deliberately preserves one protected legacy non-UUID row
+  // for manual cleanup, but that stale value must never be trusted or sent to
+  // Telnyx. Validate before any provider-facing routing update.
+  const normalizedPhoneNumberId = normalizeTelnyxPhoneNumberId(
+    phoneNumberId,
+    `stored for business ${businessId}`
+  );
+
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select("telnyx_messaging_profile_id, telnyx_voice_application_id")
@@ -209,11 +243,11 @@ export async function attachOwnedNumberToCustomerProfile(
     );
   }
 
-  await telnyx.phoneNumbers.update(phoneNumberId, {
+  await telnyx.phoneNumbers.update(normalizedPhoneNumberId, {
     connection_id: business.telnyx_voice_application_id,
     customer_reference: businessId,
   });
-  await telnyx.phoneNumbers.messaging.update(phoneNumberId, {
+  await telnyx.phoneNumbers.messaging.update(normalizedPhoneNumberId, {
     messaging_profile_id: business.telnyx_messaging_profile_id,
   });
 }

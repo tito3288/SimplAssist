@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { Phone, Mail, MapPin, Clock } from "lucide-react";
+import { Clock, Mail, MapPin, MessageSquareText, Phone } from "lucide-react";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { body, card, ink, inlineLink } from "@/lib/theme-v2/theme";
+import { body, card, ink, inlineLink, tile } from "@/lib/theme-v2/theme";
 import {
   PublicPageShell,
   publicHeaderLink,
 } from "@/components/legal/LegalDocLayout";
+import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import { formatPhoneNumber } from "@/lib/utils";
 import { isPendingSlug } from "@/lib/util/slug";
 
@@ -29,8 +31,12 @@ import { isPendingSlug } from "@/lib/util/slug";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
+// The number is activated during launch. Never cache a pre-activation page
+// that omits it; carrier reviewers must receive fresh server-rendered HTML.
+export const dynamic = "force-dynamic";
+
 const PUBLIC_PROJECTION =
-  "id, slug, name, business_type, email, phone_number, address, city, state, zip, opt_in_description";
+  "id, slug, name, business_type, email, phone_number, address, city, state, zip";
 
 const DAY_NAMES = [
   "Sunday",
@@ -53,7 +59,6 @@ type PublicBusiness = {
   city: string | null;
   state: string | null;
   zip: string | null;
-  opt_in_description: string | null;
 };
 
 type Hours = {
@@ -65,7 +70,11 @@ type Hours = {
 
 async function loadBusiness(
   slug: string
-): Promise<{ business: PublicBusiness; hours: Hours[] } | null> {
+): Promise<{
+  business: PublicBusiness;
+  hours: Hours[];
+  smsPhoneNumber: string | null;
+} | null> {
   if (isPendingSlug(slug)) return null;
 
   const { data: business, error } = await supabaseAdmin
@@ -76,15 +85,21 @@ async function loadBusiness(
 
   if (error || !business) return null;
 
+  const publicBusiness = business as unknown as PublicBusiness;
+  const smsPhoneNumber = await getActiveSmsNumberForBusiness(
+    publicBusiness.id
+  );
+
   const { data: hours } = await supabaseAdmin
     .from("business_hours")
     .select("day_of_week, open_time, close_time, is_closed")
-    .eq("business_id", (business as unknown as PublicBusiness).id)
+    .eq("business_id", publicBusiness.id)
     .order("day_of_week");
 
   return {
-    business: business as unknown as PublicBusiness,
+    business: publicBusiness,
     hours: (hours ?? []) as Hours[],
+    smsPhoneNumber,
   };
 }
 
@@ -96,7 +111,9 @@ export async function generateMetadata({
   if (!loaded) return { title: "Business" };
   return {
     title: loaded.business.name,
-    description: `${loaded.business.name} — contact information, hours, and SMS messaging policies.`,
+    description: loaded.smsPhoneNumber
+      ? `${loaded.business.name} — contact information, hours, and SMS messaging policies.`
+      : `${loaded.business.name} — contact information and hours.`,
   };
 }
 
@@ -124,8 +141,17 @@ export default async function BusinessLandingPage({ params }: PageProps) {
   const { slug } = await params;
   const loaded = await loadBusiness(slug);
   if (!loaded) notFound();
-  const { business, hours } = loaded;
+  const { business, hours, smsPhoneNumber } = loaded;
   const address = formatAddress(business);
+  const privacyHref = `/c/${business.slug}/privacy`;
+  const smsCopy = smsPhoneNumber
+    ? buildSmsComplianceCopy({
+        business,
+        smsPhoneNumber,
+        smsEntryPoint: `this page (/c/${business.slug})`,
+        privacyUrl: privacyHref,
+      })
+    : null;
 
   return (
     <PublicPageShell
@@ -158,6 +184,34 @@ export default async function BusinessLandingPage({ params }: PageProps) {
           {business.name}
         </h1>
 
+        {smsPhoneNumber && smsCopy && (
+          <section
+            aria-labelledby="sms-contact-heading"
+            className="mt-8 rounded-[24px] border border-[#f2c9a5] bg-[#fdf1e7] p-5 sm:p-6 dark:border-[rgba(255,145,77,0.28)] dark:bg-[rgba(255,145,77,0.10)]"
+          >
+            <h2
+              id="sms-contact-heading"
+              className="text-sm font-bold uppercase tracking-[0.14em] text-[#9a3412] dark:text-[#ffd7bf]"
+            >
+              SMS customer care
+            </h2>
+            <a
+              href={`sms:${smsPhoneNumber}`}
+              aria-label={`Text ${business.name} at ${smsPhoneNumber}`}
+              className="mt-3 inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full bg-[#c2410c] px-5 py-3 text-base font-bold text-white transition-colors hover:bg-[#9a3412] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c2410c]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#fdf1e7] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] dark:focus-visible:ring-[#ff914d]/60 dark:focus-visible:ring-offset-[#17110d]"
+            >
+              <MessageSquareText className="h-5 w-5 shrink-0" aria-hidden />
+              <span>Text us at</span>
+              <span dir="ltr" className="font-mono tracking-tight">
+                {smsPhoneNumber}
+              </span>
+            </a>
+            <p className={`mt-4 text-[15px] leading-relaxed ${body}`}>
+              {smsCopy.disclosures.purpose}
+            </p>
+          </section>
+        )}
+
         <div className={`mt-8 grid gap-4 ${body}`}>
           {business.phone_number && (
             <a
@@ -165,7 +219,12 @@ export default async function BusinessLandingPage({ params }: PageProps) {
               className="inline-flex items-center gap-3 text-base transition-colors hover:text-[#c2410c] dark:hover:text-[#ff914d]"
             >
               <Phone className="h-4 w-4 shrink-0" aria-hidden />
-              <span>{formatPhoneNumber(business.phone_number)}</span>
+              <span>
+                <span className="font-semibold text-stone-700 dark:text-[#d4d4d8]">
+                  Call us at
+                </span>{" "}
+                {formatPhoneNumber(business.phone_number)}
+              </span>
             </a>
           )}
           {business.email && (
@@ -208,32 +267,121 @@ export default async function BusinessLandingPage({ params }: PageProps) {
           </section>
         )}
 
-        {business.opt_in_description && (
-          <section className="mt-10">
+        {smsPhoneNumber && smsCopy && (
+          <section className="mt-12" aria-labelledby="sms-compliance-heading">
             <h2
-              className={`mb-3 text-lg font-semibold tracking-tight sm:text-xl ${ink}`}
+              id="sms-compliance-heading"
+              className={`text-xl font-semibold tracking-tight sm:text-2xl ${ink}`}
             >
-              About our SMS messaging
+              SMS opt-in and program details
             </h2>
-            <p className={`text-[15px] leading-relaxed sm:text-base ${body}`}>
-              {business.opt_in_description}
+            <p className={`mt-3 text-[15px] leading-relaxed sm:text-base ${body}`}>
+              {smsCopy.optInPaths.introduction}
             </p>
-            <p className={`mt-3 text-sm ${body}`}>
-              See our{" "}
-              <Link
-                href={`/c/${business.slug}/privacy`}
-                className={`${inlineLink} underline-offset-2 hover:underline`}
-              >
-                Privacy Policy
-              </Link>{" "}
-              and{" "}
+
+            <div className="mt-6 grid gap-5">
+              <section className={`p-5 sm:p-6 ${tile}`}>
+                <h3 className={`text-base font-semibold sm:text-lg ${ink}`}>
+                  Text-message opt-in
+                </h3>
+                <p className={`mt-2 text-[15px] leading-relaxed ${body}`}>
+                  {smsCopy.optInPaths.inboundSms}
+                </p>
+                <p className={`mt-4 text-sm font-semibold ${ink}`}>
+                  Confirmation SMS
+                </p>
+                <blockquote
+                  className={`mt-2 border-l-2 border-[#ea580c] pl-4 text-[15px] italic leading-relaxed dark:border-[#ff914d] ${body}`}
+                >
+                  “{smsCopy.confirmationSms}”
+                </blockquote>
+              </section>
+
+              <section className={`p-5 sm:p-6 ${tile}`}>
+                <h3 className={`text-base font-semibold sm:text-lg ${ink}`}>
+                  Voicemail opt-in
+                </h3>
+                <p className={`mt-2 text-[15px] leading-relaxed ${body}`}>
+                  {smsCopy.optInPaths.voicemail}
+                </p>
+                <p className={`mt-3 text-[15px] leading-relaxed ${body}`}>
+                  {smsCopy.optInPaths.callForwarding}
+                </p>
+                <p className={`mt-4 text-sm font-semibold ${ink}`}>
+                  What callers hear before leaving a message
+                </p>
+                <blockquote
+                  className={`mt-2 border-l-2 border-[#ea580c] pl-4 text-[15px] italic leading-relaxed dark:border-[#ff914d] ${body}`}
+                >
+                  “{smsCopy.voicemailGreeting}”
+                </blockquote>
+              </section>
+            </div>
+
+            <h3 className={`mt-8 text-base font-semibold sm:text-lg ${ink}`}>
+              Program disclosures
+            </h3>
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className={`p-4 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>
+                  Message frequency
+                </dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  {smsCopy.disclosures.frequency}
+                </dd>
+              </div>
+              <div className={`p-4 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>
+                  Message and data rates
+                </dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  {smsCopy.disclosures.rates}
+                </dd>
+              </div>
+              <div className={`p-4 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>HELP</dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  {smsCopy.disclosures.help}
+                </dd>
+              </div>
+              <div className={`p-4 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>STOP</dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  {smsCopy.disclosures.stop}
+                </dd>
+              </div>
+              <div className={`p-4 sm:col-span-2 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>
+                  Mobile information sharing
+                </dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  {smsCopy.disclosures.mobileInformationSharing}
+                </dd>
+              </div>
+              <div className={`p-4 sm:col-span-2 ${tile}`}>
+                <dt className={`text-sm font-semibold ${ink}`}>
+                  Privacy Policy
+                </dt>
+                <dd className={`mt-1 text-sm leading-relaxed ${body}`}>
+                  <Link
+                    href={privacyHref}
+                    className={`${inlineLink} underline-offset-2 hover:underline`}
+                  >
+                    {smsCopy.disclosures.privacyPolicy}
+                  </Link>
+                </dd>
+              </div>
+            </dl>
+
+            <p className={`mt-5 text-sm ${body}`}>
+              See also our{" "}
               <Link
                 href={`/c/${business.slug}/terms`}
                 className={`${inlineLink} underline-offset-2 hover:underline`}
               >
                 Terms of Service
-              </Link>{" "}
-              for details on opt-in, opt-out, and message frequency.
+              </Link>
+              .
             </p>
           </section>
         )}

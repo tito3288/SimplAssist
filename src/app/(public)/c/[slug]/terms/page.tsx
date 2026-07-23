@@ -7,6 +7,7 @@ import {
   buildTermsContent,
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
+import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import { isPendingSlug } from "@/lib/util/slug";
 
 /**
@@ -17,6 +18,8 @@ import { isPendingSlug } from "@/lib/util/slug";
  */
 
 type PageProps = { params: Promise<{ slug: string }> };
+
+export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
   "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description";
@@ -39,18 +42,11 @@ async function loadBusiness(
     slug: string;
   };
 
-  const { data: phoneNumber } = await supabaseAdmin
-    .from("phone_numbers")
-    .select("phone_number")
-    .eq("business_id", business.id)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const smsPhoneNumber = await getActiveSmsNumberForBusiness(business.id);
 
   return {
     ...business,
-    sms_phone_number: phoneNumber?.phone_number ?? null,
+    sms_phone_number: smsPhoneNumber,
   };
 }
 

@@ -8,6 +8,7 @@ import {
   PurchasedNumberSaveError,
   purchaseNumber,
 } from "@/lib/messaging/numbers";
+import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import {
   createMessagingProfile,
   createVoiceApplication,
@@ -31,6 +32,7 @@ import {
   A2P_RISK_CUSTOMER_REVIEW_MESSAGE,
 } from "@/lib/messaging/registration/riskCategories";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
+import { verifyPublishedCompliancePage } from "@/lib/messaging/registration/publicCompliancePage";
 import {
   getA2pRiskClearanceForBusiness,
   screenA2pRiskForBusiness,
@@ -85,6 +87,8 @@ type LaunchResult =
 
 interface BusinessLaunchRow {
   id: string;
+  slug: string;
+  name: string;
   has_ein: boolean | null;
   pending_phone_number: string | null;
   telnyx_submission_disabled: boolean;
@@ -163,10 +167,11 @@ export async function attemptPaidLaunch(
   let linkedExistingBrandConsumed = false;
 
   try {
-    // Exact Phase 9 order after checkout success:
-    // risk -> attempt gate -> existing-brand revalidate/consume -> brand
-    // archive -> brand -> campaign archive -> campaign -> profile -> voice ->
-    // owned attach / purchase.
+    // Paid-launch order after checkout success:
+    // risk -> attempt gate -> existing-brand revalidate/consume -> rejected
+    // brand cleanup -> brand -> profile -> voice -> owned attach / purchase ->
+    // active number + deployed compliance-page verification -> rejected
+    // campaign cleanup -> campaign.
     // The retry-only risk gate lives INSIDE the try so a transient failure
     // here funnels into the catch's markRegistrationFailed (immediately
     // retryable) instead of stranding the claimed row in 'submitting'.
@@ -226,12 +231,10 @@ export async function attemptPaidLaunch(
     // No-op in every other state.
     await archiveAndClearRejectedBrand(businessId);
     await registerBrand(businessId);
-    // Carrier-rejected campaign? Archive its history, deactivate it at
-    // Telnyx (best-effort), and clear the pointer so a replacement is
-    // created below. After a brand re-file this is a no-op (the cascade
-    // already archived the campaign). No-op in every other state.
-    await archiveAndClearRejectedCampaign(businessId);
-    await registerCampaign(businessId);
+
+    // A number order needs both routing resources. Each helper recovers an
+    // exact business-scoped provider resource before creating, closing the
+    // provider-success/local-save retry gap.
     await createMessagingProfile(businessId);
     await createVoiceApplication(businessId);
 
@@ -245,6 +248,29 @@ export async function attemptPaidLaunch(
     } else {
       await purchasePendingNumber(businessId, business.pending_phone_number);
     }
+
+    // Use the same strict active-number source as /c/[slug] and campaign
+    // generation (including duplicate-row and E.164 validation), then fetch
+    // the deployed page's raw SSR HTML. No charged campaign submission is
+    // reachable until the exact active number and disclosure markers render.
+    const smsPhoneNumber = await getActiveSmsNumberForBusiness(businessId);
+    if (!smsPhoneNumber) {
+      throw new Error(
+        `[billing:launch] Active SMS number disappeared before compliance-page verification for ${businessId}`
+      );
+    }
+    await verifyPublishedCompliancePage({
+      slug: business.slug,
+      businessName: business.name,
+      smsPhoneNumber,
+    });
+
+    // Carrier-rejected campaign? Archive its history, deactivate it at
+    // Telnyx (best-effort), and clear the pointer so a replacement is
+    // created below. After a brand re-file this is a no-op (the cascade
+    // already archived the campaign). No-op in every other state.
+    await archiveAndClearRejectedCampaign(businessId);
+    await registerCampaign(businessId);
 
     await ensureCampaignAssignmentForBusiness(businessId, {
       force: true,
@@ -347,7 +373,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt"
+      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();

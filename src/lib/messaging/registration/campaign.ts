@@ -5,8 +5,12 @@ import {
   TelnyxRemoteMutationAuthorizationError,
 } from "@/lib/messaging/telnyxDestructive";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import { appendRegistrationEvent, serializeError } from "./audit";
+import {
+  buildCampaignMessageFlow,
+  CampaignMessageFlowError,
+} from "./campaignMessageFlow";
 import { resolveLegalUrls, type PrivacyTermsMode } from "./legalUrls";
 import {
   buildA2pRiskInputForBusiness,
@@ -975,15 +979,44 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { privacyUrl, termsUrl } = resolveLegalUrls(business);
   const smsEntryPoint = `${appBaseUrl()}/c/${business.slug}`;
 
-  const complianceCopy = buildSmsComplianceCopy({
-    privacyUrl,
-    smsPhoneNumber: null,
-    smsEntryPoint,
-    business,
-  });
   let campaignPreflightChecked = false;
+  let submissionAuditSnapshot: Record<string, unknown> | null = null;
 
   try {
+    const smsPhoneNumber = await getActiveSmsNumberForBusiness(businessId);
+    if (!smsPhoneNumber) {
+      throw new CampaignMessageFlowError({
+        code: "campaign_sms_number_missing",
+        kind: "transient",
+        message:
+          "Campaign submission requires an active SMS phone number in E.164 format.",
+      });
+    }
+
+    // This is the final, mandatory-number generator. It validates E.164 and
+    // enforces Telnyx's 2,048-character limit before any database rewrite,
+    // provider preflight, or charged campaign submission can occur.
+    const complianceCopy = buildCampaignMessageFlow({
+      privacyUrl,
+      smsPhoneNumber,
+      smsEntryPoint,
+      business,
+    });
+    const currentSubmissionAuditSnapshot = {
+      privacyPolicyLink: privacyUrl,
+      termsAndConditionsLink: termsUrl,
+      messageFlow: complianceCopy.messageFlow,
+      messageFlowCharacterCount: complianceCopy.messageFlowCharacterCount,
+      smsPhoneNumber: complianceCopy.smsPhoneNumber,
+      smsEntryPoint,
+      confirmationSms: complianceCopy.confirmationSms,
+      voicemailGreeting: complianceCopy.voicemailGreeting,
+      optinMessage: complianceCopy.optinMessage,
+      optoutMessage: complianceCopy.optoutMessage,
+      helpMessage: complianceCopy.helpMessage,
+    };
+    submissionAuditSnapshot = currentSubmissionAuditSnapshot;
+
     const { error: optInUpdateError } = await supabaseAdmin
       .from("businesses")
       .update({ opt_in_description: complianceCopy.messageFlow })
@@ -1061,40 +1094,45 @@ export async function registerCampaign(businessId: string): Promise<void> {
     });
     campaignPreflightChecked = true;
 
-    const response = await telnyx.messaging10dlc.campaignBuilder.submit({
-      brandId: business.telnyx_brand_id,
-      description: business.use_case_description,
-      usecase: CAMPAIGN_USECASE,
-      sample1: samples[0],
-      sample2: samples[1],
-      sample3: samples[2],
-      sample4: samples[3],
-      sample5: samples[4],
-      messageFlow: complianceCopy.messageFlow,
-      subscriberOptin: true,
-      optinKeywords: OPTIN_KEYWORDS,
-      optinMessage: complianceCopy.optinMessage,
-      subscriberOptout: true,
-      optoutKeywords: OPTOUT_KEYWORDS,
-      optoutMessage: complianceCopy.optoutMessage,
-      subscriberHelp: true,
-      helpKeywords: HELP_KEYWORDS,
-      helpMessage: complianceCopy.helpMessage,
-      // Boolean acceptance flag — REQUIRED by Telnyx, separate from the URL
-      // fields below. Do not remove when refactoring URL handling.
-      termsAndConditions: true,
-      privacyPolicyLink: privacyUrl,
-      termsAndConditionsLink: termsUrl,
-      autoRenewal: true,
-      embeddedLink: false,
-      embeddedPhone: false,
-      ageGated: false,
-      numberPool: false,
-      directLending: false,
-      referenceId: businessId,
-      webhookURL,
-      webhookFailoverURL: webhookURL,
-    });
+    const response = await telnyx.messaging10dlc.campaignBuilder.submit(
+      {
+        brandId: business.telnyx_brand_id,
+        description: business.use_case_description,
+        usecase: CAMPAIGN_USECASE,
+        sample1: samples[0],
+        sample2: samples[1],
+        sample3: samples[2],
+        sample4: samples[3],
+        sample5: samples[4],
+        messageFlow: complianceCopy.messageFlow,
+        subscriberOptin: true,
+        optinKeywords: OPTIN_KEYWORDS,
+        optinMessage: complianceCopy.optinMessage,
+        subscriberOptout: true,
+        optoutKeywords: OPTOUT_KEYWORDS,
+        optoutMessage: complianceCopy.optoutMessage,
+        subscriberHelp: true,
+        helpKeywords: HELP_KEYWORDS,
+        helpMessage: complianceCopy.helpMessage,
+        // Boolean acceptance flag — REQUIRED by Telnyx, separate from the URL
+        // fields below. Do not remove when refactoring URL handling.
+        termsAndConditions: true,
+        privacyPolicyLink: privacyUrl,
+        termsAndConditionsLink: termsUrl,
+        autoRenewal: true,
+        embeddedLink: false,
+        embeddedPhone: false,
+        ageGated: false,
+        numberPool: false,
+        directLending: false,
+        referenceId: businessId,
+        webhookURL,
+        webhookFailoverURL: webhookURL,
+      },
+      // This POST carries an upfront, non-refundable campaign charge. Do not
+      // let the SDK replay an ambiguous success; Retry recovers by referenceId.
+      { maxRetries: 0 }
+    );
 
     const rawCampaignId = response.campaignId;
     if (!isValidCampaignId(rawCampaignId)) {
@@ -1129,16 +1167,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       status: "pending",
       rawPayload: {
         ...(response as unknown as Record<string, unknown>),
-        _submitted: {
-          privacyPolicyLink: privacyUrl,
-          termsAndConditionsLink: termsUrl,
-          messageFlow: complianceCopy.messageFlow,
-          smsPhoneNumber: "number_agnostic_pending_paid_launch",
-          smsEntryPoint,
-          optinMessage: complianceCopy.optinMessage,
-          optoutMessage: complianceCopy.optoutMessage,
-          helpMessage: complianceCopy.helpMessage,
-        },
+        _submitted: currentSubmissionAuditSnapshot,
       },
     });
   } catch (err) {
@@ -1162,16 +1191,9 @@ export async function registerCampaign(businessId: string): Promise<void> {
       status: "error",
       rawPayload: {
         error: serializeError(err),
-        _submitted: {
-          privacyPolicyLink: privacyUrl,
-          termsAndConditionsLink: termsUrl,
-          messageFlow: complianceCopy.messageFlow,
-          smsPhoneNumber: "number_agnostic_pending_paid_launch",
-          smsEntryPoint,
-          optinMessage: complianceCopy.optinMessage,
-          optoutMessage: complianceCopy.optoutMessage,
-          helpMessage: complianceCopy.helpMessage,
-        },
+        ...(submissionAuditSnapshot
+          ? { _submitted: submissionAuditSnapshot }
+          : {}),
       },
     });
     throw err;

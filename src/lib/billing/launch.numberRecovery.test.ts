@@ -18,11 +18,19 @@ const mocks = vi.hoisted(() => ({
   claimRegistrationAttempt: vi.fn(),
   markRegistrationFailed: vi.fn(),
   markRegistrationSubmitted: vi.fn(),
+  getActiveSmsNumber: vi.fn(),
+  verifyPublishedCompliancePage: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
+}));
+vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
+  getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
+}));
+vi.mock("@/lib/messaging/registration/publicCompliancePage", () => ({
+  verifyPublishedCompliancePage: mocks.verifyPublishedCompliancePage,
 }));
 vi.mock("@/lib/messaging/numbers", async (importOriginal) => {
   // Keep the REAL PurchasedNumberSaveError class — launch.ts classifies by
@@ -76,6 +84,8 @@ const TELNYX_NUMBER_ID = "tn_number_uuid_1";
 
 const LAUNCH_BUSINESS = {
   id: BUSINESS_ID,
+  slug: "test-business",
+  name: "Test Business",
   has_ein: true,
   pending_phone_number: PENDING_NUMBER,
   telnyx_submission_disabled: false,
@@ -119,7 +129,7 @@ function queueResults(...results: unknown[]) {
 // Query order for the fresh-purchase flow (billing-exempt business with no
 // synchronized subscription): 1 businesses launch-row read; 2 subscriptions;
 // 3 phone_numbers readActiveNumber (pre-claim); 4 phone_numbers
-// readActiveNumber (post-registration); 5 phone_numbers step-1 collision
+// readActiveNumber (after routing resources); 5 phone_numbers step-1 collision
 // check; 6 phone_numbers insert; 7 businesses clearPending.
 function queueHappyPathThrough(...tail: unknown[]) {
   queueResults(
@@ -161,6 +171,8 @@ beforeEach(() => {
     fn.mockResolvedValue(undefined);
   }
   mocks.findOwnedNumberId.mockResolvedValue(null);
+  mocks.getActiveSmsNumber.mockResolvedValue(PENDING_NUMBER);
+  mocks.verifyPublishedCompliancePage.mockResolvedValue(undefined);
   mocks.prepareExistingTelnyxBrandLinkForLaunch.mockResolvedValue({
     status: "not_requested",
   });
@@ -209,7 +221,110 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       PENDING_NUMBER,
       BUSINESS_ID
     );
+    expect(
+      mocks.prepareExistingTelnyxBrandLinkForLaunch.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.archiveAndClearRejectedBrand.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.archiveAndClearRejectedBrand.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.registerBrand.mock.invocationCallOrder[0]);
+    expect(mocks.registerBrand.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createMessagingProfile.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.createMessagingProfile.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.createVoiceApplication.mock.invocationCallOrder[0]);
+    expect(
+      mocks.createVoiceApplication.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.purchaseNumber.mock.invocationCallOrder[0]);
+    expect(mocks.purchaseNumber.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getActiveSmsNumber.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.getActiveSmsNumber.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.verifyPublishedCompliancePage.mock.invocationCallOrder[0]);
+    expect(
+      mocks.verifyPublishedCompliancePage.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.archiveAndClearRejectedCampaign.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.archiveAndClearRejectedCampaign.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.registerCampaign.mock.invocationCallOrder[0]);
+    expect(mocks.verifyPublishedCompliancePage).toHaveBeenCalledWith({
+      slug: LAUNCH_BUSINESS.slug,
+      businessName: LAUNCH_BUSINESS.name,
+      smsPhoneNumber: PENDING_NUMBER,
+    });
     expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
+  });
+
+  it("fails before campaign cleanup or submission when the strict active number disappears", async () => {
+    queueHappyPathThrough(
+      { data: null, error: null },
+      { error: null },
+      { error: null }
+    );
+    mocks.getActiveSmsNumber.mockResolvedValue(null);
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+  });
+
+  it("keeps the campaign-fee path closed until deployed raw HTML passes", async () => {
+    queueHappyPathThrough(
+      { data: null, error: null },
+      { error: null },
+      { error: null }
+    );
+    mocks.verifyPublishedCompliancePage.mockRejectedValue(
+      new Error("raw HTML missing SMS disclosures")
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
+  });
+
+  it("stops before voice, number, page, and campaign work when profile setup fails", async () => {
+    queueHappyPathThrough();
+    mocks.createMessagingProfile.mockRejectedValue(
+      new Error("profile reconciliation required")
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.createVoiceApplication).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("stops before number, page, and campaign work when voice setup fails", async () => {
+    queueHappyPathThrough();
+    mocks.createVoiceApplication.mockRejectedValue(
+      new Error("voice application reconciliation required")
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
   });
 
   it("classifies a save failure as retryable with truthful copy, keeping the pending number", async () => {
@@ -265,6 +380,99 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       BUSINESS_ID,
       TELNYX_NUMBER_ID
     );
+  });
+
+  it("retries a purchase-save failure by recovering ownership and never orders twice", async () => {
+    mocks.findOwnedNumberId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(TELNYX_NUMBER_ID);
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { error: { message: "database unavailable after provider success" } },
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { error: null },
+      { error: null }
+    );
+
+    const first = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+    const second = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(first.status).toBe("failed");
+    expect(second.status).toBe("submitted");
+    expect(mocks.purchaseNumber).toHaveBeenCalledTimes(1);
+    expect(mocks.findOwnedNumberId).toHaveBeenCalledTimes(2);
+    expect(mocks.attachOwnedNumberToCustomerProfile).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      TELNYX_NUMBER_ID
+    );
+    expect(mocks.registerCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed page check using the saved active number without re-purchasing or early campaign cleanup", async () => {
+    const activeNumber = {
+      id: "phone-row-1",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: TELNYX_NUMBER_ID,
+    };
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { error: null },
+      { error: null },
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: activeNumber, error: null },
+      { data: activeNumber, error: null },
+      { error: null }
+    );
+    mocks.verifyPublishedCompliancePage
+      .mockRejectedValueOnce(new Error("deployment not visible yet"))
+      .mockResolvedValueOnce(undefined);
+
+    const first = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(first.status).toBe("failed");
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+
+    const second = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(second.status).toBe("submitted");
+    const expectedVerification = {
+      slug: LAUNCH_BUSINESS.slug,
+      businessName: LAUNCH_BUSINESS.name,
+      smsPhoneNumber: PENDING_NUMBER,
+    };
+    expect(mocks.verifyPublishedCompliancePage).toHaveBeenCalledTimes(2);
+    expect(mocks.verifyPublishedCompliancePage).toHaveBeenNthCalledWith(
+      1,
+      expectedVerification
+    );
+    expect(mocks.verifyPublishedCompliancePage).toHaveBeenNthCalledWith(
+      2,
+      expectedVerification
+    );
+    expect(mocks.purchaseNumber).toHaveBeenCalledTimes(1);
+    expect(mocks.attachOwnedNumberToCustomerProfile).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      TELNYX_NUMBER_ID
+    );
+    expect(mocks.archiveAndClearRejectedCampaign).toHaveBeenCalledTimes(1);
+    expect(mocks.registerCampaign).toHaveBeenCalledTimes(1);
   });
 
   it("re-asserts routing on an already-completed prior attempt (idempotent completion)", async () => {

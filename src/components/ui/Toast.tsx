@@ -49,42 +49,46 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`${toastBase} ${typeStyles[toast.type]} animate-slide-in`}
-          >
-            <span className="text-sm flex-1">{toast.message}</span>
-            <button
-              onClick={() => dismiss(toast.id)}
-              className="opacity-60 hover:opacity-100 transition-opacity"
-            >
-              <X className="w-4 h-4" />
-            </button>
+      {toasts.length > 0 ? (
+        <>
+          <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className={`${toastBase} ${typeStyles[toast.type]} animate-slide-in`}
+              >
+                <span className="text-sm flex-1">{toast.message}</span>
+                <button
+                  onClick={() => dismiss(toast.id)}
+                  className="opacity-60 hover:opacity-100 transition-opacity"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <style jsx global>{`
-        @keyframes slide-in {
-          from {
-            opacity: 0;
-            transform: translateX(100%);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-        .animate-slide-in {
-          animation: slide-in 0.3s ease-out;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .animate-slide-in {
-            animation: none;
-          }
-        }
-      `}</style>
+          <style jsx global>{`
+            @keyframes slide-in {
+              from {
+                opacity: 0;
+                transform: translateX(100%);
+              }
+              to {
+                opacity: 1;
+                transform: translateX(0);
+              }
+            }
+            .animate-slide-in {
+              animation: slide-in 0.3s ease-out;
+            }
+            @media (prefers-reduced-motion: reduce) {
+              .animate-slide-in {
+                animation: none;
+              }
+            }
+          `}</style>
+        </>
+      ) : null}
     </ToastContext.Provider>
   );
 }

@@ -59,12 +59,20 @@ const mocks = vi.hoisted(() => {
     claim: vi.fn(),
     markFailed: vi.fn(),
     markSubmitted: vi.fn(),
+    getActiveSmsNumber: vi.fn(),
+    verifyPublishedCompliancePage: vi.fn(),
   };
 });
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
+}));
+vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
+  getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
+}));
+vi.mock("@/lib/messaging/registration/publicCompliancePage", () => ({
+  verifyPublishedCompliancePage: mocks.verifyPublishedCompliancePage,
 }));
 vi.mock("@/lib/messaging/numbers", () => ({
   NumberTakenError: class extends Error {},
@@ -115,6 +123,8 @@ const ACTIVE_NUMBER = {
 };
 const BUSINESS = {
   id: BUSINESS_ID,
+  slug: "test-business",
+  name: "Test Business",
   has_ein: true,
   pending_phone_number: null,
   telnyx_submission_disabled: false,
@@ -173,6 +183,8 @@ beforeEach(() => {
     startedAt: "2026-07-21T13:00:00.000Z",
   });
   mocks.prepareExistingBrand.mockResolvedValue({ status: "not_requested" });
+  mocks.getActiveSmsNumber.mockResolvedValue(ACTIVE_NUMBER.phone_number);
+  mocks.verifyPublishedCompliancePage.mockResolvedValue(undefined);
   for (const fn of [
     mocks.archiveBrand,
     mocks.registerBrand,
@@ -300,7 +312,13 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
   });
 
   it("routes a permanent linked campaign recovery failure to support", async () => {
-    queueThroughClaim();
+    queueResults(
+      { data: BUSINESS, error: null },
+      { data: null, error: null },
+      { data: ACTIVE_NUMBER, error: null },
+      { data: ACTIVE_NUMBER, error: null },
+      { error: null }
+    );
     mocks.prepareExistingBrand.mockResolvedValue({ status: "consumed" });
     mocks.registerCampaign.mockRejectedValue(
       new mocks.CampaignRegistrationError({
@@ -313,7 +331,8 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
     expect(result.status).toBe("linked_brand_needs_support");
-    expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+    expect(mocks.createMessagingProfile).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.createVoiceApplication).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.purchaseNumber).not.toHaveBeenCalled();
   });
 
