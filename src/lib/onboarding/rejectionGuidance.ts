@@ -110,6 +110,25 @@ export function inferRejectionStep(
 }
 
 /**
+ * No carrier rejection is self-serve retryable: the blind Retry button
+ * resubmits whatever is saved, and every resubmission costs real money (a
+ * campaign rejection recreates the campaign — new review fee plus upfront
+ * monthly charges — and deactivating it destroys the Mission Control appeal
+ * option; a brand rejection re-files the brand AND rebuilds its campaign,
+ * so it carries the same campaign charges on top of the brand fee). The
+ * recovery paths are Fix & resubmit (edit, then resubmit through the normal
+ * flow once something actually changed) and support. Retry stays only for
+ * technical failures, where nothing was rejected and nothing is recreated.
+ * Shared by the step-9 panel and the retry-registration API guard.
+ */
+export function isRejectionRetryBlocked(
+  brandStatus: string | null | undefined,
+  campaignStatus: string | null | undefined
+): boolean {
+  return brandStatus === "rejected" || campaignStatus === "rejected";
+}
+
+/**
  * True when the rejection class cannot be fully resolved self-serve, so the
  * panel should surface a Contact-support action alongside (or instead of)
  * the routed form:
@@ -151,7 +170,7 @@ export function mapReasonToFriendly(
       // fields live on the (approved) brand, which a campaign retry never
       // re-files — support path.
       return kind === "brand"
-        ? "Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Update your details, then hit Retry registration — we'll re-file your verification with the carrier automatically. It's usually a quick fix."
+        ? "Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Use Fix & resubmit to update your details and continue through to Review & Submit — we'll re-file your verification with the carrier automatically. It's usually a quick fix."
         : "Carriers couldn't verify your business identity. Double-check your legal business name, EIN, and business address — they need to exactly match what's on file with the IRS and your state. Even a small difference like 'LLC' vs 'L.L.C.' can cause this. Update your details, then contact support from our Support page and we'll re-file your verification with you — it's usually a quick fix.";
     case "opt_out":
       return "One or more of your sample messages is missing opt-out wording. Add a line like 'Reply STOP to unsubscribe' to each sample message and resubmit — a quick fix.";
@@ -175,8 +194,8 @@ export function mapReasonToFriendly(
       // customer's own site being down; everything else (wrong override
       // value, our hosted pages) is support's.
       return kind === "brand"
-        ? "Carriers couldn't verify your website or your privacy and terms pages. Make sure your website address is correct and loads for visitors, then hit Retry registration — we'll re-file your verification with the carrier automatically. (Your SimplAssist privacy and terms pages are generated automatically — if you use your own links, check those.)"
-        : "Carriers couldn't load the privacy or terms links on your SMS registration. If you use your own privacy and terms pages, make sure those links load for visitors, then retry. If they look fine — or you use the SimplAssist-generated pages — contact support from our Support page and we'll fix it with you.";
+        ? "Carriers couldn't verify your website or your privacy and terms pages. Make sure your website address is correct and loads for visitors, then use Fix & resubmit to confirm it and continue through to Review & Submit — we'll re-file your verification with the carrier automatically. (Your SimplAssist privacy and terms pages are generated automatically — if you use your own links, check those.)"
+        : "Carriers couldn't load the privacy or terms links on your SMS registration. If you use your own privacy and terms pages, make sure those links load for visitors. Then contact support from our Support page and we'll send it back for review — same if the links look fine or you use the SimplAssist-generated pages.";
     default:
       return null;
   }

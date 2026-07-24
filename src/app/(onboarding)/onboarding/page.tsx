@@ -24,8 +24,8 @@ import {
 } from '@/lib/onboarding/types';
 import {
   inferRejectionStep,
+  isRejectionRetryBlocked,
   mapReasonToFriendly,
-  rejectionNeedsSupport,
   type RejectionKind,
 } from '@/lib/onboarding/rejectionGuidance';
 import { supportHref } from '@/lib/support/constants';
@@ -463,7 +463,8 @@ function CarrierReviewStatus({
   // can no longer be produced — but pre-recovery rows can still sit in it
   // until the one-time backfill moves them to 'failed', so keep the
   // fix/support controls there (Retry itself is only offered where a claim
-  // can succeed: 'failed' or stale 'submitting').
+  // can succeed — 'failed' or stale 'submitting' — and never for carrier
+  // rejections of either kind; see retryBlocked below).
   const rejectionActionable =
     rejectionKind !== null &&
     !registration.smsReady &&
@@ -494,18 +495,24 @@ function CarrierReviewStatus({
   // "carrier's wording + contact support" branch — the lock notice above
   // already explains why editing is closed.
   const displayFriendlyReason = formsLocked ? null : friendlyReason;
-  // Support action for classes the customer can't finish self-serve:
-  // opt-in/message-flow (we generate that text) and campaign-kind identity
-  // (a campaign retry never re-files the approved brand those fields live
-  // on). Brand-kind rejections are self-serve now — retry archives and
-  // re-files the rejected brand. From 'submitted' NO rejection is
-  // self-serve — the attempt isn't claimable, so a re-run reports success
-  // without re-filing anything — hence support always shows there.
-  const needsSupport =
-    rejectionActionable &&
-    rejectionKind !== null &&
-    (registration.status === 'submitted' ||
-      rejectionNeedsSupport(rejectionKind, carrierReason));
+  // Carrier rejections never offer Retry: a blind retry resubmits unchanged
+  // data and every resubmission costs money — a campaign rejection recreates
+  // the campaign (new review fee + upfront monthly charges) and deactivating
+  // it destroys the Mission Control appeal option; a brand rejection
+  // re-files the brand AND rebuilds its campaign, same campaign charges on
+  // top. The recovery paths are Fix & resubmit (edit, then resubmit through
+  // Review & Submit once something actually changed) and support. Retry
+  // survives only for technical failures — nothing was rejected, nothing
+  // gets recreated, resubmitting is free.
+  const retryBlocked = isRejectionRetryBlocked(
+    registration.brandStatus,
+    registration.campaignStatus
+  );
+  // With Retry withheld on every rejection, support is the guaranteed
+  // action: whatever the class, the customer can always reach us. Fix &
+  // resubmit still renders alongside where the rejection maps to a form the
+  // customer owns.
+  const needsSupport = rejectionActionable;
   const supportLink = supportHref('number_registration');
   // When both brand and campaign are rejected, brand wins the headline slot;
   // the campaign's own carrier verdict still has to stay visible.
@@ -671,7 +678,8 @@ function CarrierReviewStatus({
                 Contact support
               </a>
             )}
-            {(registration.status === 'failed' || staleSubmitting) && (
+            {(registration.status === 'failed' || staleSubmitting) &&
+              !retryBlocked && (
               <Button
                 type="button"
                 variant={fixStep || needsSupport ? 'secondary' : 'primary'}

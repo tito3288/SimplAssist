@@ -93,7 +93,7 @@ export async function sendBrandRejectedEmail(
     "Hi,",
     `The carrier review for ${input.businessName} came back without approval.`,
     reasonLine,
-    "The most common causes are a mismatched legal business name, an incorrect EIN, or a website that doesn't match the registered business. Log in to SimplAssist, update your business verification details, then hit Retry registration — we'll re-file your verification with the carrier automatically.",
+    "The most common causes are a mismatched legal business name, an incorrect EIN, or a website that doesn't match the registered business. Log in to SimplAssist, use Fix & resubmit to update your business verification details, and continue through to Review & Submit — we'll re-file your verification with the carrier automatically.",
     "If you're not sure what to fix, reply to this email and we'll help.",
     "— The SimplAssist Team",
   ];

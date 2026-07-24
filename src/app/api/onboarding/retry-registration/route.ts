@@ -3,9 +3,13 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { isRejectionRetryBlocked } from "@/lib/onboarding/rejectionGuidance";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
+
+const REJECTION_SUPPORT_MESSAGE =
+  "Carriers rejected this registration — update your details with Fix & resubmit, or contact support and we'll fix it with you.";
 
 const retrySchema = z.object({
   businessId: z.string().uuid(),
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
   const { data: business, error: ownershipError } = await supabase
     .from("businesses")
-    .select("id, compliance_info_completed_at")
+    .select("id, compliance_info_completed_at, brand_status, campaign_status")
     .eq("id", businessId)
     .eq("owner_id", user.id)
     .single();
@@ -54,6 +58,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Complete brand verification info before retrying registration" },
       { status: 400 }
+    );
+  }
+
+  // Carrier rejections are never blind-retryable: every resubmission costs
+  // real money (campaign recreation charges; a rejected campaign's Mission
+  // Control appeal option is destroyed by deactivation) and an unchanged
+  // resubmission just rejects again. The step-9 panel hides Retry in these
+  // states; this guard covers stale tabs and direct POSTs. The legitimate
+  // fixed-content path resubmits through submit-registration instead.
+  if (isRejectionRetryBlocked(business.brand_status, business.campaign_status)) {
+    return NextResponse.json(
+      {
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      },
+      { status: 409 }
     );
   }
 
