@@ -14,6 +14,9 @@ export const SUPPORT_EMAIL = "bryan@simplassist.com";
 
 export const SUPPORT_PATH = "/support";
 
+/** Public explainer for the one-time setup and SMS activation fee. */
+export const SETUP_FEE_EXPLAINER_PATH = "/support/setup-fee";
+
 export const SUPPORT_CATEGORIES = [
   { value: "billing", label: "Billing" },
   { value: "number_registration", label: "Phone number / SMS registration" },
