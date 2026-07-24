@@ -581,3 +581,30 @@ Post-launch items:
   regeneration (screenshot exposure, Pre-Launch Checklist item 4),
   timing-safe token compare, `src/lib/admin/auth.ts` unit tests, and a
   business-flags zero-row existence check.
+- **2026-07-24** — Dual-session admin auth + hardening chunk. The admin
+  console now authenticates from its own cookie namespace (`sa-admin-auth`
+  via `@supabase/ssr` `cookieOptions.name`, Secure attribute in production):
+  an admin session and a customer session coexist in one browser with
+  independent sign-in/sign-out. `/admin` renders a staff login form for
+  signed-out visitors (accepted stealth trade; `/api/admin` stays
+  404-indistinguishable); authenticated non-allowlisted admin-channel
+  sessions are auto-revoked in middleware (scope local, returned errors
+  logged); the env allowlist remains the sole authorization, fail-closed —
+  an empty allowlist 404s and never shows the form. Middleware refreshes
+  both channels on admin paths, accumulating both clients' cookie writes
+  onto ONE response (the canonical per-client response recreation would drop
+  the first client's rotated tokens). Hardening: timing-safe A2P review
+  token compare; business-flags zero-row update now 404s instead of
+  `success: true`. Review-driven decision: customer sign-outs KEEP the
+  global default (the customer's only remote-revocation lever; also revokes
+  stray admin-channel sessions minted with customer credentials) — so the
+  dedicated admin identity must never sign into the customer app (recovery
+  is a re-login at `/admin`); the admin sign-out button is scope local.
+  Verification: 987/987 vitest (41 new cases pinning the middleware
+  cookie-flow invariant, mass-assignment stripping, and token-bypass
+  semantics), tsc/lint clean; 41-agent adversarial review (5 finder lenses →
+  12 findings → 3 independent verifiers each): 10 confirmed and all resolved
+  pre-commit (headlined by the createBrowserClient singleton trap, the
+  sign-out scope reversal, and the Secure-cookie opt-in), 2 refuted — one by
+  a live Next 14.2.35 reproduction. Open: regenerate `A2P_REVIEW_ADMIN_TOKEN`
+  in Railway (Pre-Launch Checklist item 4), then tick it.

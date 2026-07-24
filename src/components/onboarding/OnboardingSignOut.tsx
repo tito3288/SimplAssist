@@ -14,6 +14,9 @@ export default function OnboardingSignOut() {
     if (signingOut) return;
     setSigningOut(true);
     const supabase = createBrowserClient();
+    // Global scope (default) is deliberate: the customer's remote-revocation
+    // lever. Only the dedicated admin identity could be harmed by it, and it
+    // must never sign into the customer app.
     await supabase.auth.signOut();
     router.refresh();
     router.push('/home');

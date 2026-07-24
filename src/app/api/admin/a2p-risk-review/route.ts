@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminUser } from "@/lib/admin/auth";
 import { approveA2pRiskReview } from "@/lib/admin/a2pRiskReview";
+import { isAuthorizedReviewToken } from "@/lib/admin/reviewToken";
 
 const overrideSchema = z.object({
   businessId: z.string().uuid(),
@@ -15,8 +16,7 @@ export async function POST(request: NextRequest) {
   const providedToken =
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ||
     request.headers.get("x-a2p-review-admin-token")?.trim();
-  const tokenAuthorized =
-    Boolean(configuredToken) && providedToken === configuredToken;
+  const tokenAuthorized = isAuthorizedReviewToken(providedToken, configuredToken);
   const admin = tokenAuthorized ? null : await getAdminUser();
 
   if (!tokenAuthorized && !admin) {

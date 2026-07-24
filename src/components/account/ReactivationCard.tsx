@@ -88,6 +88,9 @@ export default function ReactivationCard({ deletionDate }: ReactivationCardProps
   }
 
   async function handleSignOut() {
+    // Global scope (default) is deliberate: the customer's remote-revocation
+    // lever. Only the dedicated admin identity could be harmed by it, and it
+    // must never sign into the customer app.
     await supabase.auth.signOut();
     router.push("/login");
   }

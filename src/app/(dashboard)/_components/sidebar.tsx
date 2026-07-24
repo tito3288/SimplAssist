@@ -54,6 +54,11 @@ export default function Sidebar({
   const supabase = createBrowserClient();
 
   async function handleSignOut() {
+    // Global scope (the default) is deliberate: it is the customer's only
+    // remote-revocation lever for sessions abandoned on other devices. It
+    // only endangers the separate /admin channel when the SAME user is in
+    // both — the dedicated admin identity must never sign in here, and its
+    // recovery is a re-login at /admin.
     await supabase.auth.signOut();
     // Invalidate the Router Cache so the next session's layout re-fetches.
     // Without this, Next.js can serve the stale Sidebar (with the previous

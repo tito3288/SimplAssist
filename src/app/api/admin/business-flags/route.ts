@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   const { businessId, ...flags } = parsed.data;
   const now = new Date().toISOString();
-  const { error } = await supabaseAdmin
+  const { data: updated, error } = await supabaseAdmin
     .from("businesses")
     .update({
       ...flags,
@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
       billing_flags_updated_at: now,
       billing_flags_updated_by: admin.id,
     })
-    .eq("id", businessId);
+    .eq("id", businessId)
+    .select("id");
 
   if (error) {
     console.error(`[admin:business-flags] Failed to update ${businessId}:`, error);
@@ -53,6 +54,11 @@ export async function POST(request: NextRequest) {
       { error: "Failed to update business flags" },
       { status: 500 }
     );
+  }
+
+  // A valid-UUID businessId matching zero rows must not report success.
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: "Business not found" }, { status: 404 });
   }
 
   return NextResponse.json({ success: true });
