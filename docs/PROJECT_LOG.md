@@ -552,3 +552,32 @@ Post-launch items:
   wrong customer_reference returns 0, proving the scoping) and fixed
   defensively anyway (digits-only filter). Deferred with evidence: the
   selection-time reservation and unique index (§5 above).
+- **2026-07-24** — Admin identity decoupled from customer accounts (ops-only,
+  zero code). The `SIMPLASSIST_ADMIN_USER_IDS` allowlist previously contained
+  the auth user that owns the soft-deleted Bryan Develops business, whose
+  permanent cleanup (scheduled 2026-09-19) deletes the owning GoTrue user via
+  the cleanup cron — which would have destroyed the only admin login and
+  fail-closed `/admin` to 404 for everyone. Migration: minted a dedicated
+  admin-only auth user (dashboard-created, auto-confirmed), dual-listed it in
+  the env allowlist, verified end-to-end (all admin pages plus a
+  business-flags write attributed to the new identity via
+  `billing_flags_updated_by`), then de-listed the old ID and verified both
+  directions (new login has full `/admin` access; old login 404s). The new
+  identity's auto-created placeholder business is flagged `billing_exempt` +
+  `telnyx_submission_disabled` with an admin note so it never resembles a
+  stalled signup — and must never be soft-deleted (its cleanup would delete
+  the admin auth user; same coupling, new identity). Sep 19 cleanup confirmed
+  safe to proceed post-decoupling: `cleanup_expired_business` creates its own
+  release run inside the scrub transaction, every Bryan Develops resource
+  classifies `protected_retain` → run status `protected_hold` (no dependence
+  on the disabled remote-release machinery), and the cron never reads the
+  admin allowlist. Verification: six-agent audit of every admin surface
+  (app, session coupling, DB/cleanup, config/tests, docs, completeness
+  critic), adversarial red-team of the runbook (4 findings, all fixed before
+  execution — including two wrong-SQL/wrong-identification hazards), and
+  read-only prod prechecks run by Bryan before any change. Rationale: admin
+  access must survive deletion of any customer account. Follow-up chunk
+  planned: dedicated admin sign-in UX at `/admin`, `A2P_REVIEW_ADMIN_TOKEN`
+  regeneration (screenshot exposure, Pre-Launch Checklist item 4),
+  timing-safe token compare, `src/lib/admin/auth.ts` unit tests, and a
+  business-flags zero-row existence check.

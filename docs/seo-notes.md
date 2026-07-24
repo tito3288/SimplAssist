@@ -5,6 +5,7 @@
 | Route | What it is | How it's gated |
 |---|---|---|
 | `/demo/conversations`, `/demo/calendar` | Dev-only fixture pages (fictional "Manny's Plumbing" data) used to produce the homepage marketing screenshots | `assertDemoPagesEnabled()` in `src/app/demo/_lib/guard.ts` — 404 page + `noindex` in production unless built with `ENABLE_DEMO_PAGES=1` |
+| `/demo/onboarding-plan` | Dev-only visual preview of the onboarding plan selector | `assertDemoPagesEnabled()` in `src/app/demo/_lib/guard.ts` — 404 page + `noindex` in production unless built with `ENABLE_DEMO_PAGES=1` |
 | `/home-v2` | Shelved alternate homepage (design record: `docs/home-v2-design.md`) | Same pattern — 404 + `noindex` unless `ENABLE_HOME_V2_PREVIEW=1` |
 
 Both gates throw in `generateMetadata` **and** the page component. Note: Next 14.2

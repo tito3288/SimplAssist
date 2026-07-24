@@ -33,7 +33,7 @@ Phase 9 billing and admin use these deployment variables:
 - `STRIPE_PRICE_FULL` - Stripe test-mode recurring Price ID for Pro / Full Suite.
 - `STRIPE_PRICE_SETUP_FEE` - Stripe test-mode one-time Price ID for the $25 setup and SMS activation fee.
 - `STRIPE_PRICE_SMS_OVERAGE_PART` - Stripe test-mode Price ID for $0.03 per extra SMS part after opt-in.
-- `SIMPLASSIST_ADMIN_USER_IDS` - comma-separated Supabase auth user IDs allowed into `/admin`; unset or empty means nobody is admin.
+- `SIMPLASSIST_ADMIN_USER_IDS` - comma-separated Supabase auth user IDs allowed into `/admin`; unset or empty means nobody is admin. Entries must be dedicated admin-only auth users — never a login that owns a customer business, because permanent account cleanup deletes the owning auth user (and would take the admin login with it). Decoupled 2026-07-24.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

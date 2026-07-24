@@ -416,6 +416,7 @@ These templates must describe what SimplAssist actually does: inbound customer c
 - Non-admins receive 404 (not 403) so the area's existence is not revealed.
 - Fail closed: env var unset/empty = nobody is admin.
 - Admin accounts are normal Supabase logins that may never complete onboarding. Admin routes must be reachable regardless of onboarding state — the admin check runs independently of the onboarding resolver/redirects. The placeholder business row auto-created at signup is expected and ignored.
+- Admin identity is decoupled from customer accounts (2026-07-24). Allowlist entries are dedicated admin-only auth users; a login that owns a real customer business must never be allowlisted, because permanent account cleanup deletes the owning auth user — which would destroy the admin login with it. The dedicated identity's placeholder business is flagged `billing_exempt` + `telnyx_submission_disabled` with an admin note so it never resembles a stalled signup. Document identity existence only — never emails-to-UUID mappings, IDs, or values.
 
 ### v1 scope — A2P risk review approvals
 
