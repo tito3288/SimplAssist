@@ -138,9 +138,11 @@ export default function PhoneNumberSelector({
           className="mt-0.5 h-4 w-4 rounded accent-[#ff914d] flex-shrink-0"
         />
         <span className="text-sm text-slate-600 dark:text-[#bdbdbf] leading-relaxed">
-          By selecting a phone number, I agree that SimplAssist will send automated text messages
-          to customers who contact my business. I will not use this number for spam or unsolicited
-          marketing. Customers can opt out at any time by replying STOP. I agree to SimplAssist&apos;s{" "}
+          By selecting a phone number, I agree that this number will be registered to my business
+          for carrier compliance, and that SimplAssist will send automated text messages on my
+          business&apos;s behalf to customers who contact me. I will not use this number for spam or
+          unsolicited marketing. Customers can opt out at any time by replying STOP. I agree to
+          SimplAssist&apos;s{" "}
           <a href="/terms" target="_blank" className="text-[#ff914d] underline hover:text-[#ffb07a]">
             Terms of Service
           </a>{" "}
