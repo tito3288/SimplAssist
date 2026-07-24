@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { attemptPaidLaunch } from "@/lib/billing/launch";
+import {
+  attemptPaidLaunch,
+  SERVICES_FAQS_REQUIRED_MESSAGE,
+} from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
+import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
 import { createCheckoutSession } from "@/lib/stripe/checkout";
 import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
-import type { SubscriptionPlan } from "@/types/database";
+import type {
+  OnboardingRegistrationStatus,
+  SubscriptionPlan,
+} from "@/types/database";
 
 const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
 const VALID_MODES = ["onboarding", "billing"] as const;
@@ -19,6 +27,11 @@ type CheckoutBusinessRow = {
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
+  onboarding_completed_at: string | null;
+  onboarding_registration_status: OnboardingRegistrationStatus | null;
+  telnyx_brand_id: string | null;
+  brand_status: string | null;
+  campaign_status: string | null;
 };
 
 type CheckoutSubscriptionRow = {
@@ -51,7 +64,9 @@ export async function POST(request: NextRequest) {
 
     const { data: business, error: bizError } = await supabase
       .from("businesses")
-      .select("id, has_ein, billing_pilot, billing_comped, billing_exempt")
+      .select(
+        "id, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status"
+      )
       .eq("owner_id", user.id)
       .single<CheckoutBusinessRow>();
 
@@ -60,6 +75,21 @@ export async function POST(request: NextRequest) {
         { error: "Business not found" },
         { status: 404 }
       );
+    }
+
+    if (shouldEnforceInitialContentQuality(business)) {
+      const contentQuality = await getBusinessContentQuality(business.id);
+      if (!contentQuality.ready) {
+        const state = await getOnboardingStateForBusinessId(business.id);
+        return NextResponse.json(
+          {
+            error: SERVICES_FAQS_REQUIRED_MESSAGE,
+            code: "services_faqs_required",
+            state,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     if (business.has_ein !== true) {

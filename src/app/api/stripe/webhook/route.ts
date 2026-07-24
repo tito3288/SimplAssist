@@ -6,7 +6,10 @@ import {
   syncCheckoutSession,
   syncStripeSubscription,
 } from "@/lib/stripe/subscriptionSync";
-import { attemptPaidLaunch } from "@/lib/billing/launch";
+import {
+  attemptPaidLaunch,
+  type LaunchResult,
+} from "@/lib/billing/launch";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
@@ -37,9 +40,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await processStripeEvent(event);
+    const launch = await processStripeEvent(event);
     await markStripeEventProcessed(event.id);
-    return NextResponse.json({ received: true });
+    return NextResponse.json({
+      received: true,
+      ...(launch?.status === "services_faqs_required"
+        ? { code: launch.status }
+        : {}),
+    });
   } catch (error) {
     console.error("Webhook handler error:", error);
     await markStripeEventFailed(event.id, errorMessage(error));
@@ -50,32 +58,34 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function processStripeEvent(event: Stripe.Event): Promise<void> {
+async function processStripeEvent(
+  event: Stripe.Event
+): Promise<LaunchResult | null> {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
       const synced = await syncCheckoutSession(session);
       if (synced) {
-        await attemptPaidLaunch(synced.businessId, "stripe_webhook");
+        return attemptPaidLaunch(synced.businessId, "stripe_webhook");
       }
-      return;
+      return null;
     }
 
     case "customer.subscription.created":
     case "customer.subscription.updated": {
       await syncStripeSubscription(event.data.object as Stripe.Subscription);
-      return;
+      return null;
     }
 
     case "customer.subscription.deleted": {
       await syncStripeSubscription(event.data.object as Stripe.Subscription);
-      return;
+      return null;
     }
 
     case "invoice.payment_succeeded": {
       const invoice = event.data.object as Stripe.Invoice;
       const subscriptionId = resolveInvoiceSubscriptionId(invoice);
-      if (!subscriptionId) return;
+      if (!subscriptionId) return null;
       // The invoice payload carries no subscription status, so recovery reads
       // the real status from Stripe and passes it through unchanged. The
       // fail-closed normalizer inside the sync throws on an absent or
@@ -83,13 +93,13 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       // stays retryable via the claimStripeEvent re-claim.
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       await syncStripeSubscription(subscription);
-      return;
+      return null;
     }
 
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice;
       const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
-      if (!customerId) return;
+      if (!customerId) return null;
 
       // Freshness check: a redelivered (possibly re-claimed) failure event
       // can be days stale, and the past_due RPC has no status guard — a
@@ -105,7 +115,7 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
           await stripe.subscriptions.retrieve(failedSubscriptionId);
         if (liveSubscription.status !== "past_due") {
           await syncStripeSubscription(liveSubscription);
-          return;
+          return null;
         }
       }
 
@@ -124,7 +134,7 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
       }
 
       if (updated === false) {
-        return;
+        return null;
       }
       if (updated !== true) {
         throw new Error(
@@ -132,11 +142,11 @@ async function processStripeEvent(event: Stripe.Event): Promise<void> {
         );
       }
 
-      return;
+      return null;
     }
 
     default:
-      return;
+      return null;
   }
 }
 

@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
   }
 
   const code =
-    launch.status === "held_no_ein"
+    launch.status === "services_faqs_required"
+      ? "services_faqs_required"
+      : launch.status === "held_no_ein"
       ? "held_no_ein"
       : launch.status === "risk_review_required"
       ? "a2p_risk_review_required"

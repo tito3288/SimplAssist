@@ -155,6 +155,37 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
+  it("propagates a 3+3 launch hold without failing the Stripe event", async () => {
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_test_missing_ai_knowledge",
+    });
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "services_faqs_required",
+      message: "Add 3+3 content.",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      code: "services_faqs_required",
+    });
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed_at: expect.any(String),
+        processing_error: null,
+      })
+    );
+  });
+
   it("processes a 100%-off checkout ($0 invoice, no payment_intent) like any other", async () => {
     // A fully-discounted promotion code completes checkout with
     // payment_status "no_payment_required" and no payment_intent at all.

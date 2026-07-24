@@ -42,6 +42,9 @@ import {
   markRegistrationFailed,
   markRegistrationSubmitted,
 } from "@/lib/onboarding/registrationAttempt";
+import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
+import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
+import type { OnboardingRegistrationStatus } from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
@@ -67,13 +70,17 @@ const LINKED_BRAND_NEEDS_SUPPORT_MESSAGE =
 const EXISTING_BRAND_RETRY_MESSAGE =
   "SimplAssist could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.";
 
+export const SERVICES_FAQS_REQUIRED_MESSAGE =
+  "Add at least 3 distinct services and 3 answered FAQs so your AI has enough accurate information to help customers.";
+
 type LaunchSource = "stripe_finalize" | "stripe_webhook" | "onboarding_retry";
 
-type LaunchResult =
+export type LaunchResult =
   | { status: "submitted" | "in_progress" | "already_submitted"; message?: string }
   | {
       status:
         | "billing_required"
+        | "services_faqs_required"
         | "held_no_ein"
         | "risk_review_required"
         | "existing_brand_review_required"
@@ -97,6 +104,10 @@ interface BusinessLaunchRow {
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
+  onboarding_completed_at: string | null;
+  onboarding_registration_status: OnboardingRegistrationStatus | null;
+  brand_status: string | null;
+  campaign_status: string | null;
 }
 
 interface ActiveNumberRow {
@@ -117,6 +128,16 @@ export async function attemptPaidLaunch(
   const business = await readLaunchBusiness(businessId);
   if (!business) {
     return { status: "failed", message: "Business not found." };
+  }
+
+  if (shouldEnforceInitialContentQuality(business)) {
+    const contentQuality = await getBusinessContentQuality(businessId);
+    if (!contentQuality.ready) {
+      return {
+        status: "services_faqs_required",
+        message: SERVICES_FAQS_REQUIRED_MESSAGE,
+      };
+    }
   }
 
   if (business.has_ein !== true) {
@@ -373,7 +394,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt"
+      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();

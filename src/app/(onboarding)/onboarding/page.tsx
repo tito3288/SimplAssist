@@ -30,6 +30,7 @@ import {
 } from '@/lib/onboarding/rejectionGuidance';
 import { supportHref } from '@/lib/support/constants';
 import { tile, statusWarning } from '@/lib/theme-v2/theme';
+import { evaluateContentQuality } from '@/lib/contentQuality';
 import type { BusinessType } from '@/types/database';
 
 type StateResponse = {
@@ -157,6 +158,7 @@ export default function OnboardingPage() {
   }
 
   const currentStepNumber = onboardingStepNumber(step);
+  const contentQuality = evaluateContentQuality(state.servicesAndFaqs);
 
   return (
     <div>
@@ -193,7 +195,12 @@ export default function OnboardingPage() {
           <ServicesAndFaqsForm
             businessId={state.businessId}
             businessType={(state.businessInfo.business_type || 'general') as BusinessType}
-            initialData={state.servicesAndFaqs.services.length > 0 ? state.servicesAndFaqs : undefined}
+            initialData={
+              state.servicesAndFaqs.services.length > 0 ||
+              state.servicesAndFaqs.faqs.length > 0
+                ? state.servicesAndFaqs
+                : undefined
+            }
             scrapedServices={scrapedData?.services}
             scrapedFaqs={scrapedData?.faqs}
             onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
@@ -255,8 +262,8 @@ export default function OnboardingPage() {
             data={{
               businessInfo: state.businessInfo,
               businessHours: state.businessHours,
-              servicesCount: state.servicesAndFaqs.services.length,
-              faqsCount: state.servicesAndFaqs.faqs.length,
+              servicesCount: contentQuality.validServiceCount,
+              faqsCount: contentQuality.validFaqCount,
               aiSettings: state.aiSettings ?? {
                 tone: 'balanced',
                 business_voice: 'we',
@@ -292,8 +299,16 @@ export default function OnboardingPage() {
             state={state}
             onRefresh={() => refreshState({ keepStep: true })}
             onRetry={(nextState) => {
-              if (nextState) setState(nextState);
-              refreshState({ keepStep: true });
+              if (nextState) {
+                setState(nextState);
+                setStep(
+                  nextState.currentStep === 'complete'
+                    ? 'carrier_review'
+                    : nextState.currentStep
+                );
+                return;
+              }
+              refreshState();
             }}
             onDashboard={() => router.push('/dashboard')}
             onFixStep={(targetStep) => setStep(targetStep)}

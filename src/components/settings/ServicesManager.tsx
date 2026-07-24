@@ -6,6 +6,11 @@ import { Pencil, Trash2, Plus, ChevronUp } from 'lucide-react';
 import type { Service } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaCompactClass } from '@/lib/glass';
+import {
+  MIN_VALID_SERVICES,
+  evaluateContentQuality,
+  normalizeKnowledgeKey,
+} from '@/lib/contentQuality';
 
 interface ServicesManagerProps {
   businessId: string;
@@ -33,9 +38,41 @@ export default function ServicesManager({ businessId, initialServices }: Service
   const [editPrice, setEditPrice] = useState('');
 
   const supabase = createClient();
+  const validServiceCount = evaluateContentQuality(services, []).validServiceCount;
+  const serviceFloor = Math.min(validServiceCount, MIN_VALID_SERVICES);
+
+  const projectedServiceCount = (nextServices: Service[]) =>
+    evaluateContentQuality(nextServices, []).validServiceCount;
+
+  const canRemoveActiveContribution = (id: string, mode: 'delete' | 'deactivate') => {
+    const nextServices =
+      mode === 'delete'
+        ? services.filter((service) => service.id !== id)
+        : services.map((service) =>
+            service.id === id ? { ...service, is_active: false } : service
+          );
+    return projectedServiceCount(nextServices) >= serviceFloor;
+  };
+
+  const duplicatesActiveName = (name: string, excludeId?: string) => {
+    const key = normalizeKnowledgeKey(name);
+    return (
+      key.length > 0 &&
+      services.some(
+        (service) =>
+          service.id !== excludeId &&
+          service.is_active &&
+          normalizeKnowledgeKey(service.name) === key
+      )
+    );
+  };
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
+    if (duplicatesActiveName(newName)) {
+      setActionError({ scope: 'add', message: 'Use a distinct service name. This service is already active.' });
+      return;
+    }
     setSaving('add');
     setActionError(null);
     try {
@@ -64,6 +101,15 @@ export default function ServicesManager({ businessId, initialServices }: Service
   };
 
   const handleEdit = async (id: string) => {
+    const service = services.find((item) => item.id === id);
+    if (!editName.trim()) {
+      setActionError({ scope: id, message: 'Service name is required.' });
+      return;
+    }
+    if (service?.is_active && duplicatesActiveName(editName, id)) {
+      setActionError({ scope: id, message: 'Use a distinct service name. This service is already active.' });
+      return;
+    }
     setSaving(id);
     setActionError(null);
     try {
@@ -91,6 +137,25 @@ export default function ServicesManager({ businessId, initialServices }: Service
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
     setActionError(null);
+    const service = services.find((item) => item.id === id);
+    if (!service) return;
+    if (isActive && !canRemoveActiveContribution(id, 'deactivate')) {
+      setActionError({
+        scope: id,
+        message: `Keep at least ${MIN_VALID_SERVICES} distinct active services. Add another service before turning this one off.`,
+      });
+      return;
+    }
+    if (!isActive) {
+      if (!service.name.trim()) {
+        setActionError({ scope: id, message: 'Add a service name before activating this service.' });
+        return;
+      }
+      if (duplicatesActiveName(service.name, id)) {
+        setActionError({ scope: id, message: 'Rename this service before activating it; that name is already active.' });
+        return;
+      }
+    }
     try {
       const { error } = await supabase.from('services').update({ is_active: !isActive }).eq('id', id);
       if (error) throw error;
@@ -101,6 +166,14 @@ export default function ServicesManager({ businessId, initialServices }: Service
   };
 
   const handleDelete = async (id: string) => {
+    if (!canRemoveActiveContribution(id, 'delete')) {
+      setActionError({
+        scope: id,
+        message: `Keep at least ${MIN_VALID_SERVICES} distinct active services. Add another service before deleting this one.`,
+      });
+      setDeleteConfirmId(null);
+      return;
+    }
     setSaving(id);
     setActionError(null);
     try {
@@ -129,6 +202,25 @@ export default function ServicesManager({ businessId, initialServices }: Service
 
   return (
     <div className="space-y-4">
+      <div
+        role="status"
+        aria-live="polite"
+        className={`rounded-lg border px-3 py-2 text-sm ${
+          validServiceCount >= MIN_VALID_SERVICES
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200'
+            : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100'
+        }`}
+      >
+        <p className="font-medium">
+          {validServiceCount} of {MIN_VALID_SERVICES} distinct active services
+        </p>
+        {validServiceCount < MIN_VALID_SERVICES && (
+          <p className="mt-1 text-xs">
+            Add {MIN_VALID_SERVICES - validServiceCount} more so your AI can answer customers accurately. Your current AI service stays live while you repair this.
+          </p>
+        )}
+      </div>
+
       {/* Fallback for an error scoped to a row that no longer renders (e.g.
           a slow failing toggle racing a successful delete) — without this
           the failure would be silent again. */}
@@ -141,15 +233,27 @@ export default function ServicesManager({ businessId, initialServices }: Service
       )}
 
       <div className="space-y-2">
-        {services.map((service) => (
+        {services.map((service) => {
+          const deactivateLocked =
+            service.is_active &&
+            !canRemoveActiveContribution(service.id, 'deactivate');
+          const deleteLocked = !canRemoveActiveContribution(service.id, 'delete');
+          const floorExplanation = `Keep at least ${MIN_VALID_SERVICES} distinct active services. Add another service first.`;
+
+          return (
           <div key={service.id} className="border border-[#ece4d8] dark:border-white/[0.12] rounded-lg">
             <div className="flex items-center gap-3 p-3">
               <button
                 type="button"
+                role="switch"
+                aria-checked={service.is_active}
                 onClick={() => handleToggleActive(service.id, service.is_active)}
+                disabled={deactivateLocked}
+                title={deactivateLocked ? floorExplanation : undefined}
+                aria-label={`${service.is_active ? 'Deactivate' : 'Activate'} ${service.name}`}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
                   service.is_active ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
-                }`}
+                } ${deactivateLocked ? 'cursor-not-allowed opacity-50' : ''}`}
               >
                 <span
                   className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
@@ -201,7 +305,10 @@ export default function ServicesManager({ businessId, initialServices }: Service
                 <button
                   type="button"
                   onClick={() => setDeleteConfirmId(service.id)}
-                  className="text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1"
+                  disabled={deleteLocked}
+                  title={deleteLocked ? floorExplanation : undefined}
+                  aria-label={`Delete ${service.name}`}
+                  className={`text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1 ${deleteLocked ? 'cursor-not-allowed opacity-40' : ''}`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -209,6 +316,11 @@ export default function ServicesManager({ businessId, initialServices }: Service
             </div>
 
             {errorFor(service.id, 'px-3 pb-2')}
+            {(deactivateLocked || deleteLocked) && (
+              <p className="px-3 pb-2 text-xs text-amber-700 dark:text-amber-300">
+                {floorExplanation}
+              </p>
+            )}
 
             {expandedId === service.id && (
               <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
@@ -257,7 +369,8 @@ export default function ServicesManager({ businessId, initialServices }: Service
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {showAddForm ? (

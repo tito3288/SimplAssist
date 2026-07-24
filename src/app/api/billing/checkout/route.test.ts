@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   from: vi.fn(),
   attemptPaidLaunch: vi.fn(),
+  getBusinessContentQuality: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
   createCheckoutSession: vi.fn(),
   getExistingTelnyxBrandLinkState: vi.fn(),
@@ -18,6 +19,11 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("@/lib/billing/launch", () => ({
   attemptPaidLaunch: mocks.attemptPaidLaunch,
+  SERVICES_FAQS_REQUIRED_MESSAGE:
+    "Add at least 3 distinct services and 3 answered FAQs so your AI has enough accurate information to help customers.",
+}));
+vi.mock("@/lib/onboarding/contentQuality.server", () => ({
+  getBusinessContentQuality: mocks.getBusinessContentQuality,
 }));
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForBusinessId: mocks.getOnboardingStateForBusinessId,
@@ -82,6 +88,7 @@ beforeEach(() => {
     error: null,
   });
   mocks.attemptPaidLaunch.mockResolvedValue({ status: "submitted" });
+  mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({ step: "complete" });
   mocks.createCheckoutSession.mockResolvedValue("https://checkout.test/session");
   mocks.getExistingTelnyxBrandLinkState.mockResolvedValue(null);
@@ -92,6 +99,29 @@ afterEach(() => {
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {
+  it("returns the 3+3 quality gate before creating a Stripe session", async () => {
+    queueResults({ data: BUSINESS, error: null });
+    mocks.getBusinessContentQuality.mockResolvedValue({
+      ready: false,
+      validServiceCount: 2,
+      validFaqCount: 3,
+    });
+    mocks.getOnboardingStateForBusinessId.mockResolvedValue({
+      currentStep: "services_faqs",
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "services_faqs_required",
+      state: { currentStep: "services_faqs" },
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.getExistingTelnyxBrandLinkState).not.toHaveBeenCalled();
+  });
+
   it.each(["past_due", "canceled"])(
     "does not let a protected override bypass an existing %s subscription",
     async (status) => {
@@ -203,7 +233,13 @@ describe("POST /api/billing/checkout redirect URLs", () => {
   });
 
   it("uses the configured public origin for billing success and cancel URLs", async () => {
-    queueResults({ data: BUSINESS, error: null });
+    queueResults({
+      data: {
+        ...BUSINESS,
+        onboarding_completed_at: "2026-07-01T00:00:00.000Z",
+      },
+      error: null,
+    });
 
     const response = await POST(request("billing"));
 
@@ -217,6 +253,7 @@ describe("POST /api/billing/checkout redirect URLs", () => {
       "https://simplassist.com/billing?canceled=true",
       "billing"
     );
+    expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
   });
 
   it("fails before creating a Stripe session when production has no public URL", async () => {

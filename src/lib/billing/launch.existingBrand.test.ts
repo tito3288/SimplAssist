@@ -61,6 +61,7 @@ const mocks = vi.hoisted(() => {
     markSubmitted: vi.fn(),
     getActiveSmsNumber: vi.fn(),
     verifyPublishedCompliancePage: vi.fn(),
+    getBusinessContentQuality: vi.fn(),
   };
 });
 
@@ -111,6 +112,9 @@ vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   claimRegistrationAttempt: mocks.claim,
   markRegistrationFailed: mocks.markFailed,
   markRegistrationSubmitted: mocks.markSubmitted,
+}));
+vi.mock("@/lib/onboarding/contentQuality.server", () => ({
+  getBusinessContentQuality: mocks.getBusinessContentQuality,
 }));
 
 import { attemptPaidLaunch } from "./launch";
@@ -177,6 +181,7 @@ beforeEach(() => {
     status: "passed",
     message: null,
   });
+  mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
   mocks.claim.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",

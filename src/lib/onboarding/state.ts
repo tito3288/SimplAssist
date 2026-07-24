@@ -25,6 +25,7 @@ import {
   hashA2pRiskInput,
   registrationHasStartedForRisk,
 } from "@/lib/messaging/registration/riskScreening";
+import { evaluateContentQuality } from "@/lib/contentQuality";
 import {
   ONBOARDING_STEPS,
   onboardingStepNumber,
@@ -413,6 +414,7 @@ async function getOnboardingStateForBusiness(
     business,
     hours: normalizedHours,
     services: normalizedServices,
+    faqs: normalizedFaqs,
     aiSettings: normalizedAiSettings,
     phoneNumber: phone,
     smsReady: smsReadiness.smsReady,
@@ -639,10 +641,11 @@ function normalizeRiskReview(args: {
   };
 }
 
-function deriveOnboardingStep(args: {
+export function deriveOnboardingStep(args: {
   business: BusinessRow;
   hours: OnboardingHours[];
   services: OnboardingService[];
+  faqs: OnboardingFaq[];
   aiSettings: OnboardingAiSettings | null;
   phoneNumber: string | null;
   smsReady: boolean;
@@ -652,6 +655,7 @@ function deriveOnboardingStep(args: {
     business,
     hours,
     services,
+    faqs,
     aiSettings,
     phoneNumber,
     smsReady,
@@ -660,20 +664,19 @@ function deriveOnboardingStep(args: {
 
   if (smsReady || business.onboarding_completed_at) return "complete";
 
-  if (
-    business.onboarding_registration_status === "failed" &&
-    business.pending_phone_number_failure_reason
-  ) {
-    return "phone_number";
-  }
-
   if (registrationHasStarted(business)) {
     return "carrier_review";
   }
 
   if (!hasBusinessInfo(business)) return "business_info";
   if (hours.length < 7) return "business_hours";
-  if (services.length === 0) return "services_faqs";
+  if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
+  if (
+    business.onboarding_registration_status === "failed" &&
+    business.pending_phone_number_failure_reason
+  ) {
+    return "phone_number";
+  }
   if (!aiSettings) return "ai_settings";
   if (!hasLegalVerification(business)) return "legal_verification";
   if (!hasCompletedComplianceInfo(business, riskCleared)) return "sms_use_case";

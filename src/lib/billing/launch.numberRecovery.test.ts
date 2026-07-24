@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   markRegistrationSubmitted: vi.fn(),
   getActiveSmsNumber: vi.fn(),
   verifyPublishedCompliancePage: vi.fn(),
+  getBusinessContentQuality: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -74,6 +75,9 @@ vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   claimRegistrationAttempt: mocks.claimRegistrationAttempt,
   markRegistrationFailed: mocks.markRegistrationFailed,
   markRegistrationSubmitted: mocks.markRegistrationSubmitted,
+}));
+vi.mock("@/lib/onboarding/contentQuality.server", () => ({
+  getBusinessContentQuality: mocks.getBusinessContentQuality,
 }));
 
 import { attemptPaidLaunch } from "./launch";
@@ -151,6 +155,7 @@ beforeEach(() => {
     status: "passed",
     message: null,
   });
+  mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
   mocks.claimRegistrationAttempt.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",
@@ -184,6 +189,24 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it("stops a deficient initial launch before billing, risk, claims, or provider work", async () => {
+    queueResults({ data: LAUNCH_BUSINESS, error: null });
+    mocks.getBusinessContentQuality.mockResolvedValue({
+      ready: false,
+      validServiceCount: 3,
+      validFaqCount: 2,
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toMatchObject({ status: "services_faqs_required" });
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
   it.each(["past_due", "canceled"])(
     "does not let a billing override bypass an existing %s subscription",
     async (status) => {

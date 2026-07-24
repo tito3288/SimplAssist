@@ -7,6 +7,12 @@ import type { FAQ } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaCompactClass } from '@/lib/glass';
 import { statusInfo, statusWarning, statusNeutral } from '@/lib/theme-v2/theme';
+import {
+  FAQ_ANSWER_MAX_LENGTH,
+  MIN_VALID_FAQS,
+  evaluateContentQuality,
+  normalizeKnowledgeKey,
+} from '@/lib/contentQuality';
 
 interface FAQManagerProps {
   businessId: string;
@@ -30,6 +36,34 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   const [editAnswer, setEditAnswer] = useState('');
 
   const supabase = createClient();
+  const validFaqCount = evaluateContentQuality([], faqs).validFaqCount;
+  const faqFloor = Math.min(validFaqCount, MIN_VALID_FAQS);
+
+  const projectedFaqCount = (nextFaqs: FAQ[]) =>
+    evaluateContentQuality([], nextFaqs).validFaqCount;
+
+  const canRemoveActiveContribution = (id: string, mode: 'delete' | 'deactivate') => {
+    const nextFaqs =
+      mode === 'delete'
+        ? faqs.filter((faq) => faq.id !== id)
+        : faqs.map((faq) =>
+            faq.id === id ? { ...faq, is_active: false } : faq
+          );
+    return projectedFaqCount(nextFaqs) >= faqFloor;
+  };
+
+  const duplicatesActiveQuestion = (question: string, excludeId?: string) => {
+    const key = normalizeKnowledgeKey(question);
+    return (
+      key.length > 0 &&
+      faqs.some(
+        (faq) =>
+          faq.id !== excludeId &&
+          faq.is_active &&
+          normalizeKnowledgeKey(faq.question) === key
+      )
+    );
+  };
 
   const sourceLabel = (source: string) => {
     switch (source) {
@@ -41,6 +75,14 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   const handleAdd = async () => {
     if (!newQuestion.trim() || !newAnswer.trim()) return;
+    if (newAnswer.trim().length > FAQ_ANSWER_MAX_LENGTH) {
+      setActionError({ scope: 'add', message: `Answer must be ${FAQ_ANSWER_MAX_LENGTH.toLocaleString()} characters or less.` });
+      return;
+    }
+    if (duplicatesActiveQuestion(newQuestion)) {
+      setActionError({ scope: 'add', message: 'Use a distinct question. This FAQ is already active.' });
+      return;
+    }
     setSaving('add');
     setActionError(null);
     try {
@@ -68,6 +110,19 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   };
 
   const handleEdit = async (id: string) => {
+    const faq = faqs.find((item) => item.id === id);
+    if (!editQuestion.trim() || !editAnswer.trim()) {
+      setActionError({ scope: id, message: 'Both a question and an answer are required.' });
+      return;
+    }
+    if (editAnswer.trim().length > FAQ_ANSWER_MAX_LENGTH) {
+      setActionError({ scope: id, message: `Answer must be ${FAQ_ANSWER_MAX_LENGTH.toLocaleString()} characters or less.` });
+      return;
+    }
+    if (faq?.is_active && duplicatesActiveQuestion(editQuestion, id)) {
+      setActionError({ scope: id, message: 'Use a distinct question. This FAQ is already active.' });
+      return;
+    }
     setSaving(id);
     setActionError(null);
     try {
@@ -89,6 +144,32 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
     setActionError(null);
+    const faq = faqs.find((item) => item.id === id);
+    if (!faq) return;
+    if (isActive && !canRemoveActiveContribution(id, 'deactivate')) {
+      setActionError({
+        scope: id,
+        message: `Keep at least ${MIN_VALID_FAQS} distinct active answered FAQs. Add another FAQ before turning this one off.`,
+      });
+      return;
+    }
+    if (!isActive) {
+      if (
+        !faq.question.trim() ||
+        !faq.answer.trim() ||
+        faq.answer.trim().length > FAQ_ANSWER_MAX_LENGTH
+      ) {
+        setActionError({
+          scope: id,
+          message: `Add a question and answer of ${FAQ_ANSWER_MAX_LENGTH.toLocaleString()} characters or less before activating this FAQ.`,
+        });
+        return;
+      }
+      if (duplicatesActiveQuestion(faq.question, id)) {
+        setActionError({ scope: id, message: 'Rewrite this question before activating it; that question is already active.' });
+        return;
+      }
+    }
     try {
       const { error } = await supabase.from('faqs').update({ is_active: !isActive }).eq('id', id);
       if (error) throw error;
@@ -99,6 +180,14 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
   };
 
   const handleDelete = async (id: string) => {
+    if (!canRemoveActiveContribution(id, 'delete')) {
+      setActionError({
+        scope: id,
+        message: `Keep at least ${MIN_VALID_FAQS} distinct active answered FAQs. Add another FAQ before deleting this one.`,
+      });
+      setDeleteConfirmId(null);
+      return;
+    }
     setSaving(id);
     setActionError(null);
     try {
@@ -126,6 +215,25 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
 
   return (
     <div className="space-y-4">
+      <div
+        role="status"
+        aria-live="polite"
+        className={`rounded-lg border px-3 py-2 text-sm ${
+          validFaqCount >= MIN_VALID_FAQS
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200'
+            : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100'
+        }`}
+      >
+        <p className="font-medium">
+          {validFaqCount} of {MIN_VALID_FAQS} distinct active answered FAQs
+        </p>
+        {validFaqCount < MIN_VALID_FAQS && (
+          <p className="mt-1 text-xs">
+            Add {MIN_VALID_FAQS - validFaqCount} more so your AI can answer customers accurately. Your current AI service stays live while you repair this.
+          </p>
+        )}
+      </div>
+
       {/* Fallback for an error scoped to a row that no longer renders (e.g.
           a slow failing toggle racing a successful delete) — without this
           the failure would be silent again. */}
@@ -140,15 +248,25 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
       <div className="space-y-2">
         {faqs.map((faq) => {
           const badge = sourceLabel(faq.source);
+          const deactivateLocked =
+            faq.is_active &&
+            !canRemoveActiveContribution(faq.id, 'deactivate');
+          const deleteLocked = !canRemoveActiveContribution(faq.id, 'delete');
+          const floorExplanation = `Keep at least ${MIN_VALID_FAQS} distinct active answered FAQs. Add another FAQ first.`;
           return (
             <div key={faq.id} className="border border-[#ece4d8] dark:border-white/[0.12] rounded-lg">
               <div className="flex items-start gap-3 p-3">
                 <button
                   type="button"
+                  role="switch"
+                  aria-checked={faq.is_active}
                   onClick={() => handleToggleActive(faq.id, faq.is_active)}
+                  disabled={deactivateLocked}
+                  title={deactivateLocked ? floorExplanation : undefined}
+                  aria-label={`${faq.is_active ? 'Deactivate' : 'Activate'} ${faq.question}`}
                   className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5 ${
                     faq.is_active ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
-                  }`}
+                  } ${deactivateLocked ? 'cursor-not-allowed opacity-50' : ''}`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
@@ -199,7 +317,10 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmId(faq.id)}
-                    className="text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1 shrink-0"
+                    disabled={deleteLocked}
+                    title={deleteLocked ? floorExplanation : undefined}
+                    aria-label={`Delete ${faq.question}`}
+                    className={`text-stone-400 dark:text-[#bdbdbf] hover:text-red-500 p-1 shrink-0 ${deleteLocked ? 'cursor-not-allowed opacity-40' : ''}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -207,6 +328,11 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
               </div>
 
               {errorFor(faq.id, 'px-3 pb-2')}
+              {(deactivateLocked || deleteLocked) && (
+                <p className="px-3 pb-2 text-xs text-amber-700 dark:text-amber-300">
+                  {floorExplanation}
+                </p>
+              )}
 
               {expandedId === faq.id && (
                 <div className="border-t border-[#ece4d8] dark:border-white/[0.10] p-3 space-y-2 bg-[#faf6ef] dark:bg-white/[0.03]">
@@ -221,6 +347,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
                     onChange={(e) => setEditAnswer(e.target.value)}
                     placeholder="Answer"
                     rows={3}
+                    maxLength={FAQ_ANSWER_MAX_LENGTH}
                     className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 resize-none"
                   />
                   <div className="flex justify-end gap-2">
@@ -267,6 +394,7 @@ export default function FAQManager({ businessId, initialFaqs }: FAQManagerProps)
             onChange={(e) => setNewAnswer(e.target.value)}
             placeholder="Answer *"
             rows={3}
+            maxLength={FAQ_ANSWER_MAX_LENGTH}
             className="w-full px-3 py-2 rounded-lg text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 resize-none"
           />
           {errorFor('add')}
