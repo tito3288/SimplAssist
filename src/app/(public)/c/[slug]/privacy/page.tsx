@@ -8,7 +8,7 @@ import {
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
-import { isPendingSlug } from "@/lib/util/slug";
+import { isPendingSlug } from "@/lib/util/slug.shared";
 
 /**
  * Per-business privacy policy (Phase 6).

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { generateSlug, ensureUniqueSlug, isPendingSlug } from "@/lib/util/slug";
+import { ensureUniqueSlug } from "@/lib/util/slug.server";
+import { generateSlug, isPendingSlug } from "@/lib/util/slug.shared";
 import {
   buildBusinessLandingUrl,
   resolveLegalUrls,

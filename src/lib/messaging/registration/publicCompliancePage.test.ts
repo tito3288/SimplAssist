@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-// legalUrls imports the slug helper, whose production module also exports a
-// database-backed uniqueness function. The verifier only uses isPendingSlug;
-// keep module initialization from constructing a real Supabase client.
-vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: {},
-}));
 
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import {

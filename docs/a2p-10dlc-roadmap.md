@@ -209,7 +209,7 @@ A2P verification often checks the customer's OWN website for an SMS-related Priv
   3. `existing` — customer already has an SMS-compliant policy. Same override-URL form, plus a **forced-engagement four-checkbox self-check** before submit enables. The checklist is the critical defense against customers confidently pasting non-compliant URLs. Carry this "are you sure?" pattern forward.
 
   Both `self_hosted` and `existing` read `*_url_override` columns (same submission path); modes differ only in UX. See `src/lib/messaging/registration/legalUrls.ts`.
-- **Slug freeze — structurally enforced:** slugs generated on FIRST brand-verification submit (`generateSlug`→`ensureUniqueSlug` in `src/lib/util/slug.ts`), then frozen. The write only happens inside `if (isPendingSlug(business.slug))` — there is no call site to regenerate, so a future maintainer can't accidentally do it. `handle_new_user` seeds `slug: 'pending-<short-id>'`. `isPendingSlug()` guards FIVE call sites. Right pattern for any "set once, then frozen" invariant.
+- **Slug freeze — structurally enforced:** slugs generated on FIRST brand-verification submit (`generateSlug` in `src/lib/util/slug.shared.ts` → `ensureUniqueSlug` in `src/lib/util/slug.server.ts`), then frozen. The write only happens inside `if (isPendingSlug(business.slug))` — there is no call site to regenerate, so a future maintainer can't accidentally do it. `handle_new_user` seeds `slug: 'pending-<short-id>'`. `isPendingSlug()` guards every rendering and URL-construction entry point. Right pattern for any "set once, then frozen" invariant.
 - **HEAD/GET reachability fallback:** `src/app/api/settings/compliance/route.ts` does a HEAD request (5s timeout) before saving a `*_url_override`; on `405` it retries with GET (Squarespace/Cloudflare return 405 for HEAD where GET works). `checkReachable()` carries a `MUST NOT be simplified` warning. Never trust HEAD alone.
 - **PII boundary on public pages:** `/c/[slug]/{privacy,terms}` and `/c/[slug]` are public, unauthenticated, use `supabaseAdmin` (RLS bypass). Each file has a `PUBLIC_PROJECTION` constant listing the exact safe columns. **NEVER project** `ein`, `last_4_ssn`, `registrant_mobile`, `authorized_rep_*`, `tax_id_type`, `owner_id`, the `telnyx_*` IDs, or `*_rejection_reason`. Same rule for any Phase 7+ public route.
 - **`LegalDocLayout` branding props:** `src/components/legal/LegalDocLayout.tsx` extended with optional `backHref`, `backLabel`, `businessName`. When `businessName` set, business identity dominates and SimplAssist is small footer attribution. Single-component-with-props beat a parallel layout.
@@ -771,7 +771,7 @@ This is not required before launch. Prioritize campaign approval, number assignm
 - `src/lib/messaging/lookup.ts` — `getOutboundSendContext()` (use for all outbound paths)
 - `src/lib/messaging/pausedNotice.ts` — paused-notice dedupe
 - `src/lib/email/` — Resend client + registration status templates (first email infra)
-- `src/lib/legal/perBusinessCopy.ts`, `src/lib/util/slug.ts`
+- `src/lib/legal/perBusinessCopy.ts`, `src/lib/util/slug.shared.ts`, `src/lib/util/slug.server.ts`
 - `src/app/api/messaging/registration/status/route.ts` — status webhook
 - `src/app/api/onboarding/brand-verification/route.ts` — fires Phase 3 registration on first submit
 - `src/app/api/settings/compliance/route.ts` — compliance modes + URL reachability check

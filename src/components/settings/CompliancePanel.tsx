@@ -8,7 +8,7 @@ import {
   toPlainText,
   type LegalTemplateBusiness,
 } from '@/lib/legal/perBusinessCopy';
-import { isPendingSlug } from '@/lib/util/slug';
+import { isPendingSlug } from '@/lib/util/slug.shared';
 import { primaryCtaInlineClass } from '@/lib/glass';
 import { statusWarning } from '@/lib/theme-v2/theme';
 import { cn } from '@/lib/utils';

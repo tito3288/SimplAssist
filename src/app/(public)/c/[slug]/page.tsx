@@ -12,7 +12,7 @@ import {
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import { formatPhoneNumber } from "@/lib/utils";
-import { isPendingSlug } from "@/lib/util/slug";
+import { isPendingSlug } from "@/lib/util/slug.shared";
 
 /**
  * Per-business public landing page (Phase 6).

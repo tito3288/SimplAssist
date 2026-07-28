@@ -1,4 +1,4 @@
-import { isPendingSlug } from "@/lib/util/slug";
+import { isPendingSlug } from "@/lib/util/slug.shared";
 import type { PrivacyTermsMode } from "@/types/database";
 
 // Re-exported for callers that already import this type via legalUrls.
