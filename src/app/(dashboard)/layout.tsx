@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
 import Sidebar from "./_components/sidebar";
 import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
 import { canUseFeature } from "@/lib/billing/entitlements";
@@ -28,8 +28,8 @@ export default async function DashboardLayout({
 
   // Dashboard unlocks only after SMS is actually ready: approved campaign plus
   // the active phone number assigned to that campaign.
-  const onboardingState = await getOnboardingStateForBusinessId(business.id);
-  if (!onboardingState?.dashboardReady) {
+  const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  if (!smsReadiness.smsReady) {
     redirect("/onboarding");
   }
 
