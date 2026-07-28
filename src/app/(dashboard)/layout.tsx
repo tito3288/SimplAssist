@@ -28,12 +28,13 @@ export default async function DashboardLayout({
 
   // Dashboard unlocks only after SMS is actually ready: approved campaign plus
   // the active phone number assigned to that campaign.
-  const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const [smsReadiness, entitlements] = await Promise.all([
+    getSmsReadinessForBusiness(business.id),
+    getDashboardEntitlements(business.id),
+  ]);
   if (!smsReadiness.smsReady) {
     redirect("/onboarding");
   }
-
-  const entitlements = await getDashboardEntitlements(business.id);
 
   return (
     <div

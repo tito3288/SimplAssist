@@ -7,21 +7,56 @@ import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 import { canUseFeature } from '@/lib/billing/entitlements';
 import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
 import { shouldShowCallForwardingNudge } from '@/components/dashboard/callForwardingNudgeEligibility';
-import { getDashboardEntitledContext } from '@/lib/dashboard/context';
+import {
+  getDashboardBusinessContext,
+  getDashboardEntitlements,
+} from '@/lib/dashboard/context';
 
 export default async function DashboardPage() {
-  const context = await getDashboardEntitledContext();
+  const context = await getDashboardBusinessContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');
 
-  const { supabase, user, business, entitlements } = context;
-  const canUseCalendar = canUseFeature(entitlements, 'calendar');
+  const { supabase, user, business } = context;
 
   // Calculate date for "this week" queries
   const now = new Date();
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekAgoISO = weekAgo.toISOString();
+
+  const [entitlements, dashboardData, smsReadiness] = await Promise.all([
+    getDashboardEntitlements(business.id),
+    Promise.all([
+      supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
+      supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
+      supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
+      supabase.from('messages').select('*', { count: 'exact', head: true }).eq('business_id', business.id).gte('created_at', weekAgoISO),
+      supabase
+        .from('conversations')
+        .select('*, contact:contacts(name, phone_number)')
+        .eq('business_id', business.id)
+        .order('last_message_at', { ascending: false })
+        .limit(5),
+      supabase
+        .from('contacts')
+        .select('*')
+        .eq('business_id', business.id)
+        .gte('lead_score', 7)
+        .order('lead_score', { ascending: false })
+        .limit(10),
+      supabase
+        .from('phone_numbers')
+        .select('phone_number, is_active')
+        .eq('business_id', business.id)
+        .eq('is_active', true)
+        .single(),
+      supabase.from('ai_settings').select('booking_enabled, booking_mode, guardrails').eq('business_id', business.id).single(),
+      supabase.from('google_calendar_tokens').select('id').eq('business_id', business.id).single(),
+      supabase.from('widget_configs').select('is_active').eq('business_id', business.id).maybeSingle(),
+    ]),
+    getSmsReadinessForBusiness(business.id),
+  ]);
 
   const [
     { count: totalConversations },
@@ -34,34 +69,7 @@ export default async function DashboardPage() {
     { data: aiSettings },
     { data: calendarToken },
     { data: widgetConfig },
-  ] = await Promise.all([
-    supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
-    supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
-    supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
-    supabase.from('messages').select('*', { count: 'exact', head: true }).eq('business_id', business.id).gte('created_at', weekAgoISO),
-    supabase
-      .from('conversations')
-      .select('*, contact:contacts(name, phone_number)')
-      .eq('business_id', business.id)
-      .order('last_message_at', { ascending: false })
-      .limit(5),
-    supabase
-      .from('contacts')
-      .select('*')
-      .eq('business_id', business.id)
-      .gte('lead_score', 7)
-      .order('lead_score', { ascending: false })
-      .limit(10),
-    supabase
-      .from('phone_numbers')
-      .select('phone_number, is_active')
-      .eq('business_id', business.id)
-      .eq('is_active', true)
-      .single(),
-    supabase.from('ai_settings').select('booking_enabled, booking_mode, guardrails').eq('business_id', business.id).single(),
-    supabase.from('google_calendar_tokens').select('id').eq('business_id', business.id).single(),
-    supabase.from('widget_configs').select('is_active').eq('business_id', business.id).maybeSingle(),
-  ]);
+  ] = dashboardData;
 
   // Fetch last message for each recent conversation
   const recentConversations = await Promise.all(
@@ -81,7 +89,7 @@ export default async function DashboardPage() {
 
   const firstName = getFirstNameFromAuthMetadata(user);
   const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
-  const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const canUseCalendar = canUseFeature(entitlements, 'calendar');
   const activePhoneNumber = smsReadiness.phoneNumber || phoneNumberRow?.phone_number || null;
   const showCallForwardingNudge = shouldShowCallForwardingNudge({
     hasActivePhoneNumber: Boolean(activePhoneNumber),

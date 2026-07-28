@@ -18,19 +18,20 @@ export default async function BillingPage() {
 
   const { supabase, business } = context;
 
-  const { data: subscription } = await supabase
-    .from("subscriptions")
-    .select("*")
-    .eq("business_id", business.id)
-    .single();
-
-  const { data: usagePeriod } = await supabase
-    .from("billing_usage_periods")
-    .select("*")
-    .eq("business_id", business.id)
-    .order("period_start", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [{ data: subscription }, { data: usagePeriod }] = await Promise.all([
+    supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("business_id", business.id)
+      .single(),
+    supabase
+      .from("billing_usage_periods")
+      .select("*")
+      .eq("business_id", business.id)
+      .order("period_start", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   const hasActiveSubscription =
     subscription && subscription.status !== "canceled";

@@ -42,6 +42,14 @@ const ENTITLEMENTS = {
   cancelAtPeriodEnd: false,
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.redirect.mockImplementation((path: string) => {
@@ -69,13 +77,33 @@ describe("DashboardLayout access gate", () => {
     expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
   });
 
-  it("redirects when SMS is not ready without resolving entitlements", async () => {
+  it("starts readiness and entitlements together once the business is known", async () => {
+    const readiness = deferred<{ smsReady: boolean }>();
+    const entitlements = deferred<typeof ENTITLEMENTS>();
+    mocks.getSmsReadinessForBusiness.mockReturnValue(readiness.promise);
+    mocks.getDashboardEntitlements.mockReturnValue(entitlements.promise);
+
+    const layout = DashboardLayout({
+      children: <div>Dashboard child</div>,
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledOnce();
+      expect(mocks.getDashboardEntitlements).toHaveBeenCalledOnce();
+    });
+
+    readiness.resolve({ smsReady: true });
+    entitlements.resolve(ENTITLEMENTS);
+    await expect(layout).resolves.toBeDefined();
+  });
+
+  it("redirects when SMS is not ready after resolving the parallel access checks", async () => {
     mocks.getSmsReadinessForBusiness.mockResolvedValue({ smsReady: false });
 
     await expect(
       DashboardLayout({ children: <div>Dashboard child</div> })
     ).rejects.toThrow("redirect:/onboarding");
-    expect(mocks.getDashboardEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
   });
 
   it("redirects deleted businesses before the readiness lookup", async () => {
