@@ -4,6 +4,7 @@ import {
   buildSmsComplianceCopy,
   defaultOnboardingOptInDescription,
   MOBILE_INFORMATION_SHARING_DISCLOSURE,
+  resolveComplianceCopyLocale,
 } from "./complianceCopy";
 
 const BUSINESS = {
@@ -14,9 +15,19 @@ const BUSINESS = {
 const SMS_NUMBER = "+13175550123";
 const ENTRY_POINT = "https://app.example.test/c/northstar-home-care";
 const PRIVACY_URL = `${ENTRY_POINT}/privacy`;
+const ENGLISH_MISSED_CALL_SMS =
+  "Hi, this is Northstar Home Care — saw your call come in. Just reply here with what you need and we'll get you taken care of.\n\nMsg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.";
+const SPANISH_MISSED_CALL_SMS =
+  "Hola, somos Northstar Home Care — vimos tu llamada. Solo responde aquí con lo que necesitas y nos encargaremos de ayudarte.\n\nLa frecuencia de mensajes varía. Pueden aplicarse tarifas de mensajes y datos. Responde HELP para recibir ayuda o STOP para dejar de recibir mensajes.";
+const ENGLISH_VOICEMAIL_GREETING =
+  "Thanks for calling Northstar Home Care. By leaving a message after the beep, you'll get a text back from us.";
+const SPANISH_VOICEMAIL_GREETING =
+  "Gracias por llamar a Northstar Home Care. Al dejar un mensaje después del tono, te responderemos por mensaje de texto.";
+const OPT_IN_MESSAGE =
+  "Northstar Home Care: You are subscribed to customer-care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.";
 
 describe("buildSmsComplianceCopy", () => {
-  it("builds the exact shared confirmation and voicemail scripts", () => {
+  it("builds the exact localized SMS and voicemail scripts", () => {
     const copy = buildSmsComplianceCopy({
       business: BUSINESS,
       smsPhoneNumber: SMS_NUMBER,
@@ -24,13 +35,64 @@ describe("buildSmsComplianceCopy", () => {
       privacyUrl: PRIVACY_URL,
     });
 
-    expect(copy.confirmationSms).toBe(
-      "Northstar Home Care: You are subscribed to customer-care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out."
-    );
-    expect(copy.optinMessage).toBe(copy.confirmationSms);
-    expect(copy.voicemailGreeting).toBe(
-      "Thanks for calling Northstar Home Care. We are unavailable right now. If you leave a message after the beep, you agree to receive a customer-care text follow-up from us. Message frequency varies and message and data rates may apply. If we text you, reply HELP for help or STOP to opt out. We will not share mobile information with third parties for promotional or marketing purposes. If you do not want a text follow-up, hang up without leaving a message. Please leave your message after the beep."
-    );
+    expect(copy.missedCallSms).toEqual({
+      en: ENGLISH_MISSED_CALL_SMS,
+      es: SPANISH_MISSED_CALL_SMS,
+    });
+    expect(copy.voicemailGreetings).toEqual({
+      en: ENGLISH_VOICEMAIL_GREETING,
+      es: SPANISH_VOICEMAIL_GREETING,
+    });
+    expect(copy.confirmationSms).toBe(ENGLISH_MISSED_CALL_SMS);
+    expect(copy.voicemailGreeting).toBe(ENGLISH_VOICEMAIL_GREETING);
+    expect(copy.optinMessage).toBe(OPT_IN_MESSAGE);
+  });
+
+  it.each([
+    ["en" as const, ENGLISH_MISSED_CALL_SMS, ENGLISH_VOICEMAIL_GREETING],
+    ["es" as const, SPANISH_MISSED_CALL_SMS, SPANISH_VOICEMAIL_GREETING],
+    ["both" as const, ENGLISH_MISSED_CALL_SMS, ENGLISH_VOICEMAIL_GREETING],
+  ])(
+    "selects the %s compliance scripts without changing the localized records",
+    (language, expectedSms, expectedGreeting) => {
+      const copy = buildSmsComplianceCopy({
+        business: BUSINESS,
+        smsPhoneNumber: SMS_NUMBER,
+        smsEntryPoint: ENTRY_POINT,
+        privacyUrl: PRIVACY_URL,
+        language,
+      });
+
+      expect(copy.confirmationSms).toBe(expectedSms);
+      expect(copy.confirmationSms).toBe(
+        copy.missedCallSms[resolveComplianceCopyLocale(language)]
+      );
+      expect(copy.voicemailGreeting).toBe(expectedGreeting);
+      expect(copy.voicemailGreeting).toBe(
+        copy.voicemailGreetings[resolveComplianceCopyLocale(language)]
+      );
+      expect(copy.missedCallSms.en).toBe(ENGLISH_MISSED_CALL_SMS);
+      expect(copy.missedCallSms.es).toBe(SPANISH_MISSED_CALL_SMS);
+      expect(copy.voicemailGreetings.en).toBe(ENGLISH_VOICEMAIL_GREETING);
+      expect(copy.voicemailGreetings.es).toBe(SPANISH_VOICEMAIL_GREETING);
+      expect(copy.optinMessage).toBe(OPT_IN_MESSAGE);
+      expect(copy.optinMessage).not.toBe(copy.confirmationSms);
+    }
+  );
+
+  it("preserves two actual line feeds between each SMS's two paragraphs", () => {
+    const copy = buildSmsComplianceCopy({
+      business: BUSINESS,
+      smsPhoneNumber: SMS_NUMBER,
+      smsEntryPoint: ENTRY_POINT,
+      privacyUrl: PRIVACY_URL,
+    });
+
+    for (const sms of Object.values(copy.missedCallSms)) {
+      expect(sms).toContain("\n\n");
+      expect(sms).not.toContain("\\n\\n");
+      expect(sms.split("\n\n")).toHaveLength(2);
+    }
   });
 
   it("quotes the confirmation SMS and voicemail script verbatim in messageFlow", () => {
@@ -79,15 +141,16 @@ describe("buildSmsComplianceCopy", () => {
       expect(copy.messageFlow).toContain(required);
     }
 
-    expect(copy.disclosures.privacyPolicy).toBe(
-      `Privacy Policy: ${PRIVACY_URL}.`
-    );
-    expect(copy.voicemailGreeting).toContain(
-      MOBILE_INFORMATION_SHARING_DISCLOSURE
-    );
-    expect(copy.disclosures.mobileInformationSharing).toBe(
-      MOBILE_INFORMATION_SHARING_DISCLOSURE
-    );
+    expect(copy.disclosures).toEqual({
+      purpose:
+        "This SMS program is for customer care only, including responses to customer questions, missed-call follow-ups, and service coordination.",
+      frequency: "Message frequency varies by conversation.",
+      rates: "Message and data rates may apply.",
+      help: "Reply HELP for help.",
+      stop: "Reply STOP to opt out.",
+      mobileInformationSharing: MOBILE_INFORMATION_SHARING_DISCLOSURE,
+      privacyPolicy: `Privacy Policy: ${PRIVACY_URL}.`,
+    });
   });
 
   it("does not substitute the business contact phone for a missing SMS number", () => {
@@ -127,6 +190,18 @@ describe("buildSmsComplianceCopy", () => {
       expect(copy.messageFlow).toContain(entryPoint);
     }
   );
+});
+
+describe("resolveComplianceCopyLocale", () => {
+  it.each([
+    ["es" as const, "es"],
+    ["en" as const, "en"],
+    ["both" as const, "en"],
+    [null, "en"],
+    [undefined, "en"],
+  ])("maps %s to %s", (language, expected) => {
+    expect(resolveComplianceCopyLocale(language)).toBe(expected);
+  });
 });
 
 describe("defaultOnboardingOptInDescription", () => {

@@ -79,6 +79,7 @@ const business = {
   privacy_terms_mode: "hosted",
   privacy_url_override: null,
   terms_url_override: null,
+  ai_settings: { language: "en" },
 };
 
 const complianceCopy = {
@@ -100,6 +101,7 @@ let updates: Array<Record<string, unknown>>;
 let archivedCampaignIds: string[];
 let campaignHistoryError: { message: string } | null;
 let campaignHistoryDataOverride: unknown;
+let selectedBusinessColumns: string[];
 
 function asyncItems(items: unknown[]) {
   return {
@@ -140,15 +142,18 @@ function augmentPromise<T>(
 
 function businessQuery() {
   return {
-    select: vi.fn((columns: string) => ({
-      eq: vi.fn(() => ({
-        single: vi.fn(async () =>
-          columns === "a2p_risk_review_status"
-            ? { data: { a2p_risk_review_status: "not_started" }, error: null }
-            : { data: { ...business }, error: null }
-        ),
-      })),
-    })),
+    select: vi.fn((columns: string) => {
+      selectedBusinessColumns.push(columns);
+      return {
+        eq: vi.fn(() => ({
+          single: vi.fn(async () =>
+            columns === "a2p_risk_review_status"
+              ? { data: { a2p_risk_review_status: "not_started" }, error: null }
+              : { data: { ...business }, error: null }
+          ),
+        })),
+      };
+    }),
     update: vi.fn((payload: Record<string, unknown>) => {
       updates.push(payload);
       return {
@@ -185,6 +190,7 @@ beforeEach(() => {
   archivedCampaignIds = [];
   campaignHistoryError = null;
   campaignHistoryDataOverride = undefined;
+  selectedBusinessColumns = [];
   setCampaigns([]);
   mocks.from.mockImplementation((table: string) => {
     if (table === "businesses") return businessQuery();
@@ -295,8 +301,14 @@ describe("registerCampaign recover-before-create", () => {
       expect.objectContaining({
         smsPhoneNumber: "+15551234567",
         smsEntryPoint: "https://app.simplassist.com/c/simplassist",
+        language: "en",
       })
     );
+    expect(
+      selectedBusinessColumns.some((columns) =>
+        columns.includes("ai_settings(language)")
+      )
+    ).toBe(true);
     expect(mocks.appendRegistrationEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "campaign_submitted",

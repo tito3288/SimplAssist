@@ -57,6 +57,11 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import { POST as voiceWebhook } from "./route";
+import {
+  buildSmsComplianceCopy,
+  resolveComplianceCopyLocale,
+} from "@/lib/messaging/complianceCopy";
+import type { Language } from "@/types/database";
 
 const ATTEMPT = {
   id: "att_1",
@@ -184,6 +189,7 @@ describe("POST /api/messaging/voice", () => {
           call_forwarding_enabled: false,
           // A saved number must not override the disabled setting.
           forward_to_number: ATTEMPT.forward_to_number,
+          ai_settings: { language: null },
         },
         error: null,
       }
@@ -204,7 +210,12 @@ describe("POST /api/messaging/voice", () => {
       expect.objectContaining({
         callForwardingEnabled: false,
         forwardToNumber: ATTEMPT.forward_to_number,
+        language: "en",
       })
+    );
+
+    expect(chains[1].select).toHaveBeenCalledWith(
+      "name, email, phone_number, telnyx_voice_application_id, call_forwarding_enabled, forward_to_number, ai_settings(language)"
     );
 
     mocks.unwrap.mockResolvedValueOnce(
@@ -223,10 +234,20 @@ describe("POST /api/messaging/voice", () => {
     const answeredResponse = await voiceWebhook(request());
 
     expect(answeredResponse.status).toBe(200);
+    const expectedGreeting = buildSmsComplianceCopy({
+      business: {
+        name: "Test Biz",
+        email: "owner@example.test",
+        phone_number: "+15745550400",
+      },
+      smsPhoneNumber: "+15745550300",
+      privacyUrl: "the business privacy policy",
+      language: "en",
+    }).voicemailGreeting;
     expect(mocks.speak).toHaveBeenCalledWith(
       "cc_forwarding_off",
       expect.objectContaining({
-        payload: expect.any(String),
+        payload: expectedGreeting,
         voice: "AWS.Polly.Joanna-Neural",
         language: "en-US",
         client_state: initiatedState,
@@ -239,6 +260,82 @@ describe("POST /api/messaging/voice", () => {
       "businesses",
     ]);
   });
+
+  it.each([
+    {
+      label: "English",
+      language: "en" as Language | undefined,
+      expectedVoice: "AWS.Polly.Joanna-Neural",
+      expectedTtsLanguage: "en-US",
+    },
+    {
+      label: "Spanish",
+      language: "es" as Language | undefined,
+      expectedVoice: "AWS.Polly.Lupe-Neural",
+      expectedTtsLanguage: "es-US",
+    },
+    {
+      label: "bilingual",
+      language: "both" as Language | undefined,
+      expectedVoice: "AWS.Polly.Joanna-Neural",
+      expectedTtsLanguage: "en-US",
+    },
+    {
+      label: "legacy state without a language",
+      language: undefined,
+      expectedVoice: "AWS.Polly.Joanna-Neural",
+      expectedTtsLanguage: "en-US",
+    },
+  ])(
+    "speaks the canonical $label voicemail with the matching Polly locale",
+    async ({ language, expectedVoice, expectedTtsLanguage }) => {
+      const state = encodeState({
+        callControlId: "cc_locale",
+        businessId: ATTEMPT.business_id,
+        from: ATTEMPT.caller_phone,
+        businessName: "Test Biz",
+        businessEmail: "owner@example.test",
+        businessPhoneNumber: "+15745550400",
+        smsPhoneNumber: "+15745550300",
+        ...(language ? { language } : {}),
+      });
+      mocks.unwrap.mockResolvedValueOnce(
+        voiceEvent(
+          "call.answered",
+          {
+            call_control_id: "cc_locale",
+            client_state: state,
+          },
+          `evt_voice_answered_${language ?? "missing_language"}`
+        )
+      );
+
+      const response = await voiceWebhook(request());
+
+      const expectedCopy = buildSmsComplianceCopy({
+        business: {
+          name: "Test Biz",
+          email: "owner@example.test",
+          phone_number: "+15745550400",
+        },
+        smsPhoneNumber: "+15745550300",
+        privacyUrl: "the business privacy policy",
+        language,
+      });
+      expect(response.status).toBe(200);
+      expect(resolveComplianceCopyLocale(language)).toBe(
+        language === "es" ? "es" : "en"
+      );
+      expect(mocks.speak).toHaveBeenCalledWith("cc_locale", {
+        payload: expectedCopy.voicemailGreeting,
+        voice: expectedVoice,
+        language: expectedTtsLanguage,
+        client_state: state,
+      });
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.dial).not.toHaveBeenCalled();
+    }
+  );
 
   it("uses forwarding-enabled configuration captured at initiation to create, dial, and bridge an attempt", async () => {
     mocks.unwrap.mockResolvedValueOnce(
@@ -263,6 +360,7 @@ describe("POST /api/messaging/voice", () => {
           telnyx_voice_application_id: "voice_app_1",
           call_forwarding_enabled: true,
           forward_to_number: ATTEMPT.forward_to_number,
+          ai_settings: [{ language: "es" }],
         },
         error: null,
       }
@@ -279,6 +377,7 @@ describe("POST /api/messaging/voice", () => {
       expect.objectContaining({
         telnyxVoiceApplicationId: "voice_app_1",
         smsPhoneNumber: "+15745550300",
+        language: "es",
         callForwardingEnabled: true,
         forwardToNumber: ATTEMPT.forward_to_number,
       })
@@ -350,6 +449,7 @@ describe("POST /api/messaging/voice", () => {
       expect.objectContaining({
         forwardingRole: "forward_target",
         forwardingAttemptId: ATTEMPT.id,
+        language: "es",
       })
     );
     const inboundState = mocks.bridge.mock.calls[0][1]
@@ -361,6 +461,7 @@ describe("POST /api/messaging/voice", () => {
         forwardingRole: "inbound",
         forwardingAttemptId: ATTEMPT.id,
         outboundCallControlId: ATTEMPT.outbound_call_control_id,
+        language: "es",
       })
     );
     expect(mocks.speak).not.toHaveBeenCalled();

@@ -7,12 +7,16 @@ import {
 } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMissedCallSMS } from "@/lib/messaging/missed-call";
-import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import {
+  buildSmsComplianceCopy,
+  resolveComplianceCopyLocale,
+} from "@/lib/messaging/complianceCopy";
 import { isE164PhoneNumber } from "@/lib/phone/e164";
 import {
   canUseFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import type { Language } from "@/types/database";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
@@ -56,6 +60,7 @@ interface VoiceState {
   businessName: string;
   businessEmail?: string | null;
   businessPhoneNumber?: string | null;
+  language?: Language;
   smsPhoneNumber?: string;
   telnyxVoiceApplicationId?: string | null;
   callForwardingEnabled?: boolean;
@@ -235,7 +240,7 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
   const { data: business, error: businessLookupError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "name, email, phone_number, telnyx_voice_application_id, call_forwarding_enabled, forward_to_number"
+      "name, email, phone_number, telnyx_voice_application_id, call_forwarding_enabled, forward_to_number, ai_settings(language)"
     )
     .eq("id", businessId)
     .maybeSingle();
@@ -252,6 +257,10 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     );
   }
   const businessName = business?.name ?? "us";
+  const aiSettings = Array.isArray(business.ai_settings)
+    ? business.ai_settings[0]
+    : business.ai_settings;
+  const language = (aiSettings?.language ?? "en") as Language;
 
   const state = encodeState({
     callControlId,
@@ -260,6 +269,7 @@ async function handleCallInitiated(payload: Record<string, unknown>) {
     businessName,
     businessEmail: business?.email ?? null,
     businessPhoneNumber: business?.phone_number ?? null,
+    language,
     smsPhoneNumber: to,
     telnyxVoiceApplicationId: business?.telnyx_voice_application_id ?? null,
     callForwardingEnabled: business?.call_forwarding_enabled ?? false,
@@ -332,6 +342,7 @@ function shouldAttemptForwarding(state: VoiceState): boolean {
 }
 
 async function speakVoicemailGreeting(state: VoiceState, stateB64: string | undefined) {
+  const locale = resolveComplianceCopyLocale(state.language);
   const greeting = buildSmsComplianceCopy({
     business: {
       name: state.businessName,
@@ -340,6 +351,7 @@ async function speakVoicemailGreeting(state: VoiceState, stateB64: string | unde
     },
     smsPhoneNumber: state.smsPhoneNumber ?? "this business number",
     privacyUrl: "the business privacy policy",
+    language: state.language,
   }).voicemailGreeting;
 
   console.log(
@@ -347,8 +359,11 @@ async function speakVoicemailGreeting(state: VoiceState, stateB64: string | unde
   );
   await telnyx.calls.actions.speak(state.callControlId, {
     payload: greeting,
-    voice: "AWS.Polly.Joanna-Neural",
-    language: "en-US",
+    voice:
+      locale === "es"
+        ? "AWS.Polly.Lupe-Neural"
+        : "AWS.Polly.Joanna-Neural",
+    language: locale === "es" ? "es-US" : "en-US",
     client_state: stateB64,
   });
 }

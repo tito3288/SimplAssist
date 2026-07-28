@@ -98,6 +98,7 @@ const LAUNCH_BUSINESS = {
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: true,
+  ai_settings: { language: "en" },
 };
 
 // Chainable, awaitable supabase mock; from() consumes queued results FIFO
@@ -244,6 +245,9 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       PENDING_NUMBER,
       BUSINESS_ID
     );
+    expect(chains[0].select).toHaveBeenCalledWith(
+      expect.stringContaining("ai_settings(language)")
+    );
     expect(
       mocks.prepareExistingTelnyxBrandLinkForLaunch.mock.invocationCallOrder[0]
     ).toBeLessThan(
@@ -279,6 +283,7 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       slug: LAUNCH_BUSINESS.slug,
       businessName: LAUNCH_BUSINESS.name,
       smsPhoneNumber: PENDING_NUMBER,
+      language: "en",
     });
     expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
   });
@@ -479,6 +484,7 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       slug: LAUNCH_BUSINESS.slug,
       businessName: LAUNCH_BUSINESS.name,
       smsPhoneNumber: PENDING_NUMBER,
+      language: "en",
     };
     expect(mocks.verifyPublishedCompliancePage).toHaveBeenCalledTimes(2);
     expect(mocks.verifyPublishedCompliancePage).toHaveBeenNthCalledWith(

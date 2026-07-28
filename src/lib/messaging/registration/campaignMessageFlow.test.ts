@@ -95,6 +95,26 @@ describe("buildCampaignMessageFlow", () => {
     expect(copy.messageFlow).toContain(copy.disclosures.rates);
   });
 
+  it("uses the selected Spanish scripts verbatim in campaign copy", () => {
+    const copy = buildCampaignMessageFlow({
+      ...BASE_ARGS,
+      language: "es",
+    });
+
+    expect(copy.confirmationSms).toBe(
+      "Hola, somos Northstar Home Care — vimos tu llamada. Solo responde aquí con lo que necesitas y nos encargaremos de ayudarte.\n\nLa frecuencia de mensajes varía. Pueden aplicarse tarifas de mensajes y datos. Responde HELP para recibir ayuda o STOP para dejar de recibir mensajes."
+    );
+    expect(copy.voicemailGreeting).toBe(
+      "Gracias por llamar a Northstar Home Care. Al dejar un mensaje después del tono, te responderemos por mensaje de texto."
+    );
+    expect(copy.messageFlow).toContain(
+      `Confirmation SMS: “${copy.confirmationSms}”`
+    );
+    expect(copy.messageFlow).toContain(
+      `Voicemail disclosure: “${copy.voicemailGreeting}”`
+    );
+  });
+
   it("accepts a message flow exactly at the 2,048-character limit", () => {
     expect(TELNYX_CAMPAIGN_MESSAGE_FLOW_MAX_CHARACTERS).toBe(2_048);
     const args = argsWithMessageFlowLength(2_048);

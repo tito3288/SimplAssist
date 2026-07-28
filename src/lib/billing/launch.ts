@@ -44,7 +44,7 @@ import {
 } from "@/lib/onboarding/registrationAttempt";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
-import type { OnboardingRegistrationStatus } from "@/types/database";
+import type { Language, OnboardingRegistrationStatus } from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
@@ -108,6 +108,7 @@ interface BusinessLaunchRow {
   onboarding_registration_status: OnboardingRegistrationStatus | null;
   brand_status: string | null;
   campaign_status: string | null;
+  ai_settings: { language: Language } | null;
 }
 
 interface ActiveNumberRow {
@@ -284,6 +285,7 @@ export async function attemptPaidLaunch(
       slug: business.slug,
       businessName: business.name,
       smsPhoneNumber,
+      language: business.ai_settings?.language ?? "en",
     });
 
     // Carrier-rejected campaign? Archive its history, deactivate it at
@@ -394,7 +396,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status"
+      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status, ai_settings(language)"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();

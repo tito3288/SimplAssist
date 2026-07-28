@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import type { Language } from "@/types/database";
 import {
   PublicCompliancePageVerificationError,
   verifyPublishedCompliancePage,
@@ -26,6 +27,13 @@ const copy = buildSmsComplianceCopy({
   smsPhoneNumber: SMS_NUMBER,
   smsEntryPoint: `this page (/c/${SLUG})`,
   privacyUrl: PRIVACY_HREF,
+});
+const spanishCopy = buildSmsComplianceCopy({
+  business: { name: BUSINESS_NAME, email: null, phone_number: null },
+  smsPhoneNumber: SMS_NUMBER,
+  smsEntryPoint: `this page (/c/${SLUG})`,
+  privacyUrl: PRIVACY_HREF,
+  language: "es",
 });
 const NEXT_THEMES_SCRIPT =
   '((e,t,r,n,o,l,a,i)=>{let u=document.documentElement,s=["light","dark"];function c(t){(Array.isArray(e)?e:[e]).forEach(e=>{let r="class"===e,n=r&&l?o.map(e=>l[e]||e):o;r?(u.classList.remove(...n),u.classList.add(l&&l[t]?l[t]:t)):u.setAttribute(e,t)}),i&&s.includes(t)&&(u.style.colorScheme=t)}if(n)c(n);else try{let e=localStorage.getItem(t)||r,n=a&&"system"===e?window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light":e;c(n)}catch(e){}})("class","theme","system",null,["light","dark"],null,true,true)';
@@ -67,7 +75,17 @@ function definition(
 }
 
 /** Mirrors the semantic section and dt/dd boundaries emitted by /c/[slug]. */
-function validHtml(omitted?: Marker): string {
+function validHtml(
+  omitted?: Marker,
+  language?: Language | null
+): string {
+  const renderedCopy = buildSmsComplianceCopy({
+    business: { name: BUSINESS_NAME, email: null, phone_number: null },
+    smsPhoneNumber: SMS_NUMBER,
+    smsEntryPoint: `this page (/c/${SLUG})`,
+    privacyUrl: PRIVACY_HREF,
+    language,
+  });
   const smsHref = omitted === "sms_href" ? "/contact" : `sms:${SMS_NUMBER}`;
   const ctaText =
     omitted === "cta_text"
@@ -78,7 +96,7 @@ function validHtml(omitted?: Marker): string {
   const privacyText =
     omitted === "privacy_text"
       ? "Read our privacy information."
-      : copy.disclosures.privacyPolicy;
+      : renderedCopy.disclosures.privacyPolicy;
 
   return [
     "<!doctype html><html><head><title>Compliance</title></head><body>",
@@ -88,31 +106,31 @@ function validHtml(omitted?: Marker): string {
     `<a data-role="sms-cta" href="${smsHref}">${escapeHtmlText(ctaText)}</a>`,
     omitted === "purpose"
       ? ""
-      : `<p data-value="purpose">${escapeHtmlText(copy.disclosures.purpose)}</p>`,
+      : `<p data-value="purpose">${escapeHtmlText(renderedCopy.disclosures.purpose)}</p>`,
     "</section>",
     '<section data-block="introduction">',
     "<h2>SMS opt-in and program details</h2>",
     omitted === "introduction"
       ? ""
-      : `<p>${escapeHtmlText(copy.optInPaths.introduction)}</p>`,
+      : `<p>${escapeHtmlText(renderedCopy.optInPaths.introduction)}</p>`,
     "</section>",
     '<section data-block="text-message-opt-in">',
     "<h3>Text-message opt-in</h3>",
     omitted === "inbound_sms"
       ? ""
-      : `<p>${escapeHtmlText(copy.optInPaths.inboundSms)}</p>`,
+      : `<p>${escapeHtmlText(renderedCopy.optInPaths.inboundSms)}</p>`,
     omitted === "confirmation_sms"
       ? ""
-      : `<h4>Confirmation SMS</h4><blockquote>“<!-- -->${escapeHtmlText(copy.confirmationSms)}<!-- -->”</blockquote>`,
+      : `<h4>Confirmation SMS</h4><blockquote>“<!-- -->${escapeHtmlText(renderedCopy.confirmationSms)}<!-- -->”</blockquote>`,
     "</section>",
     '<section data-block="voicemail-opt-in">',
     "<h3>Voicemail opt-in</h3>",
     omitted === "voicemail_path"
       ? ""
-      : `<p>${escapeHtmlText(copy.optInPaths.voicemail)}</p><p>${escapeHtmlText(copy.optInPaths.callForwarding)}</p>`,
+      : `<p>${escapeHtmlText(renderedCopy.optInPaths.voicemail)}</p><p>${escapeHtmlText(renderedCopy.optInPaths.callForwarding)}</p>`,
     omitted === "voicemail_script"
       ? ""
-      : `<h4>What callers hear before leaving a message</h4><blockquote>“<!-- -->${escapeHtmlText(copy.voicemailGreeting)}<!-- -->”</blockquote>`,
+      : `<h4>What callers hear before leaving a message</h4><blockquote>“<!-- -->${escapeHtmlText(renderedCopy.voicemailGreeting)}<!-- -->”</blockquote>`,
     "</section>",
     '<section data-block="program-disclosures">',
     "<h3>Program disclosures</h3><dl>",
@@ -120,21 +138,21 @@ function validHtml(omitted?: Marker): string {
       "frequency",
       omitted,
       "Message frequency",
-      copy.disclosures.frequency
+      renderedCopy.disclosures.frequency
     ),
     definition(
       "rates",
       omitted,
       "Message and data rates",
-      copy.disclosures.rates
+      renderedCopy.disclosures.rates
     ),
-    definition("help", omitted, "HELP", copy.disclosures.help),
-    definition("stop", omitted, "STOP", copy.disclosures.stop),
+    definition("help", omitted, "HELP", renderedCopy.disclosures.help),
+    definition("stop", omitted, "STOP", renderedCopy.disclosures.stop),
     definition(
       "sharing",
       omitted,
       "Mobile information sharing",
-      copy.disclosures.mobileInformationSharing
+      renderedCopy.disclosures.mobileInformationSharing
     ),
     omitted === "privacy_text"
       ? `<div data-definition="privacy"><dt>Privacy Policy</dt><dd><a data-role="privacy-link" href="${privacyHref}">${privacyText}</a></dd></div>`
@@ -219,6 +237,41 @@ describe("verifyPublishedCompliancePage", () => {
         signal: expect.any(AbortSignal),
       })
     );
+  });
+
+  it("verifies both quoted scripts against the explicitly selected locale", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      htmlResponse(validHtml(undefined, "es"))
+    );
+
+    await expect(
+      verifyPublishedCompliancePage({
+        ...VERIFY_ARGS,
+        language: "es",
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects stale or mixed-language quoted scripts", async () => {
+    vi.mocked(fetch).mockResolvedValue(htmlResponse(validHtml()));
+    await expect(
+      verifyPublishedCompliancePage({
+        ...VERIFY_ARGS,
+        language: "es",
+      })
+    ).rejects.toThrow("required visible SMS disclosure");
+
+    const mixedHtml = validHtml(undefined, "es").replace(
+      escapeHtmlText(spanishCopy.voicemailGreeting),
+      escapeHtmlText(copy.voicemailGreeting)
+    );
+    vi.mocked(fetch).mockResolvedValue(htmlResponse(mixedHtml));
+    await expect(
+      verifyPublishedCompliancePage({
+        ...VERIFY_ARGS,
+        language: "es",
+      })
+    ).rejects.toThrow("required visible SMS disclosure");
   });
 
   it.each<Marker>([

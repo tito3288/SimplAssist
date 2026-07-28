@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Parser, parseDocument } from "htmlparser2";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
+import type { Language } from "@/types/database";
 import { buildBusinessLandingUrl } from "./legalUrls";
 
 const PUBLIC_COMPLIANCE_PAGE_TIMEOUT_MS = 10_000;
@@ -167,10 +168,12 @@ export async function verifyPublishedCompliancePage({
   slug,
   businessName,
   smsPhoneNumber,
+  language,
 }: {
   slug: string;
   businessName: string;
   smsPhoneNumber: string;
+  language?: Language | null;
 }): Promise<void> {
   const pageUrl = buildBusinessLandingUrl(slug);
 
@@ -279,6 +282,7 @@ export async function verifyPublishedCompliancePage({
     smsPhoneNumber,
     smsEntryPoint: `this page (/c/${slug})`,
     privacyUrl: privacyHref,
+    language,
   });
 
   const smsAnchor = findVisibleAnchor(

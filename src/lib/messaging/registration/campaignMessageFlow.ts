@@ -4,6 +4,7 @@ import {
   type SmsComplianceCopy,
 } from "@/lib/messaging/complianceCopy";
 import { isE164PhoneNumber, normalizeE164Input } from "@/lib/phone/e164";
+import type { Language } from "@/types/database";
 
 export const TELNYX_CAMPAIGN_MESSAGE_FLOW_MAX_CHARACTERS = 2_048;
 
@@ -47,11 +48,13 @@ export function buildCampaignMessageFlow({
   smsPhoneNumber,
   smsEntryPoint,
   privacyUrl,
+  language,
 }: {
   business: SmsComplianceBusiness;
   smsPhoneNumber: string;
   smsEntryPoint: string;
   privacyUrl: string;
+  language?: Language | null;
 }): CampaignMessageFlowCopy {
   const normalizedSmsPhoneNumber = normalizeE164Input(smsPhoneNumber);
   if (!isE164PhoneNumber(normalizedSmsPhoneNumber)) {
@@ -68,6 +71,7 @@ export function buildCampaignMessageFlow({
     smsPhoneNumber: normalizedSmsPhoneNumber,
     smsEntryPoint,
     privacyUrl,
+    language,
   });
   const messageFlowCharacterCount = copy.messageFlow.length;
 

@@ -375,7 +375,9 @@ Thanks for contacting {BusinessName}. We received your message and can help with
 ```
 
 ```text
-Hi, this is {BusinessName}. We saw your missed call and wanted to follow up. What service or question can we help with? Reply STOP to opt out.
+Hi, this is {BusinessName} — saw your call come in. Just reply here with what you need and we'll get you taken care of.
+
+Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.
 ```
 
 ```text

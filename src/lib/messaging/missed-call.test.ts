@@ -124,15 +124,15 @@ describe("sendMissedCallSMS", () => {
   it.each([
     [
       "en" as const,
-      "Hi, this is Green Leaf Landscaping. We received your call and can help by text. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
+      "Hi, this is Green Leaf Landscaping — saw your call come in. Just reply here with what you need and we'll get you taken care of.\n\nMsg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
     ],
     [
       "es" as const,
-      "Hola, somos Green Leaf Landscaping. Recibimos su llamada y podemos ayudar por texto. La frecuencia de mensajes varia. Pueden aplicar tarifas de mensajes y datos. Responda HELP para ayuda o STOP para cancelar.",
+      "Hola, somos Green Leaf Landscaping — vimos tu llamada. Solo responde aquí con lo que necesitas y nos encargaremos de ayudarte.\n\nLa frecuencia de mensajes varía. Pueden aplicarse tarifas de mensajes y datos. Responde HELP para recibir ayuda o STOP para dejar de recibir mensajes.",
     ],
     [
       "both" as const,
-      "Hi, this is Green Leaf Landscaping. We received your call and can help by text. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
+      "Hi, this is Green Leaf Landscaping — saw your call come in. Just reply here with what you need and we'll get you taken care of.\n\nMsg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
     ],
   ])("sends the exact static %s template without Anthropic", async (language, expected) => {
     setRows(language);
@@ -156,6 +156,36 @@ describe("sendMissedCallSMS", () => {
       "sms",
       { defaultAiHandling: false }
     );
+    expect(expected).toContain("\n\n");
+    expect(expected).not.toContain("\\n\\n");
+    expect(expected.split("\n\n")).toHaveLength(2);
+    expect(mocks.addMessage).toHaveBeenCalledWith(
+      "conversation_1",
+      BUSINESS_ID,
+      "assistant",
+      expected,
+      "sms"
+    );
+    expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      text: expected,
+      source: "missed_call_sms",
+      providerMessageId: "telnyx_message_1",
+      idempotencyKey: "outbound:missed_call:telnyx_message_1",
+      metadata: { to: CALLER, from: BUSINESS_NUMBER },
+    });
+
+    const telnyxBody = mocks.send.mock.calls[0]?.[0]?.text;
+    const preflightBody = mocks.preflightOutboundSms.mock.calls[0]?.[0]?.text;
+    const persistedBody = mocks.addMessage.mock.calls[0]?.[3];
+    const meteredBody =
+      mocks.recordOutboundSmsUsage.mock.calls[0]?.[0]?.text;
+    expect([telnyxBody, preflightBody, persistedBody, meteredBody]).toEqual([
+      expected,
+      expected,
+      expected,
+      expected,
+    ]);
     expect(mocks.anthropicCreate).not.toHaveBeenCalled();
   });
 

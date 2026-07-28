@@ -239,6 +239,7 @@ export default function OnboardingPage() {
               businessName={state.businessInfo.name || 'Your Business'}
               businessType={(state.businessInfo.business_type || 'general') as BusinessType}
               businessTypeOther={state.businessInfo.business_type_other}
+              language={state.aiSettings?.language ?? 'en'}
               services={state.servicesAndFaqs.services}
               riskReview={state.registration.riskReview}
               initialData={state.brandVerification}

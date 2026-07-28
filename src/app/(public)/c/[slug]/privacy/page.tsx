@@ -8,6 +8,7 @@ import {
   type LegalTemplateBusiness,
 } from "@/lib/legal/perBusinessCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
+import type { Language } from "@/types/database";
 import { isPendingSlug } from "@/lib/util/slug.shared";
 
 /**
@@ -28,7 +29,13 @@ type PageProps = { params: Promise<{ slug: string }> };
 export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
-  "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description";
+  "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description, ai_settings(language)";
+
+type PublicLegalBusiness = LegalTemplateBusiness & {
+  id: string;
+  slug: string;
+  ai_settings: { language: Language } | null;
+};
 
 async function loadBusiness(
   slug: string
@@ -43,15 +50,13 @@ async function loadBusiness(
 
   if (error || !data) return null;
 
-  const business = data as unknown as LegalTemplateBusiness & {
-    id: string;
-    slug: string;
-  };
+  const business = data as unknown as PublicLegalBusiness;
 
   const smsPhoneNumber = await getActiveSmsNumberForBusiness(business.id);
 
   return {
     ...business,
+    language: business.ai_settings?.language,
     sms_phone_number: smsPhoneNumber,
   };
 }

@@ -1,4 +1,8 @@
-import type { BusinessType } from "@/types/database";
+import {
+  buildMissedCallSmsCopy,
+  resolveComplianceCopyLocale,
+} from "@/lib/messaging/complianceCopy";
+import type { BusinessType, Language } from "@/types/database";
 
 export interface CustomerCareTemplateInput {
   businessName: string;
@@ -6,6 +10,7 @@ export interface CustomerCareTemplateInput {
   businessTypeOther?: string | null;
   services?: { name: string; description?: string | null }[];
   bookingEnabled?: boolean;
+  language?: Language | null;
 }
 
 export interface CustomerCareTemplateCopy {
@@ -53,6 +58,8 @@ export function buildCustomerCareTemplateCopy(
 ): CustomerCareTemplateCopy {
   const businessName = cleanBusinessName(input.businessName);
   const serviceCategory = deriveServiceCategory(input);
+  const missedCallSms = buildMissedCallSmsCopy(businessName);
+  const locale = resolveComplianceCopyLocale(input.language);
 
   return {
     serviceCategory,
@@ -63,7 +70,7 @@ export function buildCustomerCareTemplateCopy(
     ].join(" "),
     sampleMessages: [
       `Thanks for contacting ${businessName}. We received your message and can help with your question about ${serviceCategory}. What can we help you with today?`,
-      `Hi, this is ${businessName}. We saw your missed call and wanted to follow up. What service or question can we help with? Reply STOP to opt out.`,
+      missedCallSms[locale],
       `Thanks for your interest in ${businessName}. We can help coordinate next steps for your inquiry. What day and time works best for a quick call?`,
     ],
     optInDescription: [

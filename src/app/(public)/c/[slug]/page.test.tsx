@@ -25,7 +25,10 @@ vi.mock("@/lib/theme-v2/ui", () => ({
   ThemeToggleV2: () => null,
 }));
 
-import { MOBILE_INFORMATION_SHARING_DISCLOSURE } from "@/lib/messaging/complianceCopy";
+import {
+  buildSmsComplianceCopy,
+  MOBILE_INFORMATION_SHARING_DISCLOSURE,
+} from "@/lib/messaging/complianceCopy";
 import { verifyPublishedCompliancePage } from "@/lib/messaging/registration/publicCompliancePage";
 import RootLayout from "../../../layout";
 import BusinessLandingPage, { dynamic } from "./page";
@@ -53,6 +56,7 @@ const BUSINESS = {
   // Deliberately stale extra data: the page's projection excludes this field,
   // and rendering must use the live shared copy instead.
   opt_in_description: "STALE PERSISTED OPT-IN COPY",
+  ai_settings: { language: "en" as const },
 };
 
 const HOURS = [
@@ -115,6 +119,13 @@ async function renderPrivacyPage() {
   return renderToStaticMarkup(element);
 }
 
+function complianceBlockquotes(html: string): string[] {
+  return Array.from(
+    html.matchAll(/<blockquote[^>]*>[\s\S]*?<\/blockquote>/g),
+    (match) => match[0]
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   tableResults.clear();
@@ -142,6 +153,14 @@ describe("/c/[slug] compliance page", () => {
   it("is force-dynamic and renders the active SMS number plus every disclosure in raw HTML", async () => {
     const html = await renderPage();
     const text = visibleText(html);
+    const expectedCopy = buildSmsComplianceCopy({
+      business: BUSINESS,
+      smsPhoneNumber: SMS_NUMBER,
+      smsEntryPoint: `this page (/c/${SLUG})`,
+      privacyUrl: `/c/${SLUG}/privacy`,
+      language: BUSINESS.ai_settings.language,
+    });
+    const blockquotes = complianceBlockquotes(html);
 
     expect(dynamic).toBe("force-dynamic");
     expect(html).not.toContain("<script");
@@ -166,9 +185,14 @@ describe("/c/[slug] compliance page", () => {
     expect(text).toContain(
       `Inbound SMS opt-in: customers text ${SMS_NUMBER}, published at this page (/c/${SLUG})`
     );
-    expect(text).toContain("Confirmation SMS “Northstar & Sons Home Care:");
-    expect(text).toContain(
-      "What callers hear before leaving a message “Thanks for calling Northstar & Sons Home Care."
+    expect(blockquotes).toHaveLength(2);
+    expect(visibleText(blockquotes[0])).toBe(
+      `“${expectedCopy.confirmationSms.replace(/\s+/g, " ")}”`
+    );
+    expect(blockquotes[0]).toContain("whitespace-pre-line");
+    expect(blockquotes[0]).toContain("\n\n");
+    expect(visibleText(blockquotes[1])).toBe(
+      `“${expectedCopy.voicemailGreeting}”`
     );
     expect(text).toContain("a call or live conversation alone is not SMS consent");
     expect(text).toContain("Message frequency Message frequency varies by conversation.");
@@ -197,7 +221,38 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, business_type, email, phone_number, address, city, state, zip"
+      "id, slug, name, business_type, email, phone_number, address, city, state, zip, ai_settings(language)"
+    );
+  });
+
+  it("renders both quoted scripts from the same Spanish canonical copy", async () => {
+    const spanishBusiness = {
+      ...BUSINESS,
+      ai_settings: { language: "es" as const },
+    };
+    tableResults.set("businesses", {
+      data: spanishBusiness,
+      error: null,
+    });
+
+    const html = await renderPage();
+    const blockquotes = complianceBlockquotes(html);
+    const expectedCopy = buildSmsComplianceCopy({
+      business: spanishBusiness,
+      smsPhoneNumber: SMS_NUMBER,
+      smsEntryPoint: `this page (/c/${SLUG})`,
+      privacyUrl: `/c/${SLUG}/privacy`,
+      language: spanishBusiness.ai_settings.language,
+    });
+
+    expect(blockquotes).toHaveLength(2);
+    expect(visibleText(blockquotes[0])).toBe(
+      `“${expectedCopy.confirmationSms.replace(/\s+/g, " ")}”`
+    );
+    expect(blockquotes[0]).toContain("whitespace-pre-line");
+    expect(blockquotes[0]).toContain("\n\n");
+    expect(visibleText(blockquotes[1])).toBe(
+      `“${expectedCopy.voicemailGreeting}”`
     );
   });
 
@@ -221,7 +276,31 @@ describe("/c/[slug] compliance page", () => {
     expect(mocks.getActiveSmsNumber).toHaveBeenCalledWith(BUSINESS_ID);
     const businessQuery = tableQueries.get("businesses")?.[0];
     expect(businessQuery?.select).toHaveBeenCalledWith(
-      "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description"
+      "id, slug, name, email, phone_number, address, city, state, zip, opt_in_description, ai_settings(language)"
+    );
+  });
+
+  it("builds generated legal copy with the business language", async () => {
+    const spanishBusiness = {
+      ...BUSINESS,
+      ai_settings: { language: "es" as const },
+    };
+    tableResults.set("businesses", {
+      data: spanishBusiness,
+      error: null,
+    });
+
+    const html = await renderPrivacyPage();
+    const text = visibleText(html);
+    const expectedCopy = buildSmsComplianceCopy({
+      business: spanishBusiness,
+      smsPhoneNumber: SMS_NUMBER,
+      privacyUrl: "this Privacy Policy",
+      language: spanishBusiness.ai_settings.language,
+    });
+
+    expect(text).toContain(
+      expectedCopy.legalOptInDescription.replace(/\s+/g, " ")
     );
   });
 
@@ -245,6 +324,7 @@ describe("/c/[slug] compliance page", () => {
         slug: SLUG,
         businessName: BUSINESS.name,
         smsPhoneNumber: SMS_NUMBER,
+        language: BUSINESS.ai_settings.language,
       })
     ).resolves.toBeUndefined();
   });
@@ -290,6 +370,7 @@ describe("/c/[slug] compliance page", () => {
         slug: SLUG,
         businessName: BUSINESS.name,
         smsPhoneNumber: SMS_NUMBER,
+        language: BUSINESS.ai_settings.language,
       })
     ).resolves.toBeUndefined();
   });

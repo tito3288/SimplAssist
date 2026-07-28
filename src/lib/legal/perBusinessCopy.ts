@@ -22,6 +22,7 @@ import {
   buildSmsComplianceCopy,
   MOBILE_INFORMATION_SHARING_DISCLOSURE,
 } from "@/lib/messaging/complianceCopy";
+import type { Language } from "@/types/database";
 
 export interface LegalSection {
   title: string;
@@ -52,6 +53,7 @@ export interface LegalTemplateBusiness {
   state: string | null;
   zip: string | null;
   opt_in_description: string | null;
+  language?: Language | null;
 }
 
 const LAST_UPDATED = "2026-07-22";
@@ -88,6 +90,7 @@ function legalOptInDescription(b: LegalTemplateBusiness): string {
     },
     smsPhoneNumber: smsNumber(b),
     privacyUrl: "this Privacy Policy",
+    language: b.language,
   }).legalOptInDescription;
 }
 

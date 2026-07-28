@@ -1,5 +1,7 @@
 import type { Language } from "@/types/database";
 
+export type ComplianceCopyLocale = "en" | "es";
+
 export interface SmsComplianceBusiness {
   name: string;
   email: string | null;
@@ -33,11 +35,36 @@ export interface SmsComplianceCopy {
   optoutMessage: string;
   helpMessage: string;
   voicemailGreeting: string;
-  missedCallSms: Record<"en" | "es", string>;
+  voicemailGreetings: Record<ComplianceCopyLocale, string>;
+  missedCallSms: Record<ComplianceCopyLocale, string>;
 }
 
 export const MOBILE_INFORMATION_SHARING_DISCLOSURE =
   "We will not share mobile information with third parties for promotional or marketing purposes.";
+
+export function resolveComplianceCopyLocale(
+  language: Language | null | undefined
+): ComplianceCopyLocale {
+  return language === "es" ? "es" : "en";
+}
+
+export function buildMissedCallSmsCopy(
+  businessName: string
+): Record<ComplianceCopyLocale, string> {
+  return {
+    en: `Hi, this is ${businessName} — saw your call come in. Just reply here with what you need and we'll get you taken care of.\n\nMsg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`,
+    es: `Hola, somos ${businessName} — vimos tu llamada. Solo responde aquí con lo que necesitas y nos encargaremos de ayudarte.\n\nLa frecuencia de mensajes varía. Pueden aplicarse tarifas de mensajes y datos. Responde HELP para recibir ayuda o STOP para dejar de recibir mensajes.`,
+  };
+}
+
+export function buildVoicemailGreetingCopy(
+  businessName: string
+): Record<ComplianceCopyLocale, string> {
+  return {
+    en: `Thanks for calling ${businessName}. By leaving a message after the beep, you'll get a text back from us.`,
+    es: `Gracias por llamar a ${businessName}. Al dejar un mensaje después del tono, te responderemos por mensaje de texto.`,
+  };
+}
 
 function cleanText(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -64,11 +91,13 @@ export function buildSmsComplianceCopy({
   smsPhoneNumber,
   smsEntryPoint,
   privacyUrl,
+  language,
 }: {
   business: SmsComplianceBusiness;
   smsPhoneNumber?: string | null;
   smsEntryPoint?: string | null;
   privacyUrl: string;
+  language?: Language | null;
 }): SmsComplianceCopy {
   const brandName = business.name.trim();
   const contact = supportContact(business);
@@ -79,17 +108,12 @@ export function buildSmsComplianceCopy({
     cleanText(smsEntryPoint) ??
     "the business's SimplAssist contact page";
 
-  const confirmationSms = `${brandName}: You are subscribed to customer-care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`;
-  const voicemailGreeting = [
-    `Thanks for calling ${brandName}.`,
-    "We are unavailable right now.",
-    "If you leave a message after the beep, you agree to receive a customer-care text follow-up from us.",
-    "Message frequency varies and message and data rates may apply.",
-    "If we text you, reply HELP for help or STOP to opt out.",
-    MOBILE_INFORMATION_SHARING_DISCLOSURE,
-    "If you do not want a text follow-up, hang up without leaving a message.",
-    "Please leave your message after the beep.",
-  ].join(" ");
+  const locale = resolveComplianceCopyLocale(language);
+  const missedCallSms = buildMissedCallSmsCopy(brandName);
+  const voicemailGreetings = buildVoicemailGreetingCopy(brandName);
+  const confirmationSms = missedCallSms[locale];
+  const voicemailGreeting = voicemailGreetings[locale];
+  const optinMessage = `${brandName}: You are subscribed to customer-care texts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`;
 
   const optInPaths: SmsOptInPaths = {
     introduction: "Customers opt in through two customer-initiated paths.",
@@ -136,14 +160,12 @@ export function buildSmsComplianceCopy({
     ),
     legalOptInDescription: [optInNarrative, programDetails].join(" "),
     confirmationSms,
-    optinMessage: confirmationSms,
+    optinMessage,
     optoutMessage: `${brandName}: You are unsubscribed. No further messages will be sent. Reply START to opt back in.`,
     helpMessage: `${brandName}: For help, contact ${contact}. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out.`,
     voicemailGreeting,
-    missedCallSms: {
-      en: `Hi, this is ${brandName}. We received your call and can help by text. Msg frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.`,
-      es: `Hola, somos ${brandName}. Recibimos su llamada y podemos ayudar por texto. La frecuencia de mensajes varia. Pueden aplicar tarifas de mensajes y datos. Responda HELP para ayuda o STOP para cancelar.`,
-    },
+    voicemailGreetings,
+    missedCallSms,
   };
 }
 
@@ -161,10 +183,10 @@ export function renderMissedCallSms({
     smsPhoneNumber,
     smsEntryPoint: smsPhoneNumber,
     privacyUrl: "the business privacy policy",
+    language,
   });
 
-  if (language === "es") return copy.missedCallSms.es;
-  return copy.missedCallSms.en;
+  return copy.confirmationSms;
 }
 
 export function defaultOnboardingOptInDescription(): string {

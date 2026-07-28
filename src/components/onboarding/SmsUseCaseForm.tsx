@@ -19,6 +19,7 @@ import type {
   A2pRiskFinding,
   A2pRiskReviewStatus,
   BusinessType,
+  Language,
 } from '@/types/database';
 import type { OnboardingRiskReviewSnapshot } from '@/lib/onboarding/types';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
@@ -98,6 +99,7 @@ interface SmsUseCaseFormProps {
   businessName: string;
   businessType: BusinessType;
   businessTypeOther?: string | null;
+  language: Language;
   services?: { name: string; description?: string | null }[];
   riskReview?: OnboardingRiskReviewSnapshot | null;
   initialData?: SmsUseCaseInitialData | null;
@@ -130,6 +132,7 @@ export default function SmsUseCaseForm({
   businessName,
   businessType,
   businessTypeOther,
+  language,
   services = [],
   riskReview,
   initialData,
@@ -154,9 +157,10 @@ export default function SmsUseCaseForm({
         businessName,
         businessType,
         businessTypeOther,
+        language,
         services,
       }),
-    [businessName, businessType, businessTypeOther, services]
+    [businessName, businessType, businessTypeOther, language, services]
   );
   const initialSampleMessages =
     initialData?.sample_messages && initialData.sample_messages.length >= 3

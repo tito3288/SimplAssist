@@ -89,6 +89,7 @@ export default async function SettingsPage() {
             state: business.state,
             zip: business.zip,
             opt_in_description: business.opt_in_description,
+            language: aiSettings.language,
           }}
           initialMode={business.privacy_terms_mode ?? 'hosted'}
           initialPrivacyUrl={business.privacy_url_override}

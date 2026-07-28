@@ -11,6 +11,7 @@ import {
 } from "@/components/legal/LegalDocLayout";
 import { buildSmsComplianceCopy } from "@/lib/messaging/complianceCopy";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
+import type { Language } from "@/types/database";
 import { formatPhoneNumber } from "@/lib/utils";
 import { isPendingSlug } from "@/lib/util/slug.shared";
 
@@ -36,7 +37,7 @@ type PageProps = { params: Promise<{ slug: string }> };
 export const dynamic = "force-dynamic";
 
 const PUBLIC_PROJECTION =
-  "id, slug, name, business_type, email, phone_number, address, city, state, zip";
+  "id, slug, name, business_type, email, phone_number, address, city, state, zip, ai_settings(language)";
 
 const DAY_NAMES = [
   "Sunday",
@@ -59,6 +60,7 @@ type PublicBusiness = {
   city: string | null;
   state: string | null;
   zip: string | null;
+  ai_settings: { language: Language } | null;
 };
 
 type Hours = {
@@ -150,6 +152,7 @@ export default async function BusinessLandingPage({ params }: PageProps) {
         smsPhoneNumber,
         smsEntryPoint: `this page (/c/${business.slug})`,
         privacyUrl: privacyHref,
+        language: business.ai_settings?.language,
       })
     : null;
 
@@ -291,7 +294,7 @@ export default async function BusinessLandingPage({ params }: PageProps) {
                   Confirmation SMS
                 </p>
                 <blockquote
-                  className={`mt-2 border-l-2 border-[#ea580c] pl-4 text-[15px] italic leading-relaxed dark:border-[#ff914d] ${body}`}
+                  className={`mt-2 whitespace-pre-line border-l-2 border-[#ea580c] pl-4 text-[15px] italic leading-relaxed dark:border-[#ff914d] ${body}`}
                 >
                   “{smsCopy.confirmationSms}”
                 </blockquote>

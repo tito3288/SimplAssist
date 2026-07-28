@@ -912,7 +912,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override"
+      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, ai_settings(language)"
     )
     .eq("id", businessId)
     .single<{
@@ -928,6 +928,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       privacy_terms_mode: PrivacyTermsMode;
       privacy_url_override: string | null;
       terms_url_override: string | null;
+      ai_settings: { language: "en" | "es" | "both" } | null;
     }>();
 
   if (readError || !business) {
@@ -1001,6 +1002,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
       smsPhoneNumber,
       smsEntryPoint,
       business,
+      language: business.ai_settings?.language ?? "en",
     });
     const currentSubmissionAuditSnapshot = {
       privacyPolicyLink: privacyUrl,

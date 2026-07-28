@@ -137,6 +137,7 @@ const BUSINESS = {
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: true,
+  ai_settings: { language: "en" },
 };
 
 function queueResults(...results: unknown[]) {
