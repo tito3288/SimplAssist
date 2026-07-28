@@ -40,7 +40,9 @@ export async function updateSession(request: NextRequest) {
       }
     );
 
-  await makeClient().auth.getUser();
+  // Middleware only refreshes the customer session. Route and page guards
+  // still authorize with getUser(); no decision here trusts cookie claims.
+  await makeClient().auth.getClaims();
 
   if (isAdminPath(request.nextUrl.pathname)) {
     const adminClient = makeClient(ADMIN_AUTH_COOKIE_OPTIONS);

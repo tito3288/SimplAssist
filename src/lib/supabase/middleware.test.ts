@@ -1,19 +1,31 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Each createServerClient call is captured with its options; getUser/signOut
-// behavior is scripted per client via the queue below. setAll is invoked from
-// inside getUser to simulate token rotation, exactly where the real client
-// writes cookies.
+// Each createServerClient call is captured with its options and auth spies.
+// Customer getClaims and admin getUser behavior are scripted independently so
+// a test cannot accidentally exercise or rotate the wrong auth channel.
 const mocks = vi.hoisted(() => ({
   clients: [] as {
     url: string;
     key: string;
     options: Record<string, unknown>;
+    getClaims: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
   }[],
   script: [] as {
     user: { id: string } | null;
-    rotate?: { name: string; value: string; options: Record<string, unknown> }[];
+    claims: Record<string, unknown> | null;
+    claimsError?: { message: string } | null;
+    rotateOnClaims?: {
+      name: string;
+      value: string;
+      options: Record<string, unknown>;
+    }[];
+    rotateOnUser?: {
+      name: string;
+      value: string;
+      options: Record<string, unknown>;
+    }[];
     signOutError?: { message: string } | null;
     signOutCalls: { scope?: string }[];
   }[],
@@ -23,7 +35,6 @@ vi.mock("@supabase/ssr", () => ({
   createServerClient: vi.fn(
     (url: string, key: string, options: Record<string, unknown>) => {
       const index = mocks.clients.length;
-      mocks.clients.push({ url, key, options });
       const behavior = mocks.script[index];
       if (!behavior) throw new Error(`no scripted behavior for client ${index}`);
       const cookieHandlers = options.cookies as {
@@ -31,12 +42,24 @@ vi.mock("@supabase/ssr", () => ({
           cookies: { name: string; value: string; options: Record<string, unknown> }[]
         ) => void;
       };
+      const getClaims = vi.fn(async () => {
+        if (behavior.rotateOnClaims) {
+          cookieHandlers.setAll(behavior.rotateOnClaims);
+        }
+        return {
+          data: behavior.claims ? { claims: behavior.claims } : null,
+          error: behavior.claimsError ?? null,
+        };
+      });
+      const getUser = vi.fn(async () => {
+        if (behavior.rotateOnUser) cookieHandlers.setAll(behavior.rotateOnUser);
+        return { data: { user: behavior.user }, error: null };
+      });
+      mocks.clients.push({ url, key, options, getClaims, getUser });
       return {
         auth: {
-          getUser: vi.fn(async () => {
-            if (behavior.rotate) cookieHandlers.setAll(behavior.rotate);
-            return { data: { user: behavior.user }, error: null };
-          }),
+          getClaims,
+          getUser,
           signOut: vi.fn(async (opts: { scope?: string }) => {
             behavior.signOutCalls.push(opts);
             return { error: behavior.signOutError ?? null };
@@ -56,7 +79,12 @@ function scriptClient(
   user: { id: string } | null,
   extras: Partial<(typeof mocks.script)[number]> = {}
 ) {
-  mocks.script.push({ user, signOutCalls: [], ...extras });
+  mocks.script.push({
+    user,
+    claims: user ? { sub: user.id } : null,
+    signOutCalls: [],
+    ...extras,
+  });
 }
 
 function makeRequest(path: string) {
@@ -76,14 +104,16 @@ afterEach(() => {
 });
 
 describe("updateSession", () => {
-  it("refreshes only the customer channel on non-admin paths", async () => {
+  it("uses getClaims only for the customer channel on non-admin paths", async () => {
     scriptClient({ id: OTHER_ID });
     await updateSession(makeRequest("/dashboard"));
     expect(mocks.clients).toHaveLength(1);
     expect(mocks.clients[0].options.cookieOptions).toBeUndefined();
+    expect(mocks.clients[0].getClaims).toHaveBeenCalledOnce();
+    expect(mocks.clients[0].getUser).not.toHaveBeenCalled();
   });
 
-  it("refreshes both channels on admin paths, admin client scoped to sa-admin-auth", async () => {
+  it("keeps authoritative getUser for the admin channel", async () => {
     scriptClient({ id: OTHER_ID });
     scriptClient({ id: ADMIN_ID });
     await updateSession(makeRequest("/admin/tickets"));
@@ -92,18 +122,35 @@ describe("updateSession", () => {
     expect(mocks.clients[1].options.cookieOptions).toMatchObject({
       name: "sa-admin-auth",
     });
+    expect(mocks.clients[0].getClaims).toHaveBeenCalledOnce();
+    expect(mocks.clients[0].getUser).not.toHaveBeenCalled();
+    expect(mocks.clients[1].getClaims).not.toHaveBeenCalled();
+    expect(mocks.clients[1].getUser).toHaveBeenCalledOnce();
   });
 
   it("applies BOTH clients' rotated cookies to the single response", async () => {
     scriptClient(
       { id: OTHER_ID },
-      { rotate: [{ name: "sb-ref-auth-token", value: "customer-rotated", options: {} }] }
+      {
+        rotateOnClaims: [
+          {
+            name: "sb-ref-auth-token",
+            value: "customer-rotated",
+            options: {},
+          },
+        ],
+      }
     );
     scriptClient(
       { id: ADMIN_ID },
-      { rotate: [{ name: "sa-admin-auth", value: "admin-rotated", options: {} }] }
+      {
+        rotateOnUser: [
+          { name: "sa-admin-auth", value: "admin-rotated", options: {} },
+        ],
+      }
     );
-    const response = await updateSession(makeRequest("/admin"));
+    const request = makeRequest("/admin");
+    const response = await updateSession(request);
     const names = response.cookies.getAll().map((cookie) => cookie.name);
     expect(names).toContain("sb-ref-auth-token");
     expect(names).toContain("sa-admin-auth");
@@ -111,6 +158,42 @@ describe("updateSession", () => {
       "customer-rotated"
     );
     expect(response.cookies.get("sa-admin-auth")?.value).toBe("admin-rotated");
+    expect(request.cookies.get("sb-ref-auth-token")?.value).toBe(
+      "customer-rotated"
+    );
+    expect(request.cookies.get("sa-admin-auth")?.value).toBe("admin-rotated");
+  });
+
+  it("continues normally when the customer session is missing", async () => {
+    scriptClient(null);
+
+    await expect(
+      updateSession(makeRequest("/dashboard"))
+    ).resolves.toBeDefined();
+    expect(mocks.clients[0].getClaims).toHaveBeenCalledOnce();
+    expect(mocks.clients[0].getUser).not.toHaveBeenCalled();
+  });
+
+  it("leaves authorization to downstream gates when claims validation returns an error", async () => {
+    scriptClient(null, {
+      claimsError: { message: "invalid signature" },
+    });
+
+    await expect(
+      updateSession(makeRequest("/dashboard"))
+    ).resolves.toBeDefined();
+    expect(mocks.clients[0].getUser).not.toHaveBeenCalled();
+  });
+
+  it("still performs the admin allowlist check when customer claims fail", async () => {
+    scriptClient(null, {
+      claimsError: { message: "JWKS unavailable" },
+    });
+    scriptClient({ id: ADMIN_ID });
+
+    await expect(updateSession(makeRequest("/admin"))).resolves.toBeDefined();
+    expect(mocks.clients[0].getClaims).toHaveBeenCalledOnce();
+    expect(mocks.clients[1].getUser).toHaveBeenCalledOnce();
   });
 
   it("signs out a non-allowlisted admin-channel session with scope local", async () => {
