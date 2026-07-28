@@ -15,6 +15,7 @@ export interface CampaignStatusInput {
   campaignStatus?: string | null;
   submissionStatus?: string | null;
   status?: string | null;
+  notificationType?: string | null;
 }
 
 // Brand mapping. Telnyx enums (verified against
@@ -22,8 +23,8 @@ export interface CampaignStatusInput {
 //   identityStatus: VERIFIED | UNVERIFIED | SELF_DECLARED | VETTED_VERIFIED
 //   status:         OK | REGISTRATION_PENDING | REGISTRATION_FAILED
 export function mapBrandStatus(input: BrandStatusInput): MappedStatus {
-  const identity = input.identityStatus ?? null;
-  const status = input.status ?? null;
+  const identity = normalizeStatus(input.identityStatus);
+  const status = normalizeStatus(input.status);
 
   if (identity === "VERIFIED" || identity === "VETTED_VERIFIED") {
     return { dbStatus: "approved", isTerminal: true };
@@ -63,34 +64,23 @@ export function mapBrandStatus(input: BrandStatusInput): MappedStatus {
 //                   MNO_ACCEPTED | MNO_REJECTED | MNO_PROVISIONED |
 //                   MNO_PROVISIONING_FAILED
 //   submissionStatus: CREATED | FAILED | PENDING
-// Real 10DLC campaign webhooks can also send high-level status:
-//   status: ACCEPTED | REJECTED
+// Real 10DLC campaign webhooks can also send high-level ACCEPTED/REJECTED,
+// while the live campaign retrieve endpoint exposes ACTIVE/EXPIRED.
 export function mapCampaignStatus(input: CampaignStatusInput): MappedStatus {
-  const campaign = input.campaignStatus ?? null;
-  const submission = input.submissionStatus ?? null;
-  const status = input.status ?? null;
+  const campaign = normalizeStatus(input.campaignStatus);
+  const submission = normalizeStatus(input.submissionStatus);
+  const status = normalizeStatus(input.status);
+  const notificationType = normalizeStatus(input.notificationType);
 
-  if (status === "REJECTED" || status === "FAILED") {
+  if (
+    status === "REJECTED" ||
+    status === "FAILED" ||
+    status === "EXPIRED"
+  ) {
     return { dbStatus: "rejected", isTerminal: true };
   }
 
-  if (status === "ACCEPTED") {
-    // Telnyx can emit ACCEPTED before MNO review is final. Keep this as an
-    // intermediate state until a stronger MNO approval/rejection arrives.
-    return { dbStatus: null, isTerminal: false };
-  }
-
   switch (campaign) {
-    case "MNO_PROVISIONED":
-    case "MNO_ACCEPTED":
-      return { dbStatus: "approved", isTerminal: true };
-
-    case "TCR_ACCEPTED":
-    case "TELNYX_ACCEPTED":
-    case "TCR_PENDING":
-    case "MNO_PENDING":
-      return { dbStatus: null, isTerminal: false };
-
     case "TCR_FAILED":
     case "TELNYX_FAILED":
     case "MNO_REJECTED":
@@ -104,7 +94,19 @@ export function mapCampaignStatus(input: CampaignStatusInput): MappedStatus {
       if (submission === "FAILED") {
         return { dbStatus: "rejected", isTerminal: true };
       }
-      return { dbStatus: null, isTerminal: false };
+      break;
+
+    case "MNO_PROVISIONED":
+    case "MNO_ACCEPTED":
+      return { dbStatus: "approved", isTerminal: true };
+
+    case "TCR_ACCEPTED":
+    case "TELNYX_ACCEPTED":
+    case "TCR_PENDING":
+    case "MNO_PENDING":
+      // Evaluate VERIFIED below before treating a lagging detailed status as
+      // intermediate.
+      break;
 
     default:
       console.warn(
@@ -112,6 +114,42 @@ export function mapCampaignStatus(input: CampaignStatusInput): MappedStatus {
       );
       return { dbStatus: null, isTerminal: false };
   }
+
+  // Telnyx campaign-update webhooks do not necessarily include the richer
+  // campaignStatus field above. Their documented terminal provisioning signal
+  // is payload.type=VERIFIED, which means the campaign reached
+  // MNO_PROVISIONED. Accept the production shape (status=ACCEPTED) and the
+  // documented shape where status is absent, but fail closed on a contradictory
+  // high-level status.
+  if (
+    notificationType === "VERIFIED" &&
+    (status === null || status === "ACCEPTED")
+  ) {
+    return { dbStatus: "approved", isTerminal: true };
+  }
+
+  if (
+    campaign === "TCR_ACCEPTED" ||
+    campaign === "TELNYX_ACCEPTED" ||
+    campaign === "TCR_PENDING" ||
+    campaign === "MNO_PENDING"
+  ) {
+    return { dbStatus: null, isTerminal: false };
+  }
+
+  if (status === "ACCEPTED") {
+    // TELNYX_REVIEW and MNO_REVIEW can emit ACCEPTED before provisioning is
+    // final. Keep generic acceptance intermediate until VERIFIED or a stronger
+    // campaignStatus arrives.
+    return { dbStatus: null, isTerminal: false };
+  }
+
+  if (notificationType === "VERIFIED") {
+    console.warn(
+      `[statusMapper] contradictory VERIFIED campaign notification: status=${status}`
+    );
+  }
+  return { dbStatus: null, isTerminal: false };
 }
 
 // Telnyx puts rejection text under various keys depending on the resource and
@@ -154,4 +192,9 @@ function pickString(
     if (typeof v === "string" && v.trim().length > 0) return v;
   }
   return null;
+}
+
+function normalizeStatus(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toUpperCase();
+  return normalized ? normalized : null;
 }

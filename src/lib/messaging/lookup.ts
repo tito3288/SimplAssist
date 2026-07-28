@@ -59,6 +59,19 @@ export async function getOutboundSendContext(
 export async function getSmsReadinessForBusiness(
   businessId: string
 ): Promise<SmsReadiness> {
+  return getSmsReadinessForBusinessInternal(businessId, true);
+}
+
+export async function getSmsReadinessForBusinessReadOnly(
+  businessId: string
+): Promise<SmsReadiness> {
+  return getSmsReadinessForBusinessInternal(businessId, false);
+}
+
+async function getSmsReadinessForBusinessInternal(
+  businessId: string,
+  allowAssignmentRefresh: boolean
+): Promise<SmsReadiness> {
   let row = await readActivePhoneContextForBusiness(businessId);
 
   if (!row) {
@@ -75,7 +88,10 @@ export async function getSmsReadinessForBusiness(
   }
 
   let readiness = buildReadiness(row);
-  if (shouldLazyRefreshAssignmentForReadiness(readiness, row)) {
+  if (
+    allowAssignmentRefresh &&
+    shouldLazyRefreshAssignmentForReadiness(readiness, row)
+  ) {
     await runLazyAssignmentRefresh(businessId, "dashboard_lazy_refresh");
     row = await readActivePhoneContextForBusiness(businessId);
     readiness = row

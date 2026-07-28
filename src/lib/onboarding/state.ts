@@ -1,7 +1,10 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
+import {
+  getSmsReadinessForBusiness,
+  getSmsReadinessForBusinessReadOnly,
+} from "@/lib/messaging/lookup";
 import type {
   A2pRiskChecklistAnswer,
   A2pRiskFinding,
@@ -165,6 +168,19 @@ type SubscriptionRow = {
 export async function getOnboardingStateForOwner(
   ownerId: string
 ): Promise<OnboardingState | null> {
+  return getOnboardingStateForOwnerInternal(ownerId, true);
+}
+
+export async function getOnboardingStateForOwnerReadOnly(
+  ownerId: string
+): Promise<OnboardingState | null> {
+  return getOnboardingStateForOwnerInternal(ownerId, false);
+}
+
+async function getOnboardingStateForOwnerInternal(
+  ownerId: string,
+  allowSideEffects: boolean
+): Promise<OnboardingState | null> {
   const { data: business, error } = await supabaseAdmin
     .from("businesses")
     .select(
@@ -243,7 +259,7 @@ export async function getOnboardingStateForOwner(
     return null;
   }
 
-  return getOnboardingStateForBusiness(business);
+  return getOnboardingStateForBusiness(business, allowSideEffects);
 }
 
 export async function getOnboardingStateForBusinessId(
@@ -331,7 +347,8 @@ export async function getOnboardingStateForBusinessId(
 }
 
 async function getOnboardingStateForBusiness(
-  business: BusinessRow
+  business: BusinessRow,
+  allowSideEffects = true
 ): Promise<OnboardingState> {
   const [
     { data: hours },
@@ -391,7 +408,9 @@ async function getOnboardingStateForBusiness(
       .maybeSingle<SubscriptionRow>(),
   ]);
 
-  const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const smsReadiness = allowSideEffects
+    ? await getSmsReadinessForBusiness(business.id)
+    : await getSmsReadinessForBusinessReadOnly(business.id);
   const normalizedHours = normalizeHours(hours ?? []);
   const normalizedServices = normalizeServices(services ?? []);
   const normalizedFaqs = normalizeFaqs(faqs ?? []);
@@ -426,12 +445,14 @@ async function getOnboardingStateForBusiness(
       ? new Date().toISOString()
       : business.onboarding_completed_at;
 
-  await syncStoredProgress({
-    business,
-    derivedStep,
-    completedAt,
-    smsReady: smsReadiness.smsReady,
-  });
+  if (allowSideEffects) {
+    await syncStoredProgress({
+      business,
+      derivedStep,
+      completedAt,
+      smsReady: smsReadiness.smsReady,
+    });
+  }
 
   return {
     businessId: business.id,

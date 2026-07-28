@@ -136,6 +136,7 @@ export const TELNYX_EVENT_TYPES = [
   "brand_status_changed",
   "campaign_submitted",
   "campaign_status_changed",
+  "campaign_status_refreshed",
   "messaging_profile_created",
   "messaging_profile_create_intent",
   "voice_application_created",
@@ -242,6 +243,10 @@ export interface Business {
   campaign_status: RegistrationStatus | null;
   campaign_status_updated_at: string | null;
   campaign_rejection_reason: string | null;
+  telnyx_campaign_assignment_claim_token: string | null;
+  telnyx_campaign_assignment_claimed_at: string | null;
+  telnyx_campaign_assignment_claim_campaign_id: string | null;
+  telnyx_campaign_assignment_claim_profile_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -11,6 +11,11 @@ import {
 } from "@/lib/messaging/registration/audit";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 import {
+  applyObservedCampaignStatus,
+  type CampaignTransitionOutcome,
+  type CampaignStatusSnapshot,
+} from "@/lib/messaging/registration/campaignStatusTransition";
+import {
   extractRejectionReason,
   mapBrandStatus,
   mapCampaignStatus,
@@ -43,10 +48,9 @@ import type { RegistrationStatus } from "@/types/database";
 // - Status-transition guard via conditional UPDATE: race-safe against
 //   simultaneous webhook deliveries (no SELECT-then-UPDATE TOCTOU window),
 //   and it makes retries idempotent: a retry after a mid-flight failure
-//   no-ops the already-applied transition, so emails/assignment never fire
-//   twice. (Corner: if the first attempt failed AFTER the transition but
-//   before email dispatch, the retry skips the email — status is correct
-//   everywhere, the courtesy email is lost. Email stays best-effort.)
+//   no-ops the already-applied transition. Approval retries still run the
+//   idempotent assignment helper so a crash after the status write cannot
+//   strand an unassigned number; emails remain status-change-only.
 // - Email is fire-and-forget; never blocks the response, never throws.
 // - Once business is resolved, every code path audits — including
 //   BRAND_OTP_VERIFIED (Phase 11 placeholder) and post-lookup errors.
@@ -85,7 +89,12 @@ export async function POST(request: NextRequest) {
 
 async function handleEvent(event: unknown): Promise<void> {
   const eventData = (event as {
-    data?: { id?: string; event_type?: string; payload?: unknown };
+    data?: {
+      id?: string;
+      event_type?: string;
+      occurred_at?: string;
+      payload?: unknown;
+    };
   }).data;
   const eventId = eventData?.id;
   const eventType = eventData?.event_type;
@@ -123,7 +132,12 @@ async function handleEvent(event: unknown): Promise<void> {
 async function processClaimedEvent(
   event: unknown,
   eventData:
-    | { id?: string; event_type?: string; payload?: unknown }
+    | {
+        id?: string;
+        event_type?: string;
+        occurred_at?: string;
+        payload?: unknown;
+      }
     | undefined
 ): Promise<void> {
   const eventType = eventData?.event_type;
@@ -188,6 +202,49 @@ async function processClaimedEvent(
       return;
     }
 
+    if (kind === "campaign" && eventType !== "10dlc.campaign.update") {
+      await appendRegistrationEvent({
+        businessId: business.id,
+        eventType: auditEventType,
+        resourceType: kind,
+        resourceId,
+        status: "audit_only_unexpected_event_type",
+        rawPayload: event as Record<string, unknown>,
+      });
+      return;
+    }
+
+    if (
+      kind === "campaign" &&
+      (!brandId || brandId !== business.telnyx_brand_id)
+    ) {
+      await appendRegistrationEvent({
+        businessId: business.id,
+        eventType: auditEventType,
+        resourceType: kind,
+        resourceId,
+        status: "audit_only_identity_mismatch",
+        rawPayload: event as Record<string, unknown>,
+      });
+      return;
+    }
+
+    const campaignObservedAt =
+      kind === "campaign"
+        ? eventOccurredAt(eventData?.occurred_at)
+        : null;
+    if (kind === "campaign" && !campaignObservedAt) {
+      await appendRegistrationEvent({
+        businessId: business.id,
+        eventType: auditEventType,
+        resourceType: kind,
+        resourceId,
+        status: "audit_only_invalid_occurred_at",
+        rawPayload: event as Record<string, unknown>,
+      });
+      return;
+    }
+
     const mapped: MappedStatus =
       kind === "brand"
         ? mapBrandStatus({
@@ -209,19 +266,38 @@ async function processClaimedEvent(
               "submission_status",
             ]),
             status: pickString(payload, ["status"]),
+            notificationType: pickString(payload, ["type"]),
           });
 
     const rejectionReason =
       mapped.dbStatus === "rejected" ? extractRejectionReason(payload) : null;
 
     let statusChanged = false;
+    let campaignTransition: CampaignTransitionOutcome | null = null;
     if (mapped.dbStatus !== null) {
-      statusChanged = await applyStatusTransition({
-        kind,
-        businessId: business.id,
-        newStatus: mapped.dbStatus,
-        rejectionReason,
-      });
+      if (kind === "campaign") {
+        campaignTransition = await applyObservedCampaignStatus({
+          snapshot: business,
+          newStatus: mapped.dbStatus,
+          rejectionReason,
+          observedAt: campaignObservedAt!,
+          touchIfUnchanged: true,
+        });
+        if (campaignTransition.outcome === "conflict") {
+          throw new Error(
+            `[registration:webhook] Campaign transition conflicted for business ${business.id}`
+          );
+        }
+        statusChanged =
+          campaignTransition.outcome === "applied" &&
+          campaignTransition.statusChanged;
+      } else {
+        statusChanged = await applyBrandStatusTransition({
+          businessId: business.id,
+          newStatus: mapped.dbStatus,
+          rejectionReason,
+        });
+      }
     }
 
     await appendRegistrationEvent({
@@ -238,17 +314,21 @@ async function processClaimedEvent(
     if (
       kind === "campaign" &&
       mapped.dbStatus === "approved" &&
-      statusChanged
+      campaignTransition !== null &&
+      campaignTransition.outcome !== "stale"
     ) {
-      ensureCampaignAssignmentForBusiness(business.id, {
-        force: true,
-        reason: "campaign_approved_webhook",
-      }).catch((err) =>
+      try {
+        await ensureCampaignAssignmentForBusiness(business.id, {
+          force: statusChanged,
+          reason: "campaign_approved_webhook",
+        });
+      } catch (err) {
         console.error(
           `[registration:webhook] campaign assignment start failed for business ${business.id}:`,
           err
-        )
-      );
+        );
+        throw err;
+      }
     }
 
     if (mapped.isTerminal && statusChanged) {
@@ -293,10 +373,8 @@ async function processClaimedEvent(
   }
 }
 
-interface BusinessRow {
-  id: string;
+interface BusinessRow extends CampaignStatusSnapshot {
   name: string;
-  owner_id: string;
   authorized_rep_email: string | null;
 }
 
@@ -307,7 +385,32 @@ async function lookupBusiness(
   const column = kind === "brand" ? "telnyx_brand_id" : "telnyx_campaign_id";
   const { data, error } = await supabaseAdmin
     .from("businesses")
-    .select("id, name, owner_id, authorized_rep_email")
+    .select(
+      [
+        "id",
+        "name",
+        "owner_id",
+        "authorized_rep_email",
+        "updated_at",
+        "deleted_at",
+        "telnyx_unique_claims_released_at",
+        "active_telnyx_release_run_id",
+        "telnyx_resource_state",
+        "telnyx_submission_disabled",
+        "telnyx_brand_id",
+        "telnyx_campaign_id",
+        "telnyx_messaging_profile_id",
+        "brand_status",
+        "campaign_status",
+        "campaign_status_updated_at",
+        "campaign_rejection_reason",
+        "onboarding_registration_status",
+        "onboarding_registration_submitted_at",
+        "onboarding_registration_error",
+        "telnyx_campaign_assignment_claim_token",
+        "telnyx_campaign_assignment_claimed_at",
+      ].join(", ")
+    )
     .eq(column, resourceId)
     // Terminal-cleanup tombstones may retain provider IDs for audit while
     // relinquishing their uniqueness claims. Late carrier events must never
@@ -330,57 +433,31 @@ async function lookupBusiness(
   return data as BusinessRow | null;
 }
 
-// Atomic conditional UPDATE: only writes (and returns a row) when the new
-// status differs from the current value. PostgREST's `.or()` filter expresses
-// `IS DISTINCT FROM` correctly across NULL by combining `is.null` with `neq`.
-async function applyStatusTransition(args: {
-  kind: "brand" | "campaign";
+// Brand transitions retain the existing status-only conditional update. The
+// campaign path uses applyObservedCampaignStatus above because campaign
+// approval also repairs stale onboarding rejection state and orders provider
+// observations.
+async function applyBrandStatusTransition(args: {
   businessId: string;
   newStatus: RegistrationStatus;
   rejectionReason: string | null;
 }): Promise<boolean> {
   const now = new Date().toISOString();
-  const update =
-    args.kind === "brand"
+  const update = {
+    brand_status: args.newStatus,
+    brand_status_updated_at: now,
+    brand_rejection_reason: args.rejectionReason,
+    ...(args.newStatus === "rejected"
       ? {
-          brand_status: args.newStatus,
-          brand_status_updated_at: now,
-          brand_rejection_reason: args.rejectionReason,
-          // A rejected brand maps to the retryable 'failed' state so the
-          // carrier-review panel can offer the routed fix path (mirrors the
-          // campaign-rejection mapping below).
-          ...(args.newStatus === "rejected"
-            ? {
-                onboarding_registration_status: "failed" as const,
-                onboarding_registration_submitted_at: null,
-                onboarding_registration_error:
-                  args.rejectionReason ??
-                  "Your business verification was rejected by the carrier.",
-              }
-            : {}),
+          onboarding_registration_status: "failed" as const,
+          onboarding_registration_submitted_at: null,
+          onboarding_registration_error:
+            args.rejectionReason ??
+            "Your business verification was rejected by the carrier.",
         }
-      : {
-          campaign_status: args.newStatus,
-          campaign_status_updated_at: now,
-          campaign_rejection_reason: args.rejectionReason,
-          // A rejected campaign is recoverable: map it into the retryable
-          // 'failed' state so the carrier-review panel offers Retry and
-          // claimRegistrationAttempt can claim the attempt. The retry
-          // pipeline archives + deactivates the rejected campaign and
-          // creates a replacement (archiveAndClearRejectedCampaign).
-          ...(args.newStatus === "rejected"
-            ? {
-                onboarding_registration_status: "failed" as const,
-                onboarding_registration_submitted_at: null,
-                onboarding_registration_error:
-                  args.rejectionReason ??
-                  "Your SMS campaign was rejected by the carrier. Retry to resubmit.",
-              }
-            : {}),
-        };
-
-  const statusColumn = args.kind === "brand" ? "brand_status" : "campaign_status";
-  const guard = `${statusColumn}.is.null,${statusColumn}.neq.${args.newStatus}`;
+      : {}),
+  };
+  const guard = `brand_status.is.null,brand_status.neq.${args.newStatus}`;
 
   const { data, error } = await supabaseAdmin
     .from("businesses")
@@ -398,6 +475,13 @@ async function applyStatusTransition(args: {
     );
   }
   return Array.isArray(data) && data.length > 0;
+}
+
+function eventOccurredAt(value: string | null | undefined): string | null {
+  if (value && Number.isFinite(Date.parse(value))) {
+    return new Date(value).toISOString();
+  }
+  return null;
 }
 
 async function dispatchStatusEmail(args: {

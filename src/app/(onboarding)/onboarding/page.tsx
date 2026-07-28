@@ -297,7 +297,10 @@ export default function OnboardingPage() {
         {step === 'carrier_review' && (
           <CarrierReviewStatus
             state={state}
-            onRefresh={() => refreshState({ keepStep: true })}
+            onStatusRefreshed={(nextState) => {
+              setState(nextState);
+              setStep('carrier_review');
+            }}
             onRetry={(nextState) => {
               if (nextState) {
                 setState(nextState);
@@ -415,19 +418,27 @@ const SUPPORT_LINK_SECONDARY =
 
 function CarrierReviewStatus({
   state,
-  onRefresh,
+  onStatusRefreshed,
   onRetry,
   onDashboard,
   onFixStep,
 }: {
   state: OnboardingState;
-  onRefresh: () => Promise<OnboardingState | null>;
+  onStatusRefreshed: (state: OnboardingState) => void;
   onRetry: (state: OnboardingState | null) => void;
   onDashboard: () => void;
   onFixStep: (step: OnboardingStep) => void;
 }) {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
+  const [statusRefreshError, setStatusRefreshError] = useState<string | null>(
+    null
+  );
+  const [statusRefreshNotice, setStatusRefreshNotice] = useState<string | null>(
+    null
+  );
+  const operationInFlightRef = useRef<'retry' | 'refresh' | null>(null);
   const registration = state.registration;
 
   // Carrier rejection with a retryable status: offer a routed edit path.
@@ -552,8 +563,12 @@ function CarrierReviewStatus({
   const copy = statusCopy(state);
 
   async function handleRetry() {
+    if (operationInFlightRef.current) return;
+    operationInFlightRef.current = 'retry';
     setRetrying(true);
     setRetryError(null);
+    setStatusRefreshError(null);
+    setStatusRefreshNotice(null);
     try {
       const response = await fetch('/api/onboarding/retry-registration', {
         method: 'POST',
@@ -575,7 +590,48 @@ function CarrierReviewStatus({
     } catch {
       setRetryError('Could not retry registration right now.');
     } finally {
+      operationInFlightRef.current = null;
       setRetrying(false);
+    }
+  }
+
+  async function handleStatusRefresh() {
+    if (operationInFlightRef.current) return;
+    operationInFlightRef.current = 'refresh';
+    setStatusRefreshing(true);
+    setStatusRefreshError(null);
+    setStatusRefreshNotice(null);
+    setRetryError(null);
+
+    try {
+      const response = await fetch('/api/onboarding/refresh-status', {
+        method: 'POST',
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        state?: OnboardingState;
+      };
+
+      if (payload.state) {
+        onStatusRefreshed(payload.state);
+      }
+
+      if (!response.ok) {
+        setStatusRefreshError(
+          payload.error ?? 'Could not refresh carrier status right now.'
+        );
+        return;
+      }
+
+      setStatusRefreshNotice(
+        payload.message ?? 'Carrier status is already up to date.'
+      );
+    } catch {
+      setStatusRefreshError('Could not refresh carrier status right now.');
+    } finally {
+      operationInFlightRef.current = null;
+      setStatusRefreshing(false);
     }
   }
 
@@ -649,8 +705,33 @@ function CarrierReviewStatus({
         </div>
       )}
 
+      {statusRefreshError && (
+        <div
+          role="alert"
+          className={`rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}
+        >
+          {statusRefreshError}
+        </div>
+      )}
+
+      {statusRefreshNotice && (
+        <p
+          role="status"
+          className="text-sm text-stone-600 dark:text-[#bdbdbf]"
+        >
+          {statusRefreshNotice}
+        </p>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-        <Button type="button" variant="secondary" onClick={onRefresh}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleStatusRefresh}
+          loading={statusRefreshing}
+          disabled={retrying}
+          aria-busy={statusRefreshing}
+        >
           <RefreshCcw className="mr-2 h-4 w-4" />
           Refresh status
         </Button>
@@ -685,6 +766,8 @@ function CarrierReviewStatus({
                 variant={fixStep || needsSupport ? 'secondary' : 'primary'}
                 onClick={handleRetry}
                 loading={retrying}
+                disabled={statusRefreshing}
+                aria-busy={retrying}
               >
                 Retry registration
               </Button>

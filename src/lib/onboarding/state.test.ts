@@ -6,6 +6,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/messaging/lookup", () => ({
   getSmsReadinessForBusiness: vi.fn(),
+  getSmsReadinessForBusinessReadOnly: vi.fn(),
 }));
 vi.mock("@/lib/messaging/registration/riskScreening", () => ({
   hashA2pRiskInput: vi.fn(() => "risk-hash"),

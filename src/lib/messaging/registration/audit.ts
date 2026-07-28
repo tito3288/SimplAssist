@@ -14,6 +14,30 @@ export interface AppendRegistrationEventInput {
 export async function appendRegistrationEvent(
   input: AppendRegistrationEventInput
 ): Promise<void> {
+  const error = await insertRegistrationEvent(input);
+
+  if (error) {
+    console.error(
+      `[registration:audit] Failed to log ${input.eventType} for business ${input.businessId}:`,
+      error
+    );
+  }
+}
+
+export async function appendRegistrationEventOrThrow(
+  input: AppendRegistrationEventInput
+): Promise<void> {
+  const error = await insertRegistrationEvent(input);
+  if (error) {
+    throw new Error(
+      `[registration:audit] Failed to log ${input.eventType} for business ${input.businessId}: ${error.message}`
+    );
+  }
+}
+
+async function insertRegistrationEvent(
+  input: AppendRegistrationEventInput
+) {
   const { error } = await supabaseAdmin
     .from("telnyx_registration_events")
     .insert({
@@ -26,12 +50,7 @@ export async function appendRegistrationEvent(
       raw_payload: input.rawPayload ?? null,
     });
 
-  if (error) {
-    console.error(
-      `[registration:audit] Failed to log ${input.eventType} for business ${input.businessId}:`,
-      error
-    );
-  }
+  return error;
 }
 
 export function serializeError(err: unknown): Record<string, unknown> {
