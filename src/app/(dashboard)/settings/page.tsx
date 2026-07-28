@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
 import AISettingsForm from '@/components/settings/AISettingsForm';
 import ServicesManager from '@/components/settings/ServicesManager';
 import FAQManager from '@/components/settings/FAQManager';
@@ -11,22 +10,15 @@ import CompliancePanel from '@/components/settings/CompliancePanel';
 import { card } from '@/lib/theme-v2/theme';
 import DangerZone from '@/components/settings/DangerZone';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
-import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
+import { canUseFeature } from '@/lib/billing/entitlements';
+import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const context = await getDashboardEntitledContext();
+  if (context.status === 'unauthenticated') redirect('/login');
+  if (context.status !== 'resolved') redirect('/onboarding');
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('*')
-    .eq('owner_id', user.id)
-    .single();
-
-  if (!business) redirect('/onboarding');
-
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const { supabase, business, entitlements } = context;
   const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
   const canUseGuardrails = canUseFeature(entitlements, 'advanced_guardrails');

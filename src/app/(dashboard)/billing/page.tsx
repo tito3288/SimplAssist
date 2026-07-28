@@ -1,8 +1,8 @@
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
+import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 import {
   card,
   cardRecommended,
@@ -12,20 +12,11 @@ import {
 } from "@/lib/theme-v2/theme";
 
 export default async function BillingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const context = await getDashboardBusinessContext();
+  if (context.status === "unauthenticated") redirect("/login");
+  if (context.status !== "resolved") redirect("/onboarding");
 
-  if (!user) redirect("/login");
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) redirect("/onboarding");
+  const { supabase, business } = context;
 
   const { data: subscription } = await supabase
     .from("subscriptions")

@@ -1,23 +1,15 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
 import WidgetPageClient from './WidgetPageClient';
-import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
+import { canUseFeature } from '@/lib/billing/entitlements';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
+import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 
 export default async function WidgetPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const context = await getDashboardEntitledContext();
+  if (context.status === 'unauthenticated') redirect('/login');
+  if (context.status !== 'resolved') redirect('/onboarding');
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name')
-    .eq('owner_id', user.id)
-    .single();
-
-  if (!business) redirect('/onboarding');
-
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const { supabase, business, entitlements } = context;
   const planActive = entitlements.active;
   if (!canUseFeature(entitlements, 'web_chat')) {
     return (

@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { InboxLayout } from "@/components/conversations/InboxLayout";
 import type { Conversation, Contact } from "@/types/database";
 import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
-import { canUseFeature, resolveBusinessEntitlements } from "@/lib/billing/entitlements";
+import { canUseFeature } from "@/lib/billing/entitlements";
+import { getDashboardEntitledContext } from "@/lib/dashboard/context";
 
 export type ConversationWithContact = Conversation & {
   contact: Pick<Contact, "id" | "name" | "phone_number" | "email">;
@@ -11,23 +11,11 @@ export type ConversationWithContact = Conversation & {
 };
 
 export default async function ConversationsPage() {
-  const supabase = await createClient();
+  const context = await getDashboardEntitledContext();
+  if (context.status === "unauthenticated") redirect("/login");
+  if (context.status !== "resolved") redirect("/onboarding");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) redirect("/onboarding");
-
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const { supabase, business, entitlements } = context;
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
 
   const { data: conversations } = await supabase

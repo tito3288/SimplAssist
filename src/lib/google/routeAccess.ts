@@ -3,13 +3,18 @@ import {
   canUseFeature,
   EntitlementResolutionError,
   requiredPlanForFeature,
-  resolveBusinessEntitlements,
   type BusinessEntitlements,
   type FeatureKey,
 } from "@/lib/billing/entitlements";
-import { createClient } from "@/lib/supabase/server";
+import {
+  getDashboardBusinessContext,
+  getDashboardEntitlements,
+} from "@/lib/dashboard/context";
 
-type ServerSupabaseClient = Awaited<ReturnType<typeof createClient>>;
+type ServerSupabaseClient = Extract<
+  Awaited<ReturnType<typeof getDashboardBusinessContext>>,
+  { status: "resolved" }
+>["supabase"];
 
 export type AuthenticatedFeatureAccess =
   | {
@@ -27,26 +32,16 @@ export type AuthenticatedFeatureAccess =
 export async function requireAuthenticatedFeature(
   feature: FeatureKey
 ): Promise<AuthenticatedFeatureAccess> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const context = await getDashboardBusinessContext();
+  if (context.status === "unauthenticated") {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
 
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (businessError) {
-    console.error("[feature-access] Business lookup failed:", businessError);
+  if (context.status === "business_lookup_failed") {
+    console.error("[feature-access] Business lookup failed:", context.error);
     return {
       ok: false,
       response: NextResponse.json(
@@ -56,7 +51,7 @@ export async function requireAuthenticatedFeature(
     };
   }
 
-  if (!business) {
+  if (context.status === "business_not_found") {
     return {
       ok: false,
       response: NextResponse.json(
@@ -66,8 +61,9 @@ export async function requireAuthenticatedFeature(
     };
   }
 
+  const { business, supabase } = context;
   try {
-    const entitlements = await resolveBusinessEntitlements(business.id);
+    const entitlements = await getDashboardEntitlements(business.id);
     if (!canUseFeature(entitlements, feature)) {
       return {
         ok: false,

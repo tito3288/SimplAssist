@@ -1,28 +1,20 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import DashboardOverview from '@/components/dashboard/DashboardOverview';
 import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
-import { canUseFeature, resolveBusinessEntitlements } from '@/lib/billing/entitlements';
+import { canUseFeature } from '@/lib/billing/entitlements';
 import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
 import { shouldShowCallForwardingNudge } from '@/components/dashboard/callForwardingNudgeEligibility';
+import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const context = await getDashboardEntitledContext();
+  if (context.status === 'unauthenticated') redirect('/login');
+  if (context.status !== 'resolved') redirect('/onboarding');
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('*')
-    .eq('owner_id', user.id)
-    .single();
-
-  if (!business) redirect('/onboarding');
-
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const { supabase, user, business, entitlements } = context;
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
 
   // Calculate date for "this week" queries

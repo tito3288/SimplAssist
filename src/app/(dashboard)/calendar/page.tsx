@@ -1,28 +1,17 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { ink, body } from "@/lib/theme-v2/theme";
 import CalendarView from "@/components/calendar/CalendarView";
 import GoogleCalendarConnect from "@/components/settings/GoogleCalendarConnect";
 import { LockedFeatureCard } from "@/components/entitlements/LockedFeatureCard";
-import { canUseFeature, resolveBusinessEntitlements } from "@/lib/billing/entitlements";
+import { canUseFeature } from "@/lib/billing/entitlements";
+import { getDashboardEntitledContext } from "@/lib/dashboard/context";
 
 export default async function CalendarPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const context = await getDashboardEntitledContext();
+  if (context.status === "unauthenticated") redirect("/login");
+  if (context.status !== "resolved") redirect("/onboarding");
 
-  if (!user) redirect("/login");
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) redirect("/onboarding");
-
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const { supabase, business, entitlements } = context;
   const planActive = entitlements.active;
 
   const { data: calendarToken } = await supabase

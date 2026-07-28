@@ -1,46 +1,39 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import Sidebar from "./_components/sidebar";
 import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
-import { canUseFeature, resolveBusinessEntitlements } from "@/lib/billing/entitlements";
+import { canUseFeature } from "@/lib/billing/entitlements";
+import {
+  getDashboardBusinessContext,
+  getDashboardEntitlements,
+} from "@/lib/dashboard/context";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const context = await getDashboardBusinessContext();
+  if (context.status === "unauthenticated") {
     redirect("/login");
   }
-
-  // Dashboard unlocks only after SMS is actually ready: approved campaign plus
-  // the active phone number assigned to that campaign.
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id, website_url, deleted_at")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
+  if (context.status !== "resolved") {
     redirect("/onboarding");
   }
 
+  const { business, user } = context;
   if (business.deleted_at) {
     redirect("/account-deleted");
   }
 
+  // Dashboard unlocks only after SMS is actually ready: approved campaign plus
+  // the active phone number assigned to that campaign.
   const onboardingState = await getOnboardingStateForBusinessId(business.id);
   if (!onboardingState?.dashboardReady) {
     redirect("/onboarding");
   }
 
-  const entitlements = await resolveBusinessEntitlements(business.id);
+  const entitlements = await getDashboardEntitlements(business.id);
 
   return (
     <div

@@ -1,25 +1,14 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import ContactStats from "@/components/contacts/ContactStats";
 import ContactsTable from "@/components/contacts/ContactsTable";
+import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 
 export default async function ContactsPage() {
-  const supabase = await createClient();
+  const context = await getDashboardBusinessContext();
+  if (context.status === "unauthenticated") redirect("/login");
+  if (context.status !== "resolved") redirect("/onboarding");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  // Get the user's business
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) redirect("/onboarding");
+  const { supabase, business } = context;
 
   // Fetch contacts and conversations in parallel
   const [contactsResult, conversationsResult] = await Promise.all([

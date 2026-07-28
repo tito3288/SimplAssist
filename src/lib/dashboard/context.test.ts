@@ -1,0 +1,133 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  createClient: vi.fn(),
+  getUser: vi.fn(),
+  from: vi.fn(),
+  select: vi.fn(),
+  eq: vi.fn(),
+  maybeSingle: vi.fn(),
+  resolveBusinessEntitlements: vi.fn(),
+  requestCacheStores: [] as Map<string, unknown>[],
+}));
+
+vi.mock("server-only", () => ({}));
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  cache: <Args extends unknown[], Result>(
+    fn: (...args: Args) => Result
+  ) => {
+    const store = new Map<string, unknown>();
+    mocks.requestCacheStores.push(store);
+    return (...args: Args): Result => {
+      const key = JSON.stringify(args);
+      if (!store.has(key)) store.set(key, fn(...args));
+      return store.get(key) as Result;
+    };
+  },
+}));
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: mocks.createClient,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
+}));
+
+import {
+  getDashboardBusinessContext,
+  getDashboardEntitledContext,
+} from "./context";
+
+const USER = { id: "user-1", email: "owner@example.com" };
+const BUSINESS = {
+  id: "business-1",
+  name: "Example Business",
+  deleted_at: null,
+};
+const ENTITLEMENTS = {
+  businessId: BUSINESS.id,
+  plan: "sms_and_chat",
+  status: "active",
+  source: "subscription",
+  active: true,
+  cancelAtPeriodEnd: false,
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.requestCacheStores.forEach((store) => store.clear());
+
+  const businessQuery = {
+    select: mocks.select,
+    eq: mocks.eq,
+    maybeSingle: mocks.maybeSingle,
+  };
+  mocks.select.mockReturnValue(businessQuery);
+  mocks.eq.mockReturnValue(businessQuery);
+  mocks.from.mockReturnValue(businessQuery);
+  mocks.getUser.mockResolvedValue({ data: { user: USER } });
+  mocks.maybeSingle.mockResolvedValue({ data: BUSINESS, error: null });
+  mocks.resolveBusinessEntitlements.mockResolvedValue(ENTITLEMENTS);
+  mocks.createClient.mockResolvedValue({
+    auth: { getUser: mocks.getUser },
+    from: mocks.from,
+  });
+});
+
+describe("dashboard request context", () => {
+  it("stops before the business and entitlement reads when unauthenticated", async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null } });
+
+    await expect(getDashboardEntitledContext()).resolves.toMatchObject({
+      status: "unauthenticated",
+      user: null,
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed business lookup distinct from a missing business", async () => {
+    const error = { message: "database unavailable" };
+    mocks.maybeSingle.mockResolvedValue({ data: null, error });
+
+    await expect(getDashboardBusinessContext()).resolves.toMatchObject({
+      status: "business_lookup_failed",
+      error,
+    });
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+  });
+
+  it("returns business_not_found without resolving entitlements", async () => {
+    mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
+
+    await expect(getDashboardEntitledContext()).resolves.toMatchObject({
+      status: "business_not_found",
+      user: USER,
+    });
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+  });
+
+  it("resolves the owner business and its entitlements through the shared layers", async () => {
+    const first = getDashboardEntitledContext();
+    const second = getDashboardEntitledContext();
+
+    await expect(first).resolves.toMatchObject({
+      status: "resolved",
+      user: USER,
+      business: BUSINESS,
+      entitlements: ENTITLEMENTS,
+    });
+    await expect(second).resolves.toBe(await first);
+    expect(mocks.createClient).toHaveBeenCalledOnce();
+    expect(mocks.getUser).toHaveBeenCalledOnce();
+    expect(mocks.from).toHaveBeenCalledOnce();
+    expect(mocks.maybeSingle).toHaveBeenCalledOnce();
+    expect(mocks.eq).toHaveBeenCalledWith("owner_id", USER.id);
+    const projection = mocks.select.mock.calls[0]?.[0] as string;
+    expect(projection).toContain("website_url");
+    expect(projection).not.toContain("last_4_ssn");
+    expect(projection).not.toContain("billing_admin_notes");
+    expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledOnce();
+    expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+  });
+});
