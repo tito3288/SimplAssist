@@ -15,11 +15,13 @@
       "events": [
         "call.initiated incoming",
         "call.answered inbound",
+        "call.playback.ended completed",
         "call.speak.ended completed",
         "call.recording.saved"
       ],
       "expected": [
         "answer inbound leg",
+        "play 11.2-second voicemail ringback with 1.2-second trailing stop-gap",
         "speak compliance voicemail greeting",
         "start recording",
         "call existing sendMissedCallSMS once"

@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   unwrap: vi.fn(),
   reject: vi.fn(),
   answer: vi.fn(),
   hangup: vi.fn(),
+  startPlayback: vi.fn(),
   speak: vi.fn(),
   startRecording: vi.fn(),
   dial: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/messaging/client", () => ({
         reject: mocks.reject,
         answer: mocks.answer,
         hangup: mocks.hangup,
+        startPlayback: mocks.startPlayback,
         speak: mocks.speak,
         startRecording: mocks.startRecording,
         bridge: mocks.bridge,
@@ -139,6 +141,21 @@ const RECORDING_STATE = encodeState({
   businessName: "Test Biz",
 });
 
+function voicemailState(overrides: Record<string, unknown> = {}) {
+  return encodeState({
+    callControlId: "cc_voicemail",
+    businessId: ATTEMPT.business_id,
+    from: ATTEMPT.caller_phone,
+    businessName: "Test Biz",
+    businessEmail: "owner@example.test",
+    businessPhoneNumber: "+15745550400",
+    smsPhoneNumber: "+15745550300",
+    language: "en",
+    callForwardingEnabled: false,
+    ...overrides,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -159,13 +176,19 @@ beforeEach(() => {
   mocks.hangup.mockResolvedValue({});
   mocks.reject.mockResolvedValue({});
   mocks.answer.mockResolvedValue({});
+  mocks.startPlayback.mockResolvedValue({});
   mocks.speak.mockResolvedValue({});
   mocks.bridge.mockResolvedValue({});
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test/");
   queueResults();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/messaging/voice", () => {
-  it("uses forwarding-disabled configuration captured at initiation and speaks voicemail without dialing", async () => {
+  it("uses forwarding-disabled state to play ringback before the voicemail disclosure", async () => {
     mocks.unwrap.mockResolvedValueOnce(
       voiceEvent(
         "call.initiated",
@@ -204,9 +227,10 @@ describe("POST /api/messaging/voice", () => {
     );
     const initiatedState = mocks.answer.mock.calls[0][1]
       .client_state as string;
-    expect(
-      JSON.parse(Buffer.from(initiatedState, "base64").toString())
-    ).toEqual(
+    const decodedInitiatedState = JSON.parse(
+      Buffer.from(initiatedState, "base64").toString()
+    );
+    expect(decodedInitiatedState).toEqual(
       expect.objectContaining({
         callForwardingEnabled: false,
         forwardToNumber: ATTEMPT.forward_to_number,
@@ -234,6 +258,44 @@ describe("POST /api/messaging/voice", () => {
     const answeredResponse = await voiceWebhook(request());
 
     expect(answeredResponse.status).toBe(200);
+    expect(mocks.startPlayback).toHaveBeenCalledWith(
+      "cc_forwarding_off",
+      {
+        audio_url:
+          "https://app.example.test/audio/voicemail-ringback-11s-v1.wav",
+        audio_type: "wav",
+        cache_audio: true,
+        target_legs: "self",
+        client_state: expect.any(String),
+        command_id: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }
+    );
+    expect(mocks.speak).not.toHaveBeenCalled();
+    const ringbackState = mocks.startPlayback.mock.calls[0][1]
+      .client_state as string;
+    const decodedRingbackState = JSON.parse(
+      Buffer.from(ringbackState, "base64").toString()
+    );
+    expect(decodedRingbackState).toEqual({
+      ...decodedInitiatedState,
+      voicePhase: "pre_voicemail_ringback",
+    });
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.playback.ended",
+        {
+          call_control_id: "cc_forwarding_off",
+          status: "completed",
+          client_state: ringbackState,
+        },
+        "evt_voice_playback_ended_forwarding_off"
+      )
+    );
+
+    const playbackResponse = await voiceWebhook(request());
+
+    expect(playbackResponse.status).toBe(200);
     const expectedGreeting = buildSmsComplianceCopy({
       business: {
         name: "Test Biz",
@@ -250,9 +312,18 @@ describe("POST /api/messaging/voice", () => {
         payload: expectedGreeting,
         voice: "AWS.Polly.Joanna-Neural",
         language: "en-US",
-        client_state: initiatedState,
+        client_state: expect.any(String),
+        command_id: expect.stringMatching(/^[a-f0-9]{64}$/),
       })
     );
+    const greetingState = mocks.speak.mock.calls[0][1].client_state as string;
+    const decodedGreetingState = JSON.parse(
+      Buffer.from(greetingState, "base64").toString()
+    );
+    expect(decodedGreetingState).toEqual({
+      ...decodedRingbackState,
+      voicePhase: "voicemail_greeting",
+    });
     expect(mocks.dial).not.toHaveBeenCalled();
     expect(mocks.bridge).not.toHaveBeenCalled();
     expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
@@ -287,7 +358,7 @@ describe("POST /api/messaging/voice", () => {
       expectedTtsLanguage: "en-US",
     },
   ])(
-    "speaks the canonical $label voicemail with the matching Polly locale",
+    "speaks the canonical $label voicemail after ringback with the matching Polly locale",
     async ({ language, expectedVoice, expectedTtsLanguage }) => {
       const state = encodeState({
         callControlId: "cc_locale",
@@ -297,16 +368,18 @@ describe("POST /api/messaging/voice", () => {
         businessEmail: "owner@example.test",
         businessPhoneNumber: "+15745550400",
         smsPhoneNumber: "+15745550300",
+        voicePhase: "pre_voicemail_ringback",
         ...(language ? { language } : {}),
       });
       mocks.unwrap.mockResolvedValueOnce(
         voiceEvent(
-          "call.answered",
+          "call.playback.ended",
           {
             call_control_id: "cc_locale",
+            status: "completed",
             client_state: state,
           },
-          `evt_voice_answered_${language ?? "missing_language"}`
+          `evt_voice_playback_ended_${language ?? "missing_language"}`
         )
       );
 
@@ -330,12 +403,450 @@ describe("POST /api/messaging/voice", () => {
         payload: expectedCopy.voicemailGreeting,
         voice: expectedVoice,
         language: expectedTtsLanguage,
-        client_state: state,
+        client_state: expect.any(String),
+        command_id: expect.stringMatching(/^[a-f0-9]{64}$/),
       });
+      const greetingState = mocks.speak.mock.calls[0][1]
+        .client_state as string;
+      expect(
+        JSON.parse(Buffer.from(greetingState, "base64").toString())
+      ).toEqual(
+        expect.objectContaining({ voicePhase: "voicemail_greeting" })
+      );
       expect(mocks.from).not.toHaveBeenCalled();
       expect(mocks.dial).not.toHaveBeenCalled();
     }
   );
+
+  it.each(["file_not_found", "failed", "unknown"])(
+    "fails open to the voicemail disclosure when ringback ends with %s",
+    async (status) => {
+      const state = voicemailState({
+        voicePhase: "pre_voicemail_ringback",
+      });
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent("call.playback.ended", {
+          status,
+          client_state: state,
+        })
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.speak).toHaveBeenCalledOnce();
+      expect(mocks.startRecording).not.toHaveBeenCalled();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["call_hangup", "cancelled", "cancelled_amd"])(
+    "issues no further command when ringback ends with %s",
+    async (status) => {
+      const state = voicemailState({
+        voicePhase: "pre_voicemail_ringback",
+      });
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent("call.playback.ended", {
+          status,
+          client_state: state,
+        })
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.speak).not.toHaveBeenCalled();
+      expect(mocks.startRecording).not.toHaveBeenCalled();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    {
+      label: "missing client state",
+      clientState: undefined,
+    },
+    {
+      label: "malformed client state",
+      clientState: "not-valid-base64-json",
+    },
+    {
+      label: "missing phase",
+      clientState: voicemailState(),
+    },
+    {
+      label: "wrong phase",
+      clientState: voicemailState({ voicePhase: "voicemail_greeting" }),
+    },
+  ])(
+    "ignores ringback completion with $label",
+    async ({ clientState }) => {
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent("call.playback.ended", {
+          status: "completed",
+          ...(clientState ? { client_state: clientState } : {}),
+        })
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.speak).not.toHaveBeenCalled();
+      expect(mocks.startRecording).not.toHaveBeenCalled();
+    }
+  );
+
+  it("fails open to the disclosure when the ringback command is rejected", async () => {
+    const state = voicemailState();
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.answered", {
+        call_control_id: "cc_voicemail",
+        client_state: state,
+      })
+    );
+    mocks.startPlayback.mockRejectedValue(new Error("playback unavailable"));
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.startPlayback).toHaveBeenCalledOnce();
+    expect(mocks.speak).toHaveBeenCalledOnce();
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("fails open to the disclosure when the public asset origin is unavailable", async () => {
+    const state = voicemailState();
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.answered", {
+        call_control_id: "cc_voicemail",
+        client_state: state,
+      })
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.speak).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { label: "network failure", httpStatus: undefined },
+    { label: "request timeout", httpStatus: 408 },
+    { label: "conflict", httpStatus: 409 },
+    { label: "rate limit", httpStatus: 429 },
+    { label: "provider failure", httpStatus: 503 },
+  ])(
+    "releases playback completion for retry after a disclosure $label",
+    async ({ httpStatus }) => {
+      const eventId = `evt_voice_playback_disclosure_retry_${httpStatus ?? "network"}`;
+      const state = voicemailState({
+        voicePhase: "pre_voicemail_ringback",
+      });
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent(
+          "call.playback.ended",
+          {
+            status: "completed",
+            client_state: state,
+          },
+          eventId
+        )
+      );
+      mocks.speak.mockRejectedValue(
+        Object.assign(
+          new Error("speak unavailable"),
+          httpStatus === undefined ? {} : { status: httpStatus }
+        )
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(500);
+      expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(eventId);
+      expect(mocks.startRecording).not.toHaveBeenCalled();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([400, 401, 403, 404, 422])(
+    "acknowledges terminal disclosure status %s without futile retries",
+    async (httpStatus) => {
+      const eventId = `evt_voice_playback_disclosure_terminal_${httpStatus}`;
+      const state = voicemailState({
+        voicePhase: "pre_voicemail_ringback",
+      });
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent(
+          "call.playback.ended",
+          {
+            status: "completed",
+            client_state: state,
+          },
+          eventId
+        )
+      );
+      mocks.speak.mockRejectedValue(
+        Object.assign(new Error("call is no longer actionable"), {
+          status: httpStatus,
+        })
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+      expect(mocks.startRecording).not.toHaveBeenCalled();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    }
+  );
+
+  it("uses stable command IDs across semantically duplicate webhook events", async () => {
+    const answeredState = voicemailState();
+    mocks.unwrap
+      .mockResolvedValueOnce(
+        voiceEvent(
+          "call.answered",
+          {
+            call_control_id: "cc_voicemail",
+            client_state: answeredState,
+          },
+          "evt_voice_answered_duplicate_a"
+        )
+      )
+      .mockResolvedValueOnce(
+        voiceEvent(
+          "call.answered",
+          {
+            call_control_id: "cc_voicemail",
+            client_state: answeredState,
+          },
+          "evt_voice_answered_duplicate_b"
+        )
+      );
+
+    await voiceWebhook(request());
+    await voiceWebhook(request());
+
+    const firstPlaybackCommand =
+      mocks.startPlayback.mock.calls[0][1].command_id;
+    const secondPlaybackCommand =
+      mocks.startPlayback.mock.calls[1][1].command_id;
+    expect(firstPlaybackCommand).toBe(secondPlaybackCommand);
+
+    const ringbackState = mocks.startPlayback.mock.calls[0][1]
+      .client_state as string;
+    mocks.unwrap
+      .mockResolvedValueOnce(
+        voiceEvent(
+          "call.playback.ended",
+          {
+            status: "completed",
+            client_state: ringbackState,
+          },
+          "evt_voice_playback_duplicate_a"
+        )
+      )
+      .mockResolvedValueOnce(
+        voiceEvent(
+          "call.playback.ended",
+          {
+            status: "completed",
+            client_state: ringbackState,
+          },
+          "evt_voice_playback_duplicate_b"
+        )
+      );
+
+    await voiceWebhook(request());
+    await voiceWebhook(request());
+
+    const firstGreetingCommand = mocks.speak.mock.calls[0][1].command_id;
+    const secondGreetingCommand = mocks.speak.mock.calls[1][1].command_id;
+    expect(firstGreetingCommand).toBe(secondGreetingCommand);
+    expect(firstGreetingCommand).not.toBe(firstPlaybackCommand);
+  });
+
+  it("routes a forwarding attempt missing runtime session state through ringback", async () => {
+    const state = voicemailState({
+      callForwardingEnabled: true,
+      forwardToNumber: ATTEMPT.forward_to_number,
+      telnyxVoiceApplicationId: "voice_app_1",
+    });
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.answered", {
+        call_control_id: "cc_voicemail",
+        client_state: state,
+      })
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.startPlayback).toHaveBeenCalledOnce();
+    expect(mocks.dial).not.toHaveBeenCalled();
+    expect(mocks.bridge).not.toHaveBeenCalled();
+  });
+
+  it("does not start ringback for a forwarding target answer", async () => {
+    const state = voicemailState({
+      forwardingRole: "forward_target",
+    });
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.answered", {
+        call_control_id: "cc_forward_target",
+        client_state: state,
+      })
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.dial).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "voicemail greeting phase",
+      state: voicemailState({ voicePhase: "voicemail_greeting" }),
+    },
+    {
+      label: "legacy phase-less state",
+      state: voicemailState(),
+    },
+  ])(
+    "starts recording after a completed disclosure with $label",
+    async ({ state }) => {
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent("call.speak.ended", {
+          status: "completed",
+          client_state: state,
+        })
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.startRecording).toHaveBeenCalledWith("cc_voicemail", {
+        channels: "single",
+        format: "mp3",
+        max_length: 60,
+        timeout_secs: 5,
+        play_beep: true,
+        client_state: state,
+      });
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not start recording from the ringback phase", async () => {
+    const state = voicemailState({
+      voicePhase: "pre_voicemail_ringback",
+    });
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.speak.ended", {
+        status: "completed",
+        client_state: state,
+      })
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.startRecording).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
+
+  it("preserves voicemail state through disclosure, recording, and missed-call SMS", async () => {
+    const ringbackState = voicemailState({
+      voicePhase: "pre_voicemail_ringback",
+    });
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.playback.ended",
+        {
+          status: "completed",
+          client_state: ringbackState,
+        },
+        "evt_voice_chain_playback"
+      )
+    );
+
+    const playbackResponse = await voiceWebhook(request());
+
+    expect(playbackResponse.status).toBe(200);
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    const greetingState = mocks.speak.mock.calls[0][1]
+      .client_state as string;
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.speak.ended",
+        {
+          status: "completed",
+          client_state: greetingState,
+        },
+        "evt_voice_chain_speak"
+      )
+    );
+
+    const speakResponse = await voiceWebhook(request());
+
+    expect(speakResponse.status).toBe(200);
+    expect(mocks.startRecording).toHaveBeenCalledOnce();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    const recordingState = mocks.startRecording.mock.calls[0][1]
+      .client_state as string;
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.recording.saved",
+        {
+          client_state: recordingState,
+          recording_urls: { mp3: "https://example.test/recording.mp3" },
+        },
+        "evt_voice_chain_recording"
+      )
+    );
+
+    const recordingResponse = await voiceWebhook(request());
+
+    expect(recordingResponse.status).toBe(200);
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id
+    );
+  });
+
+  it("does not send SMS when the caller hangs up during ringback", async () => {
+    const state = voicemailState({
+      voicePhase: "pre_voicemail_ringback",
+    });
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.hangup", {
+        call_control_id: "cc_voicemail",
+        call_session_id: "sess_voicemail",
+        client_state: state,
+        hangup_cause: "originator_cancel",
+      })
+    );
+    queueResults(
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null }
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.startRecording).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+  });
 
   it("uses forwarding-enabled configuration captured at initiation to create, dial, and bridge an attempt", async () => {
     mocks.unwrap.mockResolvedValueOnce(
@@ -465,6 +976,7 @@ describe("POST /api/messaging/voice", () => {
       })
     );
     expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
     expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
       "phone_numbers",
       "businesses",

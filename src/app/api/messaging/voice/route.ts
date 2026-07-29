@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { telnyx } from "@/lib/messaging/client";
 import {
   markProcessedOnce,
@@ -22,7 +23,8 @@ import type { Language } from "@/types/database";
 // We act on a small subset to drive forwarding and the missed-call voicemail flow:
 //
 //   call.initiated      -> answer (or reject if number isn't configured)
-//   call.answered       -> forward if enabled, otherwise speak greeting
+//   call.answered       -> forward if enabled, otherwise play voicemail ringback
+//   call.playback.ended -> speak greeting after voicemail ringback
 //   call.bridged        -> mark a forwarding attempt connected
 //   call.speak.ended    -> start recording
 //   call.recording.saved -> hangup + trigger missed-call SMS
@@ -38,11 +40,15 @@ import type { Language } from "@/types/database";
 // OR any handler throwing RetryableWebhookError (durable side effects can
 // fail under real-time event types — e.g. the missed-call SMS on a
 // forwarding dial error under call.answered), release the idempotency
-// claim and return 500 so Telnyx redelivers. All other real-time
-// call-control failures keep the log-and-200 swallow: retrying
-// answer()/speak() seconds later on a dead call cannot help.
+// claim and return 500 so Telnyx redelivers. Transient voicemail-greeting
+// failures are explicitly retryable because a stable command ID makes
+// redelivery safe; terminal 4xx responses are acknowledged.
+// Other real-time call-control failures keep the log-and-200 swallow:
+// retrying answer()/reject() seconds later on a dead call cannot help.
 
 const CALL_FORWARD_TIMEOUT_SECS = 18;
+const VOICEMAIL_RINGBACK_AUDIO_PATH =
+  "/audio/voicemail-ringback-11s-v1.wav";
 
 const DURABLE_EVENT_TYPES = new Set([
   "call.hangup",
@@ -52,6 +58,7 @@ const DURABLE_EVENT_TYPES = new Set([
 
 type ForwardingRole = "inbound" | "forward_target";
 type ForwardingTerminalStatus = "abandoned" | "fallback_triggered" | "error";
+type VoicePhase = "pre_voicemail_ringback" | "voicemail_greeting";
 
 interface VoiceState {
   callControlId: string;
@@ -68,6 +75,7 @@ interface VoiceState {
   forwardingRole?: ForwardingRole;
   forwardingAttemptId?: string;
   outboundCallControlId?: string | null;
+  voicePhase?: VoicePhase;
 }
 
 interface ForwardingAttempt {
@@ -138,6 +146,9 @@ export async function POST(request: NextRequest) {
         break;
       case "call.answered":
         await handleCallAnswered(payload);
+        break;
+      case "call.playback.ended":
+        await handlePlaybackEnded(payload);
         break;
       case "call.bridged":
         await handleCallBridged(payload);
@@ -304,7 +315,7 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
     return;
   }
 
-  await speakVoicemailGreeting(state, stateB64);
+  await startVoicemailRingback(state);
 }
 
 function shouldAttemptForwarding(state: VoiceState): boolean {
@@ -341,7 +352,135 @@ function shouldAttemptForwarding(state: VoiceState): boolean {
   return true;
 }
 
-async function speakVoicemailGreeting(state: VoiceState, stateB64: string | undefined) {
+function stableVoiceCommandId(
+  callControlId: string,
+  command: "voicemail_ringback_v1" | "voicemail_greeting_v1"
+): string {
+  return createHash("sha256")
+    .update(`${command}:${callControlId}`)
+    .digest("hex");
+}
+
+function voiceCommandHttpStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const status =
+    (error as { status?: unknown }).status ??
+    (error as { statusCode?: unknown }).statusCode;
+  return typeof status === "number" ? status : null;
+}
+
+function isRetryableVoiceCommandError(error: unknown): boolean {
+  const status = voiceCommandHttpStatus(error);
+  if (status === null) return true;
+  return (
+    status === 408 ||
+    status === 409 ||
+    status === 429 ||
+    status >= 500
+  );
+}
+
+function voicemailRingbackAudioUrl(): string | null {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!appUrl) {
+    console.warn(
+      "[messaging:voice] NEXT_PUBLIC_APP_URL is missing; skipping voicemail ringback"
+    );
+    return null;
+  }
+
+  try {
+    const audioUrl = new URL(VOICEMAIL_RINGBACK_AUDIO_PATH, appUrl);
+    if (audioUrl.protocol !== "https:" && audioUrl.protocol !== "http:") {
+      throw new Error(`unsupported protocol ${audioUrl.protocol}`);
+    }
+    return audioUrl.toString();
+  } catch (error) {
+    console.warn(
+      "[messaging:voice] NEXT_PUBLIC_APP_URL is invalid; skipping voicemail ringback:",
+      error
+    );
+    return null;
+  }
+}
+
+async function startVoicemailRingback(state: VoiceState) {
+  const audioUrl = voicemailRingbackAudioUrl();
+  if (!audioUrl) {
+    await speakVoicemailGreeting(state);
+    return;
+  }
+
+  const ringbackState = encodeState({
+    ...state,
+    voicePhase: "pre_voicemail_ringback",
+  });
+
+  console.log(
+    `[messaging:voice] Starting voicemail ringback for callControlId=${state.callControlId}`
+  );
+  try {
+    await telnyx.calls.actions.startPlayback(state.callControlId, {
+      audio_url: audioUrl,
+      audio_type: "wav",
+      cache_audio: true,
+      target_legs: "self",
+      client_state: ringbackState,
+      command_id: stableVoiceCommandId(
+        state.callControlId,
+        "voicemail_ringback_v1"
+      ),
+    });
+  } catch (error) {
+    console.warn(
+      `[messaging:voice] voicemail ringback failed to start for callControlId=${state.callControlId}; speaking greeting immediately:`,
+      error
+    );
+    await speakVoicemailGreeting(state);
+  }
+}
+
+async function handlePlaybackEnded(payload: Record<string, unknown>) {
+  const status = payload.status as string | undefined;
+  const state = decodeState(payload.client_state as string | undefined);
+  if (!state) {
+    console.warn(`[messaging:voice] call.playback.ended missing client_state`);
+    return;
+  }
+  if (state.voicePhase !== "pre_voicemail_ringback") {
+    console.log(
+      `[messaging:voice] call.playback.ended phase=${state.voicePhase ?? "missing"} (skipping voicemail greeting)`
+    );
+    return;
+  }
+
+  switch (status) {
+    case "completed":
+    case "file_not_found":
+    case "failed":
+    case "unknown":
+      if (status !== "completed") {
+        console.warn(
+          `[messaging:voice] voicemail ringback ended status=${status}; speaking greeting immediately`
+        );
+      }
+      await speakVoicemailGreeting(state);
+      return;
+    case "call_hangup":
+    case "cancelled":
+    case "cancelled_amd":
+      console.log(
+        `[messaging:voice] voicemail ringback ended status=${status}; call is no longer continuing`
+      );
+      return;
+    default:
+      console.warn(
+        `[messaging:voice] call.playback.ended unexpected status=${status ?? "missing"} (skipping voicemail greeting)`
+      );
+  }
+}
+
+async function speakVoicemailGreeting(state: VoiceState) {
   const locale = resolveComplianceCopyLocale(state.language);
   const greeting = buildSmsComplianceCopy({
     business: {
@@ -353,19 +492,41 @@ async function speakVoicemailGreeting(state: VoiceState, stateB64: string | unde
     privacyUrl: "the business privacy policy",
     language: state.language,
   }).voicemailGreeting;
+  const greetingState = encodeState({
+    ...state,
+    voicePhase: "voicemail_greeting",
+  });
 
   console.log(
-    `[messaging:voice] call.answered, speaking greeting for ${state.businessName}`
+    `[messaging:voice] Speaking voicemail greeting for ${state.businessName}`
   );
-  await telnyx.calls.actions.speak(state.callControlId, {
-    payload: greeting,
-    voice:
-      locale === "es"
-        ? "AWS.Polly.Lupe-Neural"
-        : "AWS.Polly.Joanna-Neural",
-    language: locale === "es" ? "es-US" : "en-US",
-    client_state: stateB64,
-  });
+  try {
+    await telnyx.calls.actions.speak(state.callControlId, {
+      payload: greeting,
+      voice:
+        locale === "es"
+          ? "AWS.Polly.Lupe-Neural"
+          : "AWS.Polly.Joanna-Neural",
+      language: locale === "es" ? "es-US" : "en-US",
+      client_state: greetingState,
+      command_id: stableVoiceCommandId(
+        state.callControlId,
+        "voicemail_greeting_v1"
+      ),
+    });
+  } catch (error) {
+    if (!isRetryableVoiceCommandError(error)) {
+      console.warn(
+        `[messaging:voice] voicemail greeting rejected with terminal status=${voiceCommandHttpStatus(error)} for callControlId=${state.callControlId}; call is no longer retryable`,
+        error
+      );
+      return;
+    }
+    throw new RetryableWebhookError(
+      `[messaging:voice] Failed to start voicemail greeting for callControlId=${state.callControlId}`,
+      { cause: error }
+    );
+  }
 }
 
 async function startCallForwarding(
@@ -382,7 +543,7 @@ async function startCallForwarding(
     console.warn(
       `[messaging:voice] forwarding prerequisites missing for businessId=${state.businessId}; using missed-call voicemail flow`
     );
-    await speakVoicemailGreeting(state, encodeState(state));
+    await startVoicemailRingback(state);
     return;
   }
 
@@ -572,6 +733,15 @@ async function handleSpeakEnded(payload: Record<string, unknown>) {
   }
   if (!state) {
     console.warn(`[messaging:voice] call.speak.ended missing client_state`);
+    return;
+  }
+  if (
+    state.voicePhase !== undefined &&
+    state.voicePhase !== "voicemail_greeting"
+  ) {
+    console.log(
+      `[messaging:voice] call.speak.ended phase=${state.voicePhase} (skipping recording)`
+    );
     return;
   }
 
