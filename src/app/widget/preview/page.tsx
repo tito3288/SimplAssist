@@ -20,6 +20,7 @@ function PreviewContent() {
         <script
           src={`/widget/embed.js?v=${Date.now()}`}
           data-business-id={businessId}
+          data-preview="true"
           async
         />
       )}

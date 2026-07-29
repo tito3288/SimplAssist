@@ -51,6 +51,7 @@ import { EntitlementResolutionError } from "@/lib/billing/entitlements";
 import { POST as postChat } from "./chat/route";
 import { GET as getConfig, PATCH as patchConfig } from "./config/route";
 import { POST as postEnd } from "./end/route";
+import { GET as getPreviewConfig } from "./preview-config/route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const ENTITLEMENTS = {
@@ -82,6 +83,12 @@ function queueDatabaseResults(...results: QueryResult[]) {
 function configRequest() {
   return new NextRequest(
     `http://localhost/api/widget/config?businessId=${BUSINESS_ID}`
+  );
+}
+
+function previewConfigRequest() {
+  return new NextRequest(
+    `http://localhost/api/widget/preview-config?businessId=${BUSINESS_ID}`
   );
 }
 
@@ -263,6 +270,10 @@ describe("public widget entitlement boundaries", () => {
       businessName: "Acme",
       welcomeMessage: "Welcome",
     });
+    const configChain = mocks.from.mock.results[0]?.value as {
+      eq: ReturnType<typeof vi.fn>;
+    };
+    expect(configChain.eq).toHaveBeenCalledWith("is_active", true);
   });
 
   it("skips AI and acknowledges chat when the plan is not entitled", async () => {
@@ -398,5 +409,84 @@ describe("public widget entitlement boundaries", () => {
     });
     // The sole database call is the required read-only widget availability lookup.
     expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("owner-only widget preview", () => {
+  it("requires an authenticated owner", async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null } });
+
+    const response = await getPreviewConfig(previewConfigRequest());
+
+    expect(response.status).toBe(401);
+    expect(mocks.serverFrom).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 without revealing a widget owned by another user", async () => {
+    setServerBusinessResult({ data: null, error: null });
+
+    const response = await getPreviewConfig(previewConfigRequest());
+
+    expect(response.status).toBe(404);
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("enforces the web-chat entitlement", async () => {
+    setServerBusinessResult({
+      data: { id: BUSINESS_ID, name: "Acme" },
+      error: null,
+    });
+    mocks.canUseFeature.mockReturnValue(false);
+
+    const response = await getPreviewConfig(previewConfigRequest());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: "feature_unavailable",
+      feature: "web_chat",
+      requiredPlan: "sms_and_chat",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("returns the saved config even when the widget is inactive", async () => {
+    setServerBusinessResult({
+      data: { id: BUSINESS_ID, name: "Acme" },
+      error: null,
+    });
+    queueDatabaseResults({
+      data: {
+        id: "widget-1",
+        business_id: BUSINESS_ID,
+        is_active: false,
+        brand_color: "#123456",
+        position: "bottom_left",
+        welcome_message: "Preview welcome",
+        show_logo: false,
+        logo_url: null,
+        lead_capture_enabled: true,
+        lead_capture_timing: "after_3_messages",
+        quick_replies: ["Pricing"],
+      },
+      error: null,
+    });
+
+    const response = await getPreviewConfig(previewConfigRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      available: true,
+      businessName: "Acme",
+      position: "bottom_left",
+      welcomeMessage: "Preview welcome",
+    });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const previewChain = mocks.from.mock.results[0]?.value as {
+      eq: ReturnType<typeof vi.fn>;
+    };
+    expect(previewChain.eq).not.toHaveBeenCalledWith("is_active", true);
   });
 });

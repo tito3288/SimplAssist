@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { secondaryCtaCompactClass } from '@/lib/glass';
-import { statusSuccess, statusNeutral } from '@/lib/theme-v2/theme';
+import { statusSuccess, statusWarning } from '@/lib/theme-v2/theme';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -487,39 +487,36 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Widget Status</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control whether the widget is visible on your website.</p>
 
-        <div className="flex items-center justify-between rounded-lg border border-[#ece4d8] dark:border-white/[0.10] p-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setValue('is_active', !isActive)}
+        <div
+          role="status"
+          className={cn(
+            'flex items-center justify-between gap-4 rounded-lg p-4 text-sm',
+            isActive ? statusSuccess : statusWarning
+          )}
+        >
+          <p className="font-medium">
+            {isActive
+              ? 'Your widget is LIVE — it will appear on your website wherever the embed code is installed.'
+              : "Your widget is OFF — it won't appear on your website until you switch it on."}
+          </p>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isActive}
+            aria-label={isActive ? 'Switch widget off' : 'Switch widget on'}
+            onClick={() => setValue('is_active', !isActive)}
+            className={cn(
+              'relative inline-flex h-7 w-14 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
+              isActive ? 'bg-green-500' : 'bg-stone-300 dark:bg-white/[0.18]'
+            )}
+          >
+            <span
               className={cn(
-                'relative inline-flex h-7 w-14 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                isActive ? 'bg-green-500' : 'bg-stone-200 dark:bg-white/[0.12]'
+                'pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow ring-0 transition-transform',
+                isActive ? 'translate-x-7' : 'translate-x-0'
               )}
-            >
-              <span
-                className={cn(
-                  'pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow ring-0 transition-transform',
-                  isActive ? 'translate-x-7' : 'translate-x-0'
-                )}
-              />
-            </button>
-            <div>
-              <span
-                className={cn(
-                  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                  isActive ? statusSuccess : statusNeutral
-                )}
-              >
-                {isActive ? 'Active' : 'Inactive'}
-              </span>
-              {!isActive && (
-                <p className="text-xs text-amber-600 mt-1">
-                  Deactivating will hide the chat widget from your website
-                </p>
-              )}
-            </div>
-          </div>
+            />
+          </button>
         </div>
       </div>
 

@@ -23,7 +23,7 @@ export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorPro
     <div>
       <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Embed Code</h2>
       <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
-        Add the chat widget to your website by copying the code below.
+        Paste this snippet into your site — your widget is active and will appear immediately.
       </p>
 
       <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-gray-900 dark:border-white/[0.10] dark:bg-white/[0.03]">

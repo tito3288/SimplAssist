@@ -17,6 +17,9 @@ export async function GET() {
   if (!businessId) { console.error('SimplAssist: missing data-business-id'); return; }
 
   var baseUrl = script.src.substring(0, script.src.indexOf('/widget/embed.js'));
+  var configPath = script && script.getAttribute('data-preview') === 'true'
+    ? '/api/widget/preview-config'
+    : '/api/widget/config';
 
   var config = null;
   var messages = [];
@@ -676,7 +679,7 @@ export async function GET() {
   function loadWidgetConfig() {
     if (configRequestInFlight) return;
     configRequestInFlight = true;
-    fetch(baseUrl + '/api/widget/config?businessId=' + encodeURIComponent(businessId), { cache: 'no-store' })
+    fetch(baseUrl + configPath + '?businessId=' + encodeURIComponent(businessId), { cache: 'no-store' })
       .then(function(r) {
         return r.json()
           .catch(function() { return {}; })

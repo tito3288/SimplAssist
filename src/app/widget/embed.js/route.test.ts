@@ -193,10 +193,11 @@ class FakeDocument {
   readonly body = new FakeElement("body");
   readonly currentScript: FakeElement;
 
-  constructor() {
+  constructor(preview = false) {
     this.currentScript = new FakeElement("script");
     this.currentScript.src = "https://simplassist.test/widget/embed.js";
     this.currentScript.setAttribute("data-business-id", "business-123");
+    if (preview) this.currentScript.setAttribute("data-preview", "true");
   }
 
   createElement(tag: string) {
@@ -282,10 +283,13 @@ interface QueuedResponse {
   body: Record<string, unknown>;
 }
 
-async function createHarness(responses: QueuedResponse[]) {
+async function createHarness(
+  responses: QueuedResponse[],
+  options: { preview?: boolean } = {},
+) {
   const response = await GET();
   const script = await response.text();
-  const document = new FakeDocument();
+  const document = new FakeDocument(options.preview);
   const timers = new FakeTimers();
   const requests: Array<{ url: string; init?: Record<string, unknown> }> = [];
   const storage = new Map<string, string>();
@@ -362,6 +366,24 @@ describe("widget embed runtime", () => {
     const script = await response.text();
 
     expect(() => new Function(script)).not.toThrow();
+  });
+
+  it("uses the owner-only config route in preview mode", async () => {
+    const harness = await createHarness(
+      [{ status: 200, body: availableConfig }],
+      { preview: true },
+    );
+
+    await flushPromises();
+
+    expect(harness.requests[0]?.url).toBe(
+      "https://simplassist.test/api/widget/preview-config?businessId=business-123",
+    );
+    expect(
+      harness.document
+        .querySelector(".sa-widget-btn")
+        ?.classList.contains("sa-btn-visible"),
+    ).toBe(true);
   });
 
   it("retries transient config failures with bounded backoff and then initializes", async () => {
