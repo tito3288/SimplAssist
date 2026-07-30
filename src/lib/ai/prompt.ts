@@ -75,6 +75,18 @@ export function buildSystemPrompt(
   const { open, todayHours } = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
     aiSettings.business_voice === "we" ? "we" : business.name;
+  const configuredPhone = business.phone_number?.trim() || null;
+  const configuredEmail = business.email?.trim() || null;
+  const configuredContactPaths = [
+    configuredPhone
+      ? `call ${configuredPhone} during business hours`
+      : null,
+    configuredEmail ? `email ${configuredEmail}` : null,
+  ].filter((path): path is string => Boolean(path));
+  const knowledgeGapHandoff =
+    configuredContactPaths.length > 0
+      ? `suggest the customer ${configuredContactPaths.join(" or ")}`
+      : "invite the customer to contact the business directly without inventing contact details";
 
   const sections: string[] = [];
 
@@ -89,11 +101,11 @@ export function buildSystemPrompt(
   if (business.address) {
     sections.push(`Address: ${business.address}${business.city ? `, ${business.city}` : ""}${business.state ? `, ${business.state}` : ""} ${business.zip ?? ""}`);
   }
-  if (business.phone_number) {
-    sections.push(`Phone: ${business.phone_number}`);
+  if (configuredPhone) {
+    sections.push(`Phone: ${configuredPhone}`);
   }
-  if (business.email) {
-    sections.push(`Email: ${business.email}`);
+  if (configuredEmail) {
+    sections.push(`Email: ${configuredEmail}`);
   }
 
   // Include today's date so the AI can calculate relative dates like "this Friday"
@@ -197,10 +209,43 @@ export function buildSystemPrompt(
     sections.push("- IMPORTANT: On your very first reply to a new customer, always include the business name so they know who is texting them.");
     sections.push("- Do NOT use markdown formatting (no **, ##, bullets with *, etc.).");
   }
-  sections.push("- Do NOT make up information that is not provided in this context.");
-  sections.push(`- If you are unsure about something, suggest the customer call during business hours${business.email ? ` or email ${business.email}` : ""}.`);
   sections.push("- Stay in character as the business itself at all times. You ARE the business, not an assistant.");
   sections.push("- Never refer to yourself as an assistant, bot, or AI. Respond as a real person from the business would.");
+
+  sections.push("");
+  sections.push("KNOWLEDGE BOUNDARIES AND GAPS:");
+  sections.push(
+    `- When the current business information does not fully answer a customer's question, name the specific missing topic. Say, for example, "I don't see free trials mentioned in our current info," instead of a generic "I don't have information about that."`
+  );
+  sections.push(
+    `- CRITICAL: Missing information means unknown, never "no." NEVER state or imply that the business does not offer, provide, allow, support, or have something solely because it is not mentioned.`
+  );
+  sections.push(
+    `- Forbidden when based only on missing information: "We don't offer free trials." Allowed: "I don't see a free trial mentioned in our current info."`
+  );
+  sections.push(
+    "- If a closely related service or FAQ appears in the provided business information and is permitted by any STRICT RULES, briefly share only that accurate information, clearly distinguish it from the unresolved topic, then hand off. Do not stretch unrelated information into an answer."
+  );
+  sections.push(
+    "- Under no circumstances invent or infer services, prices, promotions or trials, policies, hours, or availability. Use only the provided business information and successful tool results for business-specific claims."
+  );
+  sections.push(
+    `- If any part of the question remains unresolved, end with a natural, tone-matched handoff: ${knowledgeGapHandoff}. Do not invent a contact method or ask the customer for their contact information as the handoff.`
+  );
+  sections.push(
+    "- For a knowledge-gap handoff, do not promise a callback, escalation, staff follow-up, or any action the engine did not actually create."
+  );
+  sections.push(
+    "- Match the configured tone and language; the examples above illustrate the rule, not a required canned script."
+  );
+  if (channel === "sms") {
+    sections.push(
+      "- For SMS, keep the entire knowledge-gap response compact. Near-miss information gets at most one short sentence before the handoff."
+    );
+  }
+  sections.push(
+    "- These knowledge-gap rules do not override STRICT RULES, BOOKING, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION timing."
+  );
 
   sections.push("");
   sections.push("CUSTOMER CARE SMS COMPLIANCE:");
