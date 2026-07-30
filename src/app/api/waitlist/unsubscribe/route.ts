@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { verifyWaitlistUnsubscribeToken } from "@/lib/waitlist/unsubscribeToken";
 
@@ -39,6 +40,14 @@ export async function POST(request: NextRequest) {
     return errorResponse("Invalid unsubscribe link", 400);
   }
 
+  let redirectOrigin: string;
+  try {
+    redirectOrigin = publicAppOrigin(request.nextUrl.origin);
+  } catch {
+    console.error("[waitlist:unsubscribe] redirect origin unavailable");
+    return errorResponse("Unsubscribe is temporarily unavailable", 500);
+  }
+
   const { error } = await supabaseAdmin
     .from("waitlist_signups")
     .update({ unsubscribed_at: new Date().toISOString() })
@@ -56,7 +65,7 @@ export async function POST(request: NextRequest) {
     status: 303,
     headers: {
       ...PRIVATE_HEADERS,
-      Location: new URL("/waitlist/unsubscribed", request.url).toString(),
+      Location: `${redirectOrigin}/waitlist/unsubscribed`,
     },
   });
 }

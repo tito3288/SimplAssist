@@ -1,5 +1,12 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -23,7 +30,7 @@ function request(token?: string): NextRequest {
   if (token !== undefined) body.set("token", token);
 
   return new NextRequest(
-    "https://simplassist.com/api/waitlist/unsubscribe",
+    "http://localhost:8080/api/waitlist/unsubscribe",
     {
       method: "POST",
       headers: {
@@ -48,11 +55,17 @@ function stubUpdate(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://simplassist.com/");
   mocks.verifyToken.mockReturnValue(SIGNUP_ID);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
 describe("POST /api/waitlist/unsubscribe", () => {
-  it("sets unsubscribe once and redirects without the token", async () => {
+  it("uses the configured public origin when Railway exposes an internal request URL", async () => {
     const admin = stubUpdate();
 
     const response = await POST(request("v1.valid.signature"));
@@ -68,6 +81,19 @@ describe("POST /api/waitlist/unsubscribe", () => {
     });
     expect(admin.eq).toHaveBeenCalledWith("id", SIGNUP_ID);
     expect(admin.is).toHaveBeenCalledWith("unsubscribed_at", null);
+  });
+
+  it("does not write when the public redirect origin is unsafe", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:8080");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await POST(request("v1.valid.signature"));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: "Unsubscribe is temporarily unavailable",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it("is idempotent on a repeated valid submission", async () => {
