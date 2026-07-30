@@ -1,9 +1,24 @@
-import { describe, expect, it } from "vitest";
-import type { AISettings, Business, FAQ, Service } from "@/types/database";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  AISettings,
+  Business,
+  BusinessHours,
+  FAQ,
+  Service,
+} from "@/types/database";
 import { buildSystemPrompt } from "./prompt";
 
 const PHONE_NUMBER = "+1 574-555-0100";
 const EMAIL = "help@acme.test";
+const DAY_NAMES_FOR_TEST = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
 const BASE_BUSINESS = {
   id: "business-1",
@@ -107,26 +122,27 @@ const CONTACT_CASES = [
 ] as const;
 
 function business(
-  overrides: Pick<Partial<Business>, "phone_number" | "email"> = {}
+  overrides: Partial<Business> = {}
 ): Business {
   return { ...BASE_BUSINESS, ...overrides } as Business;
 }
 
 function promptFor(
   channel: "sms" | "web_chat",
-  contact: Pick<Partial<Business>, "phone_number" | "email"> = {
+  businessOverrides: Partial<Business> = {
     phone_number: PHONE_NUMBER,
     email: EMAIL,
   },
   services: Service[] = SERVICES,
-  faqs: FAQ[] = FAQS
+  faqs: FAQ[] = FAQS,
+  businessHours: BusinessHours[] = []
 ): string {
   return buildSystemPrompt(
-    business(contact),
+    business(businessOverrides),
     AI_SETTINGS,
     services,
     faqs,
-    [],
+    businessHours,
     false,
     channel
   );
@@ -273,5 +289,116 @@ describe.each(CHANNEL_CASES)(
         );
       });
     }
+  }
+);
+
+describe.each(CHANNEL_CASES)(
+  "buildSystemPrompt business information for $channel",
+  ({ channel }) => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-02-02T12:00:00.000Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("renders a compact, trimmed address from nonempty components", () => {
+      const prompt = promptFor(channel, {
+        address: "  123 Main Street  ",
+        city: "  Indianapolis ",
+        state: "  IN ",
+        zip: " 46201  ",
+      });
+
+      expect(prompt).toContain(
+        "\nAddress: 123 Main Street, Indianapolis, IN 46201\n"
+      );
+      expect(prompt).not.toContain("Address:   ");
+    });
+
+    it("joins only the address components that contain text", () => {
+      const prompt = promptFor(channel, {
+        address: " ",
+        city: " Indianapolis ",
+        state: null,
+        zip: " 46201 ",
+      });
+
+      expect(prompt).toContain("\nAddress: Indianapolis 46201\n");
+      expect(prompt).not.toContain("Address: ,");
+    });
+
+    it("omits an address and hours when those values are unset", () => {
+      const prompt = promptFor(channel, {
+        address: "   ",
+        city: null,
+        state: " ",
+        zip: null,
+      });
+
+      expect(prompt).not.toContain("\nAddress:");
+      expect(prompt).not.toContain("\nBUSINESS HOURS:");
+      expect(prompt).not.toContain("\nToday:");
+      expect(prompt).not.toContain("\nCurrently:");
+    });
+
+    it("shows a partial schedule without inferring today's status", () => {
+      const today = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "UTC" })
+      ).getDay();
+      const scheduledDay = (today + 1) % 7;
+      const businessHours: BusinessHours[] = [
+        {
+          id: "hours-1",
+          business_id: "business-1",
+          day_of_week: scheduledDay,
+          open_time: "09:00",
+          close_time: "17:00",
+          is_closed: false,
+        },
+      ];
+      const prompt = promptFor(
+        channel,
+        undefined,
+        SERVICES,
+        FAQS,
+        businessHours
+      );
+
+      expect(prompt).toContain("\nBUSINESS HOURS:");
+      expect(prompt).toContain(
+        `${DAY_NAMES_FOR_TEST[scheduledDay]}: 09:00 - 17:00`
+      );
+      expect(prompt).not.toContain("\nToday:");
+      expect(prompt).not.toContain("\nCurrently:");
+    });
+
+    it("keeps an explicit closed-today row factual", () => {
+      const today = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "UTC" })
+      ).getDay();
+      const businessHours: BusinessHours[] = [
+        {
+          id: "hours-1",
+          business_id: "business-1",
+          day_of_week: today,
+          open_time: "09:00",
+          close_time: "17:00",
+          is_closed: true,
+        },
+      ];
+      const prompt = promptFor(
+        channel,
+        undefined,
+        SERVICES,
+        FAQS,
+        businessHours
+      );
+
+      expect(prompt).toContain("\nToday: Closed today");
+      expect(prompt).toContain("\nCurrently: CLOSED");
+    });
   }
 );

@@ -48,9 +48,10 @@ export default function OnboardingPage() {
   const [finalizingCheckout, setFinalizingCheckout] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Website-scan results carried from Business Info to the Services & FAQs
-  // step so they can pre-fill those (editable) fields. Convenience only —
-  // never saved or submitted on their own, and saved DB data always wins.
+  // Website-scan results carried from Business Info to the Hours and
+  // Services & FAQs steps so they can pre-fill editable fields. Convenience
+  // only — never saved or submitted on their own, and saved DB data always
+  // wins.
   const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
 
   const loadState = useCallback(async (options: { keepStep?: boolean } = {}) => {
@@ -170,12 +171,20 @@ export default function OnboardingPage() {
           <BusinessInfoForm
             businessId={state.businessId}
             initialData={state.businessInfo}
-            onNext={(_data, scraped) => {
+            onNext={(data, scraped) => {
               // Only a fresh scan updates the captured result. BusinessInfoForm
               // remounts with null scrapedData on back-navigation, so guarding
               // here keeps an earlier scan's prefill from being wiped when the
               // customer returns and continues without re-scanning.
               if (scraped) setScrapedData(scraped);
+              setState((current) =>
+                current
+                  ? {
+                      ...current,
+                      businessInfo: { ...current.businessInfo, ...data },
+                    }
+                  : current
+              );
               setStep(nextStepOf(step));
               refreshState({ keepStep: true });
             }}
@@ -186,7 +195,19 @@ export default function OnboardingPage() {
           <BusinessHoursForm
             businessId={state.businessId}
             initialData={state.businessHours.length > 0 ? state.businessHours : undefined}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            scannedData={scrapedData?.business_hours}
+            onNext={(hours) => {
+              setState((current) =>
+                current
+                  ? {
+                      ...current,
+                      businessHours: hours.map((row) => ({ ...row })),
+                    }
+                  : current
+              );
+              setStep(nextStepOf(step));
+              refreshState({ keepStep: true });
+            }}
             onBack={() => setStep('business_info')}
           />
         )}
@@ -201,7 +222,11 @@ export default function OnboardingPage() {
                 ? state.servicesAndFaqs
                 : undefined
             }
-            scrapedServices={scrapedData?.services}
+            scrapedServices={scrapedData?.services?.map((service) => ({
+              name: service.name,
+              description: service.description ?? undefined,
+              price: service.price ?? undefined,
+            }))}
             scrapedFaqs={scrapedData?.faqs}
             onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('business_hours')}

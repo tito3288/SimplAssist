@@ -3,6 +3,7 @@ import AISettingsForm from '@/components/settings/AISettingsForm';
 import ServicesManager from '@/components/settings/ServicesManager';
 import FAQManager from '@/components/settings/FAQManager';
 import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
+import BusinessInfoEditor from '@/components/settings/BusinessInfoEditor';
 import PhoneNumberSection from '@/components/settings/PhoneNumberSection';
 import BusinessEmailForm from '@/components/settings/BusinessEmailForm';
 import TimezoneSelector from '@/components/settings/TimezoneSelector';
@@ -149,19 +150,39 @@ export default async function SettingsPage() {
         )}
       </div>
 
-      {/* Business Hours */}
+      {/* Business Info */}
       <div className={`p-6 ${card}`}>
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Business Hours</h2>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Set when your business is open. Your AI will inform customers of your hours.</p>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Business Info</h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
+          Keep the contact details and hours your AI shares with customers up to date.
+        </p>
 
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">
-            Timezone
-          </label>
-          <TimezoneSelector businessId={business.id} initialTimezone={business.timezone} />
+        <BusinessInfoEditor
+          businessId={business.id}
+          initialPhoneNumber={business.phone_number}
+          initialAddress={business.address}
+          initialCity={business.city}
+          initialState={business.state}
+          initialZip={business.zip}
+        />
+
+        <div className="mt-8 border-t border-[#e3dacc] pt-8 dark:border-white/[0.12]">
+          <h3 className="text-base font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
+            Timezone &amp; Hours
+          </h3>
+          <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
+            Set when your business is open. Your AI will inform customers of your hours.
+          </p>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-2">
+              Timezone
+            </label>
+            <TimezoneSelector businessId={business.id} initialTimezone={business.timezone} />
+          </div>
+
+          <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
         </div>
-
-        <BusinessHoursEditor businessId={business.id} initialHours={businessHours || []} />
       </div>
 
       {/* Danger Zone */}

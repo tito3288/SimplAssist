@@ -9,6 +9,10 @@ import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 import { primaryCtaInlineClass } from '@/lib/glass';
+import {
+  getBusinessInfoScanPrefill,
+  type OnboardingScanData,
+} from '@/lib/onboarding/scanPrefill';
 
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
@@ -39,10 +43,7 @@ const businessInfoSchema = z.object({
 
 type BusinessInfoData = z.infer<typeof businessInfoSchema>;
 
-export interface ScrapedData {
-  services?: { name: string; description?: string; price?: string }[];
-  faqs?: { question: string; answer: string }[];
-}
+export type ScrapedData = OnboardingScanData;
 
 interface BusinessInfoFormProps {
   businessId: string;
@@ -76,7 +77,9 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
 
   const {
     register,
+    getValues,
     handleSubmit,
+    setValue,
     watch,
     formState: { errors },
   } = useForm<BusinessInfoData>({
@@ -110,10 +113,29 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         body: JSON.stringify({ url: websiteValue }),
       });
       if (!res.ok) throw new Error('Failed to scan website');
-      const data = await res.json();
+      const data = (await res.json()) as ScrapedData;
+      const current = getValues();
+      const prefill = getBusinessInfoScanPrefill(
+        {
+          name: current.name,
+          phone: current.phone,
+          address: current.address,
+          city: current.city,
+          state: current.state,
+          zip: current.zip,
+        },
+        data
+      );
+
+      for (const [field, value] of Object.entries(prefill) as [
+        keyof typeof prefill,
+        string,
+      ][]) {
+        setValue(field, value, { shouldDirty: true, shouldValidate: true });
+      }
       setScrapedData(data);
     } catch {
-      setScanError('Could not scan website. You can add services and FAQs manually.');
+      setScanError('Could not scan website. You can continue by entering your information manually.');
     } finally {
       setScanning(false);
     }
@@ -322,7 +344,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       <div className="flex justify-end pt-4">
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || scanning}
           className={primaryCtaInlineClass}
         >
           {saving ? (

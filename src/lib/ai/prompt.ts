@@ -20,7 +20,7 @@ const DAY_NAMES = [
 function isCurrentlyOpen(
   businessHours: BusinessHours[],
   timezone: string
-): { open: boolean; todayHours: string } {
+): { open: boolean; todayHours: string } | null {
   const now = new Date(
     new Date().toLocaleString("en-US", { timeZone: timezone })
   );
@@ -29,7 +29,11 @@ function isCurrentlyOpen(
 
   const todayEntry = businessHours.find((h) => h.day_of_week === dayOfWeek);
 
-  if (!todayEntry || todayEntry.is_closed) {
+  if (!todayEntry) {
+    return null;
+  }
+
+  if (todayEntry.is_closed) {
     return { open: false, todayHours: "Closed today" };
   }
 
@@ -41,7 +45,7 @@ function isCurrentlyOpen(
 }
 
 function formatHoursSchedule(businessHours: BusinessHours[]): string {
-  return businessHours
+  return [...businessHours]
     .sort((a, b) => a.day_of_week - b.day_of_week)
     .map((h) => {
       const day = DAY_NAMES[h.day_of_week];
@@ -49,6 +53,18 @@ function formatHoursSchedule(businessHours: BusinessHours[]): string {
       return `${day}: ${h.open_time} - ${h.close_time}`;
     })
     .join("\n");
+}
+
+function formatBusinessAddress(business: Business): string | null {
+  const street = business.address?.trim() || null;
+  const city = business.city?.trim() || null;
+  const state = business.state?.trim() || null;
+  const zip = business.zip?.trim() || null;
+  const cityAndState = [city, state].filter(Boolean).join(", ");
+  const locality = [cityAndState, zip].filter(Boolean).join(" ");
+  const address = [street, locality].filter(Boolean).join(", ");
+
+  return address || null;
 }
 
 function getToneInstructions(tone: string): string {
@@ -72,9 +88,10 @@ export function buildSystemPrompt(
   calendarConnected: boolean = false,
   channel: string = "sms"
 ): string {
-  const { open, todayHours } = isCurrentlyOpen(businessHours, business.timezone);
+  const currentHours = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
     aiSettings.business_voice === "we" ? "we" : business.name;
+  const formattedAddress = formatBusinessAddress(business);
   const configuredPhone = business.phone_number?.trim() || null;
   const configuredEmail = business.email?.trim() || null;
   const configuredContactPaths = [
@@ -98,8 +115,8 @@ export function buildSystemPrompt(
     `You are ${business.name}, a ${businessTypeDisplay} business. Respond as if you are the business itself — never refer to yourself as an assistant, bot, or virtual assistant.`
   );
 
-  if (business.address) {
-    sections.push(`Address: ${business.address}${business.city ? `, ${business.city}` : ""}${business.state ? `, ${business.state}` : ""} ${business.zip ?? ""}`);
+  if (formattedAddress) {
+    sections.push(`Address: ${formattedAddress}`);
   }
   if (configuredPhone) {
     sections.push(`Phone: ${configuredPhone}`);
@@ -114,11 +131,15 @@ export function buildSystemPrompt(
   sections.push("");
   sections.push(`TODAY'S DATE: ${todayFormatted}`);
 
-  sections.push("");
-  sections.push("BUSINESS HOURS:");
-  sections.push(formatHoursSchedule(businessHours));
-  sections.push(`Today: ${todayHours}`);
-  sections.push(`Currently: ${open ? "OPEN" : "CLOSED"}`);
+  if (businessHours.length > 0) {
+    sections.push("");
+    sections.push("BUSINESS HOURS:");
+    sections.push(formatHoursSchedule(businessHours));
+    if (currentHours) {
+      sections.push(`Today: ${currentHours.todayHours}`);
+      sections.push(`Currently: ${currentHours.open ? "OPEN" : "CLOSED"}`);
+    }
+  }
 
   if (services.length > 0) {
     sections.push("");

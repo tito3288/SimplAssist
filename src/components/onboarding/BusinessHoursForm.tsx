@@ -4,36 +4,37 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
-
-interface DayHours {
-  day: string;
-  is_closed: boolean;
-  open_time: string;
-  close_time: string;
-}
-
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-const DEFAULT_HOURS: DayHours[] = DAYS.map((day) => ({
-  day: day.toLowerCase(),
-  is_closed: day === 'Sunday' || day === 'Saturday',
-  open_time: '09:00',
-  close_time: '17:00',
-}));
+import {
+  buildBusinessHoursDefaults,
+  type EditableBusinessHours,
+  type ScannedBusinessHours,
+} from '@/lib/onboarding/scanPrefill';
 
 interface BusinessHoursFormProps {
   businessId: string;
-  initialData?: DayHours[];
-  onNext: (data: DayHours[]) => void;
+  initialData?: EditableBusinessHours[];
+  scannedData?: ScannedBusinessHours[] | null;
+  onNext: (data: EditableBusinessHours[]) => void;
   onBack: () => void;
 }
 
-export default function BusinessHoursForm({ businessId, initialData, onNext, onBack }: BusinessHoursFormProps) {
-  const [hours, setHours] = useState<DayHours[]>(initialData || DEFAULT_HOURS);
+export default function BusinessHoursForm({
+  businessId,
+  initialData,
+  scannedData,
+  onNext,
+  onBack,
+}: BusinessHoursFormProps) {
+  const [hours, setHours] = useState<EditableBusinessHours[]>(() =>
+    buildBusinessHoursDefaults({
+      savedHours: initialData,
+      scannedHours: scannedData,
+    })
+  );
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  const updateDay = (index: number, updates: Partial<DayHours>) => {
+  const updateDay = (index: number, updates: Partial<EditableBusinessHours>) => {
     setHours((prev) => prev.map((h, i) => (i === index ? { ...h, ...updates } : h)));
   };
 
