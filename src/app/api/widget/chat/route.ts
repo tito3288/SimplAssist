@@ -3,8 +3,9 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   AIProcessingBlockedError,
   AIProcessingStateError,
-  processIncomingMessage,
+  processIncomingMessageDetailed,
 } from "@/lib/ai/engine";
+import { recordKnowledgeGap } from "@/lib/ai/knowledgeGaps";
 import {
   canUseFeature,
   EntitlementResolutionError,
@@ -73,9 +74,9 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    let response: string;
+    let result: Awaited<ReturnType<typeof processIncomingMessageDetailed>>;
     try {
-      response = await processIncomingMessage(
+      result = await processIncomingMessageDetailed(
         businessId,
         null,
         visitorEmail || null,
@@ -107,8 +108,23 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    if (result.knowledgeGapDetected && result.sourceMessageId) {
+      const sourceMessageId = result.sourceMessageId;
+      void recordKnowledgeGap({
+        businessId,
+        sourceMessageId,
+        aiResponseText: result.text,
+      }).catch((error) => {
+        console.error(
+          "[widget:chat] Knowledge gap capture failed:",
+          { businessId, sourceMessageId },
+          error
+        );
+      });
+    }
+
     return NextResponse.json(
-      { available: true, response, sessionId },
+      { available: true, response: result.text, sessionId },
       { headers: corsHeaders }
     );
   } catch (error) {

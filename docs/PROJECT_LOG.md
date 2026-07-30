@@ -231,6 +231,8 @@ Deletion-pipeline PII crumbs (verified real, pre-existing, out of scope of PR #7
   for tombstoned businesses.
 - `telnyx_registration_events.raw_payload` (jsonb with submitted brand payloads)
   never scrubbed.
+- `knowledge_gaps.question_text` / `ai_response_text` retain customer content
+  unless terminal account cleanup explicitly scrubs or deletes the rows.
 - Widget logo storage objects orphaned in the `widget-logos` bucket after
   cleanup.
 - One-time GoTrue audit for auth users orphaned by the old cleanup route.

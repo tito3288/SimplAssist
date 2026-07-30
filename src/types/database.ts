@@ -32,6 +32,8 @@ export type ConversationStatus = "active" | "closed" | "handed_off";
 
 export type MessageRole = "customer" | "assistant" | "human_agent" | "system";
 
+export type KnowledgeGapStatus = "open" | "resolved" | "dismissed";
+
 export type SubscriptionPlan = "sms_only" | "sms_and_chat" | "full";
 
 export type SubscriptionStatus =
@@ -384,6 +386,23 @@ export interface Message {
   content: string;
   channel: Channel;
   created_at: string;
+}
+
+export interface KnowledgeGap {
+  id: string;
+  business_id: string;
+  question_text: string;
+  normalized_question: string;
+  ai_response_text: string;
+  channel: Channel;
+  conversation_id: string | null;
+  source_message_id: string | null;
+  occurrence_count: number;
+  status: KnowledgeGapStatus;
+  resolved_faq_id: string | null;
+  created_at: string;
+  last_seen_at: string;
+  updated_at: string;
 }
 
 export interface PhoneNumber {

@@ -13,6 +13,11 @@ import {
   getConversationHistory,
   isAiHandlingActive,
 } from "./conversations";
+import {
+  parseKnowledgeGapSignal,
+  stripExactKnowledgeGapSignal,
+} from "./knowledgeGapSignal";
+import type { ParsedKnowledgeGapSignal } from "./knowledgeGapSignal";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
 import { calendarTools, shouldIncludeCalendarTools } from "./tools";
 import { checkAvailability, createBooking } from "@/lib/google/calendar";
@@ -59,6 +64,13 @@ export interface ProcessIncomingMessageOptions {
   sourceMessageId?: string;
   contact?: Contact;
   conversation?: Conversation;
+}
+
+export interface ProcessIncomingMessageResult {
+  text: string;
+  knowledgeGapDetected: boolean;
+  conversationId: string | null;
+  sourceMessageId: string | null;
 }
 
 function scoreMessage(message: string): number {
@@ -197,6 +209,28 @@ export async function processIncomingMessage(
   sessionId: string | null = null,
   options: ProcessIncomingMessageOptions = {}
 ): Promise<string> {
+  const result = await processIncomingMessageDetailed(
+    businessId,
+    contactPhone,
+    contactEmail,
+    message,
+    channel,
+    sessionId,
+    options
+  );
+
+  return result.text;
+}
+
+export async function processIncomingMessageDetailed(
+  businessId: string,
+  contactPhone: string | null,
+  contactEmail: string | null,
+  message: string,
+  channel: Channel,
+  sessionId: string | null = null,
+  options: ProcessIncomingMessageOptions = {}
+): Promise<ProcessIncomingMessageResult> {
   try {
     // Resolve at the execution boundary even when an upstream webhook already
     // checked the plan. This closes the downgrade/cancel race before any
@@ -481,7 +515,18 @@ export async function processIncomingMessage(
     const textBlock = response.content.find(
       (block): block is Anthropic.TextBlock => block.type === "text"
     );
-    const responseText = textBlock?.text || FALLBACK_MESSAGE;
+    const rawResponseText = textBlock?.text || FALLBACK_MESSAGE;
+    let parsedResponse: ParsedKnowledgeGapSignal;
+    try {
+      parsedResponse = parseKnowledgeGapSignal(rawResponseText);
+    } catch (error) {
+      console.error("[ai-engine] Knowledge-gap signal parsing failed:", error);
+      parsedResponse = {
+        text: stripExactKnowledgeGapSignal(rawResponseText),
+        knowledgeGapDetected: false,
+      };
+    }
+    const responseText = parsedResponse.text || FALLBACK_MESSAGE;
 
     if (options.persistAssistant !== false) {
       try {
@@ -505,7 +550,12 @@ export async function processIncomingMessage(
       await incrementLeadScore(contact.id, leadScoreIncrease);
     }
 
-    return responseText;
+    return {
+      text: responseText,
+      knowledgeGapDetected: parsedResponse.knowledgeGapDetected,
+      conversationId: conversation.id,
+      sourceMessageId,
+    };
   } catch (error) {
     if (
       error instanceof AIProcessingBlockedError ||
@@ -515,6 +565,11 @@ export async function processIncomingMessage(
       throw error;
     }
     console.error("Error processing incoming message:", error);
-    return FALLBACK_MESSAGE;
+    return {
+      text: FALLBACK_MESSAGE,
+      knowledgeGapDetected: false,
+      conversationId: null,
+      sourceMessageId: null,
+    };
   }
 }

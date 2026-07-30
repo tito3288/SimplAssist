@@ -6,6 +6,7 @@ import type {
   FAQ,
   Service,
 } from "@/types/database";
+import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 import { buildSystemPrompt } from "./prompt";
 
 const PHONE_NUMBER = "+1 574-555-0100";
@@ -160,9 +161,37 @@ function knowledgeGapSection(prompt: string): string {
   return prompt.slice(start, end);
 }
 
+function expectedKnowledgeGapSection(channel: "sms" | "web_chat"): string {
+  return [
+    "KNOWLEDGE BOUNDARIES AND GAPS:",
+    `- When the current business information does not fully answer a customer's question, name the specific missing topic. Say, for example, "I don't see free trials mentioned in our current info," instead of a generic "I don't have information about that."`,
+    `- CRITICAL: Missing information means unknown, never "no." NEVER state or imply that the business does not offer, provide, allow, support, or have something solely because it is not mentioned.`,
+    `- Forbidden when based only on missing information: "We don't offer free trials." Allowed: "I don't see a free trial mentioned in our current info."`,
+    "- If a closely related service or FAQ appears in the provided business information and is permitted by any STRICT RULES, briefly share only that accurate information, clearly distinguish it from the unresolved topic, then hand off. Do not stretch unrelated information into an answer.",
+    "- Under no circumstances invent or infer services, prices, promotions or trials, policies, hours, or availability. Use only the provided business information and successful tool results for business-specific claims.",
+    `- If any part of the question remains unresolved, end with a natural, tone-matched handoff: suggest the customer call ${PHONE_NUMBER} during business hours or email ${EMAIL}. Do not invent a contact method or ask the customer for their contact information as the handoff.`,
+    "- For a knowledge-gap handoff, do not promise a callback, escalation, staff follow-up, or any action the engine did not actually create.",
+    "- Match the configured tone and language; the examples above illustrate the rule, not a required canned script.",
+    ...(channel === "sms"
+      ? [
+          "- For SMS, keep the entire knowledge-gap response compact. Near-miss information gets at most one short sentence before the handoff.",
+        ]
+      : []),
+    "- These knowledge-gap rules do not override STRICT RULES, BOOKING, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION timing.",
+    "",
+    "",
+  ].join("\n");
+}
+
 describe.each(CHANNEL_CASES)(
   "buildSystemPrompt knowledge-gap policy for $channel",
   ({ channel, ownChannelInstruction, otherChannelInstruction }) => {
+    it("preserves the existing knowledge-boundaries section verbatim", () => {
+      expect(knowledgeGapSection(promptFor(channel))).toBe(
+        expectedKnowledgeGapSection(channel)
+      );
+    });
+
     it("includes the shared gap rules without displacing existing prompt behavior", () => {
       const prompt = promptFor(channel);
       const gapSection = knowledgeGapSection(prompt);
@@ -290,6 +319,40 @@ describe.each(CHANNEL_CASES)(
         );
       });
     }
+  }
+);
+
+describe.each(CHANNEL_CASES)(
+  "buildSystemPrompt internal knowledge-gap signal for $channel",
+  ({ channel }) => {
+    it("adds the exact internal signal instructions at the end", () => {
+      const prompt = promptFor(channel);
+      const heading = "KNOWLEDGE GAP SIGNALING (INTERNAL):";
+      const signalingSection = prompt.slice(prompt.indexOf(heading));
+
+      expect(prompt.match(/KNOWLEDGE GAP SIGNALING \(INTERNAL\):/g)).toHaveLength(
+        1
+      );
+      expect(prompt.match(/\[\[SIMPLASSIST_KNOWLEDGE_GAP_V1\]\]/g)).toHaveLength(
+        1
+      );
+      expect(signalingSection).toContain(
+        `append ${KNOWLEDGE_GAP_SIGNAL} exactly once on its own final line`
+      );
+      expect(signalingSection).toContain(
+        "This includes a near-miss answer that shares related business information"
+      );
+      expect(signalingSection).toContain(
+        "Do not append the signal when the supplied business information or successful tool results fully answer the question."
+      );
+      expect(signalingSection).toContain(
+        "The signal is internal metadata, not customer-facing content."
+      );
+      expect(prompt.endsWith(signalingSection)).toBe(true);
+      expect(prompt.indexOf("CONTACT COLLECTION:")).toBeLessThan(
+        prompt.indexOf(heading)
+      );
+    });
   }
 );
 

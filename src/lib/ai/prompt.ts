@@ -6,6 +6,7 @@ import type {
   BusinessHours,
   Message,
 } from "@/types/database";
+import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 
 const DAY_NAMES = [
   "Sunday",
@@ -287,6 +288,21 @@ export function buildSystemPrompt(
   sections.push("- When the customer provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step.");
   sections.push("- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow.");
   sections.push("- Once you have their name, use it naturally in the conversation.");
+
+  sections.push("");
+  sections.push("KNOWLEDGE GAP SIGNALING (INTERNAL):");
+  sections.push(
+    `- If any part of the customer's question remains unresolved after composing the customer-facing answer, append ${KNOWLEDGE_GAP_SIGNAL} exactly once on its own final line.`
+  );
+  sections.push(
+    "- This includes a near-miss answer that shares related business information but cannot fully answer the specific topic."
+  );
+  sections.push(
+    "- Do not append the signal when the supplied business information or successful tool results fully answer the question."
+  );
+  sections.push(
+    "- The signal is internal metadata, not customer-facing content. Do not mention, explain, translate, reformat, or place any text after it."
+  );
 
   return sections.join("\n");
 }

@@ -9,7 +9,8 @@ import {
   releaseMessagingWebhookClaim,
 } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { processIncomingMessage } from "@/lib/ai/engine";
+import { processIncomingMessageDetailed } from "@/lib/ai/engine";
+import { recordKnowledgeGap } from "@/lib/ai/knowledgeGaps";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import {
   addInboundMessageOnce,
@@ -381,7 +382,7 @@ async function processAndReply(
   console.log(
     `[messaging:webhook] Generating AI reply (appendOptOut=${context.appendAiOptOut})`
   );
-  const aiResponse = await processIncomingMessage(
+  const aiResult = await processIncomingMessageDetailed(
     context.businessId,
     context.from,
     null,
@@ -420,8 +421,8 @@ async function processAndReply(
   if (!(await canStillSendAutomatedReply(context))) return;
 
   const finalReply = context.appendAiOptOut
-    ? `${aiResponse}\n\nReply STOP to opt out.`
-    : aiResponse;
+    ? `${aiResult.text}\n\nReply STOP to opt out.`
+    : aiResult.text;
   const usage = await preflightOutboundSms({
     businessId: context.businessId,
     text: finalReply,
@@ -466,6 +467,22 @@ async function processAndReply(
       : undefined,
     metadata: { from: context.to, to: context.from },
   });
+  if (aiResult.knowledgeGapDetected && aiResult.sourceMessageId) {
+    const sourceMessageId = aiResult.sourceMessageId;
+    try {
+      await recordKnowledgeGap({
+        businessId: context.businessId,
+        sourceMessageId,
+        aiResponseText: finalReply,
+      });
+    } catch (error) {
+      console.error(
+        "[messaging:webhook] Knowledge gap capture failed:",
+        { businessId: context.businessId, sourceMessageId },
+        error
+      );
+    }
+  }
 }
 
 async function shouldAppendAiOptOut(conversationId: string): Promise<boolean> {

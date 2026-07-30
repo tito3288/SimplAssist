@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
   buildSystemPrompt: vi.fn(),
   buildConversationMessages: vi.fn(),
+  parseKnowledgeGapSignal: vi.fn(),
   shouldIncludeCalendarTools: vi.fn(),
   checkAvailability: vi.fn(),
   createBooking: vi.fn(),
@@ -51,6 +52,17 @@ vi.mock("./prompt", () => ({
   buildSystemPrompt: mocks.buildSystemPrompt,
   buildConversationMessages: mocks.buildConversationMessages,
 }));
+vi.mock("./knowledgeGapSignal", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./knowledgeGapSignal")>();
+  mocks.parseKnowledgeGapSignal.mockImplementation(
+    actual.parseKnowledgeGapSignal
+  );
+  return {
+    ...actual,
+    parseKnowledgeGapSignal: mocks.parseKnowledgeGapSignal,
+  };
+});
 vi.mock("./tools", () => ({
   calendarTools: [
     {
@@ -74,7 +86,9 @@ vi.mock("@/lib/google/calendar", () => ({
 import {
   AIProcessingStateError,
   processIncomingMessage,
+  processIncomingMessageDetailed,
 } from "./engine";
+import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const CONTACT = {
@@ -571,5 +585,167 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
     ).resolves.toBe("I could not book that.");
 
     expect(mocks.createBooking).not.toHaveBeenCalled();
+  });
+});
+
+describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
+  it("returns gap metadata and persists only the cleaned response", async () => {
+    mocks.anthropicCreate.mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: `I don't see free trials mentioned. Please call us.\n${KNOWLEDGE_GAP_SIGNAL}`,
+        },
+      ],
+    });
+
+    await expect(
+      processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Do you offer free trials?",
+        "sms"
+      )
+    ).resolves.toEqual({
+      text: "I don't see free trials mentioned. Please call us.",
+      knowledgeGapDetected: true,
+      conversationId: CONVERSATION.id,
+      sourceMessageId: "message_1",
+    });
+
+    expect(mocks.addMessage).toHaveBeenNthCalledWith(
+      2,
+      CONVERSATION.id,
+      BUSINESS_ID,
+      "assistant",
+      "I don't see free trials mentioned. Please call us.",
+      "sms"
+    );
+  });
+
+  it("classifies the final response after the tool loop", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "save_contact_name",
+            input: { name: "Pat" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [
+          {
+            type: "text",
+            text: `Thanks, Pat. I don't see trial details. Please call us.\n${KNOWLEDGE_GAP_SIGNAL}`,
+          },
+        ],
+      });
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "I'm Pat. Is there a free trial?",
+      "sms"
+    );
+
+    expect(result).toMatchObject({
+      text: "Thanks, Pat. I don't see trial details. Please call us.",
+      knowledgeGapDetected: true,
+    });
+    expect(mocks.updateContactName).toHaveBeenCalledWith(CONTACT.id, "Pat");
+    expect(mocks.parseKnowledgeGapSignal).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns caller-owned persistence references without writing messages", async () => {
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Do you offer free trials?",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: "provider-message-1",
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    expect(result).toEqual({
+      text: "Absolutely.",
+      knowledgeGapDetected: false,
+      conversationId: CONVERSATION.id,
+      sourceMessageId: "provider-message-1",
+    });
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+  });
+
+  it("uses the fallback when stripping leaves no customer-visible text", async () => {
+    mocks.anthropicCreate.mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: KNOWLEDGE_GAP_SIGNAL }],
+    });
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Do you offer free trials?",
+      "sms"
+    );
+
+    expect(result.text).toContain("We're having a brief technical issue.");
+    expect(result.knowledgeGapDetected).toBe(true);
+    expect(mocks.addMessage).toHaveBeenNthCalledWith(
+      2,
+      CONVERSATION.id,
+      BUSINESS_ID,
+      "assistant",
+      result.text,
+      "sms"
+    );
+  });
+
+  it("exact-strips the sentinel and disables classification if parsing throws", async () => {
+    const parserError = new Error("parser failure");
+    mocks.parseKnowledgeGapSignal.mockImplementationOnce(() => {
+      throw parserError;
+    });
+    mocks.anthropicCreate.mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: `Please call us.\n${KNOWLEDGE_GAP_SIGNAL}`,
+        },
+      ],
+    });
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Do you offer free trials?",
+      "sms"
+    );
+
+    expect(result).toMatchObject({
+      text: "Please call us.",
+      knowledgeGapDetected: false,
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "[ai-engine] Knowledge-gap signal parsing failed:",
+      parserError
+    );
   });
 });

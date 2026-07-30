@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => {
     getUser: vi.fn(),
     resolveBusinessEntitlements: vi.fn(),
     canUseFeature: vi.fn(),
-    processIncomingMessage: vi.fn(),
+    processIncomingMessageDetailed: vi.fn(),
+    recordKnowledgeGap: vi.fn(),
     AIProcessingBlockedError,
     AIProcessingStateError,
   };
@@ -42,9 +43,12 @@ vi.mock("@/lib/billing/entitlements", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/ai/engine", () => ({
-  processIncomingMessage: mocks.processIncomingMessage,
+  processIncomingMessageDetailed: mocks.processIncomingMessageDetailed,
   AIProcessingBlockedError: mocks.AIProcessingBlockedError,
   AIProcessingStateError: mocks.AIProcessingStateError,
+}));
+vi.mock("@/lib/ai/knowledgeGaps", () => ({
+  recordKnowledgeGap: mocks.recordKnowledgeGap,
 }));
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
@@ -138,7 +142,13 @@ beforeEach(() => {
   setServerBusinessResult({ data: { id: BUSINESS_ID }, error: null });
   mocks.resolveBusinessEntitlements.mockResolvedValue(ENTITLEMENTS);
   mocks.canUseFeature.mockReturnValue(true);
-  mocks.processIncomingMessage.mockResolvedValue("How can I help?");
+  mocks.processIncomingMessageDetailed.mockResolvedValue({
+    text: "How can I help?",
+    knowledgeGapDetected: false,
+    conversationId: "conversation-1",
+    sourceMessageId: "customer-message-1",
+  });
+  mocks.recordKnowledgeGap.mockResolvedValue(undefined);
   queueDatabaseResults();
 });
 
@@ -276,6 +286,95 @@ describe("public widget entitlement boundaries", () => {
     expect(configChain.eq).toHaveBeenCalledWith("is_active", true);
   });
 
+  it("returns the cleaned chat response while launching gap capture in the background", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "I don't see free trials mentioned. Please call us.",
+      knowledgeGapDetected: true,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+    });
+    mocks.recordKnowledgeGap.mockReturnValue(new Promise(() => undefined));
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Do you offer free trials?",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      available: true,
+      response: "I don't see free trials mentioned. Please call us.",
+      sessionId: "session-1",
+    });
+    expect(mocks.recordKnowledgeGap).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      sourceMessageId: "customer-message-1",
+      aiResponseText: "I don't see free trials mentioned. Please call us.",
+    });
+    expect(
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.recordKnowledgeGap.mock.invocationCallOrder[0]);
+  });
+
+  it("does not capture a widget response without a gap signal", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "How can I help?",
+    });
+    expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+  });
+
+  it("returns the widget response when background gap capture unexpectedly rejects", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "I don't see free trials mentioned. Please call us.",
+      knowledgeGapDetected: true,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+    });
+    const captureError = new Error("capture failed");
+    mocks.recordKnowledgeGap.mockRejectedValue(captureError);
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Do you offer free trials?",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "I don't see free trials mentioned. Please call us.",
+    });
+    await vi.waitFor(() =>
+      expect(console.error).toHaveBeenCalledWith(
+        "[widget:chat] Knowledge gap capture failed:",
+        {
+          businessId: BUSINESS_ID,
+          sourceMessageId: "customer-message-1",
+        },
+        captureError
+      )
+    );
+  });
+
   it("skips AI and acknowledges chat when the plan is not entitled", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.canUseFeature.mockReturnValue(false);
@@ -293,7 +392,7 @@ describe("public widget entitlement boundaries", () => {
       available: false,
       response: null,
     });
-    expect(mocks.processIncomingMessage).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
   });
 
   it("returns retryable 503 without AI or writes when chat entitlement resolution fails", async () => {
@@ -319,14 +418,14 @@ describe("public widget entitlement boundaries", () => {
       error: "Service temporarily unavailable",
       retryable: true,
     });
-    expect(mocks.processIncomingMessage).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     // The sole database call is the required read-only widget availability lookup.
     expect(mocks.from).toHaveBeenCalledTimes(1);
   });
 
   it("returns unavailable when the AI engine catches a downgrade race", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
-    mocks.processIncomingMessage.mockRejectedValue(
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
       new mocks.AIProcessingBlockedError("feature_not_entitled")
     );
 
@@ -347,7 +446,7 @@ describe("public widget entitlement boundaries", () => {
 
   it("returns retryable 503 when AI context persistence or lookup is uncertain", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
-    mocks.processIncomingMessage.mockRejectedValue(
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
       new mocks.AIProcessingStateError("database unavailable")
     );
 
