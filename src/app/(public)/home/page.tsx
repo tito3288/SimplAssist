@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import Script from "next/script";
 import {
   Phone,
   MessageCircle,
@@ -223,6 +224,12 @@ const paneFrame =
 export default function HomePage() {
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
+      <Script
+        src="https://simplassist.com/widget/embed.js"
+        data-business-id="ea848911-ef72-44a6-8cf3-c47b3959be26"
+        strategy="afterInteractive"
+      />
+
       {/* Ambient backgrounds — light gets its own warm treatment */}
       <div
         className="fixed inset-0 -z-10 pointer-events-none dark:hidden"
