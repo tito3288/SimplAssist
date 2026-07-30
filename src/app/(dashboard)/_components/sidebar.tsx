@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquare,
+  CircleHelp,
   Users,
   Calendar,
   Cog,
@@ -22,6 +23,7 @@ import { StaggeredMenuIcon } from "@/components/icons/staggered-menu-icon";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/conversations", label: "Conversations", icon: MessageSquare },
+  { href: "/knowledge-gaps", label: "Knowledge Gaps", icon: CircleHelp },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/settings", label: "Settings", icon: Cog },
