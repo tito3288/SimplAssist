@@ -1,0 +1,41 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { PlanSelectionOption } from "./PlanSelectionOption";
+
+describe("PlanSelectionOption", () => {
+  it("renders Full Suite as a non-selectable waitlist card", () => {
+    const markup = renderToStaticMarkup(
+      <PlanSelectionOption
+        inputName="plan"
+        planKey="full"
+        plan={SUBSCRIPTION_PLANS.full}
+        selected={false}
+        recommended={false}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(markup).toContain("Coming Soon");
+    expect(markup).toContain("Notify Me When It Launches");
+    expect(markup).not.toContain('type="radio"');
+    expect(markup.startsWith("<div")).toBe(true);
+  });
+
+  it("keeps an available plan selectable", () => {
+    const markup = renderToStaticMarkup(
+      <PlanSelectionOption
+        inputName="plan"
+        planKey="sms_and_chat"
+        plan={SUBSCRIPTION_PLANS.sms_and_chat}
+        selected
+        recommended
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(markup.startsWith("<label")).toBe(true);
+    expect(markup).toContain('type="radio"');
+    expect(markup).not.toContain("Notify Me When It Launches");
+  });
+});

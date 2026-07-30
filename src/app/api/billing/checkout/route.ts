@@ -11,6 +11,7 @@ import { createCheckoutSession } from "@/lib/stripe/checkout";
 import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
+import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import type {
   OnboardingRegistrationStatus,
   SubscriptionPlan,
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const selectedPlan = plan as SubscriptionPlan;
 
     const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "billing";
 
@@ -156,7 +158,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const priceId = stripePriceIds()[plan as SubscriptionPlan];
+    if (!isPlanAvailable(selectedPlan)) {
+      return NextResponse.json(
+        {
+          error:
+            "Full Suite is coming soon. Join the waitlist to be notified when it launches.",
+          code: "full_suite_coming_soon",
+        },
+        { status: 409 }
+      );
+    }
+
+    const priceId = stripePriceIds()[selectedPlan];
     const setupFeePriceId = stripeSetupFeePriceId();
     const origin = publicAppOrigin(request.nextUrl.origin);
     const successPath =
@@ -170,7 +183,7 @@ export async function POST(request: NextRequest) {
 
     const checkoutUrl = await createCheckoutSession(
       business.id,
-      plan as SubscriptionPlan,
+      selectedPlan,
       priceId,
       setupFeePriceId,
       `${origin}${successPath}`,

@@ -417,6 +417,24 @@ export interface Subscription {
   updated_at: string;
 }
 
+/**
+ * Server-side representation of a Full Suite waitlist row.
+ *
+ * The launch claim fields are private delivery-coordination state. Public
+ * waitlist endpoints must never serialize this interface (or any subset that
+ * includes identifiers, email, unsubscribe state, or claim state).
+ */
+export interface WaitlistSignup {
+  id: string;
+  email: string;
+  feature_interest: string | null;
+  created_at: string;
+  notified_at: string | null;
+  unsubscribed_at: string | null;
+  launch_send_claim_token: string | null;
+  launch_send_claimed_at: string | null;
+}
+
 export type AccountDeletionStripeAction = "pause" | "resume" | "cancel";
 
 export type AccountDeletionStripeActionStatus =

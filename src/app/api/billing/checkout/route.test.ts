@@ -71,11 +71,14 @@ function queueResults(...results: unknown[]) {
   });
 }
 
-function request(mode: "onboarding" | "billing" = "onboarding") {
+function request(
+  mode: "onboarding" | "billing" = "onboarding",
+  plan: "sms_only" | "sms_and_chat" | "full" = "sms_and_chat"
+) {
   return new NextRequest("http://localhost:8080/api/billing/checkout", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ plan: "sms_and_chat", mode }),
+    body: JSON.stringify({ plan, mode }),
   });
 }
 
@@ -99,6 +102,50 @@ afterEach(() => {
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {
+  it("blocks a new crafted Full Suite checkout before Stripe", async () => {
+    queueResults({
+      data: {
+        ...BUSINESS,
+        billing_exempt: false,
+        onboarding_completed_at: "2026-07-01T00:00:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await POST(request("billing", "full"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "Full Suite is coming soon. Join the waitlist to be notified when it launches.",
+      code: "full_suite_coming_soon",
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("preserves an already-paid Full Suite onboarding retry", async () => {
+    queueResults(
+      { data: { ...BUSINESS, billing_exempt: false }, error: null },
+      {
+        data: {
+          status: "active",
+          setup_fee_paid_at: "2026-07-01T00:00:00.000Z",
+        },
+        error: null,
+      }
+    );
+
+    const response = await POST(request("onboarding", "full"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true });
+    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
+      BUSINESS.id,
+      "onboarding_retry"
+    );
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it("returns the 3+3 quality gate before creating a Stripe session", async () => {
     queueResults({ data: BUSINESS, error: null });
     mocks.getBusinessContentQuality.mockResolvedValue({

@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
+import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
+import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { secondaryCtaClass } from "@/lib/glass";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 import {
   card,
@@ -89,55 +92,70 @@ export default async function BillingPage() {
               SubscriptionPlan,
               (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan],
             ][]
-          ).map(([key, plan]) => (
-            <div
-              key={key}
-              className={`relative p-6 rounded-[28px] ${
-                key === "sms_and_chat" ? cardRecommended : card
-              }`}
-            >
-              {key === "sms_and_chat" && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] px-3 py-0.5 text-xs font-medium text-white dark:text-[#16100b]">
-                  Recommended
-                </span>
-              )}
-              <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
-                {plan.name}
-              </h3>
-              <p className="mt-2">
-                <span className="text-3xl font-bold text-stone-900 dark:text-[#f5f5f5]">
-                  ${plan.price}
-                </span>
-                <span className="text-stone-500 dark:text-[#bdbdbf]">/mo</span>
-              </p>
-              <ul className="mt-6 space-y-3">
-                {plan.features.map((feature) => (
-                  <li
-                    key={feature}
-                    className="flex items-start gap-2 text-sm text-stone-500 dark:text-[#bdbdbf]"
-                  >
-                    <svg
-                      className="mt-0.5 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d]"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2}
-                      stroke="currentColor"
+          ).map(([key, plan]) => {
+            const available = isPlanAvailable(key);
+
+            return (
+              <div
+                key={key}
+                className={`relative p-6 rounded-[28px] ${
+                  key === "sms_and_chat" ? cardRecommended : card
+                }`}
+              >
+                {key === "sms_and_chat" && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] px-3 py-0.5 text-xs font-medium text-white dark:text-[#16100b]">
+                    Recommended
+                  </span>
+                )}
+                {!available && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#f5dcc4] bg-[#fdf1e7] px-3 py-0.5 text-xs font-semibold text-[#c2410c] dark:border-[#ff914d]/30 dark:bg-[#291b13] dark:text-[#ffd7bf]">
+                    Coming Soon
+                  </span>
+                )}
+                <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
+                  {plan.name}
+                </h3>
+                <p className="mt-2">
+                  <span className="text-3xl font-bold text-stone-900 dark:text-[#f5f5f5]">
+                    ${plan.price}
+                  </span>
+                  <span className="text-stone-500 dark:text-[#bdbdbf]">/mo</span>
+                </p>
+                <ul className="mt-6 space-y-3">
+                  {plan.features.map((feature) => (
+                    <li
+                      key={feature}
+                      className="flex items-start gap-2 text-sm text-stone-500 dark:text-[#bdbdbf]"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M4.5 12.75l6 6 9-13.5"
-                      />
-                    </svg>
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-6">
-                <BillingActions mode="checkout" plan={key} />
+                      <svg
+                        className="mt-0.5 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d]"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4.5 12.75l6 6 9-13.5"
+                        />
+                      </svg>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-6">
+                  {available ? (
+                    <BillingActions mode="checkout" plan={key} />
+                  ) : (
+                    <FullSuiteWaitlistButton
+                      className={`${secondaryCtaClass} w-full text-sm`}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

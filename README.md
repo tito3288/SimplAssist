@@ -35,6 +35,12 @@ Phase 9 billing and admin use these deployment variables:
 - `STRIPE_PRICE_SMS_OVERAGE_PART` - Stripe test-mode Price ID for $0.03 per extra SMS part after opt-in.
 - `SIMPLASSIST_ADMIN_USER_IDS` - comma-separated Supabase auth user IDs allowed into `/admin`; unset or empty means nobody is admin. Entries must be dedicated admin-only auth users — never a login that owns a customer business, because permanent account cleanup deletes the owning auth user (and would take the admin login with it). Decoupled 2026-07-24.
 
+The Full Suite waitlist uses these server-only deployment variables:
+
+- `RESEND_API_KEY` - Resend API key used for waitlist confirmation emails.
+- `RESEND_FROM_EMAIL` - optional from-address override. Defaults to `SimplAssist <notifications@simplassist.com>`.
+- `WAITLIST_UNSUBSCRIBE_SECRET` - secret used to sign waitlist unsubscribe links. Set this to at least 32 cryptographically random bytes and never expose it through a `NEXT_PUBLIC_` variable.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

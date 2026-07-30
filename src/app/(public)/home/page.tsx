@@ -12,6 +12,8 @@ import {
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
+import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
+import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import {
   accentText,
   body,
@@ -95,6 +97,7 @@ const dashboardViews = [
 
 const plans = [
   {
+    planKey: "sms_only" as const,
     name: "SMS Only",
     price: "$25",
     description: "Missed-call texting for small teams that want fast coverage.",
@@ -107,6 +110,7 @@ const plans = [
     highlighted: false,
   },
   {
+    planKey: "sms_and_chat" as const,
     name: "SMS + Web Chat",
     price: "$45",
     description: "Capture leads from calls and your website, then turn them into booked appointments.",
@@ -123,6 +127,7 @@ const plans = [
     highlighted: true,
   },
   {
+    planKey: "full" as const,
     name: "Full Suite",
     price: "$65",
     description: "Measure performance and automate follow-up as your business grows.",
@@ -475,12 +480,15 @@ export default function HomePage() {
           />
 
           <div className="grid md:grid-cols-3 gap-5 items-start">
-            {plans.map((plan, i) => (
-              <Reveal key={plan.name} delayMs={i * 100} className="h-full">
-                <div
-                  className={
-                    plan.highlighted
-                      ? `
+            {plans.map((plan, i) => {
+              const available = isPlanAvailable(plan.planKey);
+
+              return (
+                <Reveal key={plan.name} delayMs={i * 100} className="h-full">
+                  <div
+                    className={
+                      plan.highlighted
+                        ? `
                         rounded-[28px] p-7 flex flex-col min-h-full relative md:-translate-y-1 z-10
                         bg-white border border-transparent
                         outline outline-2 outline-[rgba(194,65,12,.30)]
@@ -490,39 +498,49 @@ export default function HomePage() {
                         dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
                         dark:backdrop-blur-[18px]
                       `
-                      : `p-7 flex flex-col min-h-full relative ${card} ${cardHover}`
-                  }
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className={`text-2xl font-bold ${ink}`}>{plan.name}</h3>
-                    {plan.highlighted && (
-                      <span className="px-3 py-1.5 rounded-full text-[12px] font-extrabold bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]">
-                        Most Popular
-                      </span>
+                        : `p-7 flex flex-col min-h-full relative ${card} ${cardHover}`
+                    }
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className={`text-2xl font-bold ${ink}`}>{plan.name}</h3>
+                      {plan.highlighted && (
+                        <span className="px-3 py-1.5 rounded-full text-[12px] font-extrabold bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]">
+                          Most Popular
+                        </span>
+                      )}
+                      {!available && (
+                        <span className="inline-flex rounded-full border border-[#f5dcc4] bg-[#fdf1e7] px-3 py-1.5 text-[12px] font-extrabold text-[#c2410c] dark:border-[#ff914d]/30 dark:bg-[#ff914d]/10 dark:text-[#ffd7bf]">
+                          Coming Soon
+                        </span>
+                      )}
+                    </div>
+                    <p className={`${body} leading-[1.65] mb-6`}>{plan.description}</p>
+                    <div className={`text-[50px] font-extrabold tracking-[-0.05em] mb-5 ${ink}`}>
+                      {plan.price}
+                      <small className="text-lg text-stone-400 dark:text-[#bdbdbf]">/mo</small>
+                    </div>
+                    <ul className="space-y-3 mb-6 flex-1">
+                      {plan.features.map((feature) => (
+                        <li key={feature} className="flex items-start gap-2.5 text-stone-700 dark:text-[#efefef] leading-relaxed">
+                          <span className="text-[#ea580c] dark:text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {available ? (
+                      <Link
+                        href="/signup"
+                        className={plan.highlighted ? `${btnPrimary} w-full` : `${btnSecondary} w-full`}
+                      >
+                        Get Started
+                      </Link>
+                    ) : (
+                      <FullSuiteWaitlistButton className={`${btnSecondary} w-full`} />
                     )}
                   </div>
-                  <p className={`${body} leading-[1.65] mb-6`}>{plan.description}</p>
-                  <div className={`text-[50px] font-extrabold tracking-[-0.05em] mb-5 ${ink}`}>
-                    {plan.price}
-                    <small className="text-lg text-stone-400 dark:text-[#bdbdbf]">/mo</small>
-                  </div>
-                  <ul className="space-y-3 mb-6 flex-1">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2.5 text-stone-700 dark:text-[#efefef] leading-relaxed">
-                        <span className="text-[#ea580c] dark:text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    href="/signup"
-                    className={plan.highlighted ? `${btnPrimary} w-full` : `${btnSecondary} w-full`}
-                  >
-                    Get Started
-                  </Link>
-                </div>
-              </Reveal>
-            ))}
+                </Reveal>
+              );
+            })}
           </div>
         </section>
 
