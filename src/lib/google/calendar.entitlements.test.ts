@@ -62,7 +62,12 @@ describe("direct booking entitlement boundary", () => {
             serviceName: "Estimate",
             startTime: "2026-07-20T10:00:00Z",
           },
-          "UTC"
+          "UTC",
+          {
+            contactId: "00000000-0000-4000-8000-000000000002",
+            conversationId: "00000000-0000-4000-8000-000000000003",
+            sourceMessageId: "00000000-0000-4000-8000-000000000004",
+          }
         ),
     ],
   ])("blocks %s before token or Google access", async (_name, operation) => {

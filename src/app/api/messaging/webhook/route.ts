@@ -51,6 +51,7 @@ interface PersistedInboundContext {
   text: string;
   mediaCount: number;
   appendAiOptOut: boolean;
+  sourceMessageId: string;
   contact: Contact;
   conversation: Conversation;
 }
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest) {
       providerEventId: eventKey,
       metadata: { from, to, telnyxEventId: providerEventId ?? null },
     });
-    await addInboundMessageOnce(
+    const inboundMessage = await addInboundMessageOnce(
       conversation.id,
       businessId,
       text,
@@ -235,6 +236,7 @@ export async function POST(request: NextRequest) {
       text,
       mediaCount,
       appendAiOptOut,
+      sourceMessageId: inboundMessage.id,
       contact,
       conversation,
     };
@@ -389,6 +391,7 @@ async function processAndReply(
     {
       persistCustomer: false,
       persistAssistant: false,
+      sourceMessageId: context.sourceMessageId,
       contact: context.contact,
       conversation: context.conversation,
     }

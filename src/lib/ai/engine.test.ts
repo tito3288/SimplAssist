@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   buildSystemPrompt: vi.fn(),
   buildConversationMessages: vi.fn(),
   shouldIncludeCalendarTools: vi.fn(),
+  checkAvailability: vi.fn(),
+  createBooking: vi.fn(),
 }));
 
 vi.mock("@/lib/anthropic/client", () => ({
@@ -56,12 +58,17 @@ vi.mock("./tools", () => ({
       description: "calendar",
       input_schema: { type: "object", properties: {} },
     },
+    {
+      name: "create_booking",
+      description: "calendar",
+      input_schema: { type: "object", properties: {} },
+    },
   ],
   shouldIncludeCalendarTools: mocks.shouldIncludeCalendarTools,
 }));
 vi.mock("@/lib/google/calendar", () => ({
-  checkAvailability: vi.fn(),
-  createBooking: vi.fn(),
+  checkAvailability: mocks.checkAvailability,
+  createBooking: mocks.createBooking,
 }));
 
 import {
@@ -178,6 +185,12 @@ beforeEach(() => {
   mocks.anthropicCreate.mockResolvedValue({
     stop_reason: "end_turn",
     content: [{ type: "text", text: "Absolutely." }],
+  });
+  mocks.createBooking.mockResolvedValue({
+    eventId: "google_event_1",
+    summary: "Estimate - Pat",
+    startTime: "2026-08-01T10:00:00",
+    endTime: "2026-08-01T10:30:00",
   });
   mocks.incrementLeadScore.mockResolvedValue(undefined);
   setAiData();
@@ -368,6 +381,42 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
     );
   });
 
+  it("refuses a create_booking tool call when direct booking tools are disabled", async () => {
+    mocks.shouldIncludeCalendarTools.mockReturnValue(false);
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-01T10:00:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "I can collect your details." }],
+      });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please book that.",
+        "sms"
+      )
+    ).resolves.toBe("I can collect your details.");
+
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+  });
+
   it("does not insert the inbound message twice when the webhook already persisted it", async () => {
     await processIncomingMessage(
       BUSINESS_ID,
@@ -388,5 +437,139 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.getConversationHistory).toHaveBeenCalledWith(CONVERSATION.id);
     expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("links a direct booking to the customer message persisted by the engine", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-01T10:00:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booked." }],
+      });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please book that.",
+      "sms"
+    );
+
+    expect(mocks.createBooking).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      expect.objectContaining({
+        customerName: "Pat",
+        serviceName: "Estimate",
+      }),
+      "America/New_York",
+      {
+        contactId: CONTACT.id,
+        conversationId: CONVERSATION.id,
+        sourceMessageId: "message_1",
+      }
+    );
+  });
+
+  it("uses a webhook-persisted source message for retry-stable direct booking", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-01T10:00:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booked." }],
+      });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please book that.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: "provider_message_1",
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.createBooking).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      expect.anything(),
+      "America/New_York",
+      expect.objectContaining({ sourceMessageId: "provider_message_1" })
+    );
+  });
+
+  it("refuses an unlinked direct booking when a caller suppresses persistence", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-01T10:00:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "I could not book that." }],
+      });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please book that.",
+        "sms",
+        null,
+        {
+          persistCustomer: false,
+          persistAssistant: false,
+          contact: CONTACT as never,
+          conversation: CONVERSATION as never,
+        }
+      )
+    ).resolves.toBe("I could not book that.");
+
+    expect(mocks.createBooking).not.toHaveBeenCalled();
   });
 });

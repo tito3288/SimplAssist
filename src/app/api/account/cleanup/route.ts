@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { reconcilePendingCalendarBookings } from "@/lib/google/bookingReconciler";
 import { reconcileAccountDeletionStripeAction } from "@/lib/stripe/accountDeletionReconciler";
 
 const CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
@@ -272,6 +273,14 @@ export async function POST(request: NextRequest) {
 
     deletedCount++;
     console.log(`[cleanup] Permanently cleaned business ${business.id}`);
+  }
+
+  // Booking recovery is lower priority than account teardown. Run it after
+  // the critical cleanup work and keep provider failures non-blocking.
+  try {
+    await reconcilePendingCalendarBookings();
+  } catch {
+    console.error("[cleanup] Calendar booking reconciliation failed");
   }
 
   return NextResponse.json({

@@ -1,6 +1,74 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedClient, getCalendarService } from "@/lib/google/client";
 import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+
+type LinkedCalendarBooking = {
+  id: string;
+  google_calendar_id: string;
+};
+
+function isGoogleEventNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const candidate = error as {
+    code?: unknown;
+    response?: { status?: unknown };
+  };
+  return (
+    candidate.code === 404 ||
+    candidate.code === "404" ||
+    candidate.response?.status === 404
+  );
+}
+
+async function findLinkedCalendarBooking(
+  businessId: string,
+  googleEventId: string,
+  selectedCalendarId: string
+): Promise<LinkedCalendarBooking | null> {
+  const { data, error } = await supabaseAdmin
+    .from("calendar_bookings")
+    .select("id,google_calendar_id")
+    .eq("business_id", businessId)
+    .eq("google_event_id", googleEventId)
+    .limit(2);
+
+  if (error) {
+    throw new Error(
+      `Could not resolve linked booking ${googleEventId}: ${error.message}`
+    );
+  }
+  if (!Array.isArray(data)) {
+    throw new Error(
+      `Linked booking ${googleEventId} returned invalid query data.`
+    );
+  }
+  if (data.length === 0) return null;
+  const candidate =
+    data.length === 1
+      ? data[0]
+      : data.find(
+          (booking) =>
+            booking?.google_calendar_id === selectedCalendarId
+        );
+  if (!candidate) {
+    throw new Error(
+      `Linked booking ${googleEventId} is ambiguous across calendars.`
+    );
+  }
+  if (
+    typeof candidate.id !== "string" ||
+    !candidate.id ||
+    typeof candidate.google_calendar_id !== "string" ||
+    !candidate.google_calendar_id.trim()
+  ) {
+    throw new Error(
+      `Linked booking ${googleEventId} returned invalid calendar data.`
+    );
+  }
+  return candidate as LinkedCalendarBooking;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -227,7 +295,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     const calendar = getCalendarService(client);
-    const calendarId = token.calendar_id || "primary";
+    const selectedCalendarId = token.calendar_id || "primary";
+    const linkedBooking = await findLinkedCalendarBooking(
+      access.businessId,
+      eventId,
+      selectedCalendarId
+    );
+    const calendarId =
+      linkedBooking?.google_calendar_id || selectedCalendarId;
 
     // Build only the fields that were provided
     const requestBody: Record<string, unknown> = {};
@@ -242,6 +317,41 @@ export async function PATCH(request: NextRequest) {
       sendUpdates: "all",
       requestBody,
     });
+
+    const startsAt =
+      event.data.start?.dateTime ?? event.data.start?.date ?? startTime;
+    const endsAt = event.data.end?.dateTime ?? event.data.end?.date ?? endTime;
+    if (!startsAt || !endsAt) {
+      throw new Error(
+        `Google Calendar event ${eventId} did not return complete timing data.`
+      );
+    }
+
+    if (linkedBooking) {
+      const { data: updatedBookings, error: bookingUpdateError } =
+        await supabaseAdmin
+          .from("calendar_bookings")
+          .update({
+            starts_at: startsAt,
+            ends_at: endsAt,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("business_id", access.businessId)
+          .eq("id", linkedBooking.id)
+          .select("id");
+
+      if (
+        bookingUpdateError ||
+        !Array.isArray(updatedBookings) ||
+        updatedBookings.length !== 1
+      ) {
+        throw new Error(
+          `Could not synchronize linked booking ${eventId}: ${
+            bookingUpdateError?.message ?? "booking row changed concurrently"
+          }`
+        );
+      }
+    }
 
     return NextResponse.json({
       event: {
@@ -306,13 +416,54 @@ export async function DELETE(request: NextRequest) {
     }
 
     const calendar = getCalendarService(client);
-    const calendarId = token.calendar_id || "primary";
-
-    await calendar.events.delete({
-      calendarId,
+    const selectedCalendarId = token.calendar_id || "primary";
+    const linkedBooking = await findLinkedCalendarBooking(
+      access.businessId,
       eventId,
-      sendUpdates: "all",
-    });
+      selectedCalendarId
+    );
+    const calendarId =
+      linkedBooking?.google_calendar_id || selectedCalendarId;
+
+    try {
+      await calendar.events.delete({
+        calendarId,
+        eventId,
+        sendUpdates: "all",
+      });
+    } catch (error) {
+      if (!isGoogleEventNotFound(error)) throw error;
+      console.warn(
+        `[calendar/events] Google event ${eventId} was already deleted; reconciling local booking.`
+      );
+    }
+
+    if (linkedBooking) {
+      const cancelledAt = new Date().toISOString();
+      const { data: updatedBookings, error: bookingUpdateError } =
+        await supabaseAdmin
+          .from("calendar_bookings")
+          .update({
+            status: "cancelled",
+            cancelled_at: cancelledAt,
+            updated_at: cancelledAt,
+          })
+          .eq("business_id", access.businessId)
+          .eq("id", linkedBooking.id)
+          .select("id");
+
+      if (
+        bookingUpdateError ||
+        !Array.isArray(updatedBookings) ||
+        updatedBookings.length !== 1
+      ) {
+        throw new Error(
+          `Could not cancel linked booking ${eventId}: ${
+            bookingUpdateError?.message ?? "booking row changed concurrently"
+          }`
+        );
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

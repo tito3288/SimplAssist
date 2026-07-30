@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   deleteUser: vi.fn(),
   reconcile: vi.fn(),
+  reconcileBookings: vi.fn(),
   graceEq: vi.fn(),
   graceIn: vi.fn(),
 }));
@@ -19,6 +20,9 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/stripe/accountDeletionReconciler", () => ({
   reconcileAccountDeletionStripeAction: mocks.reconcile,
+}));
+vi.mock("@/lib/google/bookingReconciler", () => ({
+  reconcilePendingCalendarBookings: mocks.reconcileBookings,
 }));
 
 import { POST as cleanupAccounts } from "./route";
@@ -168,6 +172,11 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   mocks.deleteUser.mockResolvedValue({ data: null, error: null });
+  mocks.reconcileBookings.mockResolvedValue({
+    confirmed: 0,
+    notFound: 0,
+    failed: 0,
+  });
 });
 
 afterEach(() => {
@@ -181,6 +190,39 @@ describe("POST /api/account/cleanup", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.reconcileBookings).not.toHaveBeenCalled();
+  });
+
+  it("runs calendar booking reconciliation on an authorized maintenance heartbeat", async () => {
+    installDatabase({ expiredBusinesses: [] });
+
+    const response = await cleanupAccounts(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues account cleanup when calendar booking reconciliation fails", async () => {
+    installDatabase({ action: null, pendingAuthUserId: null });
+    mocks.reconcileBookings.mockRejectedValueOnce(
+      new Error("calendar provider unavailable")
+    );
+
+    const response = await cleanupAccounts(request());
+
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      deleted_count: 1,
+      failed_count: 0,
+      failed_ids: [],
+    });
+    expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileBookings.mock.invocationCallOrder[0]).toBeGreaterThan(
+      Math.max(...mocks.rpc.mock.invocationCallOrder)
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      "[cleanup] Calendar booking reconciliation failed"
+    );
   });
 
   it("retries a durable pause during grace even when no account has expired", async () => {

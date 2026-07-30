@@ -55,6 +55,8 @@ export interface ProcessIncomingMessageOptions {
   persistAssistant?: boolean;
   /** Set false only when the caller has already durably stored this message. */
   persistCustomer?: boolean;
+  /** Required with persistCustomer=false so direct bookings remain retry-stable. */
+  sourceMessageId?: string;
   contact?: Contact;
   conversation?: Conversation;
 }
@@ -130,7 +132,9 @@ async function executeCalendarTool(
   toolInput: Record<string, unknown>,
   timezone: string,
   contactPhone: string | null,
-  contactId: string | null = null
+  contactId: string,
+  conversationId: string,
+  sourceMessageId: string | null
 ): Promise<string> {
   try {
     if (toolName === "check_availability") {
@@ -145,6 +149,11 @@ async function executeCalendarTool(
     }
 
     if (toolName === "create_booking") {
+      if (!sourceMessageId) {
+        throw new AIProcessingStateError(
+          "Direct booking requires a durably persisted source message."
+        );
+      }
       const customerEmail = (toolInput.customer_email as string) || undefined;
       const result = await createBooking(
         businessId,
@@ -156,11 +165,16 @@ async function executeCalendarTool(
           startTime: toolInput.start_time as string,
           durationMinutes: (toolInput.duration_minutes as number) || 30,
         },
-        timezone
+        timezone,
+        {
+          contactId,
+          conversationId,
+          sourceMessageId,
+        }
       );
 
       // Save email to contact as a safety net
-      if (customerEmail && contactId) {
+      if (customerEmail) {
         await updateContactEmail(contactId, customerEmail).catch(() => {});
       }
 
@@ -261,15 +275,17 @@ export async function processIncomingMessage(
       }
     }
 
+    let sourceMessageId = options.sourceMessageId ?? null;
     if (options.persistCustomer !== false) {
       try {
-        await addMessage(
+        const persistedMessage = await addMessage(
           conversation.id,
           businessId,
           "customer",
           message,
           channel
         );
+        sourceMessageId = persistedMessage.id;
       } catch (error) {
         throw new AIProcessingStateError(
           `Could not persist the customer message for conversation ${conversation.id}.`,
@@ -393,6 +409,7 @@ export async function processIncomingMessage(
     if (useTools) {
       tools.push(...calendarTools);
     }
+    const enabledToolNames = new Set(tools.map((tool) => tool.name));
 
     // Build API params
     const apiParams: Anthropic.MessageCreateParamsNonStreaming = {
@@ -425,6 +442,9 @@ export async function processIncomingMessage(
             toolUseBlock.name,
             toolUseBlock.input as Record<string, unknown>
           );
+        } else if (!enabledToolNames.has(toolUseBlock.name)) {
+          toolResult =
+            "That tool is not enabled for this business. Do not perform the action.";
         } else {
           toolResult = await executeCalendarTool(
             businessId,
@@ -432,7 +452,9 @@ export async function processIncomingMessage(
             toolUseBlock.input as Record<string, unknown>,
             (business as Business).timezone,
             contactPhone,
-            contact.id
+            contact.id,
+            conversation.id,
+            sourceMessageId
           );
         }
         toolResults.push({

@@ -358,6 +358,7 @@ describe("POST /api/messaging/webhook", () => {
       expect.objectContaining({
         persistCustomer: false,
         persistAssistant: false,
+        sourceMessageId: "message_1",
         conversation: ACTIVE_CONVERSATION,
       })
     );
