@@ -8,6 +8,7 @@ import type {
   BusinessType,
   BusinessVoice,
   CampaignAssignmentStatus,
+  KnowledgeSource,
   Language,
   NoEinHoldStatus,
   OnboardingRegistrationStatus,
@@ -70,11 +71,13 @@ export interface OnboardingService {
   name: string;
   description?: string;
   price?: string;
+  source: KnowledgeSource;
 }
 
 export interface OnboardingFaq {
   question: string;
   answer: string;
+  source: KnowledgeSource;
 }
 
 export interface OnboardingServicesAndFaqs {

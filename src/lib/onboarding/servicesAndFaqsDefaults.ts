@@ -3,16 +3,25 @@ import {
   MIN_VALID_SERVICES,
   normalizeKnowledgeKey,
 } from "@/lib/contentQuality";
+import type { KnowledgeSource } from "@/types/database";
 
-export type EditableService = {
+export type ScannedService = {
   name: string;
   description?: string;
   price?: string;
 };
 
-export type EditableFaq = {
+export type ScannedFaq = {
   question: string;
   answer: string;
+};
+
+export type EditableService = ScannedService & {
+  source: KnowledgeSource;
+};
+
+export type EditableFaq = ScannedFaq & {
+  source: KnowledgeSource;
 };
 
 export type ServicesAndFaqsValues = {
@@ -22,9 +31,9 @@ export type ServicesAndFaqsValues = {
 
 type BuildServicesAndFaqsDefaultsInput = {
   initialData?: ServicesAndFaqsValues;
-  scrapedServices?: readonly EditableService[];
-  scrapedFaqs?: readonly EditableFaq[];
-  suggestedFaqs: readonly EditableFaq[];
+  scrapedServices?: readonly ScannedService[];
+  scrapedFaqs?: readonly ScannedFaq[];
+  suggestedFaqs: readonly ScannedFaq[];
 };
 
 export type ServicesAndFaqsDefaults = ServicesAndFaqsValues & {
@@ -35,25 +44,32 @@ const blankService = (): EditableService => ({
   name: "",
   description: "",
   price: "",
+  source: "manual",
 });
 
 const blankFaq = (): EditableFaq => ({
   question: "",
   answer: "",
+  source: "manual",
 });
 
-function cloneService(service: EditableService): EditableService {
+function cloneService(
+  service: ScannedService,
+  source: KnowledgeSource
+): EditableService {
   return {
     name: service.name,
     description: service.description ?? "",
     price: service.price ?? "",
+    source,
   };
 }
 
-function cloneFaq(faq: EditableFaq): EditableFaq {
+function cloneFaq(faq: ScannedFaq, source: KnowledgeSource): EditableFaq {
   return {
     question: faq.question,
     answer: faq.answer,
+    source,
   };
 }
 
@@ -73,12 +89,16 @@ export function buildServicesAndFaqsDefaults({
       (initialData.services.length > 0 || initialData.faqs.length > 0)
   );
 
-  const services = (
-    hasSavedData ? initialData?.services : scrapedServices
-  )?.map(cloneService) ?? [];
-  const faqs = (
-    hasSavedData ? initialData?.faqs : scrapedFaqs
-  )?.map(cloneFaq) ?? [];
+  const services = hasSavedData
+    ? (initialData?.services ?? []).map((service) =>
+        cloneService(service, service.source)
+      )
+    : (scrapedServices ?? []).map((service) =>
+        cloneService(service, "scraped")
+      );
+  const faqs = hasSavedData
+    ? (initialData?.faqs ?? []).map((faq) => cloneFaq(faq, faq.source))
+    : (scrapedFaqs ?? []).map((faq) => cloneFaq(faq, "scraped"));
 
   while (services.length < MIN_VALID_SERVICES) {
     services.push(blankService());
@@ -97,7 +117,7 @@ export function buildServicesAndFaqsDefaults({
     const key = normalizeKnowledgeKey(suggestedFaq.question);
     if (!key || seenQuestions.has(key)) continue;
 
-    faqs.push(cloneFaq(suggestedFaq));
+    faqs.push(cloneFaq(suggestedFaq, "suggested"));
     seenQuestions.add(key);
     usedSuggestedFaqs = true;
   }

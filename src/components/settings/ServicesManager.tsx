@@ -83,6 +83,7 @@ export default function ServicesManager({ businessId, initialServices }: Service
           name: newName.trim(),
           description: newDescription.trim() || null,
           price: newPrice.trim() || null,
+          source: 'manual' as const,
           is_active: true,
         })
         .select()

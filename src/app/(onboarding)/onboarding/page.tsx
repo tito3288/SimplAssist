@@ -228,7 +228,21 @@ export default function OnboardingPage() {
               price: service.price ?? undefined,
             }))}
             scrapedFaqs={scrapedData?.faqs}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            onNext={(data) => {
+              setState((current) =>
+                current
+                  ? {
+                      ...current,
+                      servicesAndFaqs: {
+                        services: data.services.map((row) => ({ ...row })),
+                        faqs: data.faqs.map((row) => ({ ...row })),
+                      },
+                    }
+                  : current
+              );
+              setStep(nextStepOf(step));
+              refreshState({ keepStep: true });
+            }}
             onBack={() => setStep('business_hours')}
           />
         )}

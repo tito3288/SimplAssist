@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
@@ -13,8 +12,6 @@ import {
   MIN_VALID_FAQS,
   MIN_VALID_SERVICES,
   evaluateContentQuality,
-  filterDistinctValidFaqs,
-  filterDistinctValidServices,
   isValidFaq,
   isValidService,
   normalizeKnowledgeKey,
@@ -23,42 +20,13 @@ import {
   buildServicesAndFaqsDefaults,
   type ServicesAndFaqsValues,
 } from '@/lib/onboarding/servicesAndFaqsDefaults';
+import {
+  prepareServicesAndFaqsSubmission,
+  servicesAndFaqsSchema,
+  type ServicesAndFaqsData,
+} from '@/lib/onboarding/servicesAndFaqsSubmission';
 
-const servicesAndFaqsSchema = z.object({
-  services: z.array(
-    z.object({
-      name: z.string(),
-      description: z.string().optional(),
-      price: z.string().optional(),
-    })
-  ),
-  faqs: z.array(
-    z.object({
-      question: z.string(),
-      answer: z.string(),
-    })
-  ),
-}).superRefine((data, context) => {
-  const quality = evaluateContentQuality(data);
-
-  if (!quality.hasMinimumServices) {
-    context.addIssue({
-      code: 'custom',
-      path: ['services'],
-      message: `Add at least ${MIN_VALID_SERVICES} distinct services with a name.`,
-    });
-  }
-
-  if (!quality.hasMinimumFaqs) {
-    context.addIssue({
-      code: 'custom',
-      path: ['faqs'],
-      message: `Answer at least ${MIN_VALID_FAQS} distinct FAQs.`,
-    });
-  }
-});
-
-export type ServicesAndFaqsData = z.infer<typeof servicesAndFaqsSchema>;
+export type { ServicesAndFaqsData } from '@/lib/onboarding/servicesAndFaqsSubmission';
 
 function serviceNotCountingReason(
   service: ServicesAndFaqsData['services'][number] | undefined,
@@ -272,35 +240,17 @@ export default function ServicesAndFaqsForm({
     setSubmitError('');
     try {
       const supabase = createClient();
-      const cleanedData: ServicesAndFaqsData = {
-        services: filterDistinctValidServices(data.services).map((service) => ({
-          name: service.name.trim(),
-          description: service.description?.trim() || '',
-          price: service.price?.trim() || '',
-        })),
-        faqs: filterDistinctValidFaqs(data.faqs).map((faq) => ({
-          question: faq.question.trim(),
-          answer: faq.answer.trim(),
-        })),
-      };
+      const { cleanedData, rpcArguments } =
+        prepareServicesAndFaqsSubmission(businessId, data);
 
-      // Atomic replace via RPC (migration 023): both tables are replaced in
-      // one transaction, so a mid-save failure can never lose existing rows.
-      // Arrays are always passed explicitly (even when empty) — PostgREST
-      // resolves the function by its named arguments.
-      const { error } = await supabase.rpc('replace_services_and_faqs', {
-        p_business_id: businessId,
-        p_services: cleanedData.services.map((s) => ({
-          name: s.name,
-          description: s.description || null,
-          price: s.price || null,
-        })),
-        p_faqs: cleanedData.faqs.map((f) => ({
-          question: f.question,
-          answer: f.answer,
-          source: 'manual' as const,
-        })),
-      });
+      // Atomic replace via the provenance-aware RPC: both tables are replaced
+      // in one transaction, so a mid-save failure can never lose existing
+      // rows. Arrays are always passed explicitly (even when empty) —
+      // PostgREST resolves the function by its named arguments.
+      const { error } = await supabase.rpc(
+        'replace_services_and_faqs',
+        rpcArguments
+      );
       if (error) throw error;
 
       const { error: markerError } = await supabase.from('businesses').update({
@@ -372,6 +322,10 @@ export default function ServicesAndFaqsForm({
 
             return (
               <div key={field.id} className="p-3 border border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg space-y-2">
+                <input
+                  type="hidden"
+                  {...register(`services.${index}.source`)}
+                />
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <input
@@ -429,7 +383,14 @@ export default function ServicesAndFaqsForm({
 
         <button
           type="button"
-          onClick={() => appendService({ name: '', description: '', price: '' })}
+          onClick={() =>
+            appendService({
+              name: '',
+              description: '',
+              price: '',
+              source: 'manual',
+            })
+          }
           className="mt-3 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
         >
           + Add Service
@@ -479,6 +440,10 @@ export default function ServicesAndFaqsForm({
 
             return (
               <div key={field.id} className="p-3 border border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg space-y-2">
+                <input
+                  type="hidden"
+                  {...register(`faqs.${index}.source`)}
+                />
                 <div className="flex gap-2">
                   <input
                     {...register(`faqs.${index}.question`)}
@@ -528,7 +493,9 @@ export default function ServicesAndFaqsForm({
 
         <button
           type="button"
-          onClick={() => appendFaq({ question: '', answer: '' })}
+          onClick={() =>
+            appendFaq({ question: '', answer: '', source: 'manual' })
+          }
           className="mt-3 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
         >
           + Add FAQ

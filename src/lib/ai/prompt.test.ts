@@ -56,6 +56,7 @@ const SERVICES: Service[] = [
     name: "Starter Plan",
     description: "Routine plumbing maintenance",
     price: "49",
+    source: "manual",
     is_active: true,
   },
 ];

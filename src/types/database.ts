@@ -14,7 +14,9 @@ export type BusinessType =
   | "general"
   | "other";
 
-export type FAQSource = "scraped" | "manual" | "suggested";
+export type KnowledgeSource = "scraped" | "manual" | "suggested";
+
+export type FAQSource = KnowledgeSource;
 
 export type AITone = "friendly" | "professional" | "balanced";
 
@@ -321,6 +323,7 @@ export interface Service {
   name: string;
   description: string | null;
   price: string | null;
+  source: KnowledgeSource;
   is_active: boolean;
 }
 

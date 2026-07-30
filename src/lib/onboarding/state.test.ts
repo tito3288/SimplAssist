@@ -27,11 +27,11 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({
 import { deriveOnboardingStep } from "./state";
 
 function service(name: string) {
-  return { name, description: "", price: "" };
+  return { name, description: "", price: "", source: "manual" as const };
 }
 
 function faq(question: string) {
-  return { question, answer: "A useful answer." };
+  return { question, answer: "A useful answer.", source: "manual" as const };
 }
 
 function baseArgs() {

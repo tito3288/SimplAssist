@@ -15,6 +15,7 @@ import type {
   BusinessType,
   BusinessVoice,
   CampaignAssignmentStatus,
+  KnowledgeSource,
   Language,
   NoEinHoldStatus,
   OnboardingRegistrationStatus,
@@ -130,11 +131,13 @@ type ServiceRow = {
   name: string;
   description: string | null;
   price: string | null;
+  source: KnowledgeSource;
 };
 
 type FaqRow = {
   question: string;
   answer: string;
+  source: KnowledgeSource | null;
 };
 
 type AiSettingsRow = {
@@ -367,14 +370,14 @@ async function getOnboardingStateForBusiness(
       .returns<HoursRow[]>(),
     supabaseAdmin
       .from("services")
-      .select("name, description, price")
+      .select("name, description, price, source")
       .eq("business_id", business.id)
       .eq("is_active", true)
       .order("created_at", { ascending: true })
       .returns<ServiceRow[]>(),
     supabaseAdmin
       .from("faqs")
-      .select("question, answer")
+      .select("question, answer, source")
       .eq("business_id", business.id)
       .eq("is_active", true)
       .order("created_at", { ascending: true })
@@ -542,6 +545,7 @@ function normalizeServices(rows: ServiceRow[]): OnboardingService[] {
     name: row.name,
     description: row.description ?? "",
     price: row.price ?? "",
+    source: row.source,
   }));
 }
 
@@ -549,6 +553,7 @@ function normalizeFaqs(rows: FaqRow[]): OnboardingFaq[] {
   return rows.map((row) => ({
     question: row.question,
     answer: row.answer,
+    source: row.source ?? "manual",
   }));
 }
 
