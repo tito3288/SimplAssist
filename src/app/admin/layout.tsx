@@ -46,6 +46,9 @@ export default async function AdminLayout({
               <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
                 Tickets
               </Link>
+              <Link href="/admin/waitlist" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                Waitlist
+              </Link>
               <AdminSignOutButton />
             </div>
           </header>
