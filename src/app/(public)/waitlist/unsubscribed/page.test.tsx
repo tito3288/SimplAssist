@@ -9,7 +9,11 @@ vi.mock("next/cache", () => ({
   unstable_noStore: mocks.noStore,
 }));
 
-import WaitlistUnsubscribedPage, { metadata } from "./page";
+import WaitlistUnsubscribedPage, {
+  dynamic,
+  metadata,
+  revalidate,
+} from "./page";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -42,5 +46,7 @@ describe("waitlist unsubscribed page", () => {
       robots: { index: false, follow: false },
       referrer: "no-referrer",
     });
+    expect(dynamic).toBe("force-dynamic");
+    expect(revalidate).toBe(0);
   });
 });

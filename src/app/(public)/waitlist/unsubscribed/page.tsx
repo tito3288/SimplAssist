@@ -32,7 +32,7 @@ export default function WaitlistUnsubscribedPage({
             : "You will not receive Full Suite waitlist or launch emails from us."}
         </p>
         <Link
-          href="/home"
+          href="/"
           className="mt-7 inline-block text-sm font-medium text-[#c2410c] underline underline-offset-4 dark:text-[#ff914d]"
         >
           Return to SimplAssist

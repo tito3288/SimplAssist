@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft } from "lucide-react";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
+import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
 import {
   body,
   card,
@@ -11,6 +12,8 @@ import {
   lightAmbient,
   pageShell,
 } from "@/lib/theme-v2/theme";
+
+export const metadata = PRIVATE_ROUTE_METADATA;
 
 export default function AuthLayout({
   children,
@@ -60,7 +63,7 @@ export default function AuthLayout({
         {/* Top bar */}
         <div className="mb-6 flex items-center justify-between gap-4">
           <Link
-            href="/home"
+            href="/"
             className="
               inline-flex items-center gap-2 text-sm font-medium
               text-stone-600 hover:text-[#c2410c]
@@ -77,7 +80,7 @@ export default function AuthLayout({
         {/* Brand */}
         <div className="mb-8 text-center">
           <Link
-            href="/home"
+            href="/"
             className="
               inline-flex flex-col items-center gap-3 rounded-[28px]
               focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50
@@ -105,7 +108,7 @@ export default function AuthLayout({
           <p className={`mt-3 max-w-[320px] mx-auto text-sm leading-relaxed ${body}`}>
             AI-powered customer communication for small businesses
           </p>
-          <Link href="/home" className={`mt-2 inline-block text-xs ${inlineLink}`}>
+          <Link href="/" className={`mt-2 inline-block text-xs ${inlineLink}`}>
             Learn more
           </Link>
         </div>

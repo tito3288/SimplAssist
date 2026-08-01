@@ -7,6 +7,9 @@ import {
   getDashboardBusinessContext,
   getDashboardEntitlements,
 } from "@/lib/dashboard/context";
+import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
+
+export const metadata = PRIVATE_ROUTE_METADATA;
 
 export default async function DashboardLayout({
   children,

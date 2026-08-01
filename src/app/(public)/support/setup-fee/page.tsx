@@ -48,6 +48,17 @@ export default function SetupFeePage() {
           messages to be accepted and delivered instead of filtered as spam.
         </p>
         <p>
+          <Term>Who are the mobile carriers?</Term> In plain terms, this means
+          the nationwide carrier ecosystem that delivers texts to customers on
+          AT&amp;T, T-Mobile, Verizon, and Boost Mobile, including familiar
+          prepaid and virtual-carrier brands such as Cricket Wireless, Metro by
+          T-Mobile, Mint Mobile, Ultra Mobile, Google Fi, Visible, Total
+          Wireless, Straight Talk, Tracfone, Simple Mobile, SafeLink Wireless,
+          Walmart Family Mobile, Page Plus, Xfinity Mobile, and Spectrum Mobile.
+          Smaller regional and prepaid providers are part of this same
+          ecosystem, too.
+        </p>
+        <p>
           Because the registration fees are charged by third parties the moment
           your business is submitted for review — and those third parties do
           not return them — this fee is non-refundable once registration

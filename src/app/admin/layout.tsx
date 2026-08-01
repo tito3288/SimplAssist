@@ -4,8 +4,10 @@ import { getAdminGateState } from "@/lib/admin/auth";
 import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
 import AdminLoginForm from "./AdminLoginForm";
 import AdminSignOutButton from "./AdminSignOutButton";
+import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
 
 export const dynamic = "force-dynamic";
+export const metadata = PRIVATE_ROUTE_METADATA;
 
 export default async function AdminLayout({
   children,

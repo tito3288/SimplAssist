@@ -66,7 +66,7 @@ export default function Sidebar({
     // Without this, Next.js can serve the stale Sidebar (with the previous
     // user's email + website) when a different account signs back in.
     router.refresh();
-    router.push("/home");
+    router.push("/");
   }
 
   const sidebarContent = (

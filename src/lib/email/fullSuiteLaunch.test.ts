@@ -70,7 +70,7 @@ describe("sendFullSuiteLaunchEmail", () => {
     expect(message.text).toContain(
       "Advanced analytics, lead alerts, review requests, and automated follow-ups"
     );
-    expect(message.text).toContain("https://simplassist.com/home#pricing");
+    expect(message.text).toContain("https://simplassist.com/#pricing");
     expect(message.text).toMatch(
       /https:\/\/simplassist\.com\/waitlist\/unsubscribe\?token=v1\./
     );

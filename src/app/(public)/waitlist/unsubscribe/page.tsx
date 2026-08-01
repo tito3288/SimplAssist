@@ -75,7 +75,7 @@ export default function WaitlistUnsubscribePage({
         )}
 
         <Link
-          href="/home"
+          href="/"
           className="mt-7 inline-block text-sm font-medium text-[#c2410c] underline underline-offset-4 dark:text-[#ff914d]"
         >
           Return to SimplAssist

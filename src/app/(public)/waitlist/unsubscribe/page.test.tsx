@@ -14,7 +14,11 @@ vi.mock("@/lib/waitlist/unsubscribeToken", () => ({
   verifyWaitlistUnsubscribeToken: mocks.verifyToken,
 }));
 
-import WaitlistUnsubscribePage, { metadata } from "./page";
+import WaitlistUnsubscribePage, {
+  dynamic,
+  metadata,
+  revalidate,
+} from "./page";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -56,5 +60,7 @@ describe("waitlist unsubscribe confirmation page", () => {
       robots: { index: false, follow: false },
       referrer: "no-referrer",
     });
+    expect(dynamic).toBe("force-dynamic");
+    expect(revalidate).toBe(0);
   });
 });

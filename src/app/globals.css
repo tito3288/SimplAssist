@@ -52,6 +52,38 @@ body {
   }
 }
 
+/* Native FAQ disclosure animation. `::details-content` keeps the same content
+   box alive through both directions so every toggle can transition. */
+@layer components {
+  .sa-faq-disclosure {
+    interpolate-size: allow-keywords;
+  }
+
+  .sa-faq-disclosure::details-content {
+    block-size: 0;
+    content-visibility: hidden;
+    opacity: 0;
+    overflow: clip;
+    transition:
+      block-size 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 200ms ease,
+      content-visibility 260ms allow-discrete;
+    transition-behavior: allow-discrete;
+  }
+
+  .sa-faq-disclosure[open]::details-content {
+    block-size: auto;
+    content-visibility: visible;
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sa-faq-disclosure::details-content {
+      transition: none;
+    }
+  }
+}
+
 /* Frosted nav + app-wide loading buffer (`.dot`) */
 @layer components {
   .dot {

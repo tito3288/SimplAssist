@@ -167,7 +167,7 @@ export async function GET() {
   var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
   sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   var footerEl = el('div', { class: 'sa-widget-footer' });
-  var footerLink = el('a', { href: baseUrl + '/home', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
+  var footerLink = el('a', { href: baseUrl + '/', target: '_blank', rel: 'noopener noreferrer' }, 'Powered by SimplAssist');
   footerEl.appendChild(footerLink);
   var endArea = el('div', { class: 'sa-widget-end-area' });
   endArea.style.display = 'none';

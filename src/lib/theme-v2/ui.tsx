@@ -10,6 +10,7 @@ import { useTheme } from "next-themes";
 import { Eye, EyeOff, Moon, Sun } from "lucide-react";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import { fieldLabel, inputField } from "./theme";
+import { REVEAL_CLASS_NAME } from "./reveal";
 
 /* ── Scroll reveal ── */
 
@@ -78,6 +79,7 @@ export function Reveal({
     <div
       ref={ref}
       className={`
+        ${REVEAL_CLASS_NAME}
         will-change-[opacity,transform]
         transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]
         ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-5"}

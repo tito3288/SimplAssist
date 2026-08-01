@@ -75,7 +75,7 @@ type LegalDocLayoutProps = {
   siblingHref?: string;
   siblingLabel?: string;
   /**
-   * Back-link target. Defaults to "/home" (SimplAssist marketing page). For
+   * Back-link target. Defaults to "/" (SimplAssist marketing page). For
    * per-business legal pages (Phase 6), override to "/c/[slug]" and label
    * with the business name.
    */
@@ -96,7 +96,7 @@ export function LegalDocLayout({
   lastUpdated = "March 2026",
   siblingHref,
   siblingLabel,
-  backHref = "/home",
+  backHref = "/",
   backLabel = "Back to home",
   businessName,
   children,
@@ -130,7 +130,7 @@ export function LegalDocLayout({
             </span>
           ) : (
             <Link
-              href="/home"
+              href="/"
               className="hidden sm:block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50 dark:focus-visible:ring-[#ff914d]/50"
             >
               <Image

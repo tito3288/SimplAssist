@@ -18,6 +18,6 @@ export async function GET(request: NextRequest) {
     await supabase.auth.verifyOtp({ type, token_hash });
   }
 
-  // Redirect to root — it will route to /onboarding or /dashboard based on status
-  return NextResponse.redirect(`${appUrl}/`);
+  // Dashboard guards route new, incomplete, deleted, and ready accounts.
+  return NextResponse.redirect(`${appUrl}/dashboard`);
 }

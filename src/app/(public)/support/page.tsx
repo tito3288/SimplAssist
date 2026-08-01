@@ -61,7 +61,7 @@ export default async function SupportPage({
       headerLeft={
         <>
           <Link
-            href="/home"
+            href="/"
             className={`inline-flex items-center gap-2 ${publicHeaderLink}`}
           >
             <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />

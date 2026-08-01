@@ -8,12 +8,20 @@ import {
   Target,
   Star,
   ArrowUpRight,
+  ChevronDown,
 } from "lucide-react";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
+import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import {
+  getHomepageJsonLd,
+  HOME_DEFINITION,
+  HOME_FAQS,
+  serializeJsonLd,
+} from "./seo";
 import {
   accentText,
   body,
@@ -25,6 +33,7 @@ import {
   darkAmbient,
   fontStack,
   ink,
+  inlineLink,
   lightAmbient,
   navLink,
   navShell,
@@ -72,6 +81,25 @@ const features = [
       "See your warmest prospects first so you know where to focus your time when you're back online.",
   },
 ];
+
+const trustedTechnologies = [
+  {
+    name: "Stripe",
+    logo: "/marketing/technology/stripe.svg",
+  },
+  {
+    name: "Google Calendar",
+    logo: "/marketing/technology/google-calendar.svg",
+  },
+  {
+    name: "Anthropic",
+    logo: "/marketing/technology/claude.svg",
+  },
+  {
+    name: "Cloudflare",
+    logo: "/marketing/technology/cloudflare.svg",
+  },
+] as const;
 
 /** The two dashboard views shown in the "how it works" panel — real product
  *  screenshots (public/marketing/pane-*.png), cropped from the /demo pages.
@@ -224,11 +252,44 @@ function PaneShot({ base, alt, sizes }: { base: string; alt: string; sizes: stri
 const paneFrame =
   "rounded-t-2xl overflow-hidden border border-b-0 border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-[#101010]";
 
+function FaqAnswerText({
+  faq,
+}: {
+  faq: (typeof HOME_FAQS)[number];
+}) {
+  if (!("answerLink" in faq)) return faq.answer;
+
+  const linkStart = faq.answer.indexOf(faq.answerLink.text);
+  if (linkStart < 0) return faq.answer;
+
+  return (
+    <>
+      {faq.answer.slice(0, linkStart)}
+      <Link
+        href={faq.answerLink.href}
+        className={`${inlineLink} underline-offset-2 hover:underline`}
+      >
+        {faq.answerLink.text}
+      </Link>
+      {faq.answer.slice(linkStart + faq.answerLink.text.length)}
+    </>
+  );
+}
+
 /* ── Page ── */
 
 export default function HomePage() {
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
+      <noscript>
+        <style>{REVEAL_NO_SCRIPT_CSS}</style>
+      </noscript>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: serializeJsonLd(getHomepageJsonLd()),
+        }}
+      />
       <Script
         src="https://simplassist.com/widget/embed.js"
         data-business-id="ea848911-ef72-44a6-8cf3-c47b3959be26"
@@ -272,7 +333,7 @@ export default function HomePage() {
       {/* ── Navigation — frosted pill; must NOT be inside a transformed parent or fixed breaks ── */}
       <nav className={`${navShell} flex items-center justify-between gap-3 sm:gap-4 px-3 py-2 sm:px-6 sm:py-3`}>
         <div className="flex items-center gap-3.5 min-w-0">
-          <Link href="/home">
+          <Link href="/">
             <Logo />
           </Link>
         </div>
@@ -358,6 +419,27 @@ export default function HomePage() {
           <Reveal className="lg:hidden">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 w-full">
               <HeroStatCards />
+            </div>
+          </Reveal>
+        </section>
+
+        {/* ── Definition ── */}
+        <section
+          id="what-is-simplassist"
+          aria-labelledby="what-is-simplassist-heading"
+          className="py-10 sm:py-14"
+        >
+          <Reveal>
+            <div className={`p-6 sm:p-8 ${card}`}>
+              <h2
+                id="what-is-simplassist-heading"
+                className={`text-[clamp(26px,3.5vw,40px)] leading-[1.08] tracking-[-0.035em] font-extrabold ${ink}`}
+              >
+                What is SimplAssist?
+              </h2>
+              <p className={`${body} mt-4 max-w-[78ch] leading-[1.75]`}>
+                {HOME_DEFINITION}
+              </p>
             </div>
           </Reveal>
         </section>
@@ -544,6 +626,48 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* ── FAQ ── */}
+        <section
+          id="faq"
+          aria-labelledby="faq-heading"
+          className="py-16 sm:py-24"
+        >
+          <Reveal className="mb-12 sm:mb-16">
+            <h2
+              id="faq-heading"
+              className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}
+            >
+              Frequently asked <span className={accentText}>questions</span>.
+            </h2>
+            <p className={`${body} mt-4 max-w-[60ch] leading-[1.65]`}>
+              Straight answers about plans, missed-call texting, AI, and setup.
+            </p>
+          </Reveal>
+
+          <div className="grid gap-4">
+            {HOME_FAQS.map((faq, i) => (
+              <Reveal key={faq.question} delayMs={Math.min(i * 45, 180)}>
+                <details className={`sa-faq-disclosure group overflow-hidden ${card}`}>
+                  <summary className="min-h-[76px] cursor-pointer list-none p-6 outline-none transition-colors hover:bg-[#faf6ef] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ea580c]/60 dark:hover:bg-white/[0.04] dark:focus-visible:ring-[#ff914d]/60 sm:px-7 [&::-webkit-details-marker]:hidden">
+                    <h3 className={`flex items-center justify-between gap-5 text-lg sm:text-xl font-bold leading-snug ${ink}`}>
+                      <span>{faq.question}</span>
+                      <ChevronDown
+                        className="h-5 w-5 shrink-0 text-[#c2410c] transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none dark:text-[#ff914d]"
+                        aria-hidden="true"
+                      />
+                    </h3>
+                  </summary>
+                  <div className={`sa-faq-answer border-t border-[#ece4d8] px-6 pb-6 pt-4 dark:border-white/[0.10] sm:px-7 sm:pb-7 ${body}`}>
+                    <p className="leading-[1.7]">
+                      <FaqAnswerText faq={faq} />
+                    </p>
+                  </div>
+                </details>
+              </Reveal>
+            ))}
+          </div>
+        </section>
+
         {/* ── CTA — headline + the "two Tuesdays" race vignette; both columns
             stretch so neither side leaves dead space ── */}
         <Reveal>
@@ -589,6 +713,37 @@ export default function HomePage() {
             </div>
           </section>
         </Reveal>
+
+        <section
+          aria-labelledby="trusted-technology-heading"
+          className="my-6 rounded-[28px] border border-black/[0.03] bg-[#f2eee5] px-6 py-7 sm:px-8 sm:py-8 dark:border-white/[0.07] dark:bg-white/[0.05]"
+        >
+          <h2
+            id="trusted-technology-heading"
+            className={`text-center text-[clamp(26px,3.5vw,38px)] font-extrabold leading-none tracking-[-0.035em] ${ink}`}
+          >
+            Powered <span className={accentText}>by</span>
+          </h2>
+          <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {trustedTechnologies.map(({ name, logo }) => (
+              <li
+                key={name}
+                className="flex min-h-[76px] items-center justify-center gap-3 rounded-[22px] border border-[#e8e0d5] bg-white px-3 py-4 shadow-[0_1px_2px_rgba(28,25,23,0.03)] dark:border-white/[0.10] dark:bg-white/[0.08] dark:shadow-none"
+              >
+                <Image
+                  src={logo}
+                  alt={name}
+                  width={40}
+                  height={32}
+                  className="h-8 w-10 shrink-0 object-contain"
+                />
+                <span className={`text-sm font-semibold leading-tight ${ink}`}>
+                  {name}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         {/* ── Footer ── */}
         <footer className="pb-10 pt-2">

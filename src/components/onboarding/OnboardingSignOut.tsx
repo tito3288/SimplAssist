@@ -19,7 +19,7 @@ export default function OnboardingSignOut() {
     // must never sign into the customer app.
     await supabase.auth.signOut();
     router.refresh();
-    router.push('/home');
+    router.push('/');
   }
 
   return (

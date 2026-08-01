@@ -4,6 +4,9 @@ import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
 import { card, pageShell, fontStack, lightAmbient, darkAmbient } from '@/lib/theme-v2/theme';
 import { ThemeToggleV2 } from '@/lib/theme-v2/ui';
 import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
+import { PRIVATE_ROUTE_METADATA } from '@/lib/seo/privateMetadata';
+
+export const metadata = PRIVATE_ROUTE_METADATA;
 
 export default async function OnboardingLayout({
   children,

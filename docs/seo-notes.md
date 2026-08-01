@@ -1,4 +1,15 @@
-# SEO notes — read BEFORE adding a sitemap, robots.txt/robots.ts, or doing SEO work
+# SEO notes — read before changing sitemap, robots, or index policy
+
+## Canonical and sitemap policy
+
+- The canonical marketing homepage is `/`. The legacy `/home` URL permanently
+  redirects to `/` and must not be used in canonical metadata or new public links.
+- The curated corporate sitemap contains exactly `/`, `/support`,
+  `/support/setup-fee`, `/privacy`, and `/terms`.
+- Public customer pages at `/c/[slug]` and their privacy/terms children may be
+  indexed, but are intentionally omitted from the corporate sitemap.
+- Auth, onboarding, dashboard, admin, widget preview, API, and waitlist
+  unsubscribe routes are private or non-indexable and must not enter the sitemap.
 
 ## Pages that must NEVER be crawlable or listed
 
@@ -14,10 +25,10 @@ content is ever served in production, and `noindex` is authoritative for Google.
 
 ## Rules for future SEO work
 
-1. **Sitemap** (`src/app/sitemap.ts` or static): include ONLY intentionally public
-   marketing/legal pages (`/home`, `/privacy`, `/terms`, `/support`, …). Never include `/demo/*`
-   or `/home-v2`, and never generate the sitemap by crawling the route tree
-   (the gated routes exist in the tree and would leak into it).
+1. **Sitemap** (`src/app/sitemap.ts`): keep the explicit five-entry corporate
+   allowlist above. Never include `/c/*`, `/demo/*`, or `/home-v2`, and never
+   generate the sitemap by crawling the route tree (gated and customer-owned
+   routes exist in the tree and would leak into it).
 2. **robots.txt / robots.ts**: do NOT add `Disallow: /demo` or `Disallow: /home-v2`
    entries. robots.txt is public — listing a path there *advertises* it. The
    404 + `noindex` gating already handles every crawler correctly; robots
@@ -26,6 +37,5 @@ content is ever served in production, and `noindex` is authoritative for Google.
    `notFound()` guard in `generateMetadata` + the component (copy
    `src/app/demo/_lib/guard.ts`), set `robots: { index: false, follow: false }`
    metadata, never link to them from public pages, and add them to the table above.
-4. Dashboard/auth pages (`(dashboard)`, onboarding, etc.) are behind auth redirects
-   and need `noindex` consideration during SEO work as well — they currently rely
-   on redirect-to-login.
+4. Dashboard/auth pages (`(dashboard)`, onboarding, etc.) are behind auth redirects,
+   carry metadata-level `noindex` protection, and are disallowed in `robots.ts`.

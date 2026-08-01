@@ -105,7 +105,7 @@ export async function sendFullSuiteLaunchEmail(
 
   try {
     const origin = publicAppOrigin(recipient.requestOrigin);
-    const pricingUrl = `${origin}/home#pricing`;
+    const pricingUrl = `${origin}/#pricing`;
     const unsubscribeUrl =
       recipient.kind === "launch"
         ? `${origin}/waitlist/unsubscribe?token=${encodeURIComponent(
