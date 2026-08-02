@@ -16,6 +16,7 @@ import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { OpenChatButton } from "./open-chat-button";
 import {
   getHomepageJsonLd,
   HOME_DEFINITION,
@@ -208,16 +209,20 @@ function Logo() {
 function SectionHeader({
   title,
   subtitle,
+  subtitleClassName = "",
 }: {
   title: React.ReactNode;
   subtitle: string;
+  subtitleClassName?: string;
 }) {
   return (
     <Reveal className="mb-12 sm:mb-16">
       <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
         {title}
       </h2>
-      <p className={`${body} mt-4 max-w-[60ch] leading-[1.65]`}>{subtitle}</p>
+      <p className={`${body} mt-4 max-w-[60ch] leading-[1.65] ${subtitleClassName}`}>
+        {subtitle}
+      </p>
     </Reveal>
   );
 }
@@ -546,6 +551,65 @@ export default function HomePage() {
                 </div>
               </Reveal>
             ))}
+          </div>
+        </section>
+
+        {/* ── Quick Demo ── */}
+        <section id="try-it-live" className="py-16 sm:py-24">
+          <SectionHeader
+            title={
+              <>
+                Quick <span className={accentText}>Demo</span>.
+              </>
+            }
+            subtitle={"Call or chat with SimplAssist and see what the experience feels like from the other\u00a0side."}
+            subtitleClassName="sm:max-w-none"
+          />
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Reveal className="h-full">
+              <article className={`flex h-full flex-col p-6 sm:p-8 ${card}`}>
+                <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
+                  Make the call. We won’t answer.
+                  <br />
+                  <span className="inline-block">SimplAssist will.</span>
+                </h3>
+                <p className={`${body} mt-3 leading-[1.7]`}>
+                  Call this number. We’ll let it ring.
+                </p>
+                <a
+                  href="tel:+15742638634"
+                  className={`my-5 block w-fit whitespace-nowrap rounded-lg text-[clamp(27px,4vw,42px)] font-extrabold leading-none tracking-[-0.04em] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 focus-visible:ring-offset-4 dark:focus-visible:ring-[#ff914d]/60 dark:focus-visible:ring-offset-[#050505] ${accentText}`}
+                >
+                  (574) 263-8634
+                </a>
+                <p className={`${body} leading-[1.7]`}>
+                  SimplAssist will text you back in seconds and carry the
+                  conversation from there.
+                </p>
+                <p className={`${body} mt-5 border-t border-[#ece4d8] pt-5 text-sm leading-[1.65] dark:border-white/[0.10]`}>
+                  Try a reply—ask about pricing, features, or how it works.
+                </p>
+              </article>
+            </Reveal>
+
+            <Reveal delayMs={90} className="h-full">
+              <article className={`flex h-full flex-col p-6 sm:p-8 ${card}`}>
+                <h3 className={`text-xl font-bold sm:text-[22px] ${ink}`}>
+                  Ask away. SimplAssist can take it.
+                </h3>
+                <p className={`${body} mt-3 leading-[1.7]`}>
+                  Ask about pricing, features, setup, or how it works. Then ask a
+                  follow-up and see if it keeps up.
+                </p>
+                <div className="mt-auto pt-7">
+                  <OpenChatButton className={btnPrimary} />
+                  <p className={`${body} mt-3 text-sm leading-[1.55]`}>
+                    Go off script. That’s the point.
+                  </p>
+                </div>
+              </article>
+            </Reveal>
           </div>
         </section>
 
