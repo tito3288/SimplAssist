@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getActiveSmsNumber: vi.fn(),
+  getRequestBrand: vi.fn(),
   notFound: vi.fn(),
 }));
 
@@ -17,6 +18,9 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
   getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
+}));
+vi.mock("@/lib/branding/requestBrand.server", () => ({
+  getRequestBrand: mocks.getRequestBrand,
 }));
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
@@ -41,6 +45,31 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000123";
 const SLUG = "northstar-home-care";
 const SMS_NUMBER = "+13175550123";
 const CONTACT_NUMBER = "+13175550199";
+
+const DEFAULT_REQUEST_BRAND = {
+  source: "default" as const,
+  isPreview: false,
+  brand: {
+    kind: "default" as const,
+    partnerId: null,
+    slug: null,
+    name: "SimplAssist",
+    publicOrigin: "https://simplassist.com",
+    logoLightUrl: "/logo-light.png",
+    logoDarkUrl: "/logo-dark.png",
+    faviconUrl: "/favicon-2.png",
+    colors: {
+      primary: "#ea580c",
+      primaryHover: "#c2410c",
+      primaryActive: "#9a3412",
+      accent: "#c2410c",
+      primaryDark: "#ff914d",
+      primaryHoverDark: "#f57f33",
+      primaryActiveDark: "#e8752c",
+      accentDark: "#ff914d",
+    },
+  },
+};
 
 const BUSINESS = {
   id: BUSINESS_ID,
@@ -138,6 +167,7 @@ beforeEach(() => {
     return makeQuery(table, result);
   });
   mocks.getActiveSmsNumber.mockResolvedValue(SMS_NUMBER);
+  mocks.getRequestBrand.mockResolvedValue(DEFAULT_REQUEST_BRAND);
   mocks.notFound.mockImplementation(() => {
     throw new Error("NEXT_NOT_FOUND");
   });
@@ -334,7 +364,7 @@ describe("/c/[slug] compliance page", () => {
       params: Promise.resolve({ slug: SLUG }),
     });
     const rootHtml = renderToStaticMarkup(
-      <RootLayout>{page}</RootLayout>
+      await RootLayout({ children: page })
     );
     const documentHtml = rootHtml.replace(
       /(<html[^>]*>)/,

@@ -17,6 +17,7 @@ import {
   tile,
 } from "@/lib/theme-v2/theme";
 import { AuthPasswordFieldV2, LoadingDot } from "@/lib/theme-v2/ui";
+import { SignupConfirmation } from "./SignupConfirmation";
 
 const signupSchema = z
   .object({
@@ -68,30 +69,19 @@ export default function SignupPage() {
 
   if (success) {
     return (
-      <div className="text-center">
-        <div
-          className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${tile}`}
-        >
-          <Mail className="h-7 w-7 text-[#ea580c] dark:text-[#ff914d]" aria-hidden />
-        </div>
-        <h1 className={`text-2xl font-bold tracking-tight ${ink}`}>
-          Check your email
-        </h1>
-        <p className={`mt-2 text-sm leading-relaxed ${body}`}>
-          We sent you a confirmation link. Open it to activate your account and
-          start using SimplAssist.
-        </p>
-        <p className={`mt-6 text-sm ${body}`}>
-          Wrong address?{" "}
-          <button
-            type="button"
-            onClick={() => setSuccess(false)}
-            className={inlineLink}
+      <SignupConfirmation
+        onGoBack={() => setSuccess(false)}
+        icon={
+          <div
+            className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${tile}`}
           >
-            Go back
-          </button>
-        </p>
-      </div>
+            <Mail
+              className="h-7 w-7 text-[#ea580c] dark:text-[#ff914d]"
+              aria-hidden
+            />
+          </div>
+        }
+      />
     );
   }
 

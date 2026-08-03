@@ -7,6 +7,10 @@ import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { secondaryCtaClass } from "@/lib/glass";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
 import {
+  partnerManagedBillingMessage,
+  resolveAssignedPartnerName,
+} from "@/lib/billing/partnerManagedBilling.server";
+import {
   card,
   cardRecommended,
   statusSuccess,
@@ -20,6 +24,26 @@ export default async function BillingPage() {
   if (context.status !== "resolved") redirect("/onboarding");
 
   const { supabase, business } = context;
+
+  if (business.billing_mode !== "stripe") {
+    const partnerName = await resolveAssignedPartnerName(business.partner_id);
+
+    return (
+      <div className="max-w-5xl mx-auto">
+        <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">
+          Billing
+        </h1>
+        <div className={`mt-8 p-6 ${card}`}>
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
+            Partner-managed billing
+          </h2>
+          <p className="mt-2 text-stone-500 dark:text-[#bdbdbf]">
+            {partnerManagedBillingMessage(partnerName)}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const [{ data: subscription }, { data: usagePeriod }] = await Promise.all([
     supabase

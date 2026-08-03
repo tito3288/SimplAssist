@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { resolveAuthCallbackOrigin } from "@/lib/auth/callbackOrigin.server";
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  // Use NEXT_PUBLIC_APP_URL for production (Railway's internal origin is localhost:8080)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
 
   if (code) {
     const supabase = await createClient();
@@ -18,6 +17,10 @@ export async function GET(request: NextRequest) {
     await supabase.auth.verifyOtp({ type, token_hash });
   }
 
+  const appOrigin = await resolveAuthCallbackOrigin(
+    request.headers.get("host")
+  );
+
   // Dashboard guards route new, incomplete, deleted, and ready accounts.
-  return NextResponse.redirect(`${appUrl}/dashboard`);
+  return NextResponse.redirect(`${appOrigin}/dashboard`);
 }

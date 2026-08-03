@@ -45,6 +45,9 @@ export default async function AdminLayout({
               SimplAssist Admin
             </Link>
             <div className="flex items-center gap-4">
+              <Link href="/admin/partners" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                Partners
+              </Link>
               <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
                 Tickets
               </Link>

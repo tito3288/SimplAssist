@@ -3,6 +3,8 @@ import WidgetPageClient from './WidgetPageClient';
 import { canUseFeature } from '@/lib/billing/entitlements';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
+import { resolveConnectedBusinessPartner } from '@/lib/branding/businessPartner.server';
+import { getCanonicalAppOrigin } from '@/lib/branding/defaultBrand';
 
 export default async function WidgetPage() {
   const context = await getDashboardEntitledContext();
@@ -71,11 +73,16 @@ export default async function WidgetPage() {
     );
   }
 
+  const connectedPartner = await resolveConnectedBusinessPartner(business.id);
+  const scriptOrigin =
+    connectedPartner?.publicOrigin ?? getCanonicalAppOrigin();
+
   return (
     <WidgetPageClient
       config={widgetConfig}
       businessId={business.id}
       businessName={business.name}
+      scriptOrigin={scriptOrigin}
     />
   );
 }

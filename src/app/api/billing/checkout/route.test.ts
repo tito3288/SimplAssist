@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getOnboardingStateForBusinessId: vi.fn(),
   createCheckoutSession: vi.fn(),
   getExistingTelnyxBrandLinkState: vi.fn(),
+  resolveAssignedPartnerName: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -42,11 +43,20 @@ vi.mock("@/lib/stripe/config", () => ({
 vi.mock("@/lib/messaging/registration/existingBrand", () => ({
   getExistingTelnyxBrandLinkState: mocks.getExistingTelnyxBrandLinkState,
 }));
+vi.mock("@/lib/billing/partnerManagedBilling.server", () => ({
+  resolveAssignedPartnerName: mocks.resolveAssignedPartnerName,
+  partnerManagedBillingMessage: (partnerName: string | null) =>
+    partnerName
+      ? `Billing is handled by ${partnerName}.`
+      : "Billing is managed externally.",
+}));
 
 import { POST } from "./route";
 
 const BUSINESS = {
   id: "business-1",
+  partner_id: null,
+  billing_mode: "stripe",
   has_ein: true,
   billing_pilot: false,
   billing_comped: false,
@@ -95,6 +105,7 @@ beforeEach(() => {
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({ step: "complete" });
   mocks.createCheckoutSession.mockResolvedValue("https://checkout.test/session");
   mocks.getExistingTelnyxBrandLinkState.mockResolvedValue(null);
+  mocks.resolveAssignedPartnerName.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -102,6 +113,66 @@ afterEach(() => {
 });
 
 describe("POST /api/billing/checkout onboarding precedence", () => {
+  it.each([
+    ["partner-1", "Alpha Dog Agency"],
+    ["partner-2", "Second Partner"],
+  ])(
+    "rejects partner-managed checkout with the assigned %s name before any Stripe or onboarding work",
+    async (partnerId, partnerName) => {
+      queueResults({
+        data: {
+          ...BUSINESS,
+          partner_id: partnerId,
+          billing_mode: "invoiced",
+          has_ein: false,
+        },
+        error: null,
+      });
+      mocks.resolveAssignedPartnerName.mockResolvedValue(partnerName);
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "billing_managed_by_partner",
+        message: `Billing is handled by ${partnerName}.`,
+      });
+      expect(mocks.resolveAssignedPartnerName).toHaveBeenCalledWith(partnerId);
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+      expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
+      expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
+      expect(mocks.getExistingTelnyxBrandLinkState).not.toHaveBeenCalled();
+      expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("uses the exact external-billing fallback for an orphaned comped business", async () => {
+    queueResults({
+      data: {
+        ...BUSINESS,
+        partner_id: null,
+        billing_mode: "comped",
+        has_ein: false,
+      },
+      error: null,
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "billing_managed_by_partner",
+      message: "Billing is managed externally.",
+    });
+    expect(mocks.resolveAssignedPartnerName).toHaveBeenCalledWith(null);
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
+    expect(mocks.getExistingTelnyxBrandLinkState).not.toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks a new crafted Full Suite checkout before Stripe", async () => {
     queueResults({
       data: {

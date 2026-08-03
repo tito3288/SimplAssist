@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowRight, PhoneForwarded, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useBrand } from "@/components/branding/BrandProvider";
 import { useToast } from "@/components/ui/Toast";
 import { orangeAccentIcon } from "@/lib/glass";
 import { body, card, ink } from "@/lib/theme-v2/theme";
@@ -17,6 +18,7 @@ async function resolveNudge(): Promise<void> {
 }
 
 export default function CallForwardingNudge() {
+  const brand = useBrand();
   const router = useRouter();
   const { showToast } = useToast();
   const [visible, setVisible] = useState(true);
@@ -78,8 +80,8 @@ export default function CallForwardingNudge() {
             Want calls to ring your phone?
           </p>
           <p className={`mt-1 text-sm ${body}`}>
-            Forward calls to the phone you already use. If you miss one,
-            SimplAssist will still send the automatic follow-up.
+            Forward calls to the phone you already use. If you miss one,{" "}
+            {brand.name} will still send the automatic follow-up.
           </p>
           <button
             type="button"

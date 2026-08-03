@@ -647,10 +647,34 @@ export async function GET() {
     input.focus();
   }
 
+  function validatedPoweredByUrl(value) {
+    if (typeof value !== 'string' || !value || value !== value.trim()) return null;
+    try {
+      var parsed = new URL(value);
+      if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password) return null;
+      return parsed.href;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function applyPoweredByAttribution(data) {
+    footerLink.textContent = 'Powered by SimplAssist';
+    footerLink.setAttribute('href', baseUrl + '/');
+
+    if (typeof data.poweredByName === 'string' && data.poweredByName.trim()) {
+      footerLink.textContent = 'Powered by ' + data.poweredByName.trim();
+    }
+
+    var poweredByUrl = validatedPoweredByUrl(data.poweredByUrl);
+    if (poweredByUrl) footerLink.setAttribute('href', poweredByUrl);
+  }
+
   function applyLoadedConfig(data) {
     var firstLoad = !configInitialized;
     config = data;
     configInitialized = true;
+    applyPoweredByAttribution(data);
     titleH3.textContent = data.businessName || 'Chat';
     applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
     applyBrandColor(data.brandColor || '#0066FF');

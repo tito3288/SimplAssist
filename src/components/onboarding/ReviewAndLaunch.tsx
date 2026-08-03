@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { getUsStateName } from '@/lib/usStates';
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
@@ -11,12 +12,42 @@ import {
 import type { OnboardingState } from '@/lib/onboarding/types';
 import type { SubscriptionPlan } from '@/types/database';
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
+import { partnerManagedBillingMessage } from "@/lib/billing/partnerManagedBilling";
 import { SETUP_FEE_EXPLAINER_PATH } from "@/lib/support/constants";
 import { tile, statusSuccess, statusWarning, statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
 
 const RECOMMENDED_PLAN: SubscriptionPlan = 'sms_and_chat';
 const SETUP_FEE = SETUP_FEE_CENTS / 100;
+
+export function buildOnboardingLaunchRequest(args: {
+  billingMode: OnboardingState["billing"]["mode"];
+  plan: SubscriptionPlan;
+}): { url: string; init: RequestInit } {
+  if (args.billingMode !== "stripe") {
+    return {
+      url: "/api/onboarding/submit-registration",
+      init: { method: "POST" },
+    };
+  }
+
+  return {
+    url: "/api/billing/checkout",
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: args.plan, mode: "onboarding" }),
+    },
+  };
+}
+
+export function requestOnboardingLaunch(
+  args: Parameters<typeof buildOnboardingLaunchRequest>[0],
+  fetcher: typeof fetch = fetch
+): Promise<Response> {
+  const request = buildOnboardingLaunchRequest(args);
+  return fetcher(request.url, request.init);
+}
 
 interface ReviewData {
   businessInfo: {
@@ -138,6 +169,8 @@ export default function ReviewAndLaunch({
   onSubmitted,
   onLaunchBlocked,
 }: ReviewAndLaunchProps) {
+  const brand = useBrand();
+  const brandArticle = /^[aeiou]/i.test(brand.name.trim()) ? "an" : "a";
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(
@@ -147,14 +180,20 @@ export default function ReviewAndLaunch({
     billing.plan,
     billing.status
   );
+  const isPartnerManaged = billing.mode !== "stripe";
   const isPaidSubscription = Boolean(paidPlanKey);
   const paidPlan = paidPlanKey ? SUBSCRIPTION_PLANS[paidPlanKey] : null;
-  const launchHold = isPaidSubscription
-    ? classifyPaidLaunchHold(registration, pendingPhoneNumberFailureReason)
+  const launchHold = isPaidSubscription || isPartnerManaged
+    ? classifyPaidLaunchHold(
+        registration,
+        pendingPhoneNumberFailureReason,
+        brand.name
+      )
     : null;
   const primaryButtonLabel = primaryLaunchButtonLabel({
     data,
     isPaidSubscription,
+    isPartnerManaged,
     launchHold,
     launching,
   });
@@ -180,11 +219,13 @@ export default function ReviewAndLaunch({
     setLaunching(true);
 
     try {
-      const res = await fetch('/api/billing/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: paidPlanKey ?? selectedPlan, mode: 'onboarding' }),
+      const res = await requestOnboardingLaunch({
+        billingMode: billing.mode,
+        plan: paidPlanKey ?? selectedPlan,
       });
+      const requestFailureMessage = isPartnerManaged
+        ? "Could not submit your SMS registration right now."
+        : "Could not start checkout right now.";
       const response = (await res.json().catch(() => ({}))) as {
         success?: boolean;
         error?: string;
@@ -195,7 +236,7 @@ export default function ReviewAndLaunch({
       };
 
       if (!res.ok) {
-        setError(response.error || 'Could not start checkout right now.');
+        setError(response.error || requestFailureMessage);
         if (response.state) {
           onLaunchBlocked(response.state);
         }
@@ -212,9 +253,13 @@ export default function ReviewAndLaunch({
         return;
       }
 
-      setError('Could not start checkout right now.');
+      setError(requestFailureMessage);
     } catch {
-      setError('Could not start checkout right now.');
+      setError(
+        isPartnerManaged
+          ? "Could not submit your SMS registration right now."
+          : "Could not start checkout right now."
+      );
     } finally {
       setLaunching(false);
     }
@@ -232,15 +277,39 @@ export default function ReviewAndLaunch({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">
-          {isPaidSubscription ? 'Review & Setup Status' : 'Review & Pay'}
+          {isPartnerManaged
+            ? "Review & Submit"
+            : isPaidSubscription
+              ? "Review & Setup Status"
+              : "Review & Pay"}
         </h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-          {isPaidSubscription
-            ? 'Payment is complete. We will finish SMS setup from here without charging you again.'
-            : 'Choose your plan and pay before we submit your SMS registration for carrier review.'}
+          {isPartnerManaged
+            ? "Review your information before submitting your SMS registration for carrier review."
+            : isPaidSubscription
+              ? "Payment is complete. We will finish SMS setup from here without charging you again."
+              : "Choose your plan and pay before we submit your SMS registration for carrier review."}
         </p>
       </div>
 
+      {isPartnerManaged ? (
+        <Section title="Billing">
+          <div className={cn("rounded-lg p-3 text-sm", statusNeutral)}>
+            <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+              {partnerManagedBillingMessage(billing.handledByName)}
+            </p>
+          </div>
+          {launchHold && (
+            <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
+              <p className="font-medium">SMS setup is paused</p>
+              <p className="mt-1">{launchHold.message}</p>
+              {launchHold.helper && !isPartnerManaged && (
+                <p className="mt-2 text-xs">{launchHold.helper}</p>
+              )}
+            </div>
+          )}
+        </Section>
+      ) : (
       <Section title={isPaidSubscription ? 'Paid Plan' : 'Plan & Setup Fee'}>
         {isPaidSubscription && paidPlan ? (
           <div className="space-y-3">
@@ -266,7 +335,9 @@ export default function ReviewAndLaunch({
         ) : (
           <div className="space-y-3">
             <fieldset className="space-y-3">
-              <legend className="sr-only">Choose a SimplAssist plan</legend>
+              <legend className="sr-only">
+                Choose {brandArticle} {brand.name} plan
+              </legend>
 
               {(Object.entries(SUBSCRIPTION_PLANS) as [SubscriptionPlan, (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan]][]).map(([key, plan]) => {
                 const selected = selectedPlan === key;
@@ -302,6 +373,7 @@ export default function ReviewAndLaunch({
           </div>
         )}
       </Section>
+      )}
 
       {/* Business Info */}
       <Section title="Business Info" onEdit={() => onEditStep(1)}>
@@ -421,7 +493,7 @@ export default function ReviewAndLaunch({
           <div className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             <p>No phone number selected</p>
             <p className="text-xs text-stone-400 dark:text-[#666] mt-1">
-              Choose a SimplAssist number before submitting SMS registration.
+              Choose {brandArticle} {brand.name} number before submitting SMS registration.
             </p>
           </div>
         )}
@@ -463,7 +535,8 @@ export default function ReviewAndLaunch({
 
 function classifyPaidLaunchHold(
   registration: OnboardingState["registration"],
-  pendingPhoneNumberFailureReason: string | null
+  pendingPhoneNumberFailureReason: string | null,
+  brandName: string
 ): PaidLaunchHold | null {
   if (registration.holdReason === "held_no_ein" || isNoEinHold(registration.error)) {
     return {
@@ -485,7 +558,7 @@ function classifyPaidLaunchHold(
 
   if (isSubmissionDisabled(registration.error)) {
     return {
-      message: "SMS setup is paused. Contact SimplAssist support to continue.",
+      message: `SMS setup is paused. Contact ${brandName} support to continue.`,
       action: "none",
     };
   }
@@ -519,15 +592,24 @@ function classifyPaidLaunchHold(
 function primaryLaunchButtonLabel(args: {
   data: ReviewData;
   isPaidSubscription: boolean;
+  isPartnerManaged: boolean;
   launchHold: PaidLaunchHold | null;
   launching: boolean;
 }): string {
-  const { data, isPaidSubscription, launchHold, launching } = args;
+  const {
+    data,
+    isPaidSubscription,
+    isPartnerManaged,
+    launchHold,
+    launching,
+  } = args;
   if (launchHold?.buttonLabel) return launchHold.buttonLabel;
   if (launching) {
+    if (isPartnerManaged) return "Submitting registration...";
     return isPaidSubscription ? "Checking setup..." : "Opening checkout...";
   }
   if (!data.phoneNumber) return "Choose number to submit";
+  if (isPartnerManaged) return "Submit SMS registration";
   return isPaidSubscription ? "Continue SMS setup" : "Pay & submit SMS registration";
 }
 

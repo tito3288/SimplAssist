@@ -11,9 +11,14 @@ interface WidgetPageClientProps {
   config: WidgetConfig;
   businessId: string;
   businessName: string;
+  scriptOrigin: string;
 }
 
-export default function WidgetPageClient({ config, businessId }: WidgetPageClientProps) {
+export default function WidgetPageClient({
+  config,
+  businessId,
+  scriptOrigin,
+}: WidgetPageClientProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [previewValues, setPreviewValues] = useState<WidgetConfigFormValues>(() => ({
     brand_color: config.brand_color,
@@ -54,7 +59,10 @@ export default function WidgetPageClient({ config, businessId }: WidgetPageClien
             <WidgetPreview businessId={businessId} refreshKey={refreshKey} preview={previewValues} />
           </div>
           <div className={`p-6 ${card}`}>
-            <EmbedCodeGenerator businessId={businessId} />
+            <EmbedCodeGenerator
+              businessId={businessId}
+              scriptOrigin={scriptOrigin}
+            />
           </div>
         </div>
       </div>

@@ -7,15 +7,19 @@ import {
   hashA2pRiskInput,
 } from "@/lib/messaging/registration/riskScreening";
 import { AdminFlagForm } from "../AdminFlagForm";
+import { BusinessPartnerBillingForm } from "../BusinessPartnerBillingForm";
 import { A2pApproveForm } from "../A2pApproveForm";
 import { ExistingTelnyxBrandForm } from "../ExistingTelnyxBrandForm";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { card } from "@/lib/theme-v2/theme";
+import type { BillingMode, PartnerStatus } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
 type DetailBusiness = {
   id: string;
+  partner_id: string | null;
+  billing_mode: BillingMode;
   name: string;
   business_type: string | null;
   business_type_other: string | null;
@@ -50,6 +54,12 @@ type DetailBusiness = {
   billing_admin_notes: string | null;
 };
 
+type PartnerRow = {
+  id: string;
+  name: string;
+  status: PartnerStatus;
+};
+
 type UsageRow = {
   included_sms_parts: number;
   inbound_sms_parts: number;
@@ -67,12 +77,17 @@ export default async function AdminBusinessPage({
 }) {
   await requireAdminUser();
 
-  const [{ data: business }, { data: usage }, existingBrandLinkState] =
+  const [
+    { data: business },
+    { data: usage },
+    existingBrandLinkState,
+    { data: partners, error: partnersError },
+  ] =
     await Promise.all([
       supabaseAdmin
         .from("businesses")
         .select(
-          "id, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes"
+          "id, partner_id, billing_mode, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes"
         )
         .eq("id", params.businessId)
         .maybeSingle<DetailBusiness>(),
@@ -86,9 +101,17 @@ export default async function AdminBusinessPage({
         .limit(1)
         .maybeSingle<UsageRow>(),
       getExistingTelnyxBrandLinkState(params.businessId),
+      supabaseAdmin
+        .from("partners")
+        .select("id, name, status")
+        .order("name", { ascending: true })
+        .returns<PartnerRow[]>(),
     ]);
 
   if (!business) notFound();
+  if (partnersError) {
+    throw new Error("Failed to load partner options");
+  }
 
   const { input } = await buildA2pRiskInputForBusiness(business.id);
   const currentInputHash = hashA2pRiskInput(input);
@@ -96,6 +119,20 @@ export default async function AdminBusinessPage({
   const usedSms = usage
     ? usage.inbound_sms_parts + usage.outbound_sms_parts
     : 0;
+  const matchedPartner =
+    (partners ?? []).find((partner) => partner.id === business.partner_id) ??
+    null;
+  const currentPartner = matchedPartner ??
+    (business.partner_id
+      ? {
+          id: business.partner_id,
+          name: "Assigned partner",
+          status: "unavailable" as const,
+        }
+      : null);
+  const activePartners = (partners ?? [])
+    .filter((partner) => partner.status === "active")
+    .map(({ id, name }) => ({ id, name }));
 
   return (
     <main className="space-y-6">
@@ -131,9 +168,24 @@ export default async function AdminBusinessPage({
           )}
         </Card>
 
-        <Card title="Billing Flags">
-          <AdminFlagForm
+        <Card title="Partner Billing">
+          <BusinessPartnerBillingForm
             businessId={business.id}
+            initialPartnerId={business.partner_id}
+            initialBillingMode={business.billing_mode}
+            currentPartner={currentPartner}
+            activePartners={activePartners}
+          />
+        </Card>
+
+        <Card title="Billing Flags">
+          {/* A router refresh preserves client component state. Remount when
+              either server value changes so a stale Comped checkbox cannot
+              undo an assignment transition on the next flags save. */}
+          <AdminFlagForm
+            key={`${business.billing_mode}:${business.billing_comped}`}
+            businessId={business.id}
+            billingMode={business.billing_mode}
             initial={{
               billing_pilot: business.billing_pilot,
               billing_comped: business.billing_comped,

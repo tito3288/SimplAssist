@@ -74,9 +74,9 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 motion-reduce:transition-none ${
                     completed
-                      ? 'bg-[#ea580c] dark:bg-[#ff914d] text-white dark:text-[#16100b]'
+                      ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] text-white dark:text-[#16100b]'
                       : isCurrent
-                      ? 'bg-[#ea580c] dark:bg-[#ff914d] text-white dark:text-[#16100b]'
+                      ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] text-white dark:text-[#16100b]'
                       : 'bg-stone-200 dark:bg-white/[0.08] text-stone-500 dark:text-[#666]'
                   } ${isPeek ? 'opacity-45 scale-90' : 'opacity-100 scale-100'}`}
                 >
@@ -91,7 +91,7 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
                 <span
                   className={`mt-1 w-full truncate px-1 text-center text-xs transition-[color,opacity] duration-300 motion-reduce:transition-none ${
                     step <= safeStep
-                      ? 'text-[#c2410c] dark:text-[#ff914d] font-medium'
+                      ? 'text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] font-medium'
                       : 'text-stone-400 dark:text-[#666]'
                   } ${isPeek ? 'opacity-45' : 'opacity-100'} ${
                     showAllLabels || isCurrent ? '' : 'invisible'
@@ -117,7 +117,7 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
       </div>
       <div className="w-full bg-stone-200 dark:bg-white/[0.10] rounded-full h-2">
         <div
-          className="bg-[#ea580c] dark:bg-[#ff914d] h-2 rounded-full transition-all duration-300"
+          className="bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] h-2 rounded-full transition-all duration-300"
           style={{ width: `${(safeStep / STEP_LABELS.length) * 100}%` }}
         />
       </div>

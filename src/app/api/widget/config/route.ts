@@ -7,6 +7,10 @@ import {
   EntitlementResolutionError,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import {
+  BusinessPartnerResolutionError,
+  resolveWidgetAttribution,
+} from "@/lib/branding/businessPartner.server";
 
 const widgetConfigMutationSchema = z
   .object({
@@ -195,6 +199,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    let attribution;
+    try {
+      attribution = await resolveWidgetAttribution({
+        businessId,
+        hostHeader: request.headers.get("host"),
+      });
+    } catch (error) {
+      if (error instanceof BusinessPartnerResolutionError) {
+        console.error("Widget attribution lookup error:", error);
+        return NextResponse.json(
+          { error: "Service temporarily unavailable", retryable: true },
+          { status: 503, headers: corsHeaders }
+        );
+      }
+      throw error;
+    }
+
     return NextResponse.json(
       {
         available: true,
@@ -207,6 +228,7 @@ export async function GET(request: NextRequest) {
         leadCaptureEnabled: widgetConfig.lead_capture_enabled,
         leadCaptureTiming: widgetConfig.lead_capture_timing,
         quickReplies: widgetConfig.quick_replies || [],
+        ...attribution,
       },
       { headers: corsHeaders }
     );

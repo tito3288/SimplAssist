@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     }
   }
   class AIProcessingStateError extends Error {}
+  class BusinessPartnerResolutionError extends Error {}
   return {
     from: vi.fn(),
     serverFrom: vi.fn(),
@@ -18,8 +19,10 @@ const mocks = vi.hoisted(() => {
     canUseFeature: vi.fn(),
     processIncomingMessageDetailed: vi.fn(),
     recordKnowledgeGap: vi.fn(),
+    resolveWidgetAttribution: vi.fn(),
     AIProcessingBlockedError,
     AIProcessingStateError,
+    BusinessPartnerResolutionError,
   };
 });
 
@@ -49,6 +52,10 @@ vi.mock("@/lib/ai/engine", () => ({
 }));
 vi.mock("@/lib/ai/knowledgeGaps", () => ({
   recordKnowledgeGap: mocks.recordKnowledgeGap,
+}));
+vi.mock("@/lib/branding/businessPartner.server", () => ({
+  resolveWidgetAttribution: mocks.resolveWidgetAttribution,
+  BusinessPartnerResolutionError: mocks.BusinessPartnerResolutionError,
 }));
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
@@ -84,15 +91,17 @@ function queueDatabaseResults(...results: QueryResult[]) {
   });
 }
 
-function configRequest() {
+function configRequest(headers?: HeadersInit) {
   return new NextRequest(
-    `http://localhost/api/widget/config?businessId=${BUSINESS_ID}`
+    `http://localhost/api/widget/config?businessId=${BUSINESS_ID}`,
+    { headers },
   );
 }
 
-function previewConfigRequest() {
+function previewConfigRequest(headers?: HeadersInit) {
   return new NextRequest(
-    `http://localhost/api/widget/preview-config?businessId=${BUSINESS_ID}`
+    `http://localhost/api/widget/preview-config?businessId=${BUSINESS_ID}`,
+    { headers },
   );
 }
 
@@ -149,6 +158,10 @@ beforeEach(() => {
     sourceMessageId: "customer-message-1",
   });
   mocks.recordKnowledgeGap.mockResolvedValue(undefined);
+  mocks.resolveWidgetAttribution.mockResolvedValue({
+    poweredByName: "SimplAssist",
+    poweredByUrl: "https://simplassist.com",
+  });
   queueDatabaseResults();
 });
 
@@ -279,6 +292,8 @@ describe("public widget entitlement boundaries", () => {
       available: true,
       businessName: "Acme",
       welcomeMessage: "Welcome",
+      poweredByName: "SimplAssist",
+      poweredByUrl: "https://simplassist.com",
     });
     const configChain = mocks.from.mock.results[0]?.value as {
       eq: ReturnType<typeof vi.fn>;
@@ -511,6 +526,96 @@ describe("public widget entitlement boundaries", () => {
   });
 });
 
+describe("widget attribution responses", () => {
+  const widgetConfig = {
+    id: "widget-1",
+    brand_color: "#123456",
+    position: "bottom_right",
+    welcome_message: "Welcome",
+    show_logo: false,
+    logo_url: null,
+    lead_capture_enabled: true,
+    lead_capture_timing: "start",
+    quick_replies: ["Pricing"],
+  };
+
+  it("returns assigned-partner attribution without passing forwarded Host headers", async () => {
+    queueDatabaseResults(
+      { data: widgetConfig, error: null },
+      { data: { name: "Acme" }, error: null },
+    );
+    mocks.resolveWidgetAttribution.mockResolvedValue({
+      poweredByName: "Alpha Dog Agency",
+      poweredByUrl: "https://app.alphadogagency.ai",
+    });
+
+    const response = await getConfig(
+      configRequest({
+        Host: "simplassist.com",
+        "X-Forwarded-Host": "app.alphadogagency.ai",
+        Forwarded: "host=app.alphadogagency.ai",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      poweredByName: "Alpha Dog Agency",
+      poweredByUrl: "https://app.alphadogagency.ai",
+    });
+    expect(mocks.resolveWidgetAttribution).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      hostHeader: "simplassist.com",
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("returns retryable 503 with CORS when public attribution lookup fails", async () => {
+    queueDatabaseResults(
+      { data: widgetConfig, error: null },
+      { data: { name: "Acme" }, error: null },
+    );
+    mocks.resolveWidgetAttribution.mockRejectedValue(
+      new mocks.BusinessPartnerResolutionError("database unavailable"),
+    );
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("returns retryable 503 with private cache headers when preview attribution fails", async () => {
+    setServerBusinessResult({
+      data: { id: BUSINESS_ID, name: "Acme" },
+      error: null,
+    });
+    queueDatabaseResults({ data: widgetConfig, error: null });
+    mocks.resolveWidgetAttribution.mockRejectedValue(
+      new mocks.BusinessPartnerResolutionError("database unavailable"),
+    );
+
+    const response = await getPreviewConfig(
+      previewConfigRequest({
+        Host: "simplassist.com",
+        "X-Forwarded-Host": "app.alphadogagency.ai",
+        Forwarded: "host=app.alphadogagency.ai",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("vary")).toBe("Cookie");
+  });
+});
+
 describe("owner-only widget preview", () => {
   it("requires an authenticated owner", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null } });
@@ -572,7 +677,13 @@ describe("owner-only widget preview", () => {
       error: null,
     });
 
-    const response = await getPreviewConfig(previewConfigRequest());
+    const response = await getPreviewConfig(
+      previewConfigRequest({
+        Host: "simplassist.com",
+        "X-Forwarded-Host": "app.alphadogagency.ai",
+        Forwarded: "host=app.alphadogagency.ai",
+      }),
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -581,8 +692,14 @@ describe("owner-only widget preview", () => {
       businessName: "Acme",
       position: "bottom_left",
       welcomeMessage: "Preview welcome",
+      poweredByName: "SimplAssist",
+      poweredByUrl: "https://simplassist.com",
     });
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mocks.resolveWidgetAttribution).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      hostHeader: "simplassist.com",
+    });
     const previewChain = mocks.from.mock.results[0]?.value as {
       eq: ReturnType<typeof vi.fn>;
     };

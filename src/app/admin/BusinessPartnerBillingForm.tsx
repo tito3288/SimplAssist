@@ -1,0 +1,182 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { primaryCtaCompactClass } from "@/lib/glass";
+import type { BillingMode, PartnerStatus } from "@/types/database";
+
+export type AdminPartnerOption = {
+  id: string;
+  name: string;
+};
+
+type CurrentPartner = AdminPartnerOption & {
+  status: PartnerStatus | "unavailable";
+};
+
+interface BusinessPartnerBillingFormProps {
+  businessId: string;
+  initialPartnerId: string | null;
+  initialBillingMode: BillingMode;
+  currentPartner: CurrentPartner | null;
+  activePartners: AdminPartnerOption[];
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  subscription_exists:
+    "Remove every Stripe subscription row before assigning partner-managed billing.",
+  partner_required: "Choose an active partner for non-Stripe billing.",
+  partner_inactive: "That partner is inactive or no longer available.",
+  unsupported_partner_stripe:
+    "Phase 1 does not support assigning a partner while Stripe billing is selected.",
+  business_not_found: "Business not found.",
+};
+
+export function BusinessPartnerBillingForm({
+  businessId,
+  initialPartnerId,
+  initialBillingMode,
+  currentPartner,
+  activePartners,
+}: BusinessPartnerBillingFormProps) {
+  const router = useRouter();
+  const [partnerId, setPartnerId] = useState(initialPartnerId ?? "");
+  const [billingMode, setBillingMode] = useState<BillingMode>(
+    initialBillingMode
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const currentPartnerIsSelectable = activePartners.some(
+    (partner) => partner.id === currentPartner?.id
+  );
+  const currentPartnerLabel = !currentPartner
+    ? "Unassigned"
+    : currentPartner.status === "unavailable"
+      ? "Assigned partner unavailable"
+      : `${currentPartner.name}${
+          currentPartner.status === "inactive" ? " (inactive)" : ""
+        }`;
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+
+    if (billingMode === "stripe" && partnerId) {
+      setError(ERROR_MESSAGES.unsupported_partner_stripe);
+      return;
+    }
+    if (billingMode !== "stripe" && !partnerId) {
+      setError(ERROR_MESSAGES.partner_required);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/business-partner-billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessId,
+          partnerId: partnerId || null,
+          billingMode,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setError(
+          (payload.error && ERROR_MESSAGES[payload.error]) ||
+            "Could not update partner billing."
+        );
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Could not update partner billing.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <dl className="space-y-2 text-sm">
+        <div className="flex justify-between gap-4">
+          <dt className="text-stone-500 dark:text-[#bdbdbf]">
+            Current partner
+          </dt>
+          <dd className="text-right">{currentPartnerLabel}</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-stone-500 dark:text-[#bdbdbf]">
+            Current billing mode
+          </dt>
+          <dd className="text-right capitalize">{initialBillingMode}</dd>
+        </div>
+      </dl>
+
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Partner</span>
+        <select
+          value={partnerId}
+          onChange={(event) => setPartnerId(event.target.value)}
+          className="w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-stone-900 dark:border-white/[0.12] dark:bg-[#242426] dark:text-[#f5f5f5]"
+        >
+          <option value="">Unassigned</option>
+          {currentPartner && !currentPartnerIsSelectable && (
+            <option value={currentPartner.id} disabled>
+              {currentPartner.status === "unavailable"
+                ? "Assigned partner unavailable"
+                : `${currentPartner.name} (inactive)`}
+            </option>
+          )}
+          {activePartners.map((partner) => (
+            <option key={partner.id} value={partner.id}>
+              {partner.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Billing mode</span>
+        <select
+          value={billingMode}
+          onChange={(event) =>
+            setBillingMode(event.target.value as BillingMode)
+          }
+          className="w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-stone-900 dark:border-white/[0.12] dark:bg-[#242426] dark:text-[#f5f5f5]"
+        >
+          <option value="stripe">Stripe</option>
+          <option value="invoiced">Partner invoiced</option>
+          <option value="comped">Partner comped</option>
+        </select>
+      </label>
+
+      <div className="space-y-2 text-xs text-amber-800 dark:text-amber-200">
+        <p>
+          Non-Stripe assignment is refused while any subscription row exists,
+          including a canceled subscription.
+        </p>
+        <p>
+          Returning to Stripe removes the temporary comp bridge. The business
+          will require checkout before access continues.
+        </p>
+      </div>
+
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={saving}
+        className={`${primaryCtaCompactClass} py-2`}
+      >
+        {saving ? "Saving..." : "Save partner billing"}
+      </button>
+    </form>
+  );
+}

@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAdminUser: vi.fn(),
+  from: vi.fn(),
   update: vi.fn(),
-  eq: vi.fn(),
-  select: vi.fn(),
+  updateEq: vi.fn(),
+  updateSelect: vi.fn(),
+  lookupSelect: vi.fn(),
+  lookupEq: vi.fn(),
+  maybeSingle: vi.fn(),
 }));
 
 vi.mock("@/lib/admin/auth", () => ({
@@ -14,7 +18,7 @@ vi.mock("@/lib/admin/auth", () => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: {
-    from: vi.fn(() => ({ update: mocks.update })),
+    from: mocks.from,
   },
 }));
 
@@ -25,6 +29,7 @@ const ADMIN_ID = "00000000-0000-4000-8000-000000000999";
 
 const validBody = {
   businessId: BUSINESS_ID,
+  expectedBillingMode: "stripe",
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: true,
@@ -43,9 +48,27 @@ function makeRequest(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.update.mockReturnValue({ eq: mocks.eq });
-  mocks.eq.mockReturnValue({ select: mocks.select });
-  mocks.select.mockResolvedValue({ data: [{ id: BUSINESS_ID }], error: null });
+  const updateQuery = {
+    eq: mocks.updateEq,
+    select: mocks.updateSelect,
+  };
+  const lookupQuery = {
+    eq: mocks.lookupEq,
+    maybeSingle: mocks.maybeSingle,
+  };
+  mocks.from.mockReturnValue({
+    update: mocks.update,
+    select: mocks.lookupSelect,
+  });
+  mocks.update.mockReturnValue(updateQuery);
+  mocks.updateEq.mockReturnValue(updateQuery);
+  mocks.updateSelect.mockResolvedValue({
+    data: [{ id: BUSINESS_ID, billing_mode: "stripe" }],
+    error: null,
+  });
+  mocks.lookupSelect.mockReturnValue(lookupQuery);
+  mocks.lookupEq.mockReturnValue(lookupQuery);
+  mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
 });
 
 describe("POST /api/admin/business-flags", () => {
@@ -58,7 +81,7 @@ describe("POST /api/admin/business-flags", () => {
 
   it("returns 404 when the business id matches zero rows", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
-    mocks.select.mockResolvedValue({ data: [], error: null });
+    mocks.updateSelect.mockResolvedValue({ data: [], error: null });
     const response = await POST(makeRequest(validBody));
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -77,8 +100,8 @@ describe("POST /api/admin/business-flags", () => {
     const written = mocks.update.mock.calls[0][0];
     expect(written.billing_flags_updated_by).toBe(ADMIN_ID);
     expect(written.sms_overage_opted_in_by).toBe(ADMIN_ID);
-    expect(mocks.eq).toHaveBeenCalledWith("id", BUSINESS_ID);
-    expect(mocks.select).toHaveBeenCalledWith("id");
+    expect(mocks.updateEq).toHaveBeenCalledWith("id", BUSINESS_ID);
+    expect(mocks.updateSelect).toHaveBeenCalledWith("id, billing_mode");
   });
 
   it("strips payload-supplied attribution and unknown columns (mass-assignment guard)", async () => {
@@ -120,11 +143,92 @@ describe("POST /api/admin/business-flags", () => {
 
   it("returns 500 when the database write fails", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
-    mocks.select.mockResolvedValue({
+    mocks.updateSelect.mockResolvedValue({
       data: null,
       error: { message: "boom" },
     });
     const response = await POST(makeRequest(validBody));
     expect(response.status).toBe(500);
+  });
+
+  it("adds an atomic Stripe-mode predicate when clearing Comped", async () => {
+    mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+
+    const response = await POST(makeRequest(validBody));
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateEq).toHaveBeenCalledWith("id", BUSINESS_ID);
+    expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "stripe");
+  });
+
+  it("rejects clearing Comped for a non-Stripe business", async () => {
+    mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+    mocks.updateSelect.mockResolvedValue({ data: [], error: null });
+    mocks.maybeSingle.mockResolvedValue({
+      data: { id: BUSINESS_ID, billing_mode: "invoiced" },
+      error: null,
+    });
+
+    const response = await POST(makeRequest(validBody));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "partner_billing_owns_comped",
+      message:
+        "Partner billing owns the temporary Comped flag for this business.",
+    });
+    expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "stripe");
+    expect(mocks.lookupSelect).toHaveBeenCalledWith("id, billing_mode");
+  });
+
+  it("rejects a non-Stripe form that explicitly tries to clear Comped before writing", async () => {
+    mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+
+    const response = await POST(
+      makeRequest({ ...validBody, expectedBillingMode: "comped" })
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("allows other flag edits that preserve Comped in non-Stripe mode", async () => {
+    mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+
+    const response = await POST(
+      makeRequest({
+        ...validBody,
+        expectedBillingMode: "invoiced",
+        billing_comped: true,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "invoiced");
+    expect(mocks.updateEq).not.toHaveBeenCalledWith("billing_mode", "stripe");
+    expect(mocks.maybeSingle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale non-Stripe form after the business returns to Stripe", async () => {
+    mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+    mocks.updateSelect.mockResolvedValue({ data: [], error: null });
+    mocks.maybeSingle.mockResolvedValue({
+      data: { id: BUSINESS_ID, billing_mode: "stripe" },
+      error: null,
+    });
+
+    const response = await POST(
+      makeRequest({
+        ...validBody,
+        expectedBillingMode: "invoiced",
+        billing_comped: true,
+      })
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "billing_mode_changed",
+      message: "Billing mode changed while flags were being saved. Retry.",
+    });
   });
 });

@@ -6,6 +6,26 @@
 :root {
   --background: #faf8f4;
   --foreground: #1c1917;
+  --brand-primary: #ea580c;
+  --brand-primary-rgb: 234 88 12;
+  --brand-primary-hover: #c2410c;
+  --brand-primary-hover-rgb: 194 65 12;
+  --brand-primary-active: #9a3412;
+  --brand-primary-active-rgb: 154 52 18;
+  --brand-accent: #c2410c;
+  --brand-accent-rgb: 194 65 12;
+  --brand-primary-dark: #ff914d;
+  --brand-primary-dark-rgb: 255 145 77;
+  --brand-primary-hover-dark: #f57f33;
+  --brand-primary-hover-dark-rgb: 245 127 51;
+  --brand-primary-active-dark: #e8752c;
+  --brand-primary-active-dark-rgb: 232 117 44;
+  --brand-accent-dark: #ff914d;
+  --brand-accent-dark-rgb: 255 145 77;
+  --brand-accent-soft: #fdf1e7;
+  --brand-accent-soft-border: #f5dcc4;
+  --brand-accent-soft-dark: #ffd7bf;
+  --brand-primary-soft-dark: #ffb07a;
 }
 
 /* Aligns with next-themes `class="dark"` on <html> (Tailwind darkMode: class) */
@@ -89,7 +109,7 @@ body {
   .dot {
     width: 12px;
     height: 12px;
-    background: #ea580c;
+    background: var(--brand-primary);
     border-radius: 50%;
     margin: 0 auto 20px;
     animation: sa-dot-pulse 1.5s infinite;
@@ -97,7 +117,7 @@ body {
   }
 
   .dark .dot {
-    background: #ff914d;
+    background: var(--brand-primary-dark);
   }
 
   .dot.dot--inline {

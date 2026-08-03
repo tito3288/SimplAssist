@@ -165,6 +165,7 @@ export default async function DashboardPage() {
         hotLeads={hotLeads || []}
         phoneNumber={activePhoneNumber}
         showCallForwardingNudge={showCallForwardingNudge}
+        billingMode={business.billing_mode}
         a2pStatus={{
           brandStatus: business.brand_status ?? null,
           brandStatusUpdatedAt: business.brand_status_updated_at ?? null,

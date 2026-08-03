@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { primaryCtaCompactClass } from "@/lib/glass";
+import type { BillingMode } from "@/types/database";
 
 interface AdminFlagFormProps {
   businessId: string;
+  billingMode: BillingMode;
   initial: {
     billing_pilot: boolean;
     billing_comped: boolean;
@@ -16,7 +18,11 @@ interface AdminFlagFormProps {
   };
 }
 
-export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
+export function AdminFlagForm({
+  businessId,
+  billingMode,
+  initial,
+}: AdminFlagFormProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,14 +36,19 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
     const response = await fetch("/api/admin/business-flags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ businessId, ...flags }),
+      body: JSON.stringify({
+        businessId,
+        expectedBillingMode: billingMode,
+        ...flags,
+      }),
     });
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
+        message?: string;
       };
-      setError(payload.error ?? "Could not update flags.");
+      setError(payload.message ?? payload.error ?? "Could not update flags.");
       setSaving(false);
       return;
     }
@@ -58,10 +69,20 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
             ["sms_overage_opt_in", "Overage opt-in"],
           ] as const
         ).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-2 text-sm">
+          <label
+            key={key}
+            className={`flex items-center gap-2 text-sm ${
+              key === "billing_comped" && billingMode !== "stripe"
+                ? "text-stone-400 dark:text-[#666]"
+                : ""
+            }`}
+          >
             <input
               type="checkbox"
               checked={flags[key]}
+              disabled={
+                key === "billing_comped" && billingMode !== "stripe"
+              }
               onChange={(event) =>
                 setFlags((current) => ({
                   ...current,
@@ -74,6 +95,12 @@ export function AdminFlagForm({ businessId, initial }: AdminFlagFormProps) {
           </label>
         ))}
       </div>
+      {billingMode !== "stripe" && (
+        <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+          Partner billing owns the temporary Comped flag. Return the business
+          to Stripe mode before changing it manually.
+        </p>
+      )}
       <textarea
         value={flags.billing_admin_notes ?? ""}
         onChange={(event) =>

@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { MessageSquare, Users, Zap, Mail, ArrowRight, Cog, CreditCard, Flame, Phone, X, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
-import type { Conversation, Contact } from '@/types/database';
+import type { BillingMode, Conversation, Contact } from '@/types/database';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
 import A2pStatusCard, { type A2pStatusCardProps } from '@/components/dashboard/A2pStatusCard';
 import CallForwardingNudge from '@/components/dashboard/CallForwardingNudge';
+import { useBrand } from '@/components/branding/BrandProvider';
 import { orangeAccentIcon } from '@/lib/glass';
 import { card as cardSurface, ink, body, statusSuccess, statusInfo } from '@/lib/theme-v2/theme';
 
@@ -30,6 +31,7 @@ interface DashboardOverviewProps {
   phoneNumber: string | null;
   a2pStatus: A2pStatusCardProps;
   showCallForwardingNudge: boolean;
+  billingMode: BillingMode;
 }
 
 const statCards = [
@@ -76,7 +78,9 @@ export default function DashboardOverview({
   phoneNumber,
   a2pStatus,
   showCallForwardingNudge,
+  billingMode,
 }: DashboardOverviewProps) {
+  const brand = useBrand();
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -94,7 +98,7 @@ export default function DashboardOverview({
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-medium ${ink}`}>
-                Your SimplAssist account doesn&apos;t have a phone number yet. Customers can&apos;t text you until you set one up.
+                Your {brand.name} account doesn&apos;t have a phone number yet. Customers can&apos;t text you until you set one up.
               </p>
             </div>
             <button
@@ -148,7 +152,7 @@ export default function DashboardOverview({
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <p className={`text-sm ${body}`}>Your SimplAssist Number</p>
+                <p className={`text-sm ${body}`}>Your {brand.name} Number</p>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ff914d] dark:border-[rgba(255,145,77,.22)]">
                   {a2pStatus.smsReady ? 'Active' : 'Setup pending'}
                 </span>
@@ -336,7 +340,9 @@ export default function DashboardOverview({
               Billing
             </h4>
             <p className={`text-sm leading-relaxed ${body}`}>
-              Manage your plan, payment method, and subscription details.
+              {billingMode === 'stripe'
+                ? 'Manage your plan, payment method, and subscription details.'
+                : 'View your partner-managed billing details'}
             </p>
           </Link>
         </div>
@@ -356,7 +362,7 @@ export default function DashboardOverview({
               </button>
             </div>
             <p className={`text-sm mb-4 ${body}`}>
-              Search for an available phone number and set it up for SimplAssist.
+              Search for an available phone number and set it up for {brand.name}.
             </p>
             <PhoneNumberSelector />
           </div>

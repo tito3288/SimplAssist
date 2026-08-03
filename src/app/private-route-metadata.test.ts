@@ -14,6 +14,9 @@ vi.mock("@/lib/messaging/lookup", () => ({
 }));
 vi.mock("@/lib/billing/entitlements", () => ({ canUseFeature: vi.fn() }));
 vi.mock("@/lib/admin/auth", () => ({ getAdminGateState: vi.fn() }));
+vi.mock("@/lib/branding/requestBrand.server", () => ({
+  getRequestBrand: vi.fn(),
+}));
 
 import { metadata as authMetadata } from "./(auth)/layout";
 import { metadata as dashboardMetadata } from "./(dashboard)/layout";

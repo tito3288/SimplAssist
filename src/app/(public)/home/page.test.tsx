@@ -1,13 +1,22 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  getRequestBrand: vi.fn(),
+}));
+
+vi.mock("server-only", () => ({}));
 vi.mock("next/font/local", () => ({
   default: () => ({ variable: "font-test-variable" }),
 }));
 vi.mock("next/script", () => ({ default: () => null }));
+vi.mock("@/lib/branding/requestBrand.server", () => ({
+  getRequestBrand: mocks.getRequestBrand,
+}));
 
 import RootLayout from "../../layout";
-import CanonicalHomepage, { metadata } from "../../page";
+import { metadata } from "../../page";
+import CanonicalHomepage from "./page";
 import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
 import {
   getHomepageJsonLd,
@@ -17,6 +26,36 @@ import {
   HOME_METADATA,
   HOME_TITLE,
 } from "./seo";
+
+const DEFAULT_REQUEST_BRAND = {
+  source: "default" as const,
+  isPreview: false,
+  brand: {
+    kind: "default" as const,
+    partnerId: null,
+    slug: null,
+    name: "SimplAssist",
+    publicOrigin: "https://simplassist.com",
+    logoLightUrl: "/logo-light.png",
+    logoDarkUrl: "/logo-dark.png",
+    faviconUrl: "/favicon-2.png",
+    colors: {
+      primary: "#ea580c",
+      primaryHover: "#c2410c",
+      primaryActive: "#9a3412",
+      accent: "#c2410c",
+      primaryDark: "#ff914d",
+      primaryHoverDark: "#f57f33",
+      primaryActiveDark: "#e8752c",
+      accentDark: "#ff914d",
+    },
+  },
+};
+
+beforeEach(() => {
+  mocks.getRequestBrand.mockReset();
+  mocks.getRequestBrand.mockResolvedValue(DEFAULT_REQUEST_BRAND);
+});
 
 function visibleText(html: string): string {
   return html
@@ -95,11 +134,11 @@ describe("canonical homepage static HTML", () => {
     }
   });
 
-  it("ships a no-JavaScript override for every initially hidden reveal", () => {
+  it("ships a no-JavaScript override for every initially hidden reveal", async () => {
     const page = <CanonicalHomepage />;
     const pageHtml = renderToStaticMarkup(page);
     const documentHtml = renderToStaticMarkup(
-      <RootLayout>{page}</RootLayout>
+      await RootLayout({ children: page })
     );
 
     expect(pageHtml).toContain("sa-reveal");

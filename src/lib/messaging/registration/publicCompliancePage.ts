@@ -75,6 +75,42 @@ const SAFE_INLINE_STYLE_PROPERTIES = new Set([
   "text-transform",
 ]);
 
+// RootLayout emits only this fixed palette contract. These properties affect
+// color decoration, never layout or visibility, and their values are validated
+// again from the fetched HTML before the compliance DOM is accepted.
+const BRAND_HEX_INLINE_STYLE_PROPERTIES = new Set([
+  "--brand-primary",
+  "--brand-primary-hover",
+  "--brand-primary-active",
+  "--brand-accent",
+  "--brand-primary-dark",
+  "--brand-primary-hover-dark",
+  "--brand-primary-active-dark",
+  "--brand-accent-dark",
+  "--brand-accent-soft",
+  "--brand-accent-soft-border",
+  "--brand-accent-soft-dark",
+  "--brand-primary-soft-dark",
+]);
+
+const BRAND_RGB_INLINE_STYLE_PROPERTIES = new Set([
+  "--brand-primary-rgb",
+  "--brand-primary-hover-rgb",
+  "--brand-primary-active-rgb",
+  "--brand-accent-rgb",
+  "--brand-primary-dark-rgb",
+  "--brand-primary-hover-dark-rgb",
+  "--brand-primary-active-dark-rgb",
+  "--brand-accent-dark-rgb",
+]);
+
+const READABLE_BRAND_TEXT_VARIABLES = new Set([
+  "--brand-primary-active",
+  "--brand-accent",
+  "--brand-accent-dark",
+  "--brand-primary-soft-dark",
+]);
+
 const ALLOWED_HEAD_ELEMENTS = new Set([
   "base",
   "head",
@@ -603,7 +639,13 @@ function requireSingleDocumentBody(documentNode: DomNode): DomElement {
         "Parsed HTML contains nested anchors with browser-ambiguous link targets"
       );
     }
-    if (currentElement && elementMayOccludeCompliancePage(currentElement)) {
+    if (
+      currentElement &&
+      elementMayOccludeCompliancePage(
+        currentElement,
+        currentElement.name === "html" && currentElement.parent === documentNode
+      )
+    ) {
       throw new Error(
         "Parsed HTML contains a foreground-positioned element that may cover the compliance page"
       );
@@ -792,7 +834,10 @@ function isValidNextFlightBootstrap(scriptText: string): boolean {
   }
 }
 
-function elementMayOccludeCompliancePage(element: DomElement): boolean {
+function elementMayOccludeCompliancePage(
+  element: DomElement,
+  allowRootBrandProperties = false
+): boolean {
   if (
     element.name === "dialog" &&
     Object.prototype.hasOwnProperty.call(element.attribs, "open")
@@ -841,7 +886,7 @@ function elementMayOccludeCompliancePage(element: DomElement): boolean {
 
   const unsafeInlineStyleInForeground =
     (element.attribs.style ?? "").trim() !== "" &&
-    parsedInlineStyleSuppresses(parsedInlineStyle) &&
+    parsedInlineStyleSuppresses(parsedInlineStyle, allowRootBrandProperties) &&
     !unconditionallyBehind;
   const overlappingUtilityInForeground =
     utilities.some(
@@ -932,7 +977,13 @@ function collectVisibleDom(body: DomElement): VisibleDom {
   // document is rendered. A hidden root must make every body marker ineligible.
   let documentAncestor = body.parent ?? null;
   while (documentAncestor) {
-    if (isElement(documentAncestor) && isSuppressedElement(documentAncestor)) {
+    if (
+      isElement(documentAncestor) &&
+      isSuppressedElement(
+        documentAncestor,
+        documentAncestor === body.parent && documentAncestor.name === "html"
+      )
+    ) {
       return emptyDom();
     }
     documentAncestor = documentAncestor.parent ?? null;
@@ -996,7 +1047,10 @@ function collectVisibleDom(body: DomElement): VisibleDom {
   };
 }
 
-function isSuppressedElement(element: DomElement): boolean {
+function isSuppressedElement(
+  element: DomElement,
+  allowRootBrandProperties = false
+): boolean {
   const tag = element.name;
   const attributes = element.attribs;
   if (NON_RENDERED_ELEMENTS.has(tag)) return true;
@@ -1021,20 +1075,59 @@ function isSuppressedElement(element: DomElement): boolean {
     return true;
   }
   return (
-    inlineStyleSuppresses(attributes.style ?? "") ||
+    inlineStyleSuppresses(
+      attributes.style ?? "",
+      allowRootBrandProperties
+    ) ||
     utilityClassesSuppress(attributes.class ?? "")
   );
 }
 
-function inlineStyleSuppresses(style: string): boolean {
+function inlineStyleSuppresses(
+  style: string,
+  allowRootBrandProperties = false
+): boolean {
   if (!style.trim()) return false;
-  return parsedInlineStyleSuppresses(parseInlineStyleDeclarations(style));
+  return parsedInlineStyleSuppresses(
+    parseInlineStyleDeclarations(style),
+    allowRootBrandProperties
+  );
 }
 
-function parsedInlineStyleSuppresses(style: ParsedInlineStyle): boolean {
-  return Array.from(style.values.keys()).some(
-    (property) => !SAFE_INLINE_STYLE_PROPERTIES.has(property)
+function parsedInlineStyleSuppresses(
+  style: ParsedInlineStyle,
+  allowRootBrandProperties = false
+): boolean {
+  return Array.from(style.values.entries()).some(
+    ([property, value]) =>
+      !isSafeInlineStyleDeclaration(
+        property,
+        value,
+        allowRootBrandProperties
+      )
   );
+}
+
+function isSafeInlineStyleDeclaration(
+  property: string,
+  value: string,
+  allowRootBrandProperties: boolean
+): boolean {
+  if (SAFE_INLINE_STYLE_PROPERTIES.has(property)) return true;
+  if (!allowRootBrandProperties) return false;
+  if (BRAND_HEX_INLINE_STYLE_PROPERTIES.has(property)) {
+    return /^#[0-9a-f]{6}$/.test(value);
+  }
+  if (BRAND_RGB_INLINE_STYLE_PROPERTIES.has(property)) {
+    const channels = value.match(
+      /^((?:0|[1-9]\d{0,2})) ((?:0|[1-9]\d{0,2})) ((?:0|[1-9]\d{0,2}))$/
+    );
+    return (
+      channels !== null &&
+      channels.slice(1).every((channel) => Number(channel) <= 255)
+    );
+  }
+  return false;
 }
 
 function parseInlineStyleDeclarations(style: string): ParsedInlineStyle {
@@ -1064,13 +1157,19 @@ function parseInlineStyleDeclarations(style: string): ParsedInlineStyle {
       });
       continue;
     }
-    const property = declaration.slice(0, separator).trim().toLowerCase();
-    const rawValue = declaration
-      .slice(separator + 1)
-      .trim()
-      .toLowerCase();
+    const rawProperty = declaration.slice(0, separator).trim();
+    const isCustomProperty = rawProperty.startsWith("--");
+    const property = isCustomProperty
+      ? rawProperty
+      : rawProperty.toLowerCase();
+    const rawValue = declaration.slice(separator + 1).trim();
     const important = /!\s*important\s*$/i.test(rawValue);
-    const value = rawValue.replace(/!\s*important\s*$/i, "").trim();
+    const valueWithoutImportant = rawValue
+      .replace(/!\s*important\s*$/i, "")
+      .trim();
+    const value = isCustomProperty
+      ? valueWithoutImportant
+      : valueWithoutImportant.toLowerCase();
     const previous = declarationsByProperty.get(property);
 
     if (previous && ["position", "z-index"].includes(property)) {
@@ -1119,6 +1218,12 @@ function classifyReadableArbitraryTextValue(
   value: string
 ): "color" | "font-size" | null {
   const normalized = value.trim().replace(/_/g, " ");
+  const brandVariable = normalized.match(/^var\((--brand-[a-z-]+)\)$/);
+  if (brandVariable) {
+    return READABLE_BRAND_TEXT_VARIABLES.has(brandVariable[1])
+      ? "color"
+      : null;
+  }
   if (normalized.startsWith("color:")) {
     return isOpaqueHexColor(normalized.slice("color:".length))
       ? "color"
@@ -1234,11 +1339,13 @@ function parseCssOpacity(value: string): number | null {
 }
 
 function utilityClassesSuppress(className: string): boolean {
-  const tokens = className
+  const rawTokens = className
     .split(/\s+/)
-    .map((token) => token.trim().toLowerCase())
+    .map((token) => token.trim())
     .filter(Boolean);
+  const tokens = rawTokens.map((token) => token.toLowerCase());
   const utilities = tokens.map(tailwindUtilityFromToken);
+  const rawUtilities = rawTokens.map(tailwindUtilityFromToken);
 
   if (utilities.some((utility) => HIDDEN_UTILITY_CLASSES.has(utility))) {
     return true;
@@ -1246,7 +1353,7 @@ function utilityClassesSuppress(className: string): boolean {
   if (utilitiesHaveMatchingForegroundAndBackground(utilities)) return true;
   if (overflowUtilityConcealsContent(utilities)) return true;
   if (
-    utilities.some((utility) => {
+    utilities.some((utility, index) => {
       if (/^(?:scale-[xy]-0|scale-\[0(?:\.0+)?\])$/.test(utility)) {
         return true;
       }
@@ -1280,7 +1387,8 @@ function utilityClassesSuppress(className: string): boolean {
       // line-height or a color alpha. The generated compliance page uses no
       // such shorthand, so ambiguous modifiers fail closed.
       if (/^text-(?!\[)[^/]+\//.test(utility)) return true;
-      const arbitraryText = utility.match(
+      const rawUtility = rawUtilities[index];
+      const arbitraryText = rawUtility.match(
         /^text-\[([^\]]+)\](?:\/(?:\[([^\]]+)\]|([^/]+)))?$/
       );
       if (arbitraryText) {

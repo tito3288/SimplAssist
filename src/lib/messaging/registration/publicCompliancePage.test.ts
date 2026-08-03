@@ -37,6 +37,28 @@ const spanishCopy = buildSmsComplianceCopy({
 });
 const NEXT_THEMES_SCRIPT =
   '((e,t,r,n,o,l,a,i)=>{let u=document.documentElement,s=["light","dark"];function c(t){(Array.isArray(e)?e:[e]).forEach(e=>{let r="class"===e,n=r&&l?o.map(e=>l[e]||e):o;r?(u.classList.remove(...n),u.classList.add(l&&l[t]?l[t]:t)):u.setAttribute(e,t)}),i&&s.includes(t)&&(u.style.colorScheme=t)}if(n)c(n);else try{let e=localStorage.getItem(t)||r,n=a&&"system"===e?window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light":e;c(n)}catch(e){}})("class","theme","system",null,["light","dark"],null,true,true)';
+const ROOT_BRAND_STYLE = [
+  "--brand-primary:#ea580c",
+  "--brand-primary-hover:#c2410c",
+  "--brand-primary-active:#9a3412",
+  "--brand-accent:#c2410c",
+  "--brand-primary-dark:#ff914d",
+  "--brand-primary-hover-dark:#f57f33",
+  "--brand-primary-active-dark:#e8752c",
+  "--brand-accent-dark:#ff914d",
+  "--brand-primary-rgb:234 88 12",
+  "--brand-primary-hover-rgb:194 65 12",
+  "--brand-primary-active-rgb:154 52 18",
+  "--brand-accent-rgb:194 65 12",
+  "--brand-primary-dark-rgb:255 145 77",
+  "--brand-primary-hover-dark-rgb:245 127 51",
+  "--brand-primary-active-dark-rgb:232 117 44",
+  "--brand-accent-dark-rgb:255 145 77",
+  "--brand-accent-soft:#fdf1e7",
+  "--brand-accent-soft-border:#f5dcc4",
+  "--brand-accent-soft-dark:#ffd7bf",
+  "--brand-primary-soft-dark:#ffb07a",
+].join(";");
 
 type Marker =
   | "cta_text"
@@ -439,6 +461,8 @@ describe("verifyPublishedCompliancePage", () => {
       "text-white bg-white",
       "text-[#fff] bg-white",
       "text-[50%]",
+      "text-[var(--brand-hidden)]",
+      "text-[var(--brand-accent,transparent)]",
       "opacity-[var(--hidden)]",
       "[transform:scale(0)]",
       "md:[transform:scale(0)]",
@@ -490,6 +514,119 @@ describe("verifyPublishedCompliancePage", () => {
       await expect(
         verifyPublishedCompliancePage(VERIFY_ARGS)
       ).resolves.toBeUndefined();
+    });
+
+    it("allows the fixed opaque root brand contract and approved text variables", async () => {
+      const brandedRoot = validHtml().replace(
+        "<html>",
+        `<html style="${ROOT_BRAND_STYLE}">`
+      );
+      const html = addAttributes(
+        brandedRoot,
+        '<a data-role="privacy-link"',
+        'class="text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]"'
+      );
+      vi.mocked(fetch).mockResolvedValue(htmlResponse(html));
+
+      await expect(
+        verifyPublishedCompliancePage(VERIFY_ARGS)
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      "--brand-unknown:#ea580c",
+      "--brand-accent-extra:#c2410c",
+      "--brand:#c2410c",
+      "--BRAND-ACCENT:#c2410c",
+      "--brand-Accent:#c2410c",
+      "--brand-accent:#C2410C",
+      "--brand-accent:#fff",
+      "--brand-accent:#fff0",
+      "--brand-accent:#ffffffff",
+      "--brand-accent:transparent",
+      "--brand-accent:currentColor",
+      "--brand-accent:rgb(194 65 12)",
+      "--brand-accent:calc(1 + 1)",
+      "--brand-accent:url(https://attacker.example/hide.svg)",
+      "--brand-accent-soft:var(--hidden)",
+      "--brand-accent-rgb:255 255",
+      "--brand-accent-rgb:255 255 255 255",
+      "--brand-accent-rgb:-1 255 255",
+      "--brand-accent-rgb:255 255 256",
+      "--brand-accent-rgb:255.0 255 255",
+      "--brand-accent-rgb:100% 0% 0%",
+      "--brand-accent-rgb:255,255,255",
+      "--brand-accent-rgb:255 255 255 / 1",
+      "--brand-accent-rgb:255  255 255",
+      "--brand-accent-rgb:01 2 3",
+      "--brand-accent:#c2410c;--brand-unknown:#ea580c",
+      "--brand-accent:#c2410c;--brand-accent:transparent",
+    ])("rejects a malformed or unapproved root brand declaration %s", async (style) => {
+      await expectRejected(
+        validHtml().replace("<html>", `<html style="${style}">`),
+        "foreground-positioned"
+      );
+    });
+
+    it.each([
+      ["body", "<body>", "<body style=\"--brand-accent:#c2410c\">"],
+      [
+        "compliance root",
+        '<main data-compliance-root="true">',
+        '<main data-compliance-root="true" style="--brand-accent:#c2410c">',
+      ],
+      [
+        "privacy anchor",
+        '<a data-role="privacy-link"',
+        '<a data-role="privacy-link" style="--brand-accent:#c2410c"',
+      ],
+    ])("rejects an otherwise valid brand declaration on the %s", async (_label, target, replacement) => {
+      await expectRejected(validHtml().replace(target, replacement));
+    });
+
+    it("rejects a local brand override that could conceal required link text", async () => {
+      await expectRejected(
+        addAttributes(
+          validHtml(),
+          '<a data-role="privacy-link"',
+          'style="--brand-accent:#ffffff" class="text-[var(--brand-accent)]"'
+        )
+      );
+    });
+
+    it.each([
+      "text-[var(--BRAND-ACCENT)]",
+      "text-[var(--brand-Accent)]",
+      "text-[var(--brand-primary)]",
+      "text-[var(--brand-accent-rgb)]",
+      "text-[var(--brand-accent-soft)]",
+      "text-[var(--brand-accent-soft-border)]",
+      "text-[var(--brand-unknown)]",
+      "text-[var(--brand-accent-extra)]",
+      "text-[var(--brand)]",
+      "text-[var(--brand-accent,transparent)]",
+      "text-[var(--brand-accent,var(--brand-primary))]",
+      "text-[var(_--brand-accent_)]",
+      "text-[color:var(--brand-accent)]",
+      "text-[var(--brand-accent)]/[0.5]",
+    ])("rejects an unapproved or ambiguous brand text utility %s", async (className) => {
+      await expectRejected(
+        addAttributes(
+          validHtml(),
+          '<a data-role="privacy-link"',
+          `class="${className}"`
+        )
+      );
+    });
+
+    it("rejects the same brand variable as both foreground and background", async () => {
+      await expectRejected(
+        addAttributes(
+          validHtml(),
+          '<a data-role="privacy-link"',
+          'class="text-[var(--brand-accent)] bg-[var(--brand-accent)]"'
+        )
+      );
     });
 
     it.each([

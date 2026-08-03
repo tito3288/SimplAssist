@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RequestBrand } from "@/lib/branding/types";
 
 const mocks = vi.hoisted(() => ({
   pathname: "/dashboard",
@@ -59,18 +60,48 @@ vi.mock("@/components/icons/staggered-menu-icon", () => ({
 }));
 
 import Sidebar from "./sidebar";
+import { BrandProvider } from "@/components/branding/BrandProvider";
+
+const DEFAULT_REQUEST: RequestBrand = {
+  source: "default",
+  isPreview: false,
+  brand: {
+    kind: "default",
+    partnerId: null,
+    slug: null,
+    name: "SimplAssist",
+    publicOrigin: "https://simplassist.com",
+    logoLightUrl: "/logo-light.png",
+    logoDarkUrl: "/logo-dark.png",
+    faviconUrl: "/favicon-2.png",
+    colors: {
+      primary: "#ea580c",
+      primaryHover: "#c2410c",
+      primaryActive: "#9a3412",
+      accent: "#c2410c",
+      primaryDark: "#ff914d",
+      primaryHoverDark: "#f57f33",
+      primaryActiveDark: "#e8752c",
+      accentDark: "#ff914d",
+    },
+  },
+};
 
 function renderSidebar(props?: {
   activePath?: string;
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
+  requestBrand?: RequestBrand;
 }) {
+  const { requestBrand = DEFAULT_REQUEST, ...sidebarProps } = props ?? {};
   return renderToStaticMarkup(
-    <Sidebar
-      userEmail="owner@example.com"
-      websiteUrl={null}
-      {...props}
-    />
+    <BrandProvider requestBrand={requestBrand}>
+      <Sidebar
+        userEmail="owner@example.com"
+        websiteUrl={null}
+        {...sidebarProps}
+      />
+    </BrandProvider>
   );
 }
 
@@ -127,7 +158,34 @@ describe("Sidebar navigation", () => {
         /<a href="\/knowledge-gaps" class="([^"]+)"/
       );
 
-      expect(knowledgeGapsLink?.[1]).toContain("bg-[#fdf1e7]");
+      expect(knowledgeGapsLink?.[1]).toContain(
+        "bg-[var(--brand-accent-soft)]"
+      );
     }
+  });
+
+  it("uses the partner identity for desktop and mobile logos", () => {
+    const markup = renderSidebar({
+      requestBrand: {
+        ...DEFAULT_REQUEST,
+        source: "partner_host",
+        brand: {
+          ...DEFAULT_REQUEST.brand,
+          kind: "partner",
+          partnerId: "11111111-1111-4111-8111-111111111111",
+          slug: "alpha-dog",
+          name: "Alpha Dog Agency",
+          publicOrigin: "https://app.partner.example",
+          logoLightUrl: "https://cdn.partner.example/logo.png",
+          logoDarkUrl: null,
+          faviconUrl: null,
+        },
+      },
+    });
+
+    expect(markup).toContain('src="https://cdn.partner.example/logo.png"');
+    expect(markup).toContain('alt="Alpha Dog Agency"');
+    expect(markup).not.toContain("/logo-light.png");
+    expect(markup).not.toContain("/logo-dark.png");
   });
 });

@@ -5,13 +5,53 @@ import { Copy, Check } from 'lucide-react';
 
 interface EmbedCodeGeneratorProps {
   businessId: string;
+  scriptOrigin: string;
 }
 
-export default function EmbedCodeGenerator({ businessId }: EmbedCodeGeneratorProps) {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validatedScriptOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.username ||
+      url.password ||
+      url.origin !== value
+    ) {
+      throw new Error('Invalid widget script origin');
+    }
+    return url.origin;
+  } catch {
+    throw new Error('Invalid widget script origin');
+  }
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export function buildEmbedCode(
+  scriptOrigin: string,
+  businessId: string,
+): string {
+  const origin = validatedScriptOrigin(scriptOrigin);
+  if (!UUID.test(businessId)) throw new Error('Invalid widget business ID');
+
+  return `<script src="${escapeHtmlAttribute(origin)}/widget/embed.js" data-business-id="${escapeHtmlAttribute(businessId)}"></script>`;
+}
+
+export default function EmbedCodeGenerator({
+  businessId,
+  scriptOrigin,
+}: EmbedCodeGeneratorProps) {
   const [copied, setCopied] = useState(false);
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com';
-  const embedCode = `<script src="${appUrl}/widget/embed.js" data-business-id="${businessId}"></script>`;
+  const embedCode = buildEmbedCode(scriptOrigin, businessId);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(embedCode);

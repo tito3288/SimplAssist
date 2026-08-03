@@ -15,7 +15,7 @@ import {
   LogOut,
   Lock,
 } from "lucide-react";
-import Image from "next/image";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { StaggeredMenuIcon } from "@/components/icons/staggered-menu-icon";
@@ -73,19 +73,11 @@ export default function Sidebar({
     <div className="flex flex-col h-full min-h-0">
       <div className="p-6 shrink-0">
         <Link href="/dashboard">
-          <Image
-            src="/logo-dark.png"
-            alt="SimplAssist"
+          <BrandLogo
             width={140}
             height={34}
-            className="hidden dark:block h-8 w-auto object-contain"
-          />
-          <Image
-            src="/logo-light.png"
-            alt="SimplAssist"
-            width={140}
-            height={34}
-            className="block dark:hidden h-8 w-auto object-contain"
+            className="h-8 w-auto object-contain"
+            wordmarkClassName="max-w-[11rem] text-lg"
           />
         </Link>
       </div>
@@ -103,7 +95,7 @@ export default function Sidebar({
               onClick={() => setMobileOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-full text-sm font-medium transition-colors ${
                 isActive
-                  ? "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.15)] text-[#c2410c] dark:text-[#ff914d] border border-[#f5dcc4] dark:border-[rgba(255,145,77,.20)]"
+                  ? "bg-[var(--brand-accent-soft)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.15)] text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] border border-[var(--brand-accent-soft-border)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.20)]"
                   : "text-stone-600 dark:text-[#bdbdbf] hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-900 dark:hover:text-white border border-transparent"
               }`}
             >
@@ -130,7 +122,7 @@ export default function Sidebar({
               href={websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs leading-snug text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] truncate block col-start-1 row-start-2 mb-2 transition-colors"
+              className="text-xs leading-snug text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] truncate block col-start-1 row-start-2 mb-2 transition-colors"
             >
               {formatWebsiteUrl(websiteUrl)}
             </a>
@@ -157,20 +149,11 @@ export default function Sidebar({
       {/* Mobile header: logo left, menu right */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-3 bg-white/85 dark:bg-[rgba(18,18,20,0.92)] backdrop-blur-[14px] border-b border-[#ece4d8] dark:border-white/[0.10]">
         <Link href="/dashboard" className="flex items-center shrink-0 min-w-0" onClick={() => setMobileOpen(false)}>
-          <Image
-            src="/logo-dark.png"
-            alt="SimplAssist"
+          <BrandLogo
             width={160}
             height={40}
-            className="hidden dark:block h-9 w-auto max-w-[min(100%,9rem)] object-contain object-left"
-            priority
-          />
-          <Image
-            src="/logo-light.png"
-            alt="SimplAssist"
-            width={160}
-            height={40}
-            className="block dark:hidden h-9 w-auto max-w-[min(100%,9rem)] object-contain object-left"
+            className="h-9 w-auto max-w-[min(100%,9rem)] object-contain object-left"
+            wordmarkClassName="max-w-36 text-lg"
             priority
           />
         </Link>
@@ -179,7 +162,7 @@ export default function Sidebar({
           onClick={() => setMobileOpen((o) => !o)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen}
-          className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[#ea580c] dark:text-[#ff914d] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50 dark:focus-visible:ring-[#ff914d]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
+          className="shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-1 rounded-lg text-[var(--brand-primary)] dark:text-[var(--brand-primary-dark)] transition-transform duration-200 active:scale-90 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--brand-primary-rgb)/.50)] dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.50)] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#121214]"
         >
           <StaggeredMenuIcon open={mobileOpen} />
         </button>

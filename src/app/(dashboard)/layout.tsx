@@ -60,7 +60,7 @@ export default async function DashboardLayout({
         style={{
           width: 640,
           height: 640,
-          background: "rgba(255,145,77,.20)",
+          background: "rgb(var(--brand-primary-dark-rgb) / .20)",
           top: -70,
           right: -210,
           filter: "blur(60px)",
@@ -71,7 +71,7 @@ export default async function DashboardLayout({
         style={{
           width: 260,
           height: 260,
-          background: "rgba(255,145,77,.14)",
+          background: "rgb(var(--brand-primary-dark-rgb) / .14)",
           left: -80,
           top: "40%",
           filter: "blur(60px)",

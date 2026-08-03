@@ -120,6 +120,7 @@ describe("DashboardPage query scheduling", () => {
         id: BUSINESS_ID,
         call_forwarding_enabled: false,
         call_forwarding_nudge_resolved_at: null,
+        billing_mode: "stripe",
       },
     });
     mocks.getDashboardEntitlements.mockReturnValue(entitlements.promise);

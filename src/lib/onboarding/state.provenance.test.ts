@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getSmsReadinessForBusinessReadOnly: vi.fn(),
   selectedColumns: new Map<string, string>(),
+  rowsByTable: {} as Record<string, unknown>,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -45,10 +46,12 @@ describe("onboarding knowledge provenance resume loading", () => {
     mocks.getSmsReadinessForBusinessReadOnly.mockReset();
     mocks.selectedColumns.clear();
 
-    const rowsByTable: Record<string, unknown> = {
+    mocks.rowsByTable = {
       businesses: {
         id: "business-1",
         owner_id: "owner-1",
+        partner_id: null,
+        billing_mode: "stripe",
         name: "Provenance Test",
         business_type: "general",
         onboarding_completed_at: null,
@@ -84,7 +87,7 @@ describe("onboarding knowledge provenance resume loading", () => {
     };
 
     mocks.from.mockImplementation((table: string) =>
-      makeQuery(table, rowsByTable[table] ?? null)
+      makeQuery(table, mocks.rowsByTable[table] ?? null)
     );
     mocks.getSmsReadinessForBusinessReadOnly.mockResolvedValue({
       phoneNumber: null,
@@ -100,6 +103,8 @@ describe("onboarding knowledge provenance resume loading", () => {
 
     expect(mocks.selectedColumns.get("services")).toContain("source");
     expect(mocks.selectedColumns.get("faqs")).toContain("source");
+    expect(mocks.selectedColumns.get("businesses")).toContain("partner_id");
+    expect(mocks.selectedColumns.get("businesses")).toContain("billing_mode");
     expect(state?.servicesAndFaqs).toEqual({
       services: [
         {
@@ -121,6 +126,45 @@ describe("onboarding knowledge provenance resume loading", () => {
           source: "manual",
         },
       ],
+    });
+    expect(state?.billing).toMatchObject({
+      mode: "stripe",
+      handledByName: null,
+    });
+    expect(mocks.from).not.toHaveBeenCalledWith("partners");
+  });
+
+  it("loads the assigned partner name through the service-role state query", async () => {
+    mocks.rowsByTable.businesses = {
+      ...(mocks.rowsByTable.businesses as Record<string, unknown>),
+      partner_id: "11111111-1111-4111-8111-111111111111",
+      billing_mode: "invoiced",
+    };
+    mocks.rowsByTable.partners = { name: "Alpha Dog Agency" };
+
+    const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+    expect(mocks.from).toHaveBeenCalledWith("partners");
+    expect(mocks.selectedColumns.get("partners")).toBe("name");
+    expect(state?.billing).toMatchObject({
+      mode: "invoiced",
+      handledByName: "Alpha Dog Agency",
+    });
+  });
+
+  it("returns a null handled-by name when the assignment is orphaned", async () => {
+    mocks.rowsByTable.businesses = {
+      ...(mocks.rowsByTable.businesses as Record<string, unknown>),
+      partner_id: "11111111-1111-4111-8111-111111111111",
+      billing_mode: "comped",
+    };
+    mocks.rowsByTable.partners = null;
+
+    const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+    expect(state?.billing).toMatchObject({
+      mode: "comped",
+      handledByName: null,
     });
   });
 });

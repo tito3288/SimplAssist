@@ -12,7 +12,12 @@ import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import {
+  partnerManagedBillingMessage,
+  resolveAssignedPartnerName,
+} from "@/lib/billing/partnerManagedBilling.server";
 import type {
+  BillingMode,
   OnboardingRegistrationStatus,
   SubscriptionPlan,
 } from "@/types/database";
@@ -24,6 +29,8 @@ const NO_EIN_HELD_MESSAGE =
 
 type CheckoutBusinessRow = {
   id: string;
+  partner_id: string | null;
+  billing_mode: BillingMode;
   has_ein: boolean | null;
   billing_pilot: boolean;
   billing_comped: boolean;
@@ -67,7 +74,7 @@ export async function POST(request: NextRequest) {
     const { data: business, error: bizError } = await supabase
       .from("businesses")
       .select(
-        "id, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status"
+        "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status"
       )
       .eq("owner_id", user.id)
       .single<CheckoutBusinessRow>();
@@ -76,6 +83,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Business not found" },
         { status: 404 }
+      );
+    }
+
+    if (business.billing_mode !== "stripe") {
+      const partnerName = await resolveAssignedPartnerName(business.partner_id);
+      return NextResponse.json(
+        {
+          error: "billing_managed_by_partner",
+          message: partnerManagedBillingMessage(partnerName),
+        },
+        { status: 409 }
       );
     }
 

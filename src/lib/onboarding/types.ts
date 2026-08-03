@@ -18,6 +18,7 @@ import type {
   SmsBlockReason,
   SubscriptionPlan,
   SubscriptionStatus,
+  BillingMode,
 } from "@/types/database";
 
 export type { OnboardingStep } from "@/types/database";
@@ -135,6 +136,8 @@ export interface OnboardingRegistrationSnapshot {
 }
 
 export interface OnboardingBillingSnapshot {
+  mode: BillingMode;
+  handledByName: string | null;
   plan: SubscriptionPlan | null;
   status: SubscriptionStatus | null;
   setupFeePaidAt: string | null;

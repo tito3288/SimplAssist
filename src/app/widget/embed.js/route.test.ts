@@ -368,6 +368,113 @@ describe("widget embed runtime", () => {
     expect(() => new Function(script)).not.toThrow();
   });
 
+  it("is byte-identical across request hosts and preserves public delivery headers", async () => {
+    const invokeWithRequest = GET as unknown as (
+      request: Request,
+    ) => Promise<Response>;
+    const first = await invokeWithRequest(
+      new Request("https://partner-one.example/widget/embed.js"),
+    );
+    const second = await invokeWithRequest(
+      new Request("https://partner-two.example/widget/embed.js"),
+    );
+
+    expect(await first.text()).toBe(await second.text());
+    expect(first.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(first.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("starts with safe runtime defaults before config resolves", async () => {
+    const harness = await createHarness([
+      { status: 200, body: availableConfig },
+    ]);
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+
+    expect(footerLink?.textContent).toBe("Powered by SimplAssist");
+    expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
+  });
+
+  it("applies partner attribution and resets it on a later default config", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: {
+          ...availableConfig,
+          poweredByName: "Alpha Dog Agency",
+          poweredByUrl: "https://partner.example/about?from=widget",
+        },
+      },
+      { status: 200, body: availableConfig },
+    ]);
+    await flushPromises();
+
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+    expect(footerLink?.textContent).toBe("Powered by Alpha Dog Agency");
+    expect(footerLink?.getAttribute("href")).toBe(
+      "https://partner.example/about?from=widget",
+    );
+
+    harness.timers.runInterval(60_000);
+    await flushPromises();
+
+    expect(footerLink?.textContent).toBe("Powered by SimplAssist");
+    expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
+  });
+
+  it.each([
+    ["a relative URL", "/partner"],
+    ["a scheme-relative URL", "//partner.example"],
+    ["a script URL", "javascript:alert(1)"],
+    ["a data URL", "data:text/html,unsafe"],
+    ["a credentialed URL", "https://user:secret@partner.example/"],
+    ["a whitespace-padded URL", " https://partner.example/"],
+  ])("retains the runtime URL for %s", async (_, poweredByUrl) => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: {
+          ...availableConfig,
+          poweredByName: "Alpha Dog Agency",
+          poweredByUrl,
+        },
+      },
+    ]);
+    await flushPromises();
+
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+    expect(footerLink?.textContent).toBe("Powered by Alpha Dog Agency");
+    expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
+  });
+
+  it("uses textContent for an untrusted powered-by name", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: {
+          ...availableConfig,
+          poweredByName: "<img src=x onerror=alert(1)>",
+          poweredByUrl: "http://partner.example/",
+        },
+      },
+    ]);
+    await flushPromises();
+
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+    expect(footerLink?.textContent).toBe(
+      "Powered by <img src=x onerror=alert(1)>",
+    );
+    expect(footerLink?.children).toHaveLength(0);
+    expect(footerLink?.getAttribute("href")).toBe("http://partner.example/");
+  });
+
   it("uses the owner-only config route in preview mode", async () => {
     const harness = await createHarness(
       [{ status: 200, body: availableConfig }],

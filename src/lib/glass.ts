@@ -24,13 +24,14 @@ export const glassInput = `
   border border-gray-300 dark:border-white/[0.12]
   text-slate-900 dark:text-[#f5f5f5]
   placeholder:text-gray-400 dark:placeholder:text-[#666]
-  focus:border-[#ff914d] focus:ring-1 focus:ring-[#ff914d]
+  focus:border-[var(--brand-primary)] focus:ring-1 focus:ring-[var(--brand-primary)]
+  dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[var(--brand-primary-dark)]
 `;
 
 export const orangeAccentIcon = `
   rounded-xl
-  bg-[#fdf1e7] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]
-  border border-[#f5dcc4] dark:border-white/[0.10]
+  bg-[var(--brand-accent-soft)] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgb(var(--brand-primary-dark-rgb)/.22),rgba(255,255,255,.08))]
+  border border-[var(--brand-accent-soft-border)] dark:border-white/[0.10]
 `;
 
 export const textPrimary = "text-slate-900 dark:text-[#f5f5f5]";
@@ -43,18 +44,20 @@ export const authInputClass = `
   border border-slate-200 dark:border-white/[0.12]
   text-slate-900 dark:text-[#f5f5f5]
   placeholder:text-slate-400 dark:placeholder:text-[#666]
-  focus:outline-none focus:border-[#ff914d] focus:ring-2 focus:ring-[#ff914d]/30
+  focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.30)]
+  dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]
 `;
 
 /** Primary action — matches dashboard / marketing CTAs */
 export const primaryCtaClass = `
   inline-flex w-full items-center justify-center gap-3 py-3.5 px-4 font-bold rounded-full text-center transition-all
-  bg-orange-500 text-white
-  dark:bg-transparent dark:bg-[linear-gradient(135deg,#ff914d,#ffb07a)] dark:text-[#111]
-  shadow-[0_14px_34px_rgba(255,145,77,.26)]
+  bg-[var(--brand-primary)] text-white
+  dark:bg-transparent dark:bg-[linear-gradient(135deg,var(--brand-primary-dark),var(--brand-primary-soft-dark))] dark:text-[#111]
+  shadow-[0_14px_34px_rgb(var(--brand-primary-dark-rgb)/.26)]
   hover:-translate-y-px
   disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0
-  focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff914d] focus-visible:ring-offset-2
+  focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2
+  dark:focus-visible:ring-[var(--brand-primary-dark)]
   focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#0a0a0c]
 `;
 
@@ -66,16 +69,16 @@ export const primaryCtaClass = `
 const ctaPillCore = `
   inline-flex items-center justify-center rounded-full font-medium text-center transition-colors
   focus:outline-none focus:ring-2 focus:ring-offset-2
-  focus:ring-[#ea580c] dark:focus:ring-[#ff914d]
+  focus:ring-[var(--brand-primary)] dark:focus:ring-[var(--brand-primary-dark)]
   disabled:opacity-50 disabled:cursor-not-allowed
 `;
 
 /* Matte primary — flat orange, darker on hover, 1px press. No glow, no gradient. */
 const ctaPrimaryColors = `
-  bg-[#ea580c] text-white
-  hover:bg-[#c2410c] active:bg-[#9a3412] active:translate-y-px
-  dark:bg-[#ff914d] dark:text-[#16100b]
-  dark:hover:bg-[#f57f33] dark:active:bg-[#e8752c]
+  bg-[var(--brand-primary)] text-white
+  hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] active:translate-y-px
+  dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]
+  dark:hover:bg-[var(--brand-primary-hover-dark)] dark:active:bg-[var(--brand-primary-active-dark)]
 `;
 
 /* Matte secondary — quiet neutral pill, warm hairline border. */

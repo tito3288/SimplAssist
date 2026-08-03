@@ -38,6 +38,8 @@ export type DashboardBusiness = Pick<
   | "privacy_url_override"
   | "terms_url_override"
   | "timezone"
+  | "partner_id"
+  | "billing_mode"
 > & {
   deleted_at: string | null;
 };
@@ -98,6 +100,8 @@ const DASHBOARD_BUSINESS_SELECT = [
   "privacy_url_override",
   "terms_url_override",
   "timezone",
+  "partner_id",
+  "billing_mode",
 ].join(", ");
 
 export const getDashboardIdentity = cache(async () => {

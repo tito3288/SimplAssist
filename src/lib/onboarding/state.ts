@@ -11,6 +11,7 @@ import type {
   A2pRiskReviewStatus,
   A2pBrandTier,
   AITone,
+  BillingMode,
   BusinessEntityType,
   BusinessType,
   BusinessVoice,
@@ -25,6 +26,7 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "@/types/database";
+import { resolveAssignedPartnerName } from "@/lib/billing/partnerManagedBilling.server";
 import {
   hashA2pRiskInput,
   registrationHasStartedForRisk,
@@ -55,6 +57,8 @@ const DAYS = [
 type BusinessRow = {
   id: string;
   owner_id: string;
+  partner_id: string | null;
+  billing_mode: BillingMode;
   name: string | null;
   business_type: BusinessType | null;
   business_type_other: string | null;
@@ -190,6 +194,8 @@ async function getOnboardingStateForOwnerInternal(
       [
         "id",
         "owner_id",
+        "partner_id",
+        "billing_mode",
         "name",
         "business_type",
         "business_type_other",
@@ -274,6 +280,8 @@ export async function getOnboardingStateForBusinessId(
       [
         "id",
         "owner_id",
+        "partner_id",
+        "billing_mode",
         "name",
         "business_type",
         "business_type_other",
@@ -353,6 +361,10 @@ async function getOnboardingStateForBusiness(
   business: BusinessRow,
   allowSideEffects = true
 ): Promise<OnboardingState> {
+  const assignedPartnerNamePromise = resolveAssignedPartnerName(
+    business.partner_id
+  );
+
   const [
     { data: hours },
     { data: services },
@@ -361,6 +373,7 @@ async function getOnboardingStateForBusiness(
     { data: widgetConfig },
     { data: phoneNumber },
     { data: subscription },
+    handledByName,
   ] = await Promise.all([
     supabaseAdmin
       .from("business_hours")
@@ -409,6 +422,7 @@ async function getOnboardingStateForBusiness(
       .select("plan, status, setup_fee_paid_at, current_period_start, current_period_end")
       .eq("business_id", business.id)
       .maybeSingle<SubscriptionRow>(),
+    assignedPartnerNamePromise,
   ]);
 
   const smsReadiness = allowSideEffects
@@ -479,6 +493,8 @@ async function getOnboardingStateForBusiness(
     pendingPhoneNumberFailureReason: business.pending_phone_number_failure_reason,
     smsConsentAgreed: Boolean(business.sms_consent_agreed),
     billing: {
+      mode: business.billing_mode,
+      handledByName,
       plan: subscription?.plan ?? null,
       status: subscription?.status ?? null,
       setupFeePaidAt: subscription?.setup_fee_paid_at ?? null,

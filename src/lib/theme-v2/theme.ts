@@ -17,7 +17,8 @@ export const ink = "text-stone-900 dark:text-[#f5f5f5]";
 export const body = "text-stone-600 dark:text-[#bdbdbf]";
 export const bodyFaint = "text-stone-500 dark:text-[#bdbdbf]";
 /** Large accent text — burnt orange in light so it doesn't wash out. */
-export const accentText = "text-[#c2410c] dark:text-[#ff914d]";
+export const accentText =
+  "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]";
 
 /* ── Buttons ── */
 
@@ -31,11 +32,11 @@ const btnBase = `
 
 /** Flat solid orange, matte. Darker on hover, 1px press. No glow, no gradient. */
 const btnPrimaryColors = `
-  bg-[#ea580c] text-white
-  hover:bg-[#c2410c] active:bg-[#9a3412] active:translate-y-px
-  dark:bg-[#ff914d] dark:text-[#16100b]
-  dark:hover:bg-[#f57f33] dark:active:bg-[#e8752c]
-  focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
+  bg-[var(--brand-primary)] text-white
+  hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] active:translate-y-px
+  dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]
+  dark:hover:bg-[var(--brand-primary-hover-dark)] dark:active:bg-[var(--brand-primary-active-dark)]
+  focus-visible:ring-[rgb(var(--brand-primary-rgb)/.60)] dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.60)]
 `;
 
 /** Quiet neutral pill — matte, warm hairline border. */
@@ -59,7 +60,7 @@ export const btnPrimaryWide = `
   ${btnBase} ${btnPrimaryColors}
   w-full gap-3 px-4 py-4
   disabled:opacity-50 disabled:cursor-not-allowed
-  disabled:hover:bg-[#ea580c] dark:disabled:hover:bg-[#ff914d]
+  disabled:hover:bg-[var(--brand-primary)] dark:disabled:hover:bg-[var(--brand-primary-dark)]
   disabled:active:translate-y-0
 `;
 
@@ -124,10 +125,10 @@ export const tileRow = `
  */
 export const cardRecommended = `
   bg-white border border-transparent
-  outline outline-2 outline-[rgba(194,65,12,.30)]
-  shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgba(154,52,18,0.18)]
+  outline outline-2 outline-[rgb(var(--brand-accent-rgb)/.30)]
+  shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgb(var(--brand-primary-active-rgb)/.18)]
   dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.05))]
-  dark:outline-[rgba(255,145,77,.42)]
+  dark:outline-[rgb(var(--brand-primary-dark-rgb)/.42)]
   dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
   dark:backdrop-blur-[18px]
 `;
@@ -135,7 +136,7 @@ export const cardRecommended = `
 /** Flat solid accent pill ("Recommended", "Most Popular"). No gradient. */
 export const badgeAccent = `
   inline-flex items-center px-3 py-1.5 rounded-full text-[12px] font-extrabold
-  bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]
+  bg-[var(--brand-primary)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]
 `;
 
 /* ── Semantic status ── */
@@ -202,9 +203,9 @@ export const navLink = `
 
 export const eyebrow = `
   inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-full text-sm tracking-wide mb-5
-  bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4]
+  bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)]
   dark:bg-transparent dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.05))]
-  dark:text-[#ffd7bf] dark:border-white/[0.14]
+  dark:text-[var(--brand-accent-soft-dark)] dark:border-white/[0.14]
 `;
 
 /* ── Forms (auth) ── */
@@ -215,8 +216,8 @@ export const inputField = `
   border border-[#e3dacc]
   dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12]
   focus:outline-none
-  focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25
-  dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30
+  focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)]
+  dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]
   transition-[border-color,box-shadow] duration-150
 `;
 
@@ -225,8 +226,8 @@ export const fieldLabel =
 
 /** Inline text links (Terms, Privacy, Log in, Create one). */
 export const inlineLink = `
-  font-semibold text-[#c2410c] hover:text-[#9a3412]
-  dark:text-[#ff914d] dark:hover:text-[#ffb07a]
+  font-semibold text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)]
+  dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]
   transition-colors
 `;
 
@@ -244,8 +245,8 @@ export const fontStack =
 
 /** Dark-mode ambient radial gradient (kept from current design). */
 export const darkAmbient =
-  "radial-gradient(circle at top right, rgba(255,145,77,.18), transparent 22%), radial-gradient(circle at 12% 18%, rgba(255,145,77,.10), transparent 20%), linear-gradient(180deg, #080808 0%, #050505 42%, #0a0a0c 100%)";
+  "radial-gradient(circle at top right, rgb(var(--brand-primary-dark-rgb) / .18), transparent 22%), radial-gradient(circle at 12% 18%, rgb(var(--brand-primary-dark-rgb) / .10), transparent 20%), linear-gradient(180deg, #080808 0%, #050505 42%, #0a0a0c 100%)";
 
 /** Light-mode ambient: faint warm washes on the off-white page. */
 export const lightAmbient =
-  "radial-gradient(circle at 85% -5%, rgba(234,88,12,.06), transparent 32%), radial-gradient(circle at 5% 30%, rgba(234,88,12,.04), transparent 26%), linear-gradient(180deg, #fbf9f5 0%, #faf8f4 50%, #f7f4ee 100%)";
+  "radial-gradient(circle at 85% -5%, rgb(var(--brand-primary-rgb) / .06), transparent 32%), radial-gradient(circle at 5% 30%, rgb(var(--brand-primary-rgb) / .04), transparent 26%), linear-gradient(180deg, #fbf9f5 0%, #faf8f4 50%, #f7f4ee 100%)";

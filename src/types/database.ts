@@ -42,6 +42,12 @@ export type SubscriptionStatus =
   | "canceled"
   | "trialing";
 
+export type PartnerStatus = "active" | "inactive";
+
+export type PartnerDomainStatus = "pending" | "connected";
+
+export type BillingMode = "stripe" | "invoiced" | "comped";
+
 export type WidgetPosition = "bottom_right" | "bottom_left";
 
 export type LeadCaptureTiming = "start" | "after_3_messages" | "on_booking";
@@ -159,6 +165,29 @@ export type TelnyxResourceType =
   | "voice_application"
   | "phone_number_assignment";
 
+export interface Partner {
+  id: string;
+  name: string;
+  slug: string;
+  custom_domain: string | null;
+  domain_status: PartnerDomainStatus;
+  logo_light_url: string | null;
+  logo_dark_url: string | null;
+  favicon_url: string | null;
+  brand_primary: string;
+  brand_primary_hover: string;
+  brand_primary_active: string;
+  brand_accent: string;
+  brand_primary_dark: string;
+  brand_primary_hover_dark: string;
+  brand_primary_active_dark: string;
+  brand_accent_dark: string;
+  email_from: string | null;
+  status: PartnerStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Business {
   id: string;
   owner_id: string;
@@ -202,6 +231,8 @@ export interface Business {
   call_forwarding_enabled: boolean;
   forward_to_number: string | null;
   call_forwarding_nudge_resolved_at: string | null;
+  partner_id: string | null;
+  billing_mode: BillingMode;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;

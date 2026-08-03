@@ -60,7 +60,7 @@ export default async function OnboardingLayout({
         style={{
           width: 520,
           height: 520,
-          background: "rgba(255,145,77,.22)",
+          background: "rgb(var(--brand-primary-dark-rgb) / .22)",
           top: -120,
           right: -160,
           filter: "blur(64px)",
@@ -71,7 +71,7 @@ export default async function OnboardingLayout({
         style={{
           width: 280,
           height: 280,
-          background: "rgba(255,145,77,.16)",
+          background: "rgb(var(--brand-primary-dark-rgb) / .16)",
           left: -100,
           bottom: "12%",
           filter: "blur(56px)",
