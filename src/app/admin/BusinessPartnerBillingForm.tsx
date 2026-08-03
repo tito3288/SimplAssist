@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { primaryCtaCompactClass } from "@/lib/glass";
-import type { BillingMode, PartnerStatus } from "@/types/database";
+import type {
+  BillingMode,
+  PartnerStatus,
+  SubscriptionPlan,
+} from "@/types/database";
 
 export type AdminPartnerOption = {
   id: string;
@@ -18,17 +22,34 @@ interface BusinessPartnerBillingFormProps {
   businessId: string;
   initialPartnerId: string | null;
   initialBillingMode: BillingMode;
+  initialPartnerPlan: SubscriptionPlan | null;
   currentPartner: CurrentPartner | null;
   activePartners: AdminPartnerOption[];
 }
+
+const PARTNER_PLAN_OPTIONS: Array<{
+  value: SubscriptionPlan;
+  label: string;
+}> = [
+  { value: "sms_only", label: "Starter — 500 included SMS parts" },
+  { value: "sms_and_chat", label: "Growth — 1,500 included SMS parts" },
+  { value: "full", label: "Full — 2,500 included SMS parts" },
+];
+
+const PARTNER_PLAN_LABELS: Record<SubscriptionPlan, string> = {
+  sms_only: "Starter",
+  sms_and_chat: "Growth",
+  full: "Full",
+};
 
 const ERROR_MESSAGES: Record<string, string> = {
   subscription_exists:
     "Remove every Stripe subscription row before assigning partner-managed billing.",
   partner_required: "Choose an active partner for non-Stripe billing.",
   partner_inactive: "That partner is inactive or no longer available.",
+  invalid_partner_plan: "Choose a valid partner plan.",
   unsupported_partner_stripe:
-    "Phase 1 does not support assigning a partner while Stripe billing is selected.",
+    "Partner assignment with Stripe billing is not supported yet.",
   business_not_found: "Business not found.",
 };
 
@@ -36,6 +57,7 @@ export function BusinessPartnerBillingForm({
   businessId,
   initialPartnerId,
   initialBillingMode,
+  initialPartnerPlan,
   currentPartner,
   activePartners,
 }: BusinessPartnerBillingFormProps) {
@@ -43,6 +65,9 @@ export function BusinessPartnerBillingForm({
   const [partnerId, setPartnerId] = useState(initialPartnerId ?? "");
   const [billingMode, setBillingMode] = useState<BillingMode>(
     initialBillingMode
+  );
+  const [partnerPlan, setPartnerPlan] = useState<SubscriptionPlan>(
+    initialPartnerPlan ?? "sms_and_chat"
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +105,7 @@ export function BusinessPartnerBillingForm({
           businessId,
           partnerId: partnerId || null,
           billingMode,
+          partnerPlan: billingMode === "stripe" ? null : partnerPlan,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
@@ -117,13 +143,31 @@ export function BusinessPartnerBillingForm({
           </dt>
           <dd className="text-right capitalize">{initialBillingMode}</dd>
         </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-stone-500 dark:text-[#bdbdbf]">
+            Current partner plan
+          </dt>
+          <dd className="text-right">
+            {initialPartnerPlan
+              ? PARTNER_PLAN_LABELS[initialPartnerPlan]
+              : "Not partner-managed"}
+          </dd>
+        </div>
       </dl>
 
       <label className="block space-y-1 text-sm">
         <span className="font-medium">Partner</span>
         <select
           value={partnerId}
-          onChange={(event) => setPartnerId(event.target.value)}
+          onChange={(event) => {
+            const nextPartnerId = event.target.value;
+            setPartnerId(nextPartnerId);
+            setPartnerPlan(
+              nextPartnerId === initialPartnerId && initialPartnerPlan
+                ? initialPartnerPlan
+                : "sms_and_chat"
+            );
+          }}
           className="w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-stone-900 dark:border-white/[0.12] dark:bg-[#242426] dark:text-[#f5f5f5]"
         >
           <option value="">Unassigned</option>
@@ -140,6 +184,28 @@ export function BusinessPartnerBillingForm({
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Partner plan</span>
+        <select
+          value={partnerPlan}
+          disabled={billingMode === "stripe"}
+          onChange={(event) =>
+            setPartnerPlan(event.target.value as SubscriptionPlan)
+          }
+          className="w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-stone-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.12] dark:bg-[#242426] dark:text-[#f5f5f5]"
+        >
+          {PARTNER_PLAN_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <span className="block text-xs text-stone-500 dark:text-[#bdbdbf]">
+          New partner assignments default to Growth. Partner plans use the same
+          feature matrix and included SMS allowances as Stripe plans.
+        </span>
       </label>
 
       <label className="block space-y-1 text-sm">
@@ -163,8 +229,8 @@ export function BusinessPartnerBillingForm({
           including a canceled subscription.
         </p>
         <p>
-          Returning to Stripe removes the temporary comp bridge. The business
-          will require checkout before access continues.
+          Returning to Stripe clears the partner plan. The business will
+          require checkout before access continues.
         </p>
       </div>
 

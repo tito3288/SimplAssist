@@ -47,9 +47,9 @@ export function AuthPasswordField({
           onClick={() => setVisible((v) => !v)}
           className={cn(
             "absolute right-2.5 top-1/2 -translate-y-1/2 rounded-xl p-2",
-            "text-slate-500 transition-colors hover:text-[#ff914d]",
-            "dark:text-[#888] dark:hover:text-[#ffb07a]",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff914d]/50 focus-visible:ring-offset-2",
+            "text-slate-500 transition-colors hover:text-[var(--brand-primary-dark)]",
+            "dark:text-[#888] dark:hover:text-[var(--brand-primary-soft-dark)]",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.50)] focus-visible:ring-offset-2",
             "focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#0a0a0c]"
           )}
           aria-label={visible ? "Hide password" : "Show password"}

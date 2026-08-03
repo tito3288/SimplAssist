@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
   const {
     data: { user },

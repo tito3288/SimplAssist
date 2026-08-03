@@ -70,7 +70,7 @@ export default function CallForwardingNudge() {
     >
       <div className="flex items-start gap-3">
         <div className={`p-2 shrink-0 ${orangeAccentIcon}`} aria-hidden="true">
-          <PhoneForwarded className="h-5 w-5 text-[#c2410c] dark:text-[#ff914d]" />
+          <PhoneForwarded className="h-5 w-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <div className="min-w-0 flex-1">
           <p
@@ -87,7 +87,7 @@ export default function CallForwardingNudge() {
             type="button"
             onClick={openSettings}
             disabled={isResolving}
-            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#c2410c] transition-colors hover:text-[#9a3412] disabled:cursor-wait disabled:opacity-60 dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-accent)] transition-colors hover:text-[var(--brand-primary-active)] disabled:cursor-wait disabled:opacity-60 dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]"
           >
             Set up call forwarding
             <ArrowRight className="h-4 w-4" aria-hidden="true" />

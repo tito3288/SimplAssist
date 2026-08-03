@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { useState } from 'react';
 import type { BusinessEntityType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { useBrand } from '@/components/branding/BrandProvider';
+import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 import { statusSuccess, statusWarning } from '@/lib/theme-v2/theme';
@@ -140,7 +142,7 @@ const ENTITY_TYPE_OPTIONS: { value: Exclude<BusinessEntityType, 'sole_proprietor
 ];
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30';
+  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]';
 
 const LABEL_CLASS = 'block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1';
 
@@ -158,6 +160,7 @@ export default function BrandVerificationForm({
   onNext,
   onBack,
 }: BrandVerificationFormProps) {
+  const brand = useBrand();
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [waitlistSaved, setWaitlistSaved] = useState(
@@ -209,7 +212,12 @@ export default function BrandVerificationForm({
         };
 
         if (!response.ok) {
-          setSubmitError(payload.error ?? 'Could not save EIN status. Please try again.');
+          setSubmitError(
+            replaceDefaultBrandName(
+              payload.error ?? 'Could not save EIN status. Please try again.',
+              brand.name,
+            ),
+          );
           return;
         }
 
@@ -241,7 +249,10 @@ export default function BrandVerificationForm({
 
       if (!response.ok) {
         setSubmitError(
-          payload.error ?? 'Could not save brand verification info. Please try again.'
+          replaceDefaultBrandName(
+            payload.error ?? 'Could not save brand verification info. Please try again.',
+            brand.name,
+          ),
         );
         return;
       }
@@ -249,9 +260,12 @@ export default function BrandVerificationForm({
       onNext(data);
     } catch (err) {
       setSubmitError(
-        err instanceof Error
-          ? err.message
-          : 'Could not save brand verification info. Please try again.'
+        replaceDefaultBrandName(
+          err instanceof Error
+            ? err.message
+            : 'Could not save brand verification info. Please try again.',
+          brand.name,
+        ),
       );
     } finally {
       setSaving(false);
@@ -273,7 +287,7 @@ export default function BrandVerificationForm({
           <label
             className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
               hasEinAnswer === 'yes'
-                ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                 : 'border-[#ece4d8] bg-[#faf7f2] dark:border-white/[0.10] dark:bg-white/[0.04]'
             }`}
           >
@@ -294,7 +308,7 @@ export default function BrandVerificationForm({
           <label
             className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
               hasEinAnswer === 'no'
-                ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                 : 'border-[#ece4d8] bg-[#faf7f2] dark:border-white/[0.10] dark:bg-white/[0.04]'
             }`}
           >

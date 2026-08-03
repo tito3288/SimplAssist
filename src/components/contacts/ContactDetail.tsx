@@ -253,7 +253,7 @@ export default function ContactDetail({
               </label>
               <p className={`mt-1 flex items-center gap-1.5 text-sm ${ink}`}>
                 {contact.source_channel === "sms" ? (
-                  <Phone className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d]" />
+                  <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                 ) : (
                   <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                 )}
@@ -320,11 +320,11 @@ export default function ContactDetail({
                     onClick={() =>
                       router.push(`/conversations?conversation=${conv.id}`)
                     }
-                    className="flex w-full items-center justify-between rounded-lg border border-[#ece4d8] dark:border-white/[0.10] px-4 py-3 text-left transition hover:border-[#ea580c]/40 dark:hover:border-[#ff914d]/40 hover:bg-[#fdf1e7] dark:hover:bg-[rgba(255,145,77,.08)]"
+                    className="flex w-full items-center justify-between rounded-lg border border-[#ece4d8] dark:border-white/[0.10] px-4 py-3 text-left transition hover:border-[rgb(var(--brand-primary-rgb)/.40)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.40)] hover:bg-[var(--brand-accent-soft)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.08)]"
                   >
                     <div className="flex items-center gap-3">
                       {conv.channel === "sms" ? (
-                        <Phone className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d]" />
+                        <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                       ) : (
                         <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                       )}

@@ -41,6 +41,7 @@ const profile = {
   logoLightUrl: "https://cdn.example.com/logo-light.svg",
   logoDarkUrl: "https://cdn.example.com/logo-dark.svg",
   faviconUrl: "https://cdn.example.com/favicon.png",
+  emailFrom: "NOTIFICATIONS@ALPHADOGAGENCY.AI",
   status: "active",
   colors,
 };
@@ -62,6 +63,10 @@ const row = {
   brand_primary_hover_dark: "#f57f33",
   brand_primary_active_dark: "#e8752c",
   brand_accent_dark: "#ff914d",
+  email_from: "notifications@alphadogagency.ai",
+  email_from_status: "pending",
+  email_from_verified_at: null,
+  email_from_verified_by: null,
   status: "active",
   created_at: "2026-08-03T00:00:00.000Z",
   updated_at: "2026-08-03T01:00:00.000Z",
@@ -122,6 +127,8 @@ describe("/api/admin/partners", () => {
           slug: "alpha-dog",
           customDomain: "app.alphadogagency.ai",
           domainStatus: "pending",
+          emailFrom: "notifications@alphadogagency.ai",
+          emailFromStatus: "pending",
           colors: { primaryDark: "#ff914d" },
         },
       ],
@@ -154,6 +161,10 @@ describe("/api/admin/partners", () => {
         slug: "alpha-dog",
         custom_domain: "app.alphadogagency.ai",
         domain_status: "pending",
+        email_from: "notifications@alphadogagency.ai",
+        email_from_status: "pending",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
         brand_primary: "#ea580c",
         brand_primary_dark: "#ff914d",
       }),
@@ -161,6 +172,31 @@ describe("/api/admin/partners", () => {
     await expect(response.json()).resolves.toMatchObject({
       partner: { id: PARTNER_ID, domainStatus: "pending" },
     });
+  });
+
+  it("creates an empty sender as Unconfigured with no verification audit", async () => {
+    mocks.single.mockResolvedValue({
+      data: {
+        ...row,
+        email_from: null,
+        email_from_status: "unconfigured",
+      },
+      error: null,
+    });
+
+    const response = await route.POST(
+      postRequest({ ...profile, emailFrom: null }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email_from: null,
+        email_from_status: "unconfigured",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
+      }),
+    );
   });
 
   it("rejects an attempted connected create instead of mass-assigning status", async () => {

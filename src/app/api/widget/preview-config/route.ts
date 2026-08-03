@@ -10,6 +10,7 @@ import {
   BusinessPartnerResolutionError,
   resolveWidgetAttribution,
 } from "@/lib/branding/businessPartner.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -17,6 +18,9 @@ const privateHeaders = {
 };
 
 export async function GET(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return withPrivateHeaders(workspace.response);
+
   const businessId = request.nextUrl.searchParams.get("businessId");
   if (!businessId) {
     return NextResponse.json(
@@ -26,22 +30,12 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401, headers: privateHeaders }
-    );
-  }
 
   const { data: business, error: businessError } = await supabase
     .from("businesses")
     .select("id, name")
     .eq("id", businessId)
-    .eq("owner_id", user.id)
+    .eq("owner_id", workspace.access.user.id)
     .maybeSingle();
 
   if (businessError) {
@@ -133,4 +127,11 @@ export async function GET(request: NextRequest) {
     },
     { headers: privateHeaders }
   );
+}
+
+function withPrivateHeaders(response: NextResponse): NextResponse {
+  for (const [name, value] of Object.entries(privateHeaders)) {
+    response.headers.set(name, value);
+  }
+  return response;
 }

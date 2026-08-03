@@ -1,9 +1,10 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getUser: vi.fn(),
-  serverFrom: vi.fn(),
+  requireFreshWorkspaceRouteAccess: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
+  randomBytes: vi.fn(),
   adminFrom: vi.fn(),
   requireAuthenticatedFeature: vi.fn(),
   resolveBusinessEntitlements: vi.fn(),
@@ -17,11 +18,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({
-    auth: { getUser: mocks.getUser },
-    from: mocks.serverFrom,
-  })),
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomBytes: mocks.randomBytes };
+});
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireFreshWorkspaceRouteAccess: mocks.requireFreshWorkspaceRouteAccess,
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.adminFrom },
@@ -65,18 +68,13 @@ const ENTITLEMENTS = {
   cancelAtPeriodEnd: false,
 } as const;
 
-function ownerLookup(data: { id: string } | null, error: unknown = null) {
-  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  for (const method of ["select", "eq", "maybeSingle"]) {
-    chain[method] = vi.fn(() => chain);
-  }
-  chain.maybeSingle.mockResolvedValue({ data, error });
-  mocks.serverFrom.mockReturnValue(chain);
-}
-
-function callbackRequest(nonce: string, stateNonce = nonce) {
+function callbackRequest(
+  nonce: string,
+  stateNonce = nonce,
+  businessId = BUSINESS_ID
+) {
   const state = encodeGoogleOAuthState({
-    businessId: BUSINESS_ID,
+    businessId,
     nonce: stateNonce,
   });
   return new NextRequest(
@@ -88,8 +86,25 @@ function callbackRequest(nonce: string, stateNonce = nonce) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
-  mocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
-  ownerLookup({ id: BUSINESS_ID });
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: USER_ID },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
+  mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: USER_ID },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
+  mocks.randomBytes.mockReturnValue(Buffer.alloc(32, 7));
   mocks.requireAuthenticatedFeature.mockResolvedValue({
     ok: true,
     businessId: BUSINESS_ID,
@@ -128,6 +143,111 @@ beforeEach(() => {
 });
 
 describe("Google Calendar OAuth", () => {
+  it.each([401, 403, 503] as const)(
+    "start maps workspace %s before entitlement, nonce, or OAuth URL creation",
+    async (status) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(
+          status === 401
+            ? { error: "Unauthorized" }
+            : status === 403
+              ? { error: "workspace_access_denied" }
+              : { error: "workspace_access_unavailable", retryable: true },
+          { status }
+        ),
+      });
+
+      const response = await beginOAuth(
+        new NextRequest("https://app.example.test/api/google/auth")
+      );
+
+      expect(response.status).toBe(status);
+      expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+      expect(mocks.randomBytes).not.toHaveBeenCalled();
+      expect(mocks.generateAuthUrl).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([401, 403, 503] as const)(
+    "callback maps workspace %s before state, entitlements, Google, or database access",
+    async (status) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(
+          status === 401
+            ? { error: "Unauthorized" }
+            : status === 403
+              ? { error: "workspace_access_denied" }
+              : { error: "workspace_access_unavailable", retryable: true },
+          { status }
+        ),
+      });
+
+      const response = await finishOAuth(callbackRequest("a".repeat(43)));
+
+      expect(response.status).toBe(status);
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.getGoogleOAuth2Client).not.toHaveBeenCalled();
+      expect(mocks.getToken).not.toHaveBeenCalled();
+      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    }
+  );
+
+  it("blocks partner-host OAuth initiation before feature, nonce, or provider work", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: USER_ID },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: "00000000-0000-4000-8000-000000000003",
+        },
+        hostKind: "partner",
+      },
+    });
+
+    const response = await beginOAuth(
+      new NextRequest("https://partner.example/api/google/auth")
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "google_oauth_unavailable_on_partner_host",
+    });
+    expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+    expect(mocks.randomBytes).not.toHaveBeenCalled();
+    expect(mocks.generateAuthUrl).not.toHaveBeenCalled();
+  });
+
+  it("blocks partner-host OAuth callback before token exchange or database writes", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: USER_ID },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: "00000000-0000-4000-8000-000000000003",
+        },
+        hostKind: "partner",
+      },
+    });
+
+    const response = await finishOAuth(callbackRequest("a".repeat(43)));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "google_oauth_unavailable_on_partner_host",
+    });
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getGoogleOAuth2Client).not.toHaveBeenCalled();
+    expect(mocks.getToken).not.toHaveBeenCalled();
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
+  });
+
   it("starts OAuth with an HttpOnly SameSite nonce bound into state", async () => {
     const response = await beginOAuth(
       new NextRequest("https://app.example.test/api/google/auth")
@@ -152,15 +272,18 @@ describe("Google Calendar OAuth", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.serverFrom).not.toHaveBeenCalled();
     expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
     expect(mocks.getToken).not.toHaveBeenCalled();
   });
 
   it("rejects state for a business the current user does not own", async () => {
-    ownerLookup(null);
-
-    const response = await finishOAuth(callbackRequest("a".repeat(43)));
+    const response = await finishOAuth(
+      callbackRequest(
+        "a".repeat(43),
+        "a".repeat(43),
+        "00000000-0000-4000-8000-000000000099"
+      )
+    );
 
     expect(response.status).toBe(403);
     expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
@@ -191,6 +314,77 @@ describe("Google Calendar OAuth", () => {
     expect(mocks.upsertToken).not.toHaveBeenCalled();
   });
 
+  it("blocks an assignment change during token exchange before durable writes", async () => {
+    mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(
+        { error: "workspace_access_denied" },
+        { status: 403 }
+      ),
+    });
+
+    const response = await finishOAuth(callbackRequest("a".repeat(43)));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "workspace_access_denied",
+    });
+    expect(mocks.getToken).toHaveBeenCalledWith("oauth-code");
+    expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledTimes(2);
+    expect(mocks.requireFreshWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.upsertToken).not.toHaveBeenCalled();
+    expect(mocks.updateSettingsEq).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("returns retryable 503 when fresh assignment revalidation fails", async () => {
+    mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(
+        { error: "workspace_access_unavailable", retryable: true },
+        { status: 503 }
+      ),
+    });
+
+    const response = await finishOAuth(callbackRequest("a".repeat(43)));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "workspace_access_unavailable",
+      retryable: true,
+    });
+    expect(mocks.upsertToken).not.toHaveBeenCalled();
+    expect(mocks.updateSettingsEq).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it.each([
+    ["user", { user: { id: "different-user" } }],
+    ["business", { business: { id: "different-business", partner_id: null } }],
+    ["host", { hostKind: "partner" as const }],
+  ])("rejects a fresh resolved %s mismatch before token persistence", async (_label, override) => {
+    mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: USER_ID },
+        business: { id: BUSINESS_ID, partner_id: null },
+        hostKind: "canonical",
+        ...override,
+      },
+    });
+
+    const response = await finishOAuth(callbackRequest("a".repeat(43)));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "workspace_access_denied",
+    });
+    expect(mocks.upsertToken).not.toHaveBeenCalled();
+    expect(mocks.updateSettingsEq).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
   it("writes tokens only after nonce, owner, and entitlement checks pass", async () => {
     const response = await finishOAuth(callbackRequest("a".repeat(43)));
 
@@ -204,6 +398,14 @@ describe("Google Calendar OAuth", () => {
       }),
       { onConflict: "business_id" }
     );
+    expect(
+      mocks.resolveBusinessEntitlements.mock.invocationCallOrder[1]
+    ).toBeLessThan(
+      mocks.requireFreshWorkspaceRouteAccess.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.requireFreshWorkspaceRouteAccess.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.upsertToken.mock.invocationCallOrder[0]);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

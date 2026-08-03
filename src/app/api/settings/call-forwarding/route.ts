@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isE164PhoneNumber, normalizeE164Input } from "@/lib/phone/e164";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const CallForwardingUpdateSchema = z.object({
   enabled: z.boolean().optional(),
@@ -13,6 +14,9 @@ const CallForwardingUpdateSchema = z.object({
 );
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
   const {
     data: { user },

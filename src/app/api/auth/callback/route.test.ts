@@ -48,6 +48,13 @@ function request(
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://simplassist.com/");
+  mocks.verifyOtp.mockResolvedValue({
+    data: {
+      user: { id: "10000000-0000-4000-a000-000000000001" },
+      session: { access_token: "session-token" },
+    },
+    error: null,
+  });
   mocks.partnerResult = { data: null, error: null };
   mocks.from.mockImplementation(() => {
     const chain = {
@@ -122,6 +129,158 @@ describe("auth callback", () => {
     expect(response.headers.get("location")).toBe(
       "https://app.alphadogagency.ai/dashboard",
     );
+  });
+
+  it("accepts only an exact successful concierge recovery on a connected partner Host", async () => {
+    mocks.partnerResult = { data: connectedPartnerRow(), error: null };
+
+    const response = await GET(
+      request(
+        "?token_hash=recovery-token&type=recovery&flow=concierge",
+        { host: PARTNER_DOMAIN },
+      ),
+    );
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      type: "recovery",
+      token_hash: "recovery-token",
+    });
+    expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "https://app.alphadogagency.ai/set-password",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it.each([
+    "?token_hash=recovery-token&type=signup&flow=concierge",
+    "?type=recovery&flow=concierge",
+    "?token_hash=%20&type=recovery&flow=concierge",
+    "?token_hash=recovery-token&type=recovery&flow=concierge&flow=concierge",
+    "?token_hash=recovery-token&type=recovery&type=signup&flow=concierge",
+    "?code=code&token_hash=recovery-token&type=recovery&flow=concierge",
+    "?token_hash=recovery-token&type=recovery&flow=unknown",
+  ])("rejects malformed reserved recovery callback %s", async (query) => {
+    const response = await GET(request(query));
+
+    expect(mocks.verifyOtp).not.toHaveBeenCalled();
+    expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "https://simplassist.com/login",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it.each(["expired", "replayed"])(
+    "fails a %s concierge recovery token safely",
+    async () => {
+      mocks.partnerResult = { data: connectedPartnerRow(), error: null };
+      mocks.verifyOtp.mockResolvedValue({
+        data: { user: null, session: null },
+        error: { message: "OTP is invalid or has expired" },
+      });
+
+      const response = await GET(
+        request("?token_hash=used-token&type=recovery&flow=concierge", {
+          host: PARTNER_DOMAIN,
+        }),
+      );
+
+      expect(response.headers.get("location")).toBe(
+        "https://app.alphadogagency.ai/login",
+      );
+      expect(response.headers.get("location")).not.toContain("set-password");
+      expect(mocks.verifyOtp).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    {
+      label: "canonical Host",
+      host: "simplassist.com",
+      result: { data: null, error: null },
+    },
+    {
+      label: "unknown Host",
+      host: "unknown.example.com",
+      result: { data: null, error: null },
+    },
+    {
+      label: "pending partner",
+      host: PARTNER_DOMAIN,
+      result: {
+        data: { ...connectedPartnerRow(), domain_status: "pending" },
+        error: null,
+      },
+    },
+    {
+      label: "inactive partner",
+      host: PARTNER_DOMAIN,
+      result: {
+        data: { ...connectedPartnerRow(), status: "inactive" },
+        error: null,
+      },
+    },
+    {
+      label: "partner lookup failure",
+      host: PARTNER_DOMAIN,
+      result: { data: null, error: { message: "database unavailable" } },
+    },
+  ])(
+    "does not consume a concierge token on $label",
+    async ({ host, result }) => {
+      mocks.partnerResult = result;
+
+      const response = await GET(
+        request(
+          "?token_hash=recovery-token&type=recovery&flow=concierge",
+          { host },
+        ),
+      );
+
+      expect(mocks.verifyOtp).not.toHaveBeenCalled();
+      expect(response.headers.get("location")).toBe(
+        "https://simplassist.com/login",
+      );
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    },
+  );
+
+  it("does not consume a concierge token from forwarded-host spoofing", async () => {
+    mocks.partnerResult = { data: connectedPartnerRow(), error: null };
+
+    const response = await GET(
+      request(
+        "?token_hash=recovery-token&type=recovery&flow=concierge",
+        {
+          host: "unknown.example.com",
+          "x-forwarded-host": PARTNER_DOMAIN,
+          forwarded: `host=${PARTNER_DOMAIN};proto=https`,
+        },
+      ),
+    );
+
+    expect(mocks.verifyOtp).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "https://simplassist.com/login",
+    );
+  });
+
+  it("ignores an arbitrary next target on successful concierge recovery", async () => {
+    mocks.partnerResult = { data: connectedPartnerRow(), error: null };
+
+    const response = await GET(
+      request(
+        "?token_hash=recovery-token&type=recovery&flow=concierge&next=https%3A%2F%2Fevil.example",
+        { host: PARTNER_DOMAIN },
+      ),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://app.alphadogagency.ai/set-password",
+    );
+    expect(response.headers.get("location")).not.toContain("evil.example");
   });
 
   it.each([

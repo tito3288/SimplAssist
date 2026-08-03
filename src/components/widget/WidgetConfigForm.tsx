@@ -133,10 +133,10 @@ function LogoUpload({
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="w-full flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-[#ece4d8] dark:border-white/[0.12] hover:border-[#ea580c] dark:hover:border-[#ff914d]/50 transition-colors cursor-pointer"
+          className="w-full flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-dashed border-[#ece4d8] dark:border-white/[0.12] hover:border-[var(--brand-primary)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.50)] transition-colors cursor-pointer"
         >
           {uploading ? (
-            <Loader2 className="w-6 h-6 text-[#c2410c] dark:text-[#ff914d] animate-spin" />
+            <Loader2 className="w-6 h-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] animate-spin" />
           ) : (
             <Upload className="w-6 h-6 text-stone-400 dark:text-[#666]" />
           )}
@@ -300,7 +300,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                   className={cn(
                     'relative flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors',
                     position === pos
-                      ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                      ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                       : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e0d7c8] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                   )}
                 >
@@ -329,7 +329,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
               onClick={() => setValue('show_logo', !showLogo)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                showLogo ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                showLogo ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
               )}
             >
               <span
@@ -363,7 +363,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
             {...register('welcome_message')}
             rows={3}
             maxLength={500}
-            className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 px-3 py-2 text-sm outline-none resize-none"
+            className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] px-3 py-2 text-sm outline-none resize-none"
           />
           <div className="flex items-center justify-between mt-1">
             <button
@@ -400,7 +400,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                   }}
                   maxLength={50}
                   placeholder={`Question ${index + 1}`}
-                  className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 px-3 py-2 text-sm outline-none"
+                  className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] px-3 py-2 text-sm outline-none"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-stone-400 dark:text-[#666] pointer-events-none">
                   {reply.length}/50
@@ -423,7 +423,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
             <button
               type="button"
               onClick={() => setValue('quick_replies', [...quickReplies, ''])}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full border border-dashed border-[#ece4d8] dark:border-white/[0.12] text-stone-500 dark:text-[#bdbdbf] hover:border-[#ea580c] hover:text-[#c2410c] dark:hover:border-[#ff914d]/50 dark:hover:text-[#ff914d] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-full border border-dashed border-[#ece4d8] dark:border-white/[0.12] text-stone-500 dark:text-[#bdbdbf] hover:border-[var(--brand-primary)] hover:text-[var(--brand-accent)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.50)] dark:hover:text-[var(--brand-accent-dark)] transition-colors"
             >
               <Plus className="h-4 w-4" />
               Add question
@@ -445,7 +445,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
               onClick={() => setValue('lead_capture_enabled', !leadCaptureEnabled)}
               className={cn(
                 'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
-                leadCaptureEnabled ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                leadCaptureEnabled ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
               )}
             >
               <span
@@ -472,7 +472,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
                     type="radio"
                     value={option.value}
                     {...register('lead_capture_timing')}
-                    className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d] border-[#ece4d8] dark:border-white/[0.12] focus:ring-[#ea580c] dark:focus:ring-[#ff914d] dark:bg-white/[0.06]"
+                    className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] border-[#ece4d8] dark:border-white/[0.12] focus:ring-[var(--brand-primary)] dark:focus:ring-[var(--brand-primary-dark)] dark:bg-white/[0.06]"
                   />
                   <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">{option.label}</span>
                 </label>
@@ -528,8 +528,8 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           className={cn(
             'inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-white transition-colors',
             saving
-              ? 'bg-[#ea580c]/60 dark:bg-[#ff914d]/50 cursor-not-allowed'
-              : 'bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33]'
+              ? 'bg-[rgb(var(--brand-primary-rgb)/.60)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.50)] cursor-not-allowed'
+              : 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)]'
           )}
         >
           {saving ? (

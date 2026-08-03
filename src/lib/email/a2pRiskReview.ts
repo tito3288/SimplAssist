@@ -1,4 +1,5 @@
-import { resend, RESEND_FROM } from "./client";
+import { resolveBusinessEmailBrand } from "./businessEmailBrand.server";
+import { sendBusinessEmail } from "./sender";
 import { SUPPORT_EMAIL } from "@/lib/support/constants";
 import type { A2pRiskFinding } from "@/types/database";
 
@@ -44,31 +45,37 @@ export async function sendA2pRiskReviewEmail(
     return;
   }
 
-  const findingLines = input.findings.length
-    ? input.findings.map(
-        (finding) =>
-          `- [${finding.severity}] ${finding.label}: ${finding.evidence.join(" | ")}`
-      )
-    : ["- No specific finding was captured."];
-
-  const lines = [
-    `A2P review needed for ${input.businessName}.`,
-    `Business ID: ${input.businessId}`,
-    `Website: ${input.websiteUrl ?? "none"}`,
-    `Input hash: ${input.inputHash}`,
-    `Customer-facing message: ${input.message}`,
-    "Findings:",
-    ...findingLines,
-    "Review before submitting this account to Telnyx/TCR. If approving, acknowledge the review-fee/rejection risk in the admin override endpoint.",
-  ];
-
   try {
-    await resend.emails.send({
-      from: RESEND_FROM,
-      to: recipients,
-      subject: `A2P review needed: ${input.businessName}`,
-      text: lines.join("\n"),
-      html: htmlFromLines(lines),
+    const brand = await resolveBusinessEmailBrand(input.businessId);
+    const findingLines = input.findings.length
+      ? input.findings.map(
+          (finding) =>
+            `- [${finding.severity}] ${finding.label}: ${finding.evidence.join(" | ")}`
+        )
+      : ["- No specific finding was captured."];
+    const lines = [
+      `A2P review needed for ${input.businessName}.`,
+      `Workspace brand: ${brand.name}`,
+      `Email sender: ${brand.from}`,
+      `Workspace URL: ${brand.publicOrigin}`,
+      `Business ID: ${input.businessId}`,
+      `Website: ${input.websiteUrl ?? "none"}`,
+      `Input hash: ${input.inputHash}`,
+      `Customer-facing message: ${input.message}`,
+      "Findings:",
+      ...findingLines,
+      "Review before submitting this account to Telnyx/TCR. If approving, acknowledge the review-fee/rejection risk in the admin override endpoint.",
+    ];
+
+    await sendBusinessEmail({
+      brand,
+      context: "a2pRiskReview",
+      message: {
+        to: recipients,
+        subject: `A2P review needed: ${brand.name} — ${input.businessName}`,
+        text: lines.join("\n"),
+        html: htmlFromLines(lines),
+      },
     });
   } catch (err) {
     console.error("[email:a2pRiskReview] send failed:", err);

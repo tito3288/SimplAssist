@@ -332,14 +332,14 @@ export default function ServicesAndFaqsForm({
                       {...register(`services.${index}.name`)}
                       placeholder="Service name *"
                       aria-describedby={`service-${index}-quality`}
-                      className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30 focus:border-[#ea580c] dark:focus:border-[#ff914d] text-sm"
+                      className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                     />
                   </div>
                   <div className="w-28">
                     <input
                       {...register(`services.${index}.price`)}
                       placeholder="Price"
-                      className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30 focus:border-[#ea580c] dark:focus:border-[#ff914d] text-sm"
+                      className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                     />
                   </div>
                   {serviceFields.length > 1 && (
@@ -358,7 +358,7 @@ export default function ServicesAndFaqsForm({
                 <input
                   {...register(`services.${index}.description`)}
                   placeholder="Description (optional)"
-                  className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30 focus:border-[#ea580c] dark:focus:border-[#ff914d] text-sm"
+                  className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                 />
                 <p
                   id={`service-${index}-quality`}
@@ -391,7 +391,7 @@ export default function ServicesAndFaqsForm({
               source: 'manual',
             })
           }
-          className="mt-3 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
+          className="mt-3 text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] font-medium"
         >
           + Add Service
         </button>
@@ -422,9 +422,9 @@ export default function ServicesAndFaqsForm({
         </p>
 
         {defaults.usedSuggestedFaqs && (
-          <div className="mb-4 p-3 bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.12)] border border-[#f5dcc4] dark:border-white/[0.10] rounded-lg">
-            <p className="text-sm text-[#c2410c] dark:text-[#ff914d] font-medium mb-2">Suggested FAQs for your business type:</p>
-            <p className="text-xs text-[#c2410c]/80 dark:text-[#ff914d]/80">
+          <div className="mb-4 p-3 bg-[var(--brand-accent-soft)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] border border-[var(--brand-accent-soft-border)] dark:border-white/[0.10] rounded-lg">
+            <p className="text-sm text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] font-medium mb-2">Suggested FAQs for your business type:</p>
+            <p className="text-xs text-[rgb(var(--brand-accent-rgb)/.80)] dark:text-[rgb(var(--brand-accent-dark-rgb)/.80)]">
               We&apos;ve pre-filled some common questions. Fill in the answers or remove any that don&apos;t apply.
             </p>
           </div>
@@ -449,7 +449,7 @@ export default function ServicesAndFaqsForm({
                     {...register(`faqs.${index}.question`)}
                     placeholder="Question"
                     aria-describedby={`faq-${index}-quality`}
-                    className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30 focus:border-[#ea580c] dark:focus:border-[#ff914d] text-sm"
+                    className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                   />
                   <button
                     type="button"
@@ -468,7 +468,7 @@ export default function ServicesAndFaqsForm({
                   rows={2}
                   maxLength={FAQ_ANSWER_MAX_LENGTH}
                   aria-describedby={`faq-${index}-quality`}
-                  className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30 focus:border-[#ea580c] dark:focus:border-[#ff914d] text-sm resize-none"
+                  className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm resize-none"
                 />
                 <p
                   id={`faq-${index}-quality`}
@@ -496,7 +496,7 @@ export default function ServicesAndFaqsForm({
           onClick={() =>
             appendFaq({ question: '', answer: '', source: 'manual' })
           }
-          className="mt-3 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
+          className="mt-3 text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] font-medium"
         >
           + Add FAQ
         </button>

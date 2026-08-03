@@ -70,6 +70,9 @@ export async function POST(request: NextRequest) {
       .insert({
         ...partnerProfileToDatabaseWrite(parsed.data),
         domain_status: "pending",
+        email_from_status: parsed.data.emailFrom ? "pending" : "unconfigured",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
       })
       .select(ADMIN_PARTNER_COLUMNS)
       .single();

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { reconcileAccountDeletionStripeAction } from "@/lib/stripe/accountDeletionReconciler";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const STRIPE_RESUME_RETRYABLE_MESSAGE =
   "We couldn't resume billing right now. Your account remains scheduled for deletion. Please try again.";
@@ -22,27 +22,10 @@ type PreparedReactivation = {
 };
 
 export async function POST() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id, deleted_at, deletion_scheduled_for")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json(
-      { error: "Account not found or not scheduled for deletion" },
-      { status: 404 }
-    );
-  }
+  const { business, user } = workspace.access;
 
   const { data: preparedData, error: prepareError } = await supabaseAdmin.rpc(
     "prepare_account_reactivation",

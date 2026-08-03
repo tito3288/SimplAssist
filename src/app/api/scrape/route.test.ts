@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   crawlSite: vi.fn(),
   extractBusinessInfo: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -20,6 +21,9 @@ vi.mock("@/lib/firecrawl/crawl", () => ({
 }));
 vi.mock("@/lib/firecrawl/extract", () => ({
   extractBusinessInfo: mocks.extractBusinessInfo,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -50,6 +54,7 @@ function request(ip = "203.0.113.10") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.getUser.mockResolvedValue({
     data: { user: { id: "owner-1" } },
@@ -73,6 +78,25 @@ beforeEach(() => {
 });
 
 describe("POST /api/scrape", () => {
+  it("returns a workspace denial before auth, rate limiting, or providers", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_denied" },
+        { status: 403 },
+      ),
+    });
+
+    const response = await POST(request("203.0.113.100"));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "workspace_access_denied" });
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.crawlSite).not.toHaveBeenCalled();
+    expect(mocks.extractBusinessInfo).not.toHaveBeenCalled();
+  });
+
   it("rejects unauthenticated callers before crawling or Anthropic", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
 

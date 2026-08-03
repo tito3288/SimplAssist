@@ -35,9 +35,9 @@ interface DashboardOverviewProps {
 }
 
 const statCards = [
-  { key: 'totalConversations' as const, label: 'Total Conversations', icon: MessageSquare, badge: '0 today', badgeColor: 'bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]' },
+  { key: 'totalConversations' as const, label: 'Total Conversations', icon: MessageSquare, badge: '0 today', badgeColor: 'bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-text-soft-dark)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.22)]' },
   { key: 'activeConversations' as const, label: 'Active Conversations', icon: Zap, badge: 'Live', badgeColor: statusSuccess },
-  { key: 'totalContacts' as const, label: 'Total Contacts', icon: Users, badge: 'CRM', badgeColor: 'bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ffd5bc] dark:border-[rgba(255,145,77,.22)]' },
+  { key: 'totalContacts' as const, label: 'Total Contacts', icon: Users, badge: 'CRM', badgeColor: 'bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-text-soft-dark)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.22)]' },
   { key: 'messagesThisWeek' as const, label: 'Messages Sent', icon: Mail, badge: 'This week', badgeColor: statusInfo },
 ];
 
@@ -65,7 +65,7 @@ function EmptyConversationsIllustration() {
       <div
         className="absolute -bottom-0.5 -right-0.5 flex h-14 w-14 items-center justify-center rounded-full border border-[#ece4d8] bg-white shadow-[0_8px_28px_rgba(0,0,0,0.1)] sm:h-16 sm:w-16 dark:border-white/[0.12] dark:bg-[#1c1c1f] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
       >
-        <Phone className="h-6 w-6 text-[#c2410c] dark:text-[#ff914d] sm:h-7 sm:w-7" strokeWidth={1.75} />
+        <Phone className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] sm:h-7 sm:w-7" strokeWidth={1.75} />
       </div>
     </div>
   );
@@ -94,7 +94,7 @@ export default function DashboardOverview({
         <div className={`p-4 ${cardSurface}`}>
           <div className="flex items-start gap-3">
             <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-              <AlertTriangle className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+              <AlertTriangle className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-medium ${ink}`}>
@@ -111,7 +111,7 @@ export default function DashboardOverview({
           <div className="mt-3 sm:mt-0 sm:ml-11">
             <button
               onClick={() => setShowPhoneModal(true)}
-              className="w-full sm:w-auto px-4 py-2 bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] text-white dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] text-sm font-bold rounded-full transition-colors"
+              className="w-full sm:w-auto px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)] text-sm font-bold rounded-full transition-colors"
             >
               Set Up Phone Number
             </button>
@@ -130,7 +130,7 @@ export default function DashboardOverview({
             <div key={card.key} className={`p-5 ${cardSurface}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className={`p-2 ${orangeAccentIcon}`}>
-                  <Icon className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+                  <Icon className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                 </div>
                 <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold ${card.badgeColor}`}>
                   {card.badge}
@@ -148,12 +148,12 @@ export default function DashboardOverview({
         <div className={`p-5 ${cardSurface}`}>
           <div className="flex items-center gap-3">
             <div className={`p-2 ${orangeAccentIcon}`}>
-              <Phone className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+              <Phone className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <p className={`text-sm ${body}`}>Your {brand.name} Number</p>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ff914d] dark:border-[rgba(255,145,77,.22)]">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-accent-dark)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.22)]">
                   {a2pStatus.smsReady ? 'Active' : 'Setup pending'}
                 </span>
               </div>
@@ -190,7 +190,7 @@ export default function DashboardOverview({
           <div className={`overflow-hidden ${cardSurface}`}>
             <div className="flex items-center justify-between p-4 border-b border-[#ece4d8] dark:border-white/[0.10]">
               <h3 className={`font-semibold ${ink}`}>Recent Conversations</h3>
-              <Link href="/conversations" className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] flex items-center gap-1">
+              <Link href="/conversations" className="text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] flex items-center gap-1">
                 View all <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
@@ -230,9 +230,9 @@ export default function DashboardOverview({
           <div className={`overflow-hidden ${cardSurface}`}>
             <div className="flex items-center justify-between p-4 border-b border-[#ece4d8] dark:border-white/[0.10]">
               <h3 className={`font-semibold flex items-center gap-2 ${ink}`}>
-                <Flame className="w-4 h-4 text-[#c2410c] dark:text-[#ff914d]" /> Hot Leads
+                <Flame className="w-4 h-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" /> Hot Leads
               </h3>
-              <Link href="/contacts" className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] flex items-center gap-1">
+              <Link href="/contacts" className="text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] flex items-center gap-1">
                 View all <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
@@ -249,8 +249,8 @@ export default function DashboardOverview({
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Flame className="w-3 h-3 text-[#c2410c] dark:text-[#ff914d]" />
-                      <span className="text-sm font-bold text-[#c2410c] dark:text-[#ff914d]">{lead.lead_score}</span>
+                      <Flame className="w-3 h-3 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
+                      <span className="text-sm font-bold text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]">{lead.lead_score}</span>
                     </div>
                   </div>
                 ))}
@@ -284,13 +284,13 @@ export default function DashboardOverview({
               border border-[#ece4d8] dark:border-white/[0.10]
               shadow-sm dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
               transition-all duration-300 ease-out
-              hover:border-[#ea580c]/35 dark:hover:border-[rgba(255,145,77,0.28)]
+              hover:border-[rgb(var(--brand-primary-rgb)/.35)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.28)]
               hover:-translate-y-1 hover:shadow-md dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
           >
             <div
               className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
             >
-              <MessageSquare className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+              <MessageSquare className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             </div>
             <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${ink}`}>
               View Conversations
@@ -306,13 +306,13 @@ export default function DashboardOverview({
               border border-[#ece4d8] dark:border-white/[0.10]
               shadow-sm dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
               transition-all duration-300 ease-out
-              hover:border-[#ea580c]/35 dark:hover:border-[rgba(255,145,77,0.28)]
+              hover:border-[rgb(var(--brand-primary-rgb)/.35)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.28)]
               hover:-translate-y-1 hover:shadow-md dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
           >
             <div
               className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
             >
-              <Cog className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+              <Cog className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             </div>
             <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${ink}`}>
               Settings
@@ -328,13 +328,13 @@ export default function DashboardOverview({
               border border-[#ece4d8] dark:border-white/[0.10]
               shadow-sm dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
               transition-all duration-300 ease-out
-              hover:border-[#ea580c]/35 dark:hover:border-[rgba(255,145,77,0.28)]
+              hover:border-[rgb(var(--brand-primary-rgb)/.35)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.28)]
               hover:-translate-y-1 hover:shadow-md dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
           >
             <div
               className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
             >
-              <CreditCard className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+              <CreditCard className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             </div>
             <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${ink}`}>
               Billing

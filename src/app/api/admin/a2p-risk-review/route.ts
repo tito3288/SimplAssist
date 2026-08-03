@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getAdminUser } from "@/lib/admin/auth";
+import {
+  getAdminUser,
+  isCanonicalAdminHostname,
+} from "@/lib/admin/auth";
 import { approveA2pRiskReview } from "@/lib/admin/a2pRiskReview";
 import { isAuthorizedReviewToken } from "@/lib/admin/reviewToken";
 
@@ -12,6 +15,10 @@ const overrideSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  if (!isCanonicalAdminHostname(request.headers.get("host"))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const configuredToken = process.env.A2P_REVIEW_ADMIN_TOKEN;
   const providedToken =
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ||

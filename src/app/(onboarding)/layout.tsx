@@ -5,6 +5,8 @@ import { card, pageShell, fontStack, lightAmbient, darkAmbient } from '@/lib/the
 import { ThemeToggleV2 } from '@/lib/theme-v2/ui';
 import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
 import { PRIVATE_ROUTE_METADATA } from '@/lib/seo/privateMetadata';
+import { getWorkspaceAccess } from '@/lib/customer/workspaceAccess.server';
+import { workspacePageRedirectTarget } from '@/lib/customer/workspaceRouteResponse.server';
 
 export const metadata = PRIVATE_ROUTE_METADATA;
 
@@ -13,6 +15,12 @@ export default async function OnboardingLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const workspaceAccess = await getWorkspaceAccess();
+  const workspaceRedirect = workspacePageRedirectTarget(workspaceAccess);
+  if (workspaceRedirect) {
+    redirect(workspaceRedirect);
+  }
+
   const supabase = await createClient();
 
   const {

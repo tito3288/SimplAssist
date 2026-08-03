@@ -127,6 +127,33 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   if (
+    parsed.data.action === "verify_email_from" &&
+    !existing.partner.emailFrom
+  ) {
+    return NextResponse.json(
+      {
+        error: "Save a From email address before marking it verified",
+        code: "partner_email_from_required",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (
+    parsed.data.action === "verify_email_from" &&
+    parsed.data.expectedEmailFrom !== existing.partner.emailFrom
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "The From email changed before it could be marked verified. Reload and verify the current address.",
+        code: "partner_email_from_changed",
+      },
+      { status: 409 },
+    );
+  }
+
+  if (
     parsed.data.action === "set_domain_status" &&
     parsed.data.domainStatus === "connected" &&
     !existing.partner.customDomain
@@ -147,16 +174,42 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ partner: existing.partner });
   }
 
-  const update =
-    parsed.data.action === "set_domain_status"
-      ? { domain_status: parsed.data.domainStatus }
-      : {
-          ...partnerProfileToDatabaseWrite(parsed.data),
-          domain_status:
-            parsed.data.customDomain === existing.partner.customDomain
-              ? existing.partner.domainStatus
-              : "pending",
-        };
+  if (
+    parsed.data.action === "verify_email_from" &&
+    existing.partner.emailFromStatus === "verified"
+  ) {
+    return NextResponse.json({ partner: existing.partner });
+  }
+
+  let update: Record<string, unknown>;
+  if (parsed.data.action === "set_domain_status") {
+    update = { domain_status: parsed.data.domainStatus };
+  } else if (parsed.data.action === "verify_email_from") {
+    update = {
+      email_from_status: "verified",
+      email_from_verified_at: new Date().toISOString(),
+      email_from_verified_by: admin.id,
+    };
+  } else {
+    const emailChanged =
+      parsed.data.emailFrom !== existing.partner.emailFrom;
+    update = {
+      ...partnerProfileToDatabaseWrite(parsed.data),
+      domain_status:
+        parsed.data.customDomain === existing.partner.customDomain
+          ? existing.partner.domainStatus
+          : "pending",
+      ...(emailChanged
+        ? {
+            email_from_status: parsed.data.emailFrom
+              ? "pending"
+              : "unconfigured",
+            email_from_verified_at: null,
+            email_from_verified_by: null,
+          }
+        : {}),
+    };
+  }
 
   try {
     let updateQuery = supabaseAdmin
@@ -169,6 +222,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updateQuery = parsed.data.expectedCustomDomain
         ? updateQuery.eq("custom_domain", parsed.data.expectedCustomDomain)
         : updateQuery.is("custom_domain", null);
+    }
+
+    if (parsed.data.action === "verify_email_from") {
+      updateQuery = updateQuery.eq(
+        "email_from",
+        parsed.data.expectedEmailFrom!,
+      );
     }
 
     const { data, error } = await updateQuery

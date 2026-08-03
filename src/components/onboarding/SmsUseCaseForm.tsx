@@ -14,6 +14,8 @@ import {
   validateCustomerCareCopy,
 } from '@/lib/messaging/registration/customerCareTemplates';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
+import { useBrand } from '@/components/branding/BrandProvider';
+import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import type {
   A2pRiskChecklistAnswer,
   A2pRiskFinding,
@@ -122,7 +124,7 @@ const VOLUME_OPTIONS: { value: SmsUseCaseData['estimated_monthly_volume']; label
 ];
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30';
+  'w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]';
 
 const LABEL_CLASS = 'block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1';
 const SECTION_HEADER_CLASS = 'text-base font-semibold text-stone-900 dark:text-[#f5f5f5]';
@@ -139,6 +141,7 @@ export default function SmsUseCaseForm({
   onNext,
   onBack,
 }: SmsUseCaseFormProps) {
+  const brand = useBrand();
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [heldRiskReview, setHeldRiskReview] = useState<RiskReviewResponse | null>(
@@ -268,7 +271,7 @@ export default function SmsUseCaseForm({
         </p>
       </div>
 
-      <div className="rounded-[18px] border border-[#f5dcc4] bg-[#fdf1e7] px-4 py-3 text-sm text-[#c2410c] dark:border-white/[0.10] dark:bg-[rgba(255,145,77,.12)] dark:text-[#ff914d]">
+      <div className="rounded-[18px] border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] px-4 py-3 text-sm text-[var(--brand-accent)] dark:border-white/[0.10] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>
             We prefilled this step with carrier-safe Customer Care wording to improve approval chances. Review it and edit anything that does not match {businessName || 'your business'}.
@@ -277,7 +280,7 @@ export default function SmsUseCaseForm({
             <button
               type="button"
               onClick={applyDraft}
-              className="self-start shrink-0 rounded-full border border-[#f5dcc4] px-3 py-1.5 text-xs font-semibold text-[#c2410c] hover:bg-[#fbe6d4] dark:border-white/[0.14] dark:text-[#ff914d] dark:hover:bg-[rgba(255,145,77,.10)]"
+              className="self-start shrink-0 rounded-full border border-[var(--brand-accent-soft-border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-accent)] hover:bg-[var(--brand-tint-strong)] dark:border-white/[0.14] dark:text-[var(--brand-accent-dark)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]"
             >
               Restore recommended draft
             </button>
@@ -329,7 +332,7 @@ export default function SmsUseCaseForm({
                   {...register(`sample_messages.${index}.value`)}
                   rows={2}
                   placeholder={`Sample message ${index + 1}`}
-                  className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d] text-sm resize-none"
+                  className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] focus:border-[var(--brand-primary)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:focus:border-[var(--brand-primary-dark)] text-sm resize-none"
                 />
                 {sampleFields.length > 3 && (
                   <button
@@ -361,7 +364,7 @@ export default function SmsUseCaseForm({
           <button
             type="button"
             onClick={() => appendSample({ value: '' })}
-            className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
+            className="text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] font-medium"
           >
             + Add sample message
           </button>
@@ -405,13 +408,13 @@ export default function SmsUseCaseForm({
             register={register}
             value="restricted"
             title="One or more restricted categories may apply"
-            description="Choose the category below so SimplAssist can prevent a likely carrier rejection."
+            description={`Choose the category below so ${brand.name} can prevent a likely carrier rejection.`}
           />
           <ChecklistRadio
             register={register}
             value="not_sure"
             title="I'm not sure / please review this"
-            description="SimplAssist will review before submitting carrier registration."
+            description={`${brand.name} will review before submitting carrier registration.`}
           />
         </div>
 
@@ -426,7 +429,7 @@ export default function SmsUseCaseForm({
                   type="checkbox"
                   value={selection}
                   {...register('a2p_risk_checklist_selections')}
-                  className="mt-0.5 h-4 w-4 rounded accent-[#ea580c] dark:accent-[#ff914d]"
+                  className="mt-0.5 h-4 w-4 rounded accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]"
                 />
                 <span>{A2P_RISK_SELECTION_LABELS[selection as A2pRiskSelection]}</span>
               </label>
@@ -442,7 +445,7 @@ export default function SmsUseCaseForm({
       </div>
 
       {heldRiskReview && (
-        <RiskReviewNotice review={heldRiskReview} />
+        <RiskReviewNotice review={heldRiskReview} brandName={brand.name} />
       )}
 
       {submitError && (
@@ -505,7 +508,7 @@ function ChecklistRadio({
         type="radio"
         value={value}
         {...register('a2p_risk_checklist_answer')}
-        className="mt-1 h-4 w-4 accent-[#ea580c] dark:accent-[#ff914d]"
+        className="mt-1 h-4 w-4 accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]"
       />
       <span>
         <span className="block text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">{title}</span>
@@ -515,7 +518,13 @@ function ChecklistRadio({
   );
 }
 
-function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
+function RiskReviewNotice({
+  review,
+  brandName,
+}: {
+  review: RiskReviewResponse;
+  brandName: string;
+}) {
   const isBlocked = review.status === 'blocked';
   const visibleFindings = dedupeRiskFindingsByCategory(review.findings).slice(0, 3);
   return (
@@ -524,14 +533,22 @@ function RiskReviewNotice({ review }: { review: RiskReviewResponse }) {
       isBlocked ? statusDanger : statusWarning
     )}>
       <p className="font-medium">
-        {isBlocked ? 'SMS registration cannot be submitted yet.' : 'SimplAssist needs to review this before submitting.'}
+        {isBlocked ? 'SMS registration cannot be submitted yet.' : `${brandName} needs to review this before submitting.`}
       </p>
-      <p className="mt-1">{review.message}</p>
-      {review.reason && <p className="mt-1 text-xs opacity-90">{review.reason}</p>}
+      <p className="mt-1">
+        {replaceDefaultBrandName(review.message, brandName)}
+      </p>
+      {review.reason && (
+        <p className="mt-1 text-xs opacity-90">
+          {replaceDefaultBrandName(review.reason, brandName)}
+        </p>
+      )}
       {visibleFindings.length > 0 && (
         <ul className="mt-2 space-y-1 text-xs">
           {visibleFindings.map((finding) => (
-            <li key={finding.category || finding.ruleId}>{finding.label}</li>
+            <li key={finding.category || finding.ruleId}>
+              {replaceDefaultBrandName(finding.label, brandName)}
+            </li>
           ))}
         </ul>
       )}

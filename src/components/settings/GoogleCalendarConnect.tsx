@@ -6,12 +6,16 @@ import { useRouter } from 'next/navigation';
 interface GoogleCalendarConnectProps {
   businessId: string;
   connectedEmail: string | null;
+  isConnected?: boolean;
   canConnect?: boolean;
+  oauthConnectSupported?: boolean;
 }
 
 export default function GoogleCalendarConnect({
   connectedEmail,
+  isConnected = connectedEmail !== null,
   canConnect = true,
+  oauthConnectSupported = true,
 }: GoogleCalendarConnectProps) {
   const router = useRouter();
   const [disconnecting, setDisconnecting] = useState(false);
@@ -34,7 +38,7 @@ export default function GoogleCalendarConnect({
     }
   };
 
-  if (connectedEmail) {
+  if (isConnected) {
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -43,9 +47,11 @@ export default function GoogleCalendarConnect({
             <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">
               Connected
             </p>
-            <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
-              {connectedEmail}
-            </p>
+            {connectedEmail && (
+              <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+                {connectedEmail}
+              </p>
+            )}
           </div>
         </div>
         <button
@@ -57,6 +63,15 @@ export default function GoogleCalendarConnect({
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
         </button>
       </div>
+    );
+  }
+
+  if (!oauthConnectSupported) {
+    return (
+      <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+        Connecting or reconnecting Google Calendar is not available on this
+        partner workspace. Existing connections remain available.
+      </p>
     );
   }
 

@@ -113,12 +113,12 @@ export function ThemeToggleV2() {
       className="
         relative inline-flex h-10 w-10 items-center justify-center rounded-full
         bg-white text-stone-500 border border-[#e7e0d4]
-        hover:text-[#c2410c] hover:bg-[#faf6ef]
+        hover:text-[var(--brand-accent)] hover:bg-[#faf6ef]
         dark:bg-white/[0.07] dark:text-[#bdbdbf] dark:border-white/[0.12]
-        dark:hover:text-[#ffb07a] dark:hover:bg-white/[0.11]
+        dark:hover:text-[var(--brand-primary-soft-dark)] dark:hover:bg-white/[0.11]
         transition-colors
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60
-        dark:focus-visible:ring-[#ff914d]/60 focus-visible:ring-offset-2
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--brand-primary-rgb)/.60)]
+        dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.60)] focus-visible:ring-offset-2
         focus-visible:ring-offset-[#faf8f4] dark:focus-visible:ring-offset-[#050505]
       "
       aria-label="Toggle theme"
@@ -169,11 +169,11 @@ export function AuthPasswordFieldV2({
           onClick={() => setVisible((v) => !v)}
           className="
             absolute right-2.5 top-1/2 -translate-y-1/2 rounded-xl p-2
-            text-stone-500 hover:text-[#c2410c]
-            dark:text-[#888] dark:hover:text-[#ffb07a]
+            text-stone-500 hover:text-[var(--brand-accent)]
+            dark:text-[#888] dark:hover:text-[var(--brand-primary-soft-dark)]
             transition-colors
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/50
-            dark:focus-visible:ring-[#ff914d]/50 focus-visible:ring-offset-2
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--brand-primary-rgb)/.50)]
+            dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.50)] focus-visible:ring-offset-2
             focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#0a0a0c]
           "
           aria-label={visible ? "Hide password" : "Show password"}
@@ -232,10 +232,10 @@ export function Switch({ checked, onCheckedChange, id, disabled, label }: Switch
         relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent
         transition-colors duration-150 motion-reduce:transition-none
         focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-        focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
+        focus-visible:ring-[rgb(var(--brand-primary-rgb)/.60)] dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.60)]
         focus-visible:ring-offset-[#faf8f4] dark:focus-visible:ring-offset-[#050505]
         disabled:opacity-50 disabled:cursor-not-allowed
-        ${checked ? "bg-[#ea580c] dark:bg-[#ff914d]" : "bg-stone-200 dark:bg-white/[0.12]"}
+        ${checked ? "bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]" : "bg-stone-200 dark:bg-white/[0.12]"}
       `}
     >
       <span
@@ -278,13 +278,13 @@ export function OptionCard({
         w-full text-left rounded-[18px] p-4
         transition-[border-color,box-shadow,background-color] duration-150 motion-reduce:transition-none
         focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-        focus-visible:ring-[#ea580c]/60 dark:focus-visible:ring-[#ff914d]/60
+        focus-visible:ring-[rgb(var(--brand-primary-rgb)/.60)] dark:focus-visible:ring-[rgb(var(--brand-primary-dark-rgb)/.60)]
         focus-visible:ring-offset-[#faf8f4] dark:focus-visible:ring-offset-[#050505]
         disabled:opacity-50 disabled:cursor-not-allowed
         ${
           selected
-            ? `border border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7]
-               dark:border-[#ff914d] dark:ring-[#ff914d]/25 dark:bg-[rgba(255,145,77,0.10)]`
+            ? `border border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)]
+               dark:border-[var(--brand-primary-dark)] dark:ring-[rgb(var(--brand-primary-dark-rgb)/.25)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]`
             : `border border-[#ede5d9] bg-[#faf7f2] hover:border-[#d9d0c1]
                dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.16]`
         }

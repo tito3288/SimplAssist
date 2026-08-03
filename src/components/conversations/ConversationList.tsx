@@ -104,7 +104,7 @@ export function ConversationList({
             placeholder="Search conversations..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] py-2 pl-9 pr-3 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[#ea580c] dark:focus:border-[#ff914d] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30"
+            className="w-full rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] py-2 pl-9 pr-3 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
           />
         </div>
       </div>
@@ -118,7 +118,7 @@ export function ConversationList({
             className={cn(
               "flex-1 px-3 py-2 text-sm font-medium transition-colors",
               filter === tab.value
-                ? "border-b-2 border-[#ea580c] text-[#c2410c] dark:border-[#ff914d] dark:text-[#ff914d]"
+                ? "border-b-2 border-[var(--brand-primary)] text-[var(--brand-accent)] dark:border-[var(--brand-primary-dark)] dark:text-[var(--brand-accent-dark)]"
                 : "text-stone-500 dark:text-[#bdbdbf] hover:text-stone-800 dark:hover:text-[#f5f5f5]"
             )}
           >
@@ -165,7 +165,7 @@ export function ConversationList({
                 onClick={() => onSelect(conv)}
                 className={cn(
                   "group flex w-full items-start gap-3 border-b border-[#f0e9de] dark:border-white/[0.06] px-4 py-3 text-left cursor-pointer transition-colors hover:bg-[#faf6ef] dark:hover:bg-white/[0.04]",
-                  activeId === conv.id && "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.08)] hover:bg-[#fdf1e7] dark:hover:bg-[rgba(255,145,77,.08)]"
+                  activeId === conv.id && "bg-[var(--brand-accent-soft)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.08)] hover:bg-[var(--brand-accent-soft)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.08)]"
                 )}
               >
                 {/* Channel icon */}
@@ -228,7 +228,7 @@ export function ConversationList({
                 {/* Delete + Unread indicator */}
                 <div className="mt-1 flex flex-col items-center gap-1 flex-shrink-0">
                   {conv.status !== "closed" && !webChatLocked && !smsLocked && !aiHandling && (
-                    <div className="h-2.5 w-2.5 rounded-full bg-[#ea580c] dark:bg-[#ff914d]" />
+                    <div className="h-2.5 w-2.5 rounded-full bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]" />
                   )}
                   {!webChatLocked && !smsLocked && (
                     <button

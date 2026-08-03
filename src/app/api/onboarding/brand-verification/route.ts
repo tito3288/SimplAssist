@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
 import { normalizeUsStateCode } from "@/lib/usStates";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const REGISTRATION_LOCKED_MESSAGE =
   "Your registration is in carrier review — these details are locked until review completes.";
@@ -64,6 +65,9 @@ const brandVerificationServerSchema = z.discriminatedUnion("has_ein", [
 ]);
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
 
   const {

@@ -11,8 +11,10 @@ import {
   getDashboardBusinessContext,
   getDashboardEntitlements,
 } from '@/lib/dashboard/context';
+import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
 export default async function DashboardPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');
@@ -146,7 +148,7 @@ export default async function DashboardPage() {
             </div>
             <Link
               href="/settings"
-              className="px-4 py-2 text-sm font-medium rounded-full bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] transition-colors whitespace-nowrap"
+              className="px-4 py-2 text-sm font-medium rounded-full bg-[var(--brand-primary)] text-white hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)] transition-colors whitespace-nowrap"
             >
               Connect Now
             </Link>

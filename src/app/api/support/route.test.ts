@@ -2,19 +2,19 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getUser: vi.fn(),
   from: vi.fn(),
   sendSupportTicketEmail: vi.fn(),
+  getOptionalWorkspaceRouteAccess: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ auth: { getUser: mocks.getUser } })),
-}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
 vi.mock("@/lib/email/supportTicket", () => ({
   sendSupportTicketEmail: mocks.sendSupportTicketEmail,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  getOptionalWorkspaceRouteAccess: mocks.getOptionalWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -70,8 +70,8 @@ function stubAdmin({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getUser.mockResolvedValue({ data: { user: null } });
   mocks.sendSupportTicketEmail.mockResolvedValue(true);
+  mocks.getOptionalWorkspaceRouteAccess.mockResolvedValue(null);
 });
 
 describe("POST /api/support", () => {
@@ -138,8 +138,11 @@ describe("POST /api/support", () => {
   });
 
   it("derives identity from the session and strips client-sent identity fields", async () => {
-    mocks.getUser.mockResolvedValue({
-      data: { user: { id: USER_ID, email: "owner@example.com" } },
+    mocks.getOptionalWorkspaceRouteAccess.mockResolvedValue({
+      status: "resolved",
+      user: { id: USER_ID, email: "owner@example.com" },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
     });
     const admin = stubAdmin({
       business: { id: BUSINESS_ID, name: "Manny's Plumbing" },
@@ -168,6 +171,28 @@ describe("POST /api/support", () => {
         businessId: BUSINESS_ID,
         businessName: "Manny's Plumbing",
       })
+    );
+  });
+
+  it("treats every non-resolved workspace as anonymous without reading a business", async () => {
+    mocks.getOptionalWorkspaceRouteAccess.mockResolvedValue(null);
+    const admin = stubAdmin({
+      business: { id: BUSINESS_ID, name: "Wrong Workspace" },
+    });
+
+    const res = await POST(request(VALID));
+
+    expect(res.status).toBe(200);
+    expect(admin.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: null, business_id: null }),
+    );
+    expect(mocks.from).not.toHaveBeenCalledWith("businesses");
+    expect(mocks.sendSupportTicketEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: null,
+        businessId: null,
+        businessName: null,
+      }),
     );
   });
 

@@ -112,7 +112,7 @@ describe("POST /api/stripe/webhook", () => {
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 
-  it("acknowledges a deleted-business checkout skip without attempting paid launch", async () => {
+  it("acknowledges a guarded stale partner-assignment Checkout skip without attempting paid launch", async () => {
     const checkoutEvent = event("checkout.session.completed", {
       id: "cs_test_deleted_business",
     });
@@ -247,7 +247,7 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
-  it("acknowledges a guarded invoice-failure skip for a deleted business", async () => {
+  it("acknowledges a guarded invoice-failure skip for a deleted or partner-managed business", async () => {
     mocks.constructEvent.mockReturnValue(
       event("invoice.payment_failed", { customer: CUSTOMER_ID })
     );
@@ -302,7 +302,7 @@ describe("POST /api/stripe/webhook", () => {
     }
   );
 
-  it("acknowledges subscription sync null so post-scrub events do not retry forever", async () => {
+  it("acknowledges subscription sync null so partner-mode events do not gain local authority or retry forever", async () => {
     const subscription = { id: SUBSCRIPTION_ID };
     mocks.constructEvent.mockReturnValue(
       event("customer.subscription.updated", subscription)
@@ -313,6 +313,7 @@ describe("POST /api/stripe/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({ processed_at: expect.any(String) })
     );

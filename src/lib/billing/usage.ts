@@ -4,7 +4,11 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { isSubscriptionPlan } from "./features";
 import { countSmsParts } from "./smsParts";
-import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
+import type {
+  BillingMode,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from "@/types/database";
 
 const USAGE_BLOCK_MESSAGES = {
   telnyx_submission_disabled:
@@ -36,6 +40,8 @@ export type UsagePreflight =
 
 interface BusinessBillingRow {
   id: string;
+  billing_mode: unknown;
+  partner_plan: unknown;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
@@ -52,11 +58,27 @@ interface SubscriptionBillingRow {
 
 interface UsagePeriodRow {
   id: string;
+  plan: unknown;
   included_sms_parts: number;
   inbound_sms_parts: number;
   outbound_sms_parts: number;
   warning_80_sent_at: string | null;
   hard_limit_reached_at: string | null;
+}
+
+type UsageBillingSource =
+  | "subscription"
+  | "partner_billing"
+  | "billing_override"
+  | "missing";
+
+interface UsageContext {
+  business: BusinessBillingRow;
+  subscription: SubscriptionBillingRow | null;
+  source: UsageBillingSource;
+  plan: SubscriptionPlan;
+  periodStart: string;
+  periodEnd: string;
 }
 
 export async function preflightOutboundSms(args: {
@@ -70,21 +92,28 @@ export async function preflightOutboundSms(args: {
     return blocked("telnyx_submission_disabled", smsParts);
   }
 
-  if (!context.billingExempt) {
-    if (!context.subscription) {
-      return blocked("billing_required", smsParts);
-    }
-    if (context.subscription.status === "canceled") {
-      return blocked("canceled", smsParts);
-    }
+  if (context.source === "missing") {
+    return blocked("billing_required", smsParts);
+  }
+  if (
+    context.source === "subscription" &&
+    context.subscription?.status === "canceled"
+  ) {
+    return blocked("canceled", smsParts);
   }
 
   const period = await ensureUsagePeriod(context);
   const used = period.inbound_sms_parts + period.outbound_sms_parts;
   const nextUsed = used + smsParts;
   const included = period.included_sms_parts;
+  // Partner plans are fixed allowances. Legacy override flags and an old
+  // overage opt-in must never turn invoiced/comped partner billing into an
+  // unlimited plan. Stripe subscriptions and Stripe-mode legacy overrides
+  // retain their existing overage behavior.
   const overageAllowed =
-    context.business.sms_overage_opt_in || context.billingExempt;
+    context.source !== "partner_billing" &&
+    (context.business.sms_overage_opt_in ||
+      context.source === "billing_override");
 
   if (included > 0 && nextUsed > included && !overageAllowed) {
     await markHardLimitReached(period.id);
@@ -177,14 +206,7 @@ function blocked(reason: UsageBlockReason, smsParts: number): UsagePreflight {
   };
 }
 
-async function resolveUsageContext(businessId: string): Promise<{
-  business: BusinessBillingRow;
-  subscription: SubscriptionBillingRow | null;
-  billingExempt: boolean;
-  plan: SubscriptionPlan;
-  periodStart: string;
-  periodEnd: string;
-}> {
+async function resolveUsageContext(businessId: string): Promise<UsageContext> {
   const [
     { data: business, error: businessError },
     { data: subscription, error: subscriptionError },
@@ -192,7 +214,7 @@ async function resolveUsageContext(businessId: string): Promise<{
     supabaseAdmin
       .from("businesses")
       .select(
-        "id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
+        "id, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
       )
       .eq("id", businessId)
       .single<BusinessBillingRow>(),
@@ -225,15 +247,50 @@ async function resolveUsageContext(businessId: string): Promise<{
     );
   }
 
-  // Match the central entitlement contract: a synchronized subscription is
-  // authoritative, including a canceled one. Protected pilot/comped/exempt
-  // access applies only when there is no subscription row to take precedence.
-  const billingExempt =
-    !subscription &&
-    (business.billing_exempt ||
-      business.billing_comped ||
-      business.billing_pilot);
-  const plan = subscription?.plan ?? (billingExempt ? "full" : "sms_only");
+  // Match the central billing contract exactly: any synchronized subscription
+  // is authoritative, followed by native partner billing, then Stripe-mode
+  // legacy overrides. Missing Stripe billing keeps its historical sms_only
+  // usage snapshot for inbound accounting, while outbound preflight blocks it.
+  let source: UsageBillingSource;
+  let plan: SubscriptionPlan;
+
+  if (subscription) {
+    source = "subscription";
+    plan = subscription.plan;
+  } else {
+    if (!isBillingMode(business.billing_mode)) {
+      throw new Error(
+        `[billing:usage] Business ${businessId} has malformed partner billing values`
+      );
+    }
+
+    if (
+      business.billing_mode === "invoiced" ||
+      business.billing_mode === "comped"
+    ) {
+      if (!isSubscriptionPlan(business.partner_plan)) {
+        throw new Error(
+          `[billing:usage] Business ${businessId} has malformed partner billing values`
+        );
+      }
+      source = "partner_billing";
+      plan = business.partner_plan;
+    } else {
+      if (business.partner_plan !== null) {
+        throw new Error(
+          `[billing:usage] Business ${businessId} has malformed partner billing values`
+        );
+      }
+
+      const hasLegacyOverride =
+        business.billing_exempt ||
+        business.billing_comped ||
+        business.billing_pilot;
+      source = hasLegacyOverride ? "billing_override" : "missing";
+      plan = hasLegacyOverride ? "full" : "sms_only";
+    }
+  }
+
   const { start, end } =
     subscription?.current_period_start && subscription.current_period_end
       ? {
@@ -245,24 +302,19 @@ async function resolveUsageContext(businessId: string): Promise<{
   return {
     business,
     subscription: subscription ?? null,
-    billingExempt,
+    source,
     plan,
     periodStart: start,
     periodEnd: end,
   };
 }
 
-async function ensureUsagePeriod(context: {
-  business: BusinessBillingRow;
-  plan: SubscriptionPlan;
-  periodStart: string;
-  periodEnd: string;
-}): Promise<UsagePeriodRow> {
+async function ensureUsagePeriod(context: UsageContext): Promise<UsagePeriodRow> {
   const included = SUBSCRIPTION_PLANS[context.plan].includedSmsParts;
   const { data: existing, error: existingError } = await supabaseAdmin
     .from("billing_usage_periods")
     .select(
-      "id, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
     )
     .eq("business_id", context.business.id)
     .eq("period_start", context.periodStart)
@@ -275,8 +327,14 @@ async function ensureUsagePeriod(context: {
   }
 
   if (existing) {
-    if (included > existing.included_sms_parts) {
-      const { data: upgraded, error: upgradeError } = await supabaseAdmin
+    const shouldReconcile =
+      context.source === "partner_billing"
+        ? existing.plan !== context.plan ||
+          existing.included_sms_parts !== included
+        : included > existing.included_sms_parts;
+
+    if (shouldReconcile) {
+      const { data: reconciled, error: reconcileError } = await supabaseAdmin
         .from("billing_usage_periods")
         .update({
           plan: context.plan,
@@ -285,16 +343,16 @@ async function ensureUsagePeriod(context: {
         })
         .eq("id", existing.id)
         .select(
-          "id, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+          "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
         )
         .single<UsagePeriodRow>();
 
-      if (upgradeError || !upgraded) {
+      if (reconcileError || !reconciled) {
         throw new Error(
-          `[billing:usage] Failed to upgrade usage period ${existing.id}: ${upgradeError?.message ?? "not found"}`
+          `[billing:usage] Failed to reconcile usage period ${existing.id}: ${reconcileError?.message ?? "not found"}`
         );
       }
-      return upgraded;
+      return reconciled;
     }
     return existing;
   }
@@ -309,7 +367,7 @@ async function ensureUsagePeriod(context: {
       included_sms_parts: included,
     })
     .select(
-      "id, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
+      "id, plan, included_sms_parts, inbound_sms_parts, outbound_sms_parts, warning_80_sent_at, hard_limit_reached_at"
     )
     .single<UsagePeriodRow>();
 
@@ -394,4 +452,8 @@ function isKnownSubscriptionStatus(
     status === "past_due" ||
     status === "canceled"
   );
+}
+
+function isBillingMode(value: unknown): value is BillingMode {
+  return value === "stripe" || value === "invoiced" || value === "comped";
 }

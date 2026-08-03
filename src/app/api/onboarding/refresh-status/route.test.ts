@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   ensureCampaignAssignmentForBusiness: vi.fn(),
   mapCampaignStatus: vi.fn(),
   getOnboardingStateForOwnerReadOnly: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -56,6 +57,10 @@ vi.mock("@/lib/messaging/registration/statusMapper", () => ({
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForOwnerReadOnly:
     mocks.getOnboardingStateForOwnerReadOnly,
+}));
+
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -147,6 +152,7 @@ function expectNoReconciliation() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   vi.spyOn(console, "error").mockImplementation(() => {});
 
   mocks.getUser.mockResolvedValue({
@@ -176,6 +182,28 @@ afterEach(() => {
 });
 
 describe("POST /api/onboarding/refresh-status", () => {
+  it("returns workspace lookup failures before auth or Telnyx reconciliation", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_unavailable", retryable: true },
+        { status: 503 },
+      ),
+    });
+
+    const { response, body } = await invoke();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: "workspace_access_unavailable",
+      retryable: true,
+    });
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+    expectNoReconciliation();
+  });
+
   it.each([
     [
       "missing user",

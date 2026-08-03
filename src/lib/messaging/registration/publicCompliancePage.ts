@@ -91,6 +91,21 @@ const BRAND_HEX_INLINE_STYLE_PROPERTIES = new Set([
   "--brand-accent-soft-border",
   "--brand-accent-soft-dark",
   "--brand-primary-soft-dark",
+  "--brand-tint-strong",
+  "--brand-tint",
+  "--brand-text-soft-dark",
+  "--brand-surface-dark",
+  "--brand-selection-border",
+  "--brand-wash-faint",
+  "--brand-wash",
+  "--brand-border-soft",
+  "--brand-border-strong",
+  "--brand-calendar-border",
+  "--brand-calendar-wash",
+  "--brand-calendar-muted",
+  "--brand-calendar-accent",
+  "--brand-primary-alt",
+  "--brand-primary-alt-wash",
 ]);
 
 const BRAND_RGB_INLINE_STYLE_PROPERTIES = new Set([
@@ -102,6 +117,7 @@ const BRAND_RGB_INLINE_STYLE_PROPERTIES = new Set([
   "--brand-primary-hover-dark-rgb",
   "--brand-primary-active-dark-rgb",
   "--brand-accent-dark-rgb",
+  "--brand-primary-alt-rgb",
 ]);
 
 const READABLE_BRAND_TEXT_VARIABLES = new Set([

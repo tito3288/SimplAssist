@@ -46,7 +46,21 @@ export type PartnerStatus = "active" | "inactive";
 
 export type PartnerDomainStatus = "pending" | "connected";
 
+export type PartnerEmailStatus = "unconfigured" | "pending" | "verified";
+
 export type BillingMode = "stripe" | "invoiced" | "comped";
+
+export type PartnerBillingMode = Exclude<BillingMode, "stripe">;
+
+export type PartnerClientProvisioningStatus =
+  | "pending"
+  | "admin_setup"
+  | "auth_created"
+  | "business_prepared"
+  | "assigned"
+  | "invite_pending"
+  | "setup_email_sent"
+  | "needs_attention";
 
 export type WidgetPosition = "bottom_right" | "bottom_left";
 
@@ -183,7 +197,28 @@ export interface Partner {
   brand_primary_active_dark: string;
   brand_accent_dark: string;
   email_from: string | null;
+  email_from_status: PartnerEmailStatus;
+  email_from_verified_at: string | null;
+  email_from_verified_by: string | null;
   status: PartnerStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartnerClientProvisioningJob {
+  id: string;
+  email: string;
+  requested_business_name: string;
+  partner_id: string;
+  billing_mode: PartnerBillingMode;
+  partner_plan: SubscriptionPlan;
+  auth_user_id: string | null;
+  business_id: string | null;
+  status: PartnerClientProvisioningStatus;
+  last_error_code: string | null;
+  setup_email_sent_at: string | null;
+  invite_attempt_count: number;
+  created_by_admin_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -233,6 +268,7 @@ export interface Business {
   call_forwarding_nudge_resolved_at: string | null;
   partner_id: string | null;
   billing_mode: BillingMode;
+  partner_plan: SubscriptionPlan | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;

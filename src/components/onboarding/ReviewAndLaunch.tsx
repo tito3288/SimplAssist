@@ -9,6 +9,8 @@ import {
   availablePlanOrFallback,
   paidPlanForOnboardingRetry,
 } from "@/lib/billing/planAvailability";
+import { getPlanPresentation } from "@/lib/billing/planPresentation";
+import { replaceDefaultBrandName } from "@/lib/branding/presentation";
 import type { OnboardingState } from '@/lib/onboarding/types';
 import type { SubscriptionPlan } from '@/types/database';
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
@@ -182,7 +184,9 @@ export default function ReviewAndLaunch({
   );
   const isPartnerManaged = billing.mode !== "stripe";
   const isPaidSubscription = Boolean(paidPlanKey);
-  const paidPlan = paidPlanKey ? SUBSCRIPTION_PLANS[paidPlanKey] : null;
+  const paidPlan = paidPlanKey
+    ? getPlanPresentation(paidPlanKey, brand.name)
+    : null;
   const launchHold = isPaidSubscription || isPartnerManaged
     ? classifyPaidLaunchHold(
         registration,
@@ -302,7 +306,9 @@ export default function ReviewAndLaunch({
           {launchHold && (
             <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
               <p className="font-medium">SMS setup is paused</p>
-              <p className="mt-1">{launchHold.message}</p>
+              <p className="mt-1">
+                {replaceDefaultBrandName(launchHold.message, brand.name)}
+              </p>
               {launchHold.helper && !isPartnerManaged && (
                 <p className="mt-2 text-xs">{launchHold.helper}</p>
               )}
@@ -325,7 +331,9 @@ export default function ReviewAndLaunch({
             {launchHold && (
               <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
                 <p className="font-medium">SMS setup is paused</p>
-                <p className="mt-1">{launchHold.message}</p>
+                <p className="mt-1">
+                  {replaceDefaultBrandName(launchHold.message, brand.name)}
+                </p>
                 {launchHold.helper && (
                   <p className="mt-2 text-xs">{launchHold.helper}</p>
                 )}
@@ -339,7 +347,8 @@ export default function ReviewAndLaunch({
                 Choose {brandArticle} {brand.name} plan
               </legend>
 
-              {(Object.entries(SUBSCRIPTION_PLANS) as [SubscriptionPlan, (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan]][]).map(([key, plan]) => {
+              {(Object.keys(SUBSCRIPTION_PLANS) as SubscriptionPlan[]).map((key) => {
+                const plan = getPlanPresentation(key, brand.name);
                 const selected = selectedPlan === key;
                 const recommended = key === RECOMMENDED_PLAN;
 
@@ -365,7 +374,7 @@ export default function ReviewAndLaunch({
                 href={SETUP_FEE_EXPLAINER_PATH}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-2 inline-block font-medium underline underline-offset-2 hover:text-[#ea580c] dark:hover:text-[#ff914d]"
+                className="mt-2 inline-block font-medium underline underline-offset-2 hover:text-[var(--brand-primary)] dark:hover:text-[var(--brand-primary-dark)]"
               >
                 Learn more about this fee →
               </a>
@@ -501,7 +510,7 @@ export default function ReviewAndLaunch({
 
       {error && (
         <div className={cn("rounded-lg px-4 py-3 text-sm", statusDanger)}>
-          {error}
+          {replaceDefaultBrandName(error, brand.name)}
         </div>
       )}
 
@@ -643,7 +652,7 @@ function Section({ title, onEdit, children }: { title: string; onEdit?: () => vo
         {onEdit && (
           <button
             onClick={onEdit}
-            className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] font-medium"
+            className="text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] font-medium"
           >
             Edit
           </button>

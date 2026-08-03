@@ -10,6 +10,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
+  requireWorkspacePageAccess: vi.fn(),
   getDashboardBusinessContext: vi.fn(),
   getDashboardEntitledContext: vi.fn(),
   loadKnowledgeGaps: vi.fn(),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
+}));
+
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
 }));
 
 vi.mock("@/lib/dashboard/context", () => ({
@@ -46,6 +51,7 @@ const BUSINESS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
   vi.spyOn(console, "error").mockImplementation(mocks.consoleError);
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);

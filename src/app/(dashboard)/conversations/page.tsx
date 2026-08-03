@@ -4,6 +4,7 @@ import type { Conversation, Contact } from "@/types/database";
 import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
 import { canUseFeature } from "@/lib/billing/entitlements";
 import { getDashboardEntitledContext } from "@/lib/dashboard/context";
+import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export type ConversationWithContact = Conversation & {
   contact: Pick<Contact, "id" | "name" | "phone_number" | "email">;
@@ -11,6 +12,7 @@ export type ConversationWithContact = Conversation & {
 };
 
 export default async function ConversationsPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");

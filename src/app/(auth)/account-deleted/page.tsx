@@ -1,8 +1,16 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ReactivationCard from "@/components/account/ReactivationCard";
+import { getWorkspaceAccess } from "@/lib/customer/workspaceAccess.server";
+import { workspacePageRedirectTarget } from "@/lib/customer/workspaceRouteResponse.server";
 
 export default async function AccountDeletedPage() {
+  const workspaceAccess = await getWorkspaceAccess();
+  const workspaceRedirect = workspacePageRedirectTarget(workspaceAccess);
+  if (workspaceRedirect) {
+    redirect(workspaceRedirect);
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

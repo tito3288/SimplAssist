@@ -1,0 +1,106 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+type RouteInventory = {
+  path: string;
+  methods: Array<"GET" | "POST" | "PATCH" | "DELETE">;
+};
+
+const REQUIRED_ROUTES: RouteInventory[] = [
+  { path: "./account/route.ts", methods: ["DELETE"] },
+  { path: "./account/reactivate/route.ts", methods: ["POST"] },
+  { path: "./billing/checkout/route.ts", methods: ["POST"] },
+  { path: "./billing/finalize/route.ts", methods: ["POST"] },
+  { path: "./billing/portal/route.ts", methods: ["POST"] },
+  {
+    path: "./calendar/events/route.ts",
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+  },
+  { path: "./conversations/[id]/route.ts", methods: ["DELETE"] },
+  { path: "./google/auth/route.ts", methods: ["GET"] },
+  { path: "./google/callback/route.ts", methods: ["GET"] },
+  { path: "./google/disconnect/route.ts", methods: ["POST"] },
+  { path: "./messaging/numbers/purchase/route.ts", methods: ["POST"] },
+  { path: "./messaging/numbers/search/route.ts", methods: ["GET"] },
+  { path: "./messaging/send/route.ts", methods: ["POST"] },
+  { path: "./onboarding/brand-verification/route.ts", methods: ["POST"] },
+  { path: "./onboarding/refresh-status/route.ts", methods: ["POST"] },
+  { path: "./onboarding/retry-registration/route.ts", methods: ["POST"] },
+  { path: "./onboarding/sms-use-case/route.ts", methods: ["POST"] },
+  { path: "./onboarding/state/route.ts", methods: ["GET"] },
+  { path: "./onboarding/submit-registration/route.ts", methods: ["POST"] },
+  { path: "./scrape/route.ts", methods: ["POST"] },
+  { path: "./settings/call-forwarding/route.ts", methods: ["POST"] },
+  { path: "./settings/call-forwarding/nudge/route.ts", methods: ["POST"] },
+  { path: "./settings/compliance/route.ts", methods: ["POST"] },
+  { path: "./widget/logo/route.ts", methods: ["POST"] },
+  { path: "./widget/preview-config/route.ts", methods: ["GET"] },
+];
+
+function routeSource(relativePath: string): string {
+  return readFileSync(new URL(relativePath, import.meta.url), "utf8");
+}
+
+function handlerSource(source: string, method: string): string {
+  const marker = `export async function ${method}`;
+  const start = source.indexOf(marker);
+  if (start === -1) return "";
+
+  const nextHandler = source.indexOf("export async function ", start + marker.length);
+  return source.slice(start, nextHandler === -1 ? undefined : nextHandler);
+}
+
+describe("authenticated API workspace-access inventory", () => {
+  for (const route of REQUIRED_ROUTES) {
+    for (const method of route.methods) {
+      it(`${method} ${route.path} gates before every other awaited operation`, () => {
+        const handler = handlerSource(routeSource(route.path), method);
+        const gate = handler.indexOf("await requireWorkspaceRouteAccess()");
+
+        expect(handler).not.toBe("");
+        expect(gate).toBeGreaterThan(-1);
+        expect(gate).toBe(handler.indexOf("await "));
+      });
+    }
+  }
+
+  it("gates only widget config PATCH while GET and OPTIONS remain public", () => {
+    const source = routeSource("./widget/config/route.ts");
+    const patch = handlerSource(source, "PATCH");
+
+    expect(patch.indexOf("await requireWorkspaceRouteAccess()")).toBe(
+      patch.indexOf("await "),
+    );
+    expect(handlerSource(source, "GET")).not.toContain(
+      "requireWorkspaceRouteAccess",
+    );
+    expect(handlerSource(source, "OPTIONS")).not.toContain(
+      "requireWorkspaceRouteAccess",
+    );
+  });
+
+  it("keeps live widget and provider/auth callback routes exempt", () => {
+    for (const path of [
+      "./widget/chat/route.ts",
+      "./widget/end/route.ts",
+      "./stripe/webhook/route.ts",
+      "./messaging/webhook/route.ts",
+      "./messaging/registration/status/route.ts",
+      "./messaging/voice/route.ts",
+      "./auth/callback/route.ts",
+    ]) {
+      expect(routeSource(path)).not.toContain("requireWorkspaceRouteAccess");
+    }
+  });
+
+  it("uses optional workspace attribution for support tickets", () => {
+    const source = routeSource("./support/route.ts");
+    const optionalAccess = source.indexOf(
+      "await getOptionalWorkspaceRouteAccess()",
+    );
+    const businessAttachment = source.indexOf('.from("businesses")');
+
+    expect(optionalAccess).toBeGreaterThan(-1);
+    expect(businessAttachment).toBeGreaterThan(optionalAccess);
+  });
+});

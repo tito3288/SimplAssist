@@ -7,7 +7,7 @@ type PulsingDotProps = {
 };
 
 /**
- * Global loading indicator — matches `.dot` in globals.css (pulsing #ff8c42).
+ * Global loading indicator — matches the branded `.dot` in globals.css.
  */
 export function PulsingDot({ className, inline }: PulsingDotProps) {
   return (

@@ -504,20 +504,27 @@ async function dispatchStatusEmail(args: {
   }
 
   if (args.kind === "brand" && args.newStatus === "approved") {
-    await sendBrandApprovedEmail({ businessName: args.businessName, recipients });
+    await sendBrandApprovedEmail({
+      businessId: args.businessId,
+      businessName: args.businessName,
+      recipients,
+    });
   } else if (args.kind === "brand" && args.newStatus === "rejected") {
     await sendBrandRejectedEmail({
+      businessId: args.businessId,
       businessName: args.businessName,
       rejectionReason: args.rejectionReason,
       recipients,
     });
   } else if (args.kind === "campaign" && args.newStatus === "approved") {
     await sendCampaignApprovedEmail({
+      businessId: args.businessId,
       businessName: args.businessName,
       recipients,
     });
   } else if (args.kind === "campaign" && args.newStatus === "rejected") {
     await sendCampaignRejectedEmail({
+      businessId: args.businessId,
       businessName: args.businessName,
       rejectionReason: args.rejectionReason,
       recipients,

@@ -95,7 +95,13 @@ function makeRequest(
   path: string,
   init?: ConstructorParameters<typeof NextRequest>[1],
 ) {
-  return new NextRequest(`http://localhost${path}`, init);
+  const requestHeaders = new Headers(init?.headers);
+  if (!requestHeaders.has("host")) requestHeaders.set("host", "localhost:3000");
+
+  return new NextRequest(`http://localhost${path}`, {
+    ...init,
+    headers: requestHeaders,
+  });
 }
 
 const PREVIEW_COOKIE = "sa-admin-brand-preview";
@@ -107,6 +113,7 @@ beforeEach(() => {
   mocks.script.length = 0;
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://supabase.local");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000");
   vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
 });
 
@@ -276,6 +283,136 @@ describe("updateSession", () => {
     expect(cookie).not.toHaveProperty("domain");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("vary")).toBe("Cookie");
+  });
+
+  it("accepts canonical preview Host normalization for case, port, and a final DNS dot", async () => {
+    scriptClient(null);
+    scriptClient({ id: ADMIN_ID });
+
+    const response = await updateSession(
+      makeRequest("/login?brand=alpha-dog", {
+        headers: { host: "LOCALHOST.:8443" },
+      }),
+    );
+
+    expect(mocks.clients).toHaveLength(2);
+    expect(mocks.clients[1].getUser).toHaveBeenCalledOnce();
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBe("alpha-dog");
+    expect(response.cookies.get(PREVIEW_COOKIE)?.value).toBe("alpha-dog");
+  });
+
+  it.each([
+    ["a partner host", "app.alphadogagency.ai"],
+    ["an unknown host", "unknown.example"],
+    ["a suffix lookalike", "localhost.evil.example"],
+    ["a malformed Host", "https://localhost:3000/path"],
+  ])(
+    "clears preview without creating an admin client solely for %s",
+    async (_, host) => {
+      scriptClient(null);
+
+      const response = await updateSession(
+        makeRequest("/login?brand=alpha-dog", {
+          headers: {
+            host,
+            cookie: `${PREVIEW_COOKIE}=existing-partner`,
+          },
+        }),
+      );
+
+      expect(mocks.clients).toHaveLength(1);
+      expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBeNull();
+      expect(response.cookies.get(PREVIEW_COOKIE)).toMatchObject({
+        value: "",
+        maxAge: 0,
+      });
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("vary")).toBe("Cookie");
+    },
+  );
+
+  it("clears preview when Host is missing without creating an admin client", async () => {
+    scriptClient(null);
+    const request = new NextRequest("http://localhost/login?brand=alpha-dog", {
+      headers: { cookie: `${PREVIEW_COOKIE}=existing-partner` },
+    });
+
+    const response = await updateSession(request);
+
+    expect(mocks.clients).toHaveLength(1);
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBeNull();
+    expect(response.cookies.get(PREVIEW_COOKIE)?.maxAge).toBe(0);
+  });
+
+  it("ignores forwarded hosts when the actual Host is canonical", async () => {
+    scriptClient(null);
+    scriptClient({ id: ADMIN_ID });
+
+    const response = await updateSession(
+      makeRequest("/login?brand=alpha-dog", {
+        headers: {
+          host: "localhost:3000",
+          "x-forwarded-host": "app.alphadogagency.ai",
+          forwarded: "host=app.alphadogagency.ai",
+        },
+      }),
+    );
+
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBe("alpha-dog");
+  });
+
+  it("does not let a forwarded canonical host authorize preview on a partner Host", async () => {
+    scriptClient(null);
+
+    const response = await updateSession(
+      makeRequest("/login?brand=alpha-dog", {
+        headers: {
+          host: "app.alphadogagency.ai",
+          "x-forwarded-host": "localhost:3000",
+          forwarded: "host=localhost:3000",
+        },
+      }),
+    );
+
+    expect(mocks.clients).toHaveLength(1);
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBeNull();
+    expect(response.cookies.get(PREVIEW_COOKIE)?.maxAge).toBe(0);
+  });
+
+  it("clears a noncanonical preview cookie without consulting the admin channel", async () => {
+    scriptClient(null);
+
+    const response = await updateSession(
+      makeRequest("/dashboard", {
+        headers: {
+          host: "app.alphadogagency.ai",
+          cookie: `${PREVIEW_COOKIE}=alpha-dog`,
+        },
+      }),
+    );
+
+    expect(mocks.clients).toHaveLength(1);
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBeNull();
+    expect(response.cookies.get(PREVIEW_COOKIE)?.maxAge).toBe(0);
+  });
+
+  it("preserves admin-path refresh on a noncanonical Host without authorizing preview", async () => {
+    scriptClient(null);
+    scriptClient({ id: ADMIN_ID });
+
+    const response = await updateSession(
+      makeRequest("/admin?brand=alpha-dog", {
+        headers: {
+          host: "app.alphadogagency.ai",
+          cookie: `${PREVIEW_COOKIE}=existing-partner`,
+        },
+      }),
+    );
+
+    expect(mocks.clients).toHaveLength(2);
+    expect(mocks.clients[1].getUser).toHaveBeenCalledOnce();
+    expect(response.headers.get(FORWARDED_PREVIEW_HEADER)).toBeNull();
+    expect(response.cookies.get(PREVIEW_COOKIE)?.maxAge).toBe(0);
   });
 
   it("passes an authorized preview cookie downstream without extending its lifetime", async () => {

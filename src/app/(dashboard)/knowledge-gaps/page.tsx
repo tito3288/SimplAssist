@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import KnowledgeGapsDashboard from "@/components/knowledge-gaps/KnowledgeGapsDashboard";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
+import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { loadKnowledgeGaps } from "@/lib/knowledge-gaps/load";
 
 export default async function KnowledgeGapsPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");

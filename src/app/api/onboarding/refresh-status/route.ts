@@ -13,6 +13,7 @@ import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registratio
 import { mapCampaignStatus } from "@/lib/messaging/registration/statusMapper";
 import { getOnboardingStateForOwnerReadOnly } from "@/lib/onboarding/state";
 import { createClient } from "@/lib/supabase/server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const CAMPAIGN_READ_TIMEOUT_MS = 10_000;
 const CAMPAIGN_SNAPSHOT_SELECT = [
@@ -39,6 +40,9 @@ const CAMPAIGN_SNAPSHOT_SELECT = [
 ].join(", ");
 
 export async function POST() {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
   const {
     data: { user },

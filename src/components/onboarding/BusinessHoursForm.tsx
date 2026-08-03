@@ -93,7 +93,7 @@ export default function BusinessHoursForm({
               type="button"
               onClick={() => updateDay(index, { is_closed: !day.is_closed })}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                !day.is_closed ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                !day.is_closed ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
               }`}
             >
               <span
@@ -112,14 +112,14 @@ export default function BusinessHoursForm({
                   type="time"
                   value={day.open_time}
                   onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d]"
+                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] focus:border-[var(--brand-primary)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:focus:border-[var(--brand-primary-dark)]"
                 />
                 <span className="text-stone-400 dark:text-[#666]">to</span>
                 <input
                   type="time"
                   value={day.close_time}
                   onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 focus:border-[#ea580c] dark:focus:ring-[#ff914d]/30 dark:focus:border-[#ff914d]"
+                  className="px-2 py-1 border border-[#e3dacc] dark:border-white/[0.12] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] focus:border-[var(--brand-primary)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:focus:border-[var(--brand-primary-dark)]"
                 />
               </div>
             )}

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   from: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -13,6 +14,9 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -47,6 +51,7 @@ function queueResults(...results: unknown[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.getUser.mockResolvedValue({
     data: { user: { id: USER_ID } },
@@ -56,6 +61,23 @@ beforeEach(() => {
 });
 
 describe("POST /api/settings/call-forwarding/nudge", () => {
+  it("passes through workspace denial before auth or business writes", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_denied" },
+        { status: 403 },
+      ),
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "workspace_access_denied" });
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it("requires an authenticated owner", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
 

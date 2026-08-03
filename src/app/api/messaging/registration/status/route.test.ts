@@ -269,6 +269,11 @@ describe("POST /api/messaging/registration/status", () => {
     await vi.waitFor(() => {
       expect(mocks.sendCampaignApprovedEmail).toHaveBeenCalledTimes(1);
     });
+    expect(mocks.sendCampaignApprovedEmail).toHaveBeenCalledWith({
+      businessId: BUSINESS.id,
+      businessName: BUSINESS.name,
+      recipients: ["rep@test.dev"],
+    });
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
 

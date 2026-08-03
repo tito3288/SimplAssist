@@ -79,7 +79,7 @@ export function InboxLayout({
             <div className="flex items-center border-b border-[#ece4d8] dark:border-white/[0.10] px-3 py-2 md:hidden">
               <button
                 onClick={() => setSelected(null)}
-                className="flex items-center gap-1 text-sm text-[#c2410c] dark:text-[#ff914d]"
+                className="flex items-center gap-1 text-sm text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back

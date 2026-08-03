@@ -18,6 +18,13 @@ interface AdminFlagFormProps {
   };
 }
 
+const PARTNER_MANAGED_FLAG_KEYS = new Set<keyof AdminFlagFormProps["initial"]>([
+  "billing_pilot",
+  "billing_comped",
+  "billing_exempt",
+  "sms_overage_opt_in",
+]);
+
 export function AdminFlagForm({
   businessId,
   billingMode,
@@ -72,7 +79,7 @@ export function AdminFlagForm({
           <label
             key={key}
             className={`flex items-center gap-2 text-sm ${
-              key === "billing_comped" && billingMode !== "stripe"
+              PARTNER_MANAGED_FLAG_KEYS.has(key) && billingMode !== "stripe"
                 ? "text-stone-400 dark:text-[#666]"
                 : ""
             }`}
@@ -81,7 +88,7 @@ export function AdminFlagForm({
               type="checkbox"
               checked={flags[key]}
               disabled={
-                key === "billing_comped" && billingMode !== "stripe"
+                PARTNER_MANAGED_FLAG_KEYS.has(key) && billingMode !== "stripe"
               }
               onChange={(event) =>
                 setFlags((current) => ({
@@ -97,8 +104,8 @@ export function AdminFlagForm({
       </div>
       {billingMode !== "stripe" && (
         <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
-          Partner billing owns the temporary Comped flag. Return the business
-          to Stripe mode before changing it manually.
+          Partner billing owns Pilot, Comped, Billing exempt, and Overage
+          opt-in. Its selected plan controls entitlements and the SMS allowance.
         </p>
       )}
       <textarea

@@ -49,6 +49,10 @@ function storedPartner(overrides: Record<string, unknown> = {}) {
     brand_primary_hover_dark: "#f57f33",
     brand_primary_active_dark: "#e8752c",
     brand_accent_dark: "#ff914d",
+    email_from: "notifications@alphadogagency.ai",
+    email_from_status: "verified",
+    email_from_verified_at: "2026-08-03T02:00:00.000Z",
+    email_from_verified_by: "10000000-0000-4000-a000-000000000099",
     status: "active",
     created_at: "2026-08-03T00:00:00.000Z",
     updated_at: "2026-08-03T00:00:00.000Z",
@@ -94,6 +98,8 @@ describe("AdminPartnersPage", () => {
     expect(html).toContain("alpha-dog");
     expect(html).toContain("app.alphadogagency.ai");
     expect(html).toContain("Connected");
+    expect(html).toContain("notifications@alphadogagency.ai");
+    expect(html).toContain("Verified");
     expect(html).toContain("Active");
     expect(html).toContain(
       'href="/admin/partners/10000000-0000-4000-a000-000000000043"',

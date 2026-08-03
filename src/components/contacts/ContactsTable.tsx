@@ -165,7 +165,7 @@ export default function ContactsTable({
             placeholder="Search contacts..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-[22px] py-2 pl-9 pr-3 text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 transition-[border-color,box-shadow] duration-150"
+            className="w-full rounded-[22px] py-2 pl-9 pr-3 text-sm bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] transition-[border-color,box-shadow] duration-150"
           />
         </div>
 
@@ -178,7 +178,7 @@ export default function ContactsTable({
                 onClick={() => setFilter(f.key)}
                 className={`px-3 py-1.5 text-xs font-medium transition ${
                   filter === f.key
-                    ? "bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]"
+                    ? "bg-[var(--brand-primary)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]"
                     : "text-stone-600 dark:text-[#bdbdbf] hover:bg-[#faf6ef] dark:hover:bg-white/[0.06]"
                 } ${f.key === "all" ? "rounded-l-[22px]" : ""} ${
                   f.key === "hot" ? "rounded-r-[22px]" : ""
@@ -194,7 +194,7 @@ export default function ContactsTable({
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as Sort)}
-              className="appearance-none rounded-[22px] py-1.5 pl-3 pr-8 text-xs font-medium bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 transition-[border-color,box-shadow] duration-150"
+              className="appearance-none rounded-[22px] py-1.5 pl-3 pr-8 text-xs font-medium bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] transition-[border-color,box-shadow] duration-150"
             >
               {sorts.map((s) => (
                 <option key={s.key} value={s.key}>
@@ -247,7 +247,7 @@ export default function ContactsTable({
                   </td>
                   <td className="px-6 py-4">
                     {contact.source_channel === "sms" ? (
-                      <Phone className="h-4 w-4 text-[#c2410c] dark:text-[#ff914d]" />
+                      <Phone className="h-4 w-4 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
                     ) : (
                       <MessageCircle className="h-4 w-4 text-stone-500 dark:text-[#bdbdbf]" />
                     )}

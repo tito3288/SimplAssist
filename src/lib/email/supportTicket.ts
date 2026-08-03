@@ -1,4 +1,5 @@
-import { resend, RESEND_FROM } from "./client";
+import { resolveBusinessEmailBrand } from "./businessEmailBrand.server";
+import { sendBusinessEmail } from "./sender";
 import {
   SUPPORT_EMAIL,
   supportCategoryLabel,
@@ -43,30 +44,36 @@ function htmlFromLines(lines: string[]): string {
 export async function sendSupportTicketEmail(
   input: SupportTicketEmailInput
 ): Promise<boolean> {
-  const categoryLabel = supportCategoryLabel(input.category);
-  const business = input.businessId
-    ? `${input.businessName ?? "unknown"} (${input.businessId})`
-    : "none — logged out";
-
-  const lines = [
-    `New support request ${input.requestId}`,
-    `Category: ${categoryLabel}`,
-    `From: ${input.name} <${input.email}>`,
-    `Business: ${business}`,
-    `User ID: ${input.userId ?? "none"}`,
-    "",
-    // Preserve the submitter's line breaks as separate paragraphs.
-    ...input.message.split("\n"),
-  ];
-
   try {
-    await resend.emails.send({
-      from: RESEND_FROM,
-      to: [SUPPORT_EMAIL],
-      replyTo: input.email,
-      subject: `Support request — ${categoryLabel} — ${input.name}`,
-      text: lines.join("\n"),
-      html: htmlFromLines(lines),
+    const brand = await resolveBusinessEmailBrand(input.businessId);
+    const categoryLabel = supportCategoryLabel(input.category);
+    const business = input.businessId
+      ? `${input.businessName ?? "unknown"} (${input.businessId})`
+      : "none — logged out";
+    const lines = [
+      `New support request ${input.requestId}`,
+      `Workspace brand: ${brand.name}`,
+      `Email sender: ${brand.from}`,
+      `Workspace URL: ${brand.publicOrigin}`,
+      `Category: ${categoryLabel}`,
+      `From: ${input.name} <${input.email}>`,
+      `Business: ${business}`,
+      `User ID: ${input.userId ?? "none"}`,
+      "",
+      // Preserve the submitter's line breaks as separate paragraphs.
+      ...input.message.split("\n"),
+    ];
+
+    await sendBusinessEmail({
+      brand,
+      context: "supportTicket",
+      message: {
+        to: [SUPPORT_EMAIL],
+        replyTo: input.email,
+        subject: `Support request — ${brand.name} — ${categoryLabel} — ${input.name}`,
+        text: lines.join("\n"),
+        html: htmlFromLines(lines),
+      },
     });
     return true;
   } catch (err) {

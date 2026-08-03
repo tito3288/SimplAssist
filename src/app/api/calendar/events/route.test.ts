@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  requireWorkspaceRouteAccess: vi.fn(),
   requireAuthenticatedFeature: vi.fn(),
   getAuthenticatedClient: vi.fn(),
   getCalendarService: vi.fn(),
@@ -13,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   calendarDelete: vi.fn(),
 }));
 
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
+}));
 vi.mock("@/lib/google/routeAccess", () => ({
   requireAuthenticatedFeature: mocks.requireAuthenticatedFeature,
 }));
@@ -176,8 +180,31 @@ function denyAccess(status: 403 | 503) {
   });
 }
 
+function denyWorkspace(status: 401 | 403 | 503) {
+  const body =
+    status === 401
+      ? { error: "Unauthorized" }
+      : status === 403
+        ? { error: "workspace_access_denied" }
+        : { error: "workspace_access_unavailable", retryable: true };
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: false,
+    response: NextResponse.json(body, { status }),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: "00000000-0000-4000-8000-000000000002" },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
 
   const tokenChain = {
     select: vi.fn(),
@@ -230,6 +257,87 @@ beforeEach(() => {
 });
 
 describe("Calendar event entitlement boundary", () => {
+  it.each(operations.flatMap((operation) =>
+    ([401, 403, 503] as const).map((status) => ({ ...operation, status }))
+  ))(
+    "$method returns workspace $status before parsing, feature, database, or provider access",
+    async ({ invoke, status }) => {
+      denyWorkspace(status);
+
+      const response = await invoke();
+
+      expect(response.status).toBe(status);
+      expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+      expect(mocks.accessFrom).not.toHaveBeenCalled();
+      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+      expect(mocks.getCalendarService).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { method: "GET", invoke: (request: NextRequest) => GET(request) },
+    { method: "DELETE", invoke: (request: NextRequest) => DELETE(request) },
+  ])(
+    "$method does not inspect query parameters before the workspace gate",
+    async ({ invoke }) => {
+      denyWorkspace(403);
+      const request = Object.create(null) as NextRequest;
+      Object.defineProperty(request, "nextUrl", {
+        get: vi.fn(() => {
+          throw new Error("query parameters were inspected");
+        }),
+      });
+
+      const response = await invoke(request);
+
+      expect(response.status).toBe(403);
+    }
+  );
+
+  it.each([
+    { method: "POST", invoke: (request: NextRequest) => POST(request) },
+    { method: "PATCH", invoke: (request: NextRequest) => PATCH(request) },
+  ])(
+    "$method does not parse JSON before the workspace gate",
+    async ({ invoke }) => {
+      denyWorkspace(403);
+      const json = vi.fn(() => {
+        throw new Error("request body was parsed");
+      });
+
+      const response = await invoke({ json } as unknown as NextRequest);
+
+      expect(response.status).toBe(403);
+      expect(json).not.toHaveBeenCalled();
+    }
+  );
+
+  it("continues to calendar access on a correctly matched partner host", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: "00000000-0000-4000-8000-000000000002" },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: "00000000-0000-4000-8000-000000000003",
+        },
+        hostKind: "partner",
+      },
+    });
+
+    const response = await GET(
+      new NextRequest(
+        "https://partner.example/api/calendar/events?start=2026-07-01T00%3A00%3A00Z&end=2026-08-01T00%3A00%3A00Z"
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith("calendar");
+    expect(mocks.calendarList).toHaveBeenCalledOnce();
+  });
+
   it.each(operations)(
     "$method returns 403 before token or Google access for a known plan denial",
     async ({ invoke }) => {

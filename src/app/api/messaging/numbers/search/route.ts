@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { searchAvailableNumbers } from "@/lib/messaging/numbers";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function GET(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const areaCode = request.nextUrl.searchParams.get("areaCode");
 
   if (!areaCode || !/^\d{3}$/.test(areaCode)) {

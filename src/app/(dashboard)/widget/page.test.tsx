@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
+  requireWorkspacePageAccess: vi.fn(),
   getDashboardEntitledContext: vi.fn(),
   canUseFeature: vi.fn(),
   from: vi.fn(),
@@ -14,6 +15,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
+}));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardEntitledContext: mocks.getDashboardEntitledContext,
 }));
@@ -45,6 +49,7 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
   mocks.canUseFeature.mockReturnValue(true);
   mocks.resolveConnectedBusinessPartner.mockResolvedValue(null);
   mocks.getCanonicalAppOrigin.mockReturnValue("https://simplassist.com");
@@ -72,6 +77,19 @@ beforeEach(() => {
 });
 
 describe("WidgetPage defaults", () => {
+  it("does not read or insert widget data when workspace access is denied", async () => {
+    mocks.requireWorkspacePageAccess.mockRejectedValueOnce(
+      new Error("redirect:/workspace-access"),
+    );
+
+    await expect(WidgetPage()).rejects.toThrow("redirect:/workspace-access");
+
+    expect(mocks.getDashboardEntitledContext).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.resolveConnectedBusinessPartner).not.toHaveBeenCalled();
+  });
+
   it("creates only new widget configs as active", async () => {
     const existingQuery = {
       select: vi.fn(),

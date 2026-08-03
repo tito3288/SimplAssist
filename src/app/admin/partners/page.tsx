@@ -86,11 +86,12 @@ export default async function AdminPartnersPage() {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
+              <table className="w-full min-w-[920px] text-left text-sm">
                 <thead className="border-b border-[#ece4d8] bg-[#faf7f2] text-xs uppercase tracking-wide text-stone-500 dark:border-white/[0.10] dark:bg-white/[0.04] dark:text-[#bdbdbf]">
                   <tr>
                     <th className="px-4 py-3 font-medium">Partner</th>
                     <th className="px-4 py-3 font-medium">Custom domain</th>
+                    <th className="px-4 py-3 font-medium">Email sender</th>
                     <th className="px-4 py-3 font-medium">Domain</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Actions</th>
@@ -107,6 +108,26 @@ export default async function AdminPartnersPage() {
                       </td>
                       <td className="px-4 py-4">
                         {partner.customDomain ?? "Not set"}
+                      </td>
+                      <td className="px-4 py-4">
+                        <p>{partner.emailFrom ?? "Not configured"}</p>
+                        <div className="mt-2">
+                          <StatusBadge
+                            tone={
+                              partner.emailFromStatus === "verified"
+                                ? "success"
+                                : partner.emailFromStatus === "pending"
+                                  ? "warning"
+                                  : "neutral"
+                            }
+                          >
+                            {partner.emailFromStatus === "verified"
+                              ? "Verified"
+                              : partner.emailFromStatus === "pending"
+                                ? "Pending"
+                                : "Unconfigured"}
+                          </StatusBadge>
+                        </div>
                       </td>
                       <td className="px-4 py-4">
                         <StatusBadge

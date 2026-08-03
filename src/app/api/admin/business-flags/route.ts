@@ -35,35 +35,51 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { businessId, expectedBillingMode, ...flags } = parsed.data;
-  if (!flags.billing_comped && expectedBillingMode !== "stripe") {
-    return NextResponse.json(
-      {
-        error: "partner_billing_owns_comped",
-        message:
-          "Partner billing owns the temporary Comped flag for this business.",
-      },
-      { status: 409 }
-    );
-  }
-
+  const {
+    businessId,
+    expectedBillingMode,
+    billing_pilot,
+    billing_comped,
+    billing_exempt,
+    telnyx_submission_disabled,
+    sms_overage_opt_in,
+    billing_admin_notes,
+  } = parsed.data;
   const now = new Date().toISOString();
+  const updateValues =
+    expectedBillingMode === "stripe"
+      ? {
+          billing_pilot,
+          billing_comped,
+          billing_exempt,
+          telnyx_submission_disabled,
+          sms_overage_opt_in,
+          billing_admin_notes,
+          sms_overage_opted_in_at: sms_overage_opt_in ? now : null,
+          sms_overage_opted_in_by: sms_overage_opt_in ? admin.id : null,
+          billing_flags_updated_at: now,
+          billing_flags_updated_by: admin.id,
+        }
+      : {
+          // Native partner billing owns all entitlement and allowance fields.
+          // Ignore their submitted values rather than rejecting the request:
+          // an assignment may retain a historical overage opt-in, and that
+          // must not prevent unrelated operational controls from being saved.
+          telnyx_submission_disabled,
+          billing_admin_notes,
+          billing_flags_updated_at: now,
+          billing_flags_updated_by: admin.id,
+        };
   const updateQuery = supabaseAdmin
     .from("businesses")
-    .update({
-      ...flags,
-      sms_overage_opted_in_at: flags.sms_overage_opt_in ? now : null,
-      sms_overage_opted_in_by: flags.sms_overage_opt_in ? admin.id : null,
-      billing_flags_updated_at: now,
-      billing_flags_updated_by: admin.id,
-    })
+    .update(updateValues)
     .eq("id", businessId)
     .eq("billing_mode", expectedBillingMode);
 
   // The expected-mode predicate is evaluated by Postgres as part of the
   // UPDATE. It protects both directions of a concurrent assignment change:
-  // a stale Stripe form cannot clear the non-Stripe bridge, and a stale
-  // non-Stripe form cannot restore it after the business returns to Stripe.
+  // a stale Stripe form cannot restore legacy overrides on native partner
+  // billing, and a stale partner form cannot alter Stripe-mode flags.
 
   const { data: updated, error } = await updateQuery.select(
     "id, billing_mode"
@@ -98,12 +114,12 @@ export async function POST(request: NextRequest) {
     if (!current) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 });
     }
-    if (!flags.billing_comped && current.billing_mode !== "stripe") {
+    if (current.billing_mode !== "stripe") {
       return NextResponse.json(
         {
-          error: "partner_billing_owns_comped",
+          error: "partner_billing_owns_legacy_flags",
           message:
-            "Partner billing owns the temporary Comped flag for this business.",
+            "Partner billing owns plan entitlements and SMS allowances for this business.",
         },
         { status: 409 }
       );

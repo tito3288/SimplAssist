@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { adminUserIds } from "@/lib/admin/allowlist";
 import { isAdminPath } from "@/lib/admin/adminPath";
+import { isCanonicalAdminHostname } from "@/lib/admin/canonicalHost";
 import { ADMIN_AUTH_COOKIE_OPTIONS } from "@/lib/admin/sessionCookie";
 import {
   BRAND_PREVIEW_COOKIE,
@@ -93,6 +94,10 @@ function addVaryCookie(headers: Headers) {
   }
 }
 
+function isCanonicalPreviewHost(request: NextRequest): boolean {
+  return isCanonicalAdminHostname(request.headers.get("host"));
+}
+
 // Refreshes both auth channels: the customer session (default sb-* cookies,
 // every matched path) and the admin session (sa-admin-auth cookies, admin
 // paths and authorized preview requests). The two clients write disjoint
@@ -135,11 +140,17 @@ export async function updateSession(request: NextRequest) {
   await makeClient().auth.getClaims();
 
   const preview = previewIntent(request);
+  const previewHostIsCanonical = isCanonicalPreviewHost(request);
   let trustedPreviewSlug: string | null = null;
   let previewCookieAction: "none" | "set" | "clear" =
-    preview.isPreviewRequest && !preview.slug ? "clear" : "none";
+    preview.isPreviewRequest && (!preview.slug || !previewHostIsCanonical)
+      ? "clear"
+      : "none";
 
-  if (isAdminPath(request.nextUrl.pathname) || preview.slug) {
+  if (
+    isAdminPath(request.nextUrl.pathname) ||
+    (previewHostIsCanonical && preview.slug)
+  ) {
     const adminClient = makeClient(ADMIN_AUTH_COOKIE_OPTIONS);
     const {
       data: { user },
@@ -148,7 +159,7 @@ export async function updateSession(request: NextRequest) {
     const allowedAdminIds = adminUserIds();
     const allowedAdmin = !userError && !!user && allowedAdminIds.has(user.id);
 
-    if (preview.slug) {
+    if (previewHostIsCanonical && preview.slug) {
       if (allowedAdmin) {
         trustedPreviewSlug = preview.slug;
         previewCookieAction = preview.persistOnAuthorize ? "set" : "none";

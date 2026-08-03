@@ -71,7 +71,8 @@ export default async function AdminPartnerDetailPage({
       <section className={`p-5 sm:p-6 ${card}`}>
         <h2 className="text-lg font-semibold">Partner profile</h2>
         <p className={`mt-1 text-sm ${bodyFaint}`}>
-          Profile saves and domain connection actions are intentionally separate.
+          Profile saves, sender verification, and domain connection actions are
+          intentionally separate.
         </p>
         <div className="mt-6">
           <PartnerForm

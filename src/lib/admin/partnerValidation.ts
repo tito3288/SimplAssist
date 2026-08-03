@@ -1,8 +1,14 @@
 import { z } from "zod";
 import { isValidPartnerSlug, normalizeHostHeader } from "@/lib/branding/hostname";
-import type { PartnerDomainStatus, PartnerStatus } from "@/types/database";
+import type {
+  PartnerDomainStatus,
+  PartnerEmailStatus,
+  PartnerStatus,
+} from "@/types/database";
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const EMAIL_MAILBOX =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 export const ADMIN_PARTNER_COLUMNS = [
   "id",
@@ -21,6 +27,10 @@ export const ADMIN_PARTNER_COLUMNS = [
   "brand_primary_hover_dark",
   "brand_primary_active_dark",
   "brand_accent_dark",
+  "email_from",
+  "email_from_status",
+  "email_from_verified_at",
+  "email_from_verified_by",
   "status",
   "created_at",
   "updated_at",
@@ -44,6 +54,7 @@ export type PartnerProfileInput = {
   logoLightUrl: string | null;
   logoDarkUrl: string | null;
   faviconUrl: string | null;
+  emailFrom: string | null;
   status: PartnerStatus;
   colors: PartnerColors;
 };
@@ -54,11 +65,18 @@ export type PartnerPatchInput =
       action: "set_domain_status";
       domainStatus: PartnerDomainStatus;
       expectedCustomDomain: string | null;
+    }
+  | {
+      action: "verify_email_from";
+      expectedEmailFrom: string | null;
     };
 
 export type AdminPartnerDto = PartnerProfileInput & {
   id: string;
   domainStatus: PartnerDomainStatus;
+  emailFromStatus: PartnerEmailStatus;
+  emailFromVerifiedAt: string | null;
+  emailFromVerifiedBy: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -160,6 +178,49 @@ const optionalAssetUrl = z
     "Asset URL must be a public absolute HTTPS URL",
   );
 
+function isCanonicalEmailMailbox(value: string): boolean {
+  return (
+    value.length <= 254 &&
+    value === value.toLowerCase() &&
+    value === value.trim() &&
+    !/[\u0000-\u0020\u007f,<>]/.test(value) &&
+    EMAIL_MAILBOX.test(value)
+  );
+}
+
+const emailFromInput = z
+  .string()
+  .refine(
+    (value) => !/[\u0000-\u001f\u007f]/.test(value),
+    "From email cannot contain control characters",
+  );
+
+const optionalEmailFrom = z
+  .union([emailFromInput, z.null()])
+  .transform((value) => {
+    if (value === null) return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized || null;
+  })
+  .refine(
+    (value) => value === null || isCanonicalEmailMailbox(value),
+    "From email must be one lowercase mailbox on a dotted DNS domain",
+  );
+
+const databaseEmailFrom = z
+  .union([z.string(), z.null()])
+  .refine(
+    (value) => value === null || isCanonicalEmailMailbox(value),
+    "Stored From email is not canonical",
+  );
+
+const nullableTimestamp = z
+  .union([z.string(), z.null()])
+  .refine(
+    (value) => value === null || !Number.isNaN(Date.parse(value)),
+    "Invalid timestamp",
+  );
+
 const profileShape = {
   name: normalizedName,
   slug: normalizedSlug,
@@ -167,6 +228,7 @@ const profileShape = {
   logoLightUrl: optionalAssetUrl,
   logoDarkUrl: optionalAssetUrl,
   faviconUrl: optionalAssetUrl,
+  emailFrom: optionalEmailFrom,
   status: z.enum(["active", "inactive"]),
   colors: colorsSchema,
 } as const;
@@ -180,6 +242,12 @@ export const partnerPatchInputSchema = z.discriminatedUnion("action", [
       action: z.literal("set_domain_status"),
       domainStatus: z.enum(["pending", "connected"]),
       expectedCustomDomain: optionalDomain,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("verify_email_from"),
+      expectedEmailFrom: optionalEmailFrom,
     })
     .strict(),
 ]);
@@ -202,6 +270,10 @@ const databasePartnerRowSchema = z
     brand_primary_hover_dark: color,
     brand_primary_active_dark: color,
     brand_accent_dark: color,
+    email_from: databaseEmailFrom,
+    email_from_status: z.enum(["unconfigured", "pending", "verified"]),
+    email_from_verified_at: nullableTimestamp,
+    email_from_verified_by: z.union([z.string().uuid(), z.null()]),
     status: z.enum(["active", "inactive"]),
     created_at: z.string().refine((value) => !Number.isNaN(Date.parse(value))),
     updated_at: z.string().refine((value) => !Number.isNaN(Date.parse(value))),
@@ -213,6 +285,28 @@ const databasePartnerRowSchema = z
         code: "custom",
         path: ["custom_domain"],
         message: "Connected partner is missing a custom domain",
+      });
+    }
+
+    const validEmailState =
+      (row.email_from === null &&
+        row.email_from_status === "unconfigured" &&
+        row.email_from_verified_at === null &&
+        row.email_from_verified_by === null) ||
+      (row.email_from !== null &&
+        row.email_from_status === "pending" &&
+        row.email_from_verified_at === null &&
+        row.email_from_verified_by === null) ||
+      (row.email_from !== null &&
+        row.email_from_status === "verified" &&
+        row.email_from_verified_at !== null &&
+        row.email_from_verified_by !== null);
+
+    if (!validEmailState) {
+      context.addIssue({
+        code: "custom",
+        path: ["email_from_status"],
+        message: "Stored From email verification state is inconsistent",
       });
     }
   });
@@ -228,6 +322,10 @@ export function parseAdminPartnerRow(value: unknown): AdminPartnerDto {
     logoLightUrl: row.logo_light_url,
     logoDarkUrl: row.logo_dark_url,
     faviconUrl: row.favicon_url,
+    emailFrom: row.email_from,
+    emailFromStatus: row.email_from_status,
+    emailFromVerifiedAt: row.email_from_verified_at,
+    emailFromVerifiedBy: row.email_from_verified_by,
     status: row.status,
     colors: {
       primary: row.brand_primary,
@@ -252,6 +350,7 @@ export function partnerProfileToDatabaseWrite(profile: PartnerProfileInput) {
     logo_light_url: profile.logoLightUrl,
     logo_dark_url: profile.logoDarkUrl,
     favicon_url: profile.faviconUrl,
+    email_from: profile.emailFrom,
     status: profile.status,
     brand_primary: profile.colors.primary,
     brand_primary_hover: profile.colors.primaryHover,

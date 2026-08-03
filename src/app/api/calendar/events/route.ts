@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedClient, getCalendarService } from "@/lib/google/client";
 import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 type LinkedCalendarBooking = {
   id: string;
@@ -71,6 +72,9 @@ async function findLinkedCalendarBooking(
 }
 
 export async function GET(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   const { searchParams } = request.nextUrl;
   const start = searchParams.get("start");
   const end = searchParams.get("end");
@@ -84,6 +88,9 @@ export async function GET(request: NextRequest) {
 
   const access = await requireAuthenticatedFeature("calendar");
   if (!access.ok) return access.response;
+  if (access.businessId !== workspace.access.business.id) {
+    return workspaceChangedResponse();
+  }
 
   const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
@@ -144,6 +151,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   let body: { title?: string; description?: string; startTime?: string; endTime?: string };
   try {
     body = await request.json();
@@ -169,6 +179,9 @@ export async function POST(request: NextRequest) {
 
   const access = await requireAuthenticatedFeature("calendar");
   if (!access.ok) return access.response;
+  if (access.businessId !== workspace.access.business.id) {
+    return workspaceChangedResponse();
+  }
 
   const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
@@ -232,6 +245,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   let body: {
     eventId?: string;
     title?: string;
@@ -263,6 +279,9 @@ export async function PATCH(request: NextRequest) {
 
   const access = await requireAuthenticatedFeature("calendar");
   if (!access.ok) return access.response;
+  if (access.businessId !== workspace.access.business.id) {
+    return workspaceChangedResponse();
+  }
 
   const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
@@ -372,6 +391,9 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   const { searchParams } = request.nextUrl;
   const eventId = searchParams.get("eventId");
 
@@ -384,6 +406,9 @@ export async function DELETE(request: NextRequest) {
 
   const access = await requireAuthenticatedFeature("calendar");
   if (!access.ok) return access.response;
+  if (access.businessId !== workspace.access.business.id) {
+    return workspaceChangedResponse();
+  }
 
   const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
@@ -473,4 +498,11 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function workspaceChangedResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "workspace_access_unavailable", retryable: true },
+    { status: 503 }
+  );
 }

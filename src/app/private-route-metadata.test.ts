@@ -17,6 +17,12 @@ vi.mock("@/lib/admin/auth", () => ({ getAdminGateState: vi.fn() }));
 vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: vi.fn(),
 }));
+vi.mock("@/lib/customer/workspaceAccess.server", () => ({
+  getWorkspaceAccess: vi.fn(),
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  workspacePageRedirectTarget: vi.fn(),
+}));
 
 import { metadata as authMetadata } from "./(auth)/layout";
 import { metadata as dashboardMetadata } from "./(dashboard)/layout";

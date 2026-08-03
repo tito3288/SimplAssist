@@ -83,7 +83,7 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
             type="button"
             onClick={() => updateDay(index, { is_closed: !day.is_closed })}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-              !day.is_closed ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+              !day.is_closed ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
             }`}
           >
             <span
@@ -102,14 +102,14 @@ export default function BusinessHoursEditor({ businessId, initialHours }: Busine
                 type="time"
                 value={day.open_time}
                 onChange={(e) => updateDay(index, { open_time: e.target.value })}
-                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
               />
               <span className="text-stone-400 dark:text-[#666]">to</span>
               <input
                 type="time"
                 value={day.close_time}
                 onChange={(e) => updateDay(index, { close_time: e.target.value })}
-                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+                className="flex-1 sm:flex-none px-2 py-1 rounded-lg text-sm bg-white text-stone-900 border border-[#e3dacc] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
               />
             </div>
           )}

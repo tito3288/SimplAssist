@@ -89,7 +89,7 @@ function StatusRow({
     <div>
       <div className="flex items-center gap-3">
         <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-          <Icon className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+          <Icon className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-medium ${ink}`}>{title}</p>
@@ -119,7 +119,7 @@ function AssignmentRow({
     <div>
       <div className="flex items-center gap-3">
         <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-          <Link2 className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+          <Link2 className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-sm font-medium ${ink}`}>Phone number assignment</p>
@@ -163,7 +163,7 @@ function SmsLiveRow({
   return (
     <div className="flex items-center gap-3">
       <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
-        <Send className="w-5 h-5 text-[#c2410c] dark:text-[#ff914d]" />
+        <Send className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
       </div>
       <div className="flex-1 min-w-0">
         <p className={`text-sm font-medium ${ink}`}>SMS sending</p>

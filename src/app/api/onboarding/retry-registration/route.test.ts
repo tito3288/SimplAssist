@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   attemptPaidLaunch: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -19,6 +20,9 @@ vi.mock("@/lib/billing/launch", () => ({
 }));
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForBusinessId: mocks.getOnboardingStateForBusinessId,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -63,6 +67,7 @@ function request(body: unknown = { businessId: BUSINESS_ID }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   mocks.getUser.mockResolvedValue({
     data: { user: { id: "owner-1" } },
     error: null,
@@ -74,6 +79,31 @@ beforeEach(() => {
 });
 
 describe("POST /api/onboarding/retry-registration rejection guard", () => {
+  it("passes through workspace denial before auth, parsing, launch, or state reads", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_unavailable", retryable: true },
+        { status: 503 },
+      ),
+    });
+    const nextRequest = request();
+    const jsonSpy = vi.spyOn(nextRequest, "json");
+
+    const response = await POST(nextRequest);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "workspace_access_unavailable",
+      retryable: true,
+    });
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
     ["brand-only", { brand_status: "rejected", campaign_status: null }],

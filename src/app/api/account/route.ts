@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { reconcileAccountDeletionStripeAction } from "@/lib/stripe/accountDeletionReconciler";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const DELETION_GRACE_PERIOD_MS = 60 * 24 * 60 * 60 * 1000;
 
@@ -16,24 +16,10 @@ type ScheduledDeletion = {
 };
 
 export async function DELETE() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
+  const { business, user } = workspace.access;
 
   const now = new Date();
   const deletionDate = new Date(now.getTime() + DELETION_GRACE_PERIOD_MS);

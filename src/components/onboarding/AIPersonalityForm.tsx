@@ -145,7 +145,7 @@ export default function AIPersonalityForm({
               key={opt.value}
               className={`cursor-pointer p-4 border-2 rounded-lg text-center transition-colors ${
                 selectedTone === opt.value
-                  ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                  ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                   : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
               }`}
             >
@@ -167,14 +167,14 @@ export default function AIPersonalityForm({
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-2">Business Voice</label>
         <div className="flex gap-3">
           <label className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-            watch('business_voice') === 'we' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
+            watch('business_voice') === 'we' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
           }`}>
             <input type="radio" value="we" {...register('business_voice')} className="sr-only" />
             <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;We&rdquo;</p>
             <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">We can help you with...</p>
           </label>
           <label className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-            watch('business_voice') === 'business_name' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
+            watch('business_voice') === 'business_name' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
           }`}>
             <input type="radio" value="business_name" {...register('business_voice')} className="sr-only" />
             <p className="font-medium text-sm text-stone-900 dark:text-[#f5f5f5]">&ldquo;{businessName}&rdquo;</p>
@@ -188,7 +188,7 @@ export default function AIPersonalityForm({
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">Language</label>
         <select
           {...register('language')}
-          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none"
+          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none"
         >
           {LANGUAGE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -199,7 +199,7 @@ export default function AIPersonalityForm({
       {/* Response Delay */}
       <div>
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">
-          SMS Response Delay: <span className="text-[#c2410c] dark:text-[#ff914d]">{getDelayLabel(responseDelay)}</span>
+          SMS Response Delay: <span className="text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]">{getDelayLabel(responseDelay)}</span>
         </label>
         <Controller
           name="response_delay_seconds"
@@ -212,7 +212,7 @@ export default function AIPersonalityForm({
               step={5}
               value={field.value}
               onChange={(e) => field.onChange(Number(e.target.value))}
-              className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[#ea580c] dark:accent-[#ff914d]"
+              className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]"
             />
           )}
         />
@@ -229,7 +229,7 @@ export default function AIPersonalityForm({
           {...register('web_greeting')}
           rows={2}
           placeholder="Welcome to our business! How can we help you today?"
-          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none resize-none"
+          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none resize-none"
         />
         <p className="text-xs text-stone-400 dark:text-[#666] mt-1">The first message visitors see when they open your chat widget.</p>
       </div>
@@ -241,7 +241,7 @@ export default function AIPersonalityForm({
           {...register('guardrails')}
           rows={3}
           placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
-          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none resize-none"
+          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none resize-none"
         />
         <p className="text-xs text-stone-400 dark:text-[#666] mt-1">One rule per line. These rules guide what your AI can and can&apos;t say.</p>
       </div>
@@ -258,7 +258,7 @@ export default function AIPersonalityForm({
                 type="button"
                 onClick={() => field.onChange(!field.value)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  field.value ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                  field.value ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
                 }`}
               >
                 <span
@@ -272,20 +272,20 @@ export default function AIPersonalityForm({
         </div>
 
         {bookingEnabled && (
-          <div className="mt-3 pl-4 border-l-2 border-[#ea580c]/30 dark:border-[#ff914d]/30 space-y-2">
+          <div className="mt-3 pl-4 border-l-2 border-[rgb(var(--brand-primary-rgb)/.30)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] space-y-2">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" value="collect_info" {...register('booking_mode')} className="accent-[#ea580c] dark:accent-[#ff914d]" />
+              <input type="radio" value="collect_info" {...register('booking_mode')} className="accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]" />
               <div>
                 <p className="text-sm font-medium text-stone-700 dark:text-[#d4d4d8]">Collect customer info</p>
                 <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">AI gathers details, you confirm the booking</p>
               </div>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" value="schedule_direct" {...register('booking_mode')} className="accent-[#ea580c] dark:accent-[#ff914d]" />
+              <input type="radio" value="schedule_direct" {...register('booking_mode')} className="accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]" />
               <div>
                 <p className="text-sm font-medium text-stone-700 dark:text-[#d4d4d8]">Direct scheduling</p>
                 <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">AI books appointments directly on your calendar</p>
-                <p className="text-xs text-[#c2410c] dark:text-[#ff914d] mt-1">After setup, connect your Google Calendar in Settings to enable direct booking.</p>
+                <p className="text-xs text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] mt-1">After setup, connect your Google Calendar in Settings to enable direct booking.</p>
               </div>
             </label>
           </div>

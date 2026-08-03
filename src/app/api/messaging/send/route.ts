@@ -15,8 +15,12 @@ import {
   isEntitlementResolutionError,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   try {
     const supabase = await createClient();
 

@@ -261,7 +261,7 @@ export default function KnowledgeGapsDashboard({
                       }}
                       className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                         isActive
-                          ? "border-[#f5dcc4] bg-[#fdf1e7] text-[#c2410c] dark:border-[rgba(255,145,77,.20)] dark:bg-[rgba(255,145,77,.15)] dark:text-[#ff914d]"
+                          ? "border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.20)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.15)] dark:text-[var(--brand-accent-dark)]"
                           : "border-[#e7e0d4] text-stone-600 hover:bg-[#faf6ef] dark:border-white/[0.12] dark:text-[#bdbdbf] dark:hover:bg-white/[0.06]"
                       }`}
                     >
@@ -281,7 +281,7 @@ export default function KnowledgeGapsDashboard({
                     if (mutationInProgress) return;
                     setSort(event.target.value as KnowledgeGapSort);
                   }}
-                  className="rounded-lg border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-800 outline-none focus:border-[#ea580c] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
+                  className="rounded-lg border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-800 outline-none focus:border-[var(--brand-primary)] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
                 >
                   <option value="most_asked">Most asked</option>
                   <option value="newest">Newest</option>
@@ -411,7 +411,7 @@ export default function KnowledgeGapsDashboard({
                                 }))
                               }
                               disabled={mutationInProgress}
-                              className="mt-1 w-full rounded-xl border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-[#ea580c] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
+                              className="mt-1 w-full rounded-xl border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-[var(--brand-primary)] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
                             />
                           </div>
                           <div>
@@ -438,7 +438,7 @@ export default function KnowledgeGapsDashboard({
                               }
                               disabled={mutationInProgress}
                               rows={4}
-                              className="mt-1 w-full resize-y rounded-xl border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-[#ea580c] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
+                              className="mt-1 w-full resize-y rounded-xl border border-[#e7e0d4] bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-[var(--brand-primary)] dark:border-white/[0.12] dark:bg-[#171719] dark:text-[#f5f5f5]"
                             />
                           </div>
 

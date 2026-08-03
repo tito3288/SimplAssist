@@ -21,6 +21,8 @@ import {
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000031";
 const BUSINESS = {
   id: BUSINESS_ID,
+  billing_mode: "stripe",
+  partner_plan: null,
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: false,
@@ -96,7 +98,7 @@ describe("resolveBusinessEntitlements", () => {
   });
 
   it.each(["billing_pilot", "billing_comped", "billing_exempt"] as const)(
-    "grants Full when a subscription is absent and %s is protected",
+    "preserves Stripe legacy Full access when no subscription exists and %s is protected",
     async (flag) => {
       mocks.results.set("businesses", {
         data: { ...BUSINESS, [flag]: true },
@@ -114,6 +116,61 @@ describe("resolveBusinessEntitlements", () => {
       });
     }
   );
+
+  it.each([
+    ["invoiced", "sms_only"],
+    ["invoiced", "sms_and_chat"],
+    ["invoiced", "full"],
+    ["comped", "sms_only"],
+    ["comped", "sms_and_chat"],
+    ["comped", "full"],
+  ] as const)(
+    "resolves %s partner billing natively at the %s plan",
+    async (billingMode, partnerPlan) => {
+      mocks.results.set("businesses", {
+        data: {
+          ...BUSINESS,
+          billing_mode: billingMode,
+          partner_plan: partnerPlan,
+        },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(resolveBusinessEntitlements(BUSINESS_ID)).resolves.toEqual({
+        businessId: BUSINESS_ID,
+        plan: partnerPlan,
+        status: "partner_billing",
+        source: "partner_billing",
+        active: true,
+        cancelAtPeriodEnd: false,
+      });
+    }
+  );
+
+  it("does not let legacy flags upgrade a partner-managed plan", async () => {
+    mocks.results.set("businesses", {
+      data: {
+        ...BUSINESS,
+        billing_mode: "invoiced",
+        partner_plan: "sms_only",
+        billing_pilot: true,
+        billing_comped: true,
+        billing_exempt: true,
+      },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).resolves.toMatchObject(
+      {
+        source: "partner_billing",
+        status: "partner_billing",
+        plan: "sms_only",
+        active: true,
+      }
+    );
+  });
 
   it("lets a valid subscription win over protected override flags", async () => {
     mocks.results.set("businesses", {
@@ -133,6 +190,31 @@ describe("resolveBusinessEntitlements", () => {
         active: false,
       }
     );
+  });
+
+  it("lets any valid subscription row win over malformed partner state", async () => {
+    mocks.results.set("businesses", {
+      data: {
+        ...BUSINESS,
+        billing_mode: "unknown",
+        partner_plan: "not_a_plan",
+        billing_pilot: null,
+      },
+      error: null,
+    });
+    mocks.results.set("subscriptions", {
+      data: { ...SUBSCRIPTION, plan: "full", status: "canceled" },
+      error: null,
+    });
+
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).resolves.toEqual({
+      businessId: BUSINESS_ID,
+      plan: "full",
+      status: "canceled",
+      source: "subscription",
+      active: false,
+      cancelAtPeriodEnd: false,
+    });
   });
 
   it.each([
@@ -172,14 +254,38 @@ describe("resolveBusinessEntitlements", () => {
     });
   });
 
-  it("throws when a provisioned business lacks a subscription and override", async () => {
+  it("keeps subscription_missing for Stripe mode with no subscription or legacy flags", async () => {
     mocks.results.set("subscriptions", { data: null, error: null });
 
     await expect(resolveBusinessEntitlements(BUSINESS_ID)).rejects.toMatchObject({
       code: "subscription_missing",
       retryable: true,
+      message: `Business ${BUSINESS_ID} has no synchronized subscription or billing override.`,
     });
   });
+
+  it.each([
+    { billing_mode: "manual", partner_plan: null },
+    { billing_mode: "stripe", partner_plan: "sms_only" },
+    { billing_mode: "invoiced", partner_plan: null },
+    { billing_mode: "comped", partner_plan: "starter" },
+  ] as const)(
+    "rejects malformed business billing state: %s",
+    async (state) => {
+      mocks.results.set("businesses", {
+        data: { ...BUSINESS, ...state },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(
+        resolveBusinessEntitlements(BUSINESS_ID)
+      ).rejects.toMatchObject({
+        code: "malformed_business",
+        retryable: true,
+      });
+    }
+  );
 
   it.each([
     { ...SUBSCRIPTION, plan: "starter" },
@@ -251,4 +357,31 @@ describe("feature decisions", () => {
       status: "active",
     });
   });
+
+  it.each([
+    ["sms_only", true, false, false],
+    ["sms_and_chat", true, true, false],
+    ["full", true, true, true],
+  ] as const)(
+    "applies the existing feature walls to partner plan %s",
+    async (partnerPlan, manualSms, webChat, advancedAnalytics) => {
+      mocks.results.set("businesses", {
+        data: {
+          ...BUSINESS,
+          billing_mode: "comped",
+          partner_plan: partnerPlan,
+        },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      const entitlements = await resolveBusinessEntitlements(BUSINESS_ID);
+
+      expect(canUseFeature(entitlements, "manual_sms")).toBe(manualSms);
+      expect(canUseFeature(entitlements, "web_chat")).toBe(webChat);
+      expect(canUseFeature(entitlements, "advanced_analytics")).toBe(
+        advancedAnalytics
+      );
+    }
+  );
 });

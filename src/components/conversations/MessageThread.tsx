@@ -327,7 +327,7 @@ export function MessageThread({
               "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               effectiveIsAiHandling
                 ? "bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-[#d4d4d8] hover:bg-stone-200 dark:hover:bg-white/[0.12]"
-                : "bg-[#fdf1e7] dark:bg-[rgba(255,145,77,.16)] text-[#c2410c] dark:text-[#ffd5bc] hover:bg-[#fbe6d4] dark:hover:bg-[rgba(255,145,77,.24)]",
+                : "bg-[var(--brand-accent-soft)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.16)] text-[var(--brand-accent)] dark:text-[var(--brand-text-soft-dark)] hover:bg-[var(--brand-tint-strong)] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.24)]",
               toggling && "opacity-50"
             )}
           >
@@ -423,7 +423,7 @@ export function MessageThread({
                           ? "rounded-bl-md border border-[#ece4d8] dark:border-white/[0.08] bg-[#f3ede3] dark:bg-white/[0.06] text-stone-800 dark:text-[#f0f0f0]"
                           : isHumanAgent
                           ? "rounded-br-md bg-stone-800 text-white dark:bg-white/[0.16] dark:text-[#f5f5f5]"
-                          : "rounded-br-md bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]"
+                          : "rounded-br-md bg-[var(--brand-primary)] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]"
                       )}
                     >
                       {msg.content}
@@ -509,13 +509,13 @@ export function MessageThread({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] px-4 py-2 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[#ea580c] dark:focus:border-[#ff914d] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:ring-[#ff914d]/30"
+              className="flex-1 rounded-lg bg-white dark:bg-white/[0.06] border border-[#e3dacc] dark:border-white/[0.12] px-4 py-2 text-sm text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
               disabled={sending}
             />
             <button
               type="submit"
               disabled={!input.trim() || sending}
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] text-white transition-colors disabled:opacity-50"
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white transition-colors disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
             </button>

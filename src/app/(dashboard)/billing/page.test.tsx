@@ -3,14 +3,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
+  requireWorkspacePageAccess: vi.fn(),
   getDashboardBusinessContext: vi.fn(),
   from: vi.fn(),
   resolveAssignedPartnerName: vi.fn(),
+  getRequestBrand: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
+}));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,
+}));
+vi.mock("@/lib/branding/requestBrand.server", () => ({
+  getRequestBrand: mocks.getRequestBrand,
 }));
 vi.mock("./billing-actions", () => ({
   BillingActions: () => <div>Stripe billing action</div>,
@@ -45,7 +53,13 @@ function queryThenable(result: Promise<unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
   mocks.resolveAssignedPartnerName.mockResolvedValue(null);
+  mocks.getRequestBrand.mockResolvedValue({
+    source: "default",
+    isPreview: false,
+    brand: { name: "SimplAssist" },
+  });
 });
 
 describe("BillingPage", () => {
@@ -81,6 +95,34 @@ describe("BillingPage", () => {
     expect(mocks.resolveAssignedPartnerName).not.toHaveBeenCalled();
   });
 
+  it("uses request-brand plan copy without changing Stripe plan behavior", async () => {
+    mocks.from.mockImplementation(() =>
+      queryThenable(Promise.resolve({ data: null }))
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: "partner-1",
+        billing_mode: "stripe",
+      },
+    });
+    mocks.getRequestBrand.mockResolvedValue({
+      source: "partner_host",
+      isPreview: false,
+      brand: { name: "Alpha Dog Agency" },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage());
+
+    expect(html).toContain("One local Alpha Dog Agency number");
+    expect(html).not.toContain("One local SimplAssist number");
+    expect(html).toContain("$25");
+    expect(html).toContain("Stripe billing action");
+  });
+
   it.each(["invoiced", "comped"] as const)(
     "skips Stripe data and controls for %s billing",
     async (billingMode) => {
@@ -107,6 +149,7 @@ describe("BillingPage", () => {
       expect(html).not.toContain("Recommended");
       expect(html).not.toContain("Manage your subscription");
       expect(html).not.toContain("SMS usage");
+      expect(mocks.getRequestBrand).not.toHaveBeenCalled();
     }
   );
 

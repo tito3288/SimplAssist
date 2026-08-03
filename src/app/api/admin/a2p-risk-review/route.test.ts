@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAdminUser: vi.fn(),
+  isCanonicalAdminHostname: vi.fn(),
   approve: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/admin/auth", () => ({
   getAdminUser: mocks.getAdminUser,
+  isCanonicalAdminHostname: mocks.isCanonicalAdminHostname,
 }));
 
 vi.mock("@/lib/admin/a2pRiskReview", () => ({
@@ -30,13 +32,14 @@ function makeRequest(body: unknown, headers: Record<string, string> = {}) {
   return new NextRequest("http://localhost/api/admin/a2p-risk-review", {
     method: "POST",
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", host: "localhost", ...headers },
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("A2P_REVIEW_ADMIN_TOKEN", TOKEN);
+  mocks.isCanonicalAdminHostname.mockReturnValue(true);
   mocks.approve.mockResolvedValue({ status: "admin_approved", inputHash: "h" });
 });
 
@@ -45,6 +48,19 @@ afterEach(() => {
 });
 
 describe("POST /api/admin/a2p-risk-review", () => {
+  it("404s a token-authorized request on a noncanonical Host before approval", async () => {
+    mocks.isCanonicalAdminHostname.mockReturnValue(false);
+
+    const response = await POST(
+      makeRequest(validBody, { authorization: `Bearer ${TOKEN}` })
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.isCanonicalAdminHostname).toHaveBeenCalledWith("localhost");
+    expect(mocks.getAdminUser).not.toHaveBeenCalled();
+    expect(mocks.approve).not.toHaveBeenCalled();
+  });
+
   it("authorizes a valid Bearer token without consulting the admin session", async () => {
     const response = await POST(
       makeRequest(validBody, { authorization: `Bearer ${TOKEN}` })

@@ -13,6 +13,7 @@ import {
   fieldLabel,
   inputField,
   statusDanger,
+  statusNeutral,
   statusSuccess,
   statusWarning,
   tile,
@@ -22,7 +23,12 @@ export type PartnerColors = ValidatedPartnerColors;
 export type AdminPartnerView = AdminPartnerDto;
 
 type EditablePartner = PartnerProfileInput;
-type BusyAction = "create" | "update" | "pending" | "connected";
+type BusyAction =
+  | "create"
+  | "update"
+  | "pending"
+  | "connected"
+  | "verify_email";
 
 const DEFAULT_VALUES: EditablePartner = {
   name: "",
@@ -31,6 +37,7 @@ const DEFAULT_VALUES: EditablePartner = {
   logoLightUrl: null,
   logoDarkUrl: null,
   faviconUrl: null,
+  emailFrom: null,
   status: "active",
   colors: {
     primary: "#ea580c",
@@ -67,6 +74,27 @@ function trimmedOrNull(value: string | null): string | null {
   return trimmed || null;
 }
 
+export function deriveEmailFromDisplayState(
+  inputEmailFrom: string | null,
+  persistedEmailFrom: string | null,
+  persistedStatus: "unconfigured" | "pending" | "verified",
+) {
+  const normalizedEmailFrom =
+    trimmedOrNull(inputEmailFrom)?.toLowerCase() ?? null;
+  const hasUnsavedChanges = normalizedEmailFrom !== persistedEmailFrom;
+
+  return {
+    hasUnsavedChanges,
+    displayedStatus: hasUnsavedChanges
+      ? normalizedEmailFrom
+        ? ("pending" as const)
+        : ("unconfigured" as const)
+      : persistedStatus,
+    showPersistedAudit:
+      !hasUnsavedChanges && persistedStatus === "verified",
+  };
+}
+
 function normalizedProfile(values: EditablePartner): EditablePartner {
   return {
     ...values,
@@ -76,6 +104,7 @@ function normalizedProfile(values: EditablePartner): EditablePartner {
     logoLightUrl: trimmedOrNull(values.logoLightUrl),
     logoDarkUrl: trimmedOrNull(values.logoDarkUrl),
     faviconUrl: trimmedOrNull(values.faviconUrl),
+    emailFrom: trimmedOrNull(values.emailFrom)?.toLowerCase() ?? null,
     colors: Object.fromEntries(
       Object.entries(values.colors).map(([key, value]) => [
         key,
@@ -105,6 +134,7 @@ export function PartnerForm({
         logoLightUrl: partner.logoLightUrl,
         logoDarkUrl: partner.logoDarkUrl,
         faviconUrl: partner.faviconUrl,
+        emailFrom: partner.emailFrom,
         status: partner.status,
         colors: partner.colors,
       }
@@ -116,6 +146,18 @@ export function PartnerForm({
   const [persistedCustomDomain, setPersistedCustomDomain] = useState(
     partner?.customDomain ?? null,
   );
+  const [persistedEmailFrom, setPersistedEmailFrom] = useState(
+    partner?.emailFrom ?? null,
+  );
+  const [emailFromStatus, setEmailFromStatus] = useState(
+    partner?.emailFromStatus ?? "unconfigured",
+  );
+  const [emailFromVerifiedAt, setEmailFromVerifiedAt] = useState(
+    partner?.emailFromVerifiedAt ?? null,
+  );
+  const [emailFromVerifiedBy, setEmailFromVerifiedBy] = useState(
+    partner?.emailFromVerifiedBy ?? null,
+  );
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,6 +165,15 @@ export function PartnerForm({
   const normalizedDomain =
     trimmedOrNull(values.customDomain)?.toLowerCase() ?? null;
   const domainHasUnsavedChanges = normalizedDomain !== persistedCustomDomain;
+  const {
+    hasUnsavedChanges: emailHasUnsavedChanges,
+    displayedStatus: displayedEmailStatus,
+    showPersistedAudit: showPersistedEmailAudit,
+  } = deriveEmailFromDisplayState(
+    values.emailFrom,
+    persistedEmailFrom,
+    emailFromStatus,
+  );
 
   function setField<Key extends keyof EditablePartner>(
     key: Key,
@@ -133,11 +184,11 @@ export function PartnerForm({
 
   async function readPayload(response: Response): Promise<{
     error?: string;
-    partner?: { id?: unknown };
+    partner?: Partial<AdminPartnerView> & { id?: unknown };
   }> {
     return (await response.json().catch(() => ({}))) as {
       error?: string;
-      partner?: { id?: unknown };
+      partner?: Partial<AdminPartnerView> & { id?: unknown };
     };
   }
 
@@ -172,6 +223,16 @@ export function PartnerForm({
 
       setValues(profile);
       setPersistedCustomDomain(profile.customDomain);
+      setPersistedEmailFrom(profile.emailFrom);
+      if (payload.partner?.emailFromStatus) {
+        setEmailFromStatus(payload.partner.emailFromStatus);
+        setEmailFromVerifiedAt(payload.partner.emailFromVerifiedAt ?? null);
+        setEmailFromVerifiedBy(payload.partner.emailFromVerifiedBy ?? null);
+      } else if (emailHasUnsavedChanges) {
+        setEmailFromStatus(profile.emailFrom ? "pending" : "unconfigured");
+        setEmailFromVerifiedAt(null);
+        setEmailFromVerifiedBy(null);
+      }
       if (mode === "create") {
         const partnerId = payload.partner?.id;
         router.push(
@@ -230,6 +291,48 @@ export function PartnerForm({
       router.refresh();
     } catch {
       setError("The domain status could not be updated.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function markEmailFromVerified() {
+    if (
+      !partner ||
+      emailHasUnsavedChanges ||
+      !persistedEmailFrom ||
+      emailFromStatus === "verified"
+    ) {
+      return;
+    }
+
+    setBusyAction("verify_email");
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch(`/api/admin/partners/${partner.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "verify_email_from",
+          expectedEmailFrom: persistedEmailFrom,
+        }),
+      });
+      const payload = await readPayload(response);
+
+      if (!response.ok) {
+        setError(payload.error ?? "The From email could not be marked verified.");
+        return;
+      }
+
+      setEmailFromStatus("verified");
+      setEmailFromVerifiedAt(payload.partner?.emailFromVerifiedAt ?? null);
+      setEmailFromVerifiedBy(payload.partner?.emailFromVerifiedBy ?? null);
+      setNotice("From email marked Verified after manual Resend verification.");
+      router.refresh();
+    } catch {
+      setError("The From email could not be marked verified.");
     } finally {
       setBusyAction(null);
     }
@@ -299,6 +402,42 @@ export function PartnerForm({
               </select>
             </Field>
           </div>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold">Transactional email sender</h3>
+                <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+                  Store one mailbox address. Verify it manually in Resend before
+                  marking it Verified here.
+                </p>
+              </div>
+              <EmailFromStatusBadge status={displayedEmailStatus} />
+            </div>
+            <Field label="From email address" htmlFor="partner-email-from">
+              <input
+                id="partner-email-from"
+                name="emailFrom"
+                type="email"
+                inputMode="email"
+                value={optionalValue(values.emailFrom)}
+                onChange={(event) =>
+                  setField("emailFrom", event.target.value.toLowerCase())
+                }
+                placeholder="notifications@partner.example"
+                className={inputField}
+                autoCapitalize="none"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+            {emailHasUnsavedChanges && mode === "edit" && (
+              <p className="text-sm text-amber-700 dark:text-amber-200">
+                Save this address before marking it verified. Address changes
+                reset verification to Pending; clearing it sets Unconfigured.
+              </p>
+            )}
+          </section>
 
           <section>
             <h3 className="font-semibold">Brand colors</h3>
@@ -396,6 +535,48 @@ export function PartnerForm({
         <section className={`space-y-4 p-4 ${tile}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
+              <h3 className="font-semibold">Sender verification</h3>
+              <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+                Confirm the saved mailbox is verified in Resend, then record
+                that manual check here.
+              </p>
+            </div>
+            <EmailFromStatusBadge status={displayedEmailStatus} />
+          </div>
+          {showPersistedEmailAudit && emailFromVerifiedAt && (
+            <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+              Verified{" "}
+              <time dateTime={emailFromVerifiedAt}>
+                {emailFromVerifiedAt}
+              </time>
+              {emailFromVerifiedBy ? ` by ${emailFromVerifiedBy}` : ""}.
+            </p>
+          )}
+          {emailHasUnsavedChanges && (
+            <p className="text-sm text-amber-700 dark:text-amber-200">
+              Save the changed From email before marking it verified.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={
+              busyAction !== null ||
+              emailHasUnsavedChanges ||
+              !persistedEmailFrom ||
+              emailFromStatus === "verified"
+            }
+            onClick={() => void markEmailFromVerified()}
+            className={btnPrimaryCompact}
+          >
+            {busyAction === "verify_email" ? "Updating..." : "Mark verified"}
+          </button>
+        </section>
+      )}
+
+      {mode === "edit" && partner && (
+        <section className={`space-y-4 p-4 ${tile}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
               <h3 className="font-semibold">Domain connection status</h3>
               <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
                 Current status: {domainStatus === "connected" ? "Connected" : "Pending"}
@@ -455,6 +636,31 @@ export function PartnerForm({
         </p>
       )}
     </div>
+  );
+}
+
+function EmailFromStatusBadge({
+  status,
+}: {
+  status: "unconfigured" | "pending" | "verified";
+}) {
+  const label =
+    status === "verified"
+      ? "Verified"
+      : status === "pending"
+        ? "Pending"
+        : "Unconfigured";
+  const tone =
+    status === "verified"
+      ? statusSuccess
+      : status === "pending"
+        ? statusWarning
+        : statusNeutral;
+
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>
+      {label}
+    </span>
   );
 }
 

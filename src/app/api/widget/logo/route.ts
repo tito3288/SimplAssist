@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   canUseFeature,
@@ -7,37 +6,16 @@ import {
   requiredPlanForFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"];
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (businessError) {
-    console.error("[logo-upload] Business lookup error:", businessError);
-    return NextResponse.json(
-      { error: "service_unavailable", retryable: true },
-      { status: 503 }
-    );
-  }
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
+  const { business } = workspace.access;
 
   try {
     const entitlements = await resolveBusinessEntitlements(business.id);

@@ -43,13 +43,16 @@ function invalidJsonRequest() {
 
 function rpcAssignment(
   billingMode: "stripe" | "invoiced" | "comped" = "invoiced",
-  partnerId: string | null = PARTNER_ID
+  partnerId: string | null = PARTNER_ID,
+  partnerPlan: "sms_only" | "sms_and_chat" | "full" | null =
+    billingMode === "stripe" ? null : "sms_and_chat"
 ) {
   return {
     business_id: BUSINESS_ID,
     partner_id: partnerId,
     billing_mode: billingMode,
-    billing_comped: billingMode !== "stripe",
+    partner_plan: partnerPlan,
+    billing_comped: false,
   };
 }
 
@@ -82,6 +85,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
+        partnerPlan: "sms_and_chat",
         p_actor_user_id: "00000000-0000-4000-8000-000000000111",
       })
     );
@@ -95,6 +99,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "stripe",
+        partnerPlan: null,
       })
     );
 
@@ -109,7 +114,12 @@ describe("POST /api/admin/business-partner-billing", () => {
     "rejects unassigned plus %s without calling the RPC",
     async (billingMode) => {
       const response = await POST(
-        request({ businessId: BUSINESS_ID, partnerId: null, billingMode })
+        request({
+          businessId: BUSINESS_ID,
+          partnerId: null,
+          billingMode,
+          partnerPlan: "sms_and_chat",
+        })
       );
 
       expect(response.status).toBe(409);
@@ -120,20 +130,78 @@ describe("POST /api/admin/business-partner-billing", () => {
     }
   );
 
+  it("rejects a missing or unknown plan before the RPC", async () => {
+    const missingPlan = await POST(
+      request({
+        businessId: BUSINESS_ID,
+        partnerId: PARTNER_ID,
+        billingMode: "invoiced",
+      })
+    );
+    expect(missingPlan.status).toBe(400);
+    await expect(missingPlan.json()).resolves.toMatchObject({
+      error: "invalid_assignment",
+    });
+
+    const unknownPlan = await POST(
+      request({
+        businessId: BUSINESS_ID,
+        partnerId: PARTNER_ID,
+        billingMode: "invoiced",
+        partnerPlan: "starter",
+      })
+    );
+    expect(unknownPlan.status).toBe(400);
+    await expect(unknownPlan.json()).resolves.toMatchObject({
+      error: "invalid_assignment",
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["stripe", null],
-    ["invoiced", PARTNER_ID],
-    ["comped", PARTNER_ID],
+    ["stripe", null, "sms_only"],
+    ["invoiced", PARTNER_ID, null],
+    ["comped", PARTNER_ID, null],
   ] as const)(
-    "allows the Phase 1 combination %s / %s and uses the session actor",
-    async (billingMode, partnerId) => {
+    "rejects plan/mode mismatch for %s before the RPC",
+    async (billingMode, partnerId, partnerPlan) => {
+      const response = await POST(
+        request({
+          businessId: BUSINESS_ID,
+          partnerId,
+          billingMode,
+          partnerPlan,
+        })
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "invalid_partner_plan",
+      });
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["stripe", null, null],
+    ["invoiced", PARTNER_ID, "sms_only"],
+    ["invoiced", PARTNER_ID, "sms_and_chat"],
+    ["comped", PARTNER_ID, "full"],
+  ] as const)(
+    "allows %s / %s / %s and uses the session actor",
+    async (billingMode, partnerId, partnerPlan) => {
       mocks.rpc.mockResolvedValue({
-        data: [rpcAssignment(billingMode, partnerId)],
+        data: [rpcAssignment(billingMode, partnerId, partnerPlan)],
         error: null,
       });
 
       const response = await POST(
-        request({ businessId: BUSINESS_ID, partnerId, billingMode })
+        request({
+          businessId: BUSINESS_ID,
+          partnerId,
+          billingMode,
+          partnerPlan,
+        })
       );
 
       expect(response.status).toBe(200);
@@ -145,6 +213,7 @@ describe("POST /api/admin/business-partner-billing", () => {
           p_partner_id: partnerId,
           p_billing_mode: billingMode,
           p_actor_user_id: ADMIN_ID,
+          p_partner_plan: partnerPlan,
         }
       );
     }
@@ -166,6 +235,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
+        partnerPlan: "sms_and_chat",
       })
     );
 
@@ -173,11 +243,11 @@ describe("POST /api/admin/business-partner-billing", () => {
     await expect(response.json()).resolves.toEqual({ error: code });
   });
 
-  it("projects only the four approved RPC result fields", async () => {
+  it("projects only the five approved RPC result fields", async () => {
     mocks.rpc.mockResolvedValue({
       data: [
         {
-          ...rpcAssignment("comped"),
+          ...rpcAssignment("comped", PARTNER_ID, "full"),
           owner_id: "should-not-leak",
           billing_admin_notes: "should-not-leak",
         },
@@ -190,12 +260,13 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "comped",
+        partnerPlan: "full",
       })
     );
 
     await expect(response.json()).resolves.toEqual({
       success: true,
-      assignment: rpcAssignment("comped"),
+      assignment: rpcAssignment("comped", PARTNER_ID, "full"),
     });
   });
 
@@ -211,6 +282,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
+        partnerPlan: "sms_and_chat",
       })
     );
     expect(unknownError.status).toBe(500);
@@ -224,6 +296,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
+        partnerPlan: "sms_and_chat",
       })
     );
     expect(malformedResult.status).toBe(500);

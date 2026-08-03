@@ -1,7 +1,11 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
+import type {
+  BillingMode,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from "@/types/database";
 import {
   canPlanUseFeature,
   isSubscriptionPlan,
@@ -9,8 +13,14 @@ import {
   type FeatureKey,
 } from "./features";
 
-export type EntitlementSource = "subscription" | "billing_override";
-export type EntitlementStatus = SubscriptionStatus | "billing_override";
+export type EntitlementSource =
+  | "subscription"
+  | "partner_billing"
+  | "billing_override";
+export type EntitlementStatus =
+  | SubscriptionStatus
+  | "partner_billing"
+  | "billing_override";
 
 export interface BusinessEntitlements {
   businessId: string;
@@ -75,9 +85,11 @@ export type FeatureAccessDecision =
 
 interface BusinessEntitlementRow {
   id: string;
-  billing_pilot: boolean;
-  billing_comped: boolean;
-  billing_exempt: boolean;
+  billing_mode: unknown;
+  partner_plan: unknown;
+  billing_pilot: unknown;
+  billing_comped: unknown;
+  billing_exempt: unknown;
 }
 
 interface SubscriptionEntitlementRow {
@@ -113,7 +125,9 @@ export async function resolveBusinessEntitlements(
   const [businessQuery, subscriptionQuery] = await Promise.allSettled([
     supabaseAdmin
       .from("businesses")
-      .select("id, billing_pilot, billing_comped, billing_exempt")
+      .select(
+        "id, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt"
+      )
       .eq("id", businessId)
       .maybeSingle<BusinessEntitlementRow>(),
     supabaseAdmin
@@ -181,6 +195,7 @@ export async function resolveBusinessEntitlements(
 
   const business = businessResult.data;
   if (
+    !isBillingMode(business.billing_mode) ||
     typeof business.billing_pilot !== "boolean" ||
     typeof business.billing_comped !== "boolean" ||
     typeof business.billing_exempt !== "boolean"
@@ -188,7 +203,37 @@ export async function resolveBusinessEntitlements(
     throw new EntitlementResolutionError({
       code: "malformed_business",
       businessId,
-      message: `Business ${businessId} has malformed billing override flags.`,
+      message: `Business ${businessId} has malformed billing authority fields.`,
+    });
+  }
+
+  if (
+    business.billing_mode === "invoiced" ||
+    business.billing_mode === "comped"
+  ) {
+    if (!isSubscriptionPlan(business.partner_plan)) {
+      throw new EntitlementResolutionError({
+        code: "malformed_business",
+        businessId,
+        message: `Business ${businessId} has malformed partner billing state.`,
+      });
+    }
+
+    return {
+      businessId,
+      plan: business.partner_plan,
+      status: "partner_billing",
+      source: "partner_billing",
+      active: true,
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  if (business.partner_plan !== null) {
+    throw new EntitlementResolutionError({
+      code: "malformed_business",
+      businessId,
+      message: `Business ${businessId} has malformed Stripe billing state.`,
     });
   }
 
@@ -298,6 +343,10 @@ function isSubscriptionStatus(value: unknown): value is SubscriptionStatus {
     value === "past_due" ||
     value === "canceled"
   );
+}
+
+function isBillingMode(value: unknown): value is BillingMode {
+  return value === "stripe" || value === "invoiced" || value === "comped";
 }
 
 function errorMessage(error: unknown): string {

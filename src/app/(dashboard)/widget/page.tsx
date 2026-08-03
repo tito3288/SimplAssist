@@ -3,10 +3,12 @@ import WidgetPageClient from './WidgetPageClient';
 import { canUseFeature } from '@/lib/billing/entitlements';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
+import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 import { resolveConnectedBusinessPartner } from '@/lib/branding/businessPartner.server';
 import { getCanonicalAppOrigin } from '@/lib/branding/defaultBrand';
 
 export default async function WidgetPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');

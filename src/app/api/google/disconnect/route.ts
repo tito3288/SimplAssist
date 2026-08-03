@@ -1,44 +1,18 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuth2Client } from "@/lib/google/client";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function POST() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (businessError) {
-    console.error("[google-disconnect] Business lookup failed:", businessError);
-    return NextResponse.json(
-      { error: "service_unavailable", retryable: true },
-      { status: 503 }
-    );
-  }
-
-  if (!business) {
-    return NextResponse.json(
-      { error: "Business not found" },
-      { status: 404 }
-    );
-  }
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+  const businessId = workspace.access.business.id;
 
   // Get the token to revoke it
   const { data: token, error: tokenError } = await supabaseAdmin
     .from("google_calendar_tokens")
     .select("access_token")
-    .eq("business_id", business.id)
+    .eq("business_id", businessId)
     .maybeSingle();
 
   if (tokenError) {
@@ -62,7 +36,7 @@ export async function POST() {
     const { error: deleteError } = await supabaseAdmin
       .from("google_calendar_tokens")
       .delete()
-      .eq("business_id", business.id);
+      .eq("business_id", businessId);
 
     if (deleteError) {
       console.error("[google-disconnect] Token delete failed:", deleteError);

@@ -1,19 +1,20 @@
+import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createClient: vi.fn(),
   rpc: vi.fn(),
   reconcile: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: mocks.createClient,
-}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
 }));
 vi.mock("@/lib/stripe/accountDeletionReconciler", () => ({
   reconcileAccountDeletionStripeAction: mocks.reconcile,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { DELETE as deleteAccount } from "./route";
@@ -24,24 +25,6 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const GENERATION = 4;
 const REACTIVATION_RESERVATION_TOKEN =
   "00000000-0000-4000-8000-000000000014";
-
-function userClient(
-  business: Record<string, unknown> | null,
-  user: { id: string } | null = { id: USER_ID }
-) {
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user } }),
-    },
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: business, error: null }),
-        }),
-      }),
-    }),
-  };
-}
 
 function scheduledDeletion(
   status: "pending" | "applied" | "blocked" = "pending"
@@ -79,18 +62,18 @@ function preparedReactivation(
   };
 }
 
-function futureDeletedBusiness() {
-  return {
-    id: BUSINESS_ID,
-    deleted_at: "2026-07-14T16:00:00.000Z",
-    deletion_scheduled_for: "2099-09-12T16:00:00.000Z",
-  };
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
-  mocks.createClient.mockResolvedValue(userClient({ id: BUSINESS_ID }));
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: USER_ID },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
 });
 
 afterEach(() => {
@@ -182,20 +165,35 @@ describe("DELETE /api/account", () => {
   });
 
   it("requires an authenticated account owner", async () => {
-    mocks.createClient.mockResolvedValue(userClient(null, null));
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
 
     const response = await deleteAccount();
 
     expect(response.status).toBe(401);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i before scheduling or Stripe work", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+
+    const response = await deleteAccount();
+
+    expect(response.status).toBe(status);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/account/reactivate", () => {
-  beforeEach(() => {
-    mocks.createClient.mockResolvedValue(userClient(futureDeletedBusiness()));
-  });
-
   it("completes reactivation only after the exact resume generation applies", async () => {
     mocks.rpc.mockImplementation(async (name: string) => {
       if (name === "prepare_account_reactivation") {
@@ -223,6 +221,23 @@ describe("POST /api/account/reactivate", () => {
       p_generation: GENERATION,
       p_reactivation_reservation_token: REACTIVATION_RESERVATION_TOKEN,
     });
+  });
+
+  it.each([
+    [401, { error: "Unauthorized" }],
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i before reactivation or Stripe work", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+
+    const response = await reactivateAccount();
+
+    expect(response.status).toBe(status);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
   });
 
   it("rejects a missing reactivation reservation before calling Stripe", async () => {
@@ -414,13 +429,6 @@ describe("POST /api/account/reactivate", () => {
   });
 
   it("lets the authoritative preparation RPC reject an expired grace period", async () => {
-    mocks.createClient.mockResolvedValue(
-      userClient({
-        id: BUSINESS_ID,
-        deleted_at: "2025-01-01T00:00:00.000Z",
-        deletion_scheduled_for: "2025-03-02T00:00:00.000Z",
-      })
-    );
     mocks.rpc.mockResolvedValue({
       data: null,
       error: { code: "55000", message: "outside grace period" },

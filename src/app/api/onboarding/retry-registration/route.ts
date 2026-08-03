@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { isRejectionRetryBlocked } from "@/lib/onboarding/rejectionGuidance";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't register your business with carriers right now. Please try again or contact support.";
@@ -16,6 +17,9 @@ const retrySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
 
   const {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendSupportTicketEmail } from "@/lib/email/supportTicket";
 import { SUPPORT_CATEGORY_VALUES } from "@/lib/support/constants";
+import { getOptionalWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 /**
  * Public support-ticket endpoint backing the /support form.
@@ -92,20 +92,19 @@ export async function POST(request: NextRequest) {
   let businessId: string | null = null;
   let businessName: string | null = null;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const workspace = await getOptionalWorkspaceRouteAccess();
 
-  if (user) {
-    userId = user.id;
+  if (workspace) {
+    userId = workspace.user.id;
+    businessId = workspace.business.id;
     const { data: business } = await supabaseAdmin
       .from("businesses")
       .select("id, name")
-      .eq("owner_id", user.id)
+      .eq("id", workspace.business.id)
       .maybeSingle();
-    businessId = business?.id ?? null;
-    businessName = business?.name ?? null;
+    if (business?.id === workspace.business.id) {
+      businessName = business.name ?? null;
+    }
   }
 
   const { data: inserted, error: insertError } = await supabaseAdmin

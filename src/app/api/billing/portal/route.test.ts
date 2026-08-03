@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   createBillingPortalSession: vi.fn(),
   resolveAssignedPartnerName: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -24,6 +25,9 @@ vi.mock("@/lib/billing/partnerManagedBilling.server", () => ({
     partnerName
       ? `Billing is handled by ${partnerName}.`
       : "Billing is managed externally.",
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -70,6 +74,15 @@ beforeEach(() => {
     "https://billing.stripe.test/session"
   );
   mocks.resolveAssignedPartnerName.mockResolvedValue(null);
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: "owner-1" },
+      business: { id: BUSINESS.id, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
 });
 
 afterEach(() => {
@@ -77,6 +90,23 @@ afterEach(() => {
 });
 
 describe("POST /api/billing/portal redirect URL", () => {
+  it.each([
+    [401, { error: "Unauthorized" }],
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i before database or Stripe work", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(status);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.createBillingPortalSession).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["partner-1", "Alpha Dog Agency"],
     ["partner-2", "Second Partner"],

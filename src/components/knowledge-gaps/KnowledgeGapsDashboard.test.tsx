@@ -106,6 +106,12 @@ describe("KnowledgeGapsDashboard initial UI", () => {
     expect(markup).toMatch(
       /<button[^>]*aria-pressed="true"[^>]*>Open<\/button>/
     );
+    expect(markup).toContain(
+      "border-[var(--brand-accent-soft-border)]"
+    );
+    expect(markup).toContain("bg-[var(--brand-accent-soft)]");
+    expect(markup).toContain("text-[var(--brand-accent)]");
+    expect(markup).toContain("focus:border-[var(--brand-primary)]");
     expect(markup).toMatch(
       /<option value="most_asked"[^>]*selected[^>]*>Most asked<\/option>/
     );

@@ -24,6 +24,7 @@ import {
 } from "@/lib/messaging/registration/riskScreening";
 import { validateCustomerCareCopy } from "@/lib/messaging/registration/customerCareTemplates";
 import type { A2pRiskChecklistAnswer } from "@/types/database";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const PREFLIGHT_FAILURE_MESSAGE =
   "Couldn't validate your compliance settings. Check Settings > Compliance, then try again.";
@@ -106,6 +107,9 @@ const smsUseCaseSchema = z
   );
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
 
   const {

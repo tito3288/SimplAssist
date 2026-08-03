@@ -5,8 +5,12 @@ import GoogleCalendarConnect from "@/components/settings/GoogleCalendarConnect";
 import { LockedFeatureCard } from "@/components/entitlements/LockedFeatureCard";
 import { canUseFeature } from "@/lib/billing/entitlements";
 import { getDashboardEntitledContext } from "@/lib/dashboard/context";
+import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 
 export default async function CalendarPage() {
+  const workspace = await requireWorkspacePageAccess();
+  const requestBrand = await getRequestBrand();
   const context = await getDashboardEntitledContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");
@@ -33,7 +37,7 @@ export default async function CalendarPage() {
           title={planActive ? "Google Calendar is available on Growth" : "Google Calendar is paused"}
           description={
             planActive
-              ? "Upgrade to view Google Calendar events in SimplAssist and let your AI check availability and book appointments."
+              ? `Upgrade to view Google Calendar events in ${requestBrand.brand.name} and let your AI check availability and book appointments.`
               : "Reactivate your subscription to view events and use your saved Calendar connection."
           }
           requiredPlan={planActive ? "Growth" : null}
@@ -47,6 +51,7 @@ export default async function CalendarPage() {
             <GoogleCalendarConnect
               businessId={business.id}
               connectedEmail={calendarToken.google_email ?? null}
+              isConnected
               canConnect={false}
             />
           </div>
@@ -66,6 +71,7 @@ export default async function CalendarPage() {
       <CalendarView
         isConnected={!!calendarToken}
         googleEmail={calendarToken?.google_email ?? null}
+        oauthConnectSupported={workspace.hostKind === "canonical"}
       />
     </div>
   );

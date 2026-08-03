@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   precheck: vi.fn(),
   commitUpdate: vi.fn(),
   registrationHasStartedForRisk: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -19,6 +20,10 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 vi.mock("@/lib/messaging/registration/riskScreening", () => ({
   registrationHasStartedForRisk: mocks.registrationHasStartedForRisk,
+}));
+
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST as saveBrandVerification } from "./route";
@@ -125,6 +130,7 @@ function einBody(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   adminChains.length = 0;
   mocks.createClient.mockResolvedValue(userClient());
   mocks.adminFrom.mockImplementation(makeAdminChain);
@@ -138,6 +144,27 @@ beforeEach(() => {
 });
 
 describe("POST /api/onboarding/brand-verification", () => {
+  it("passes through workspace denial before auth, parsing, risk, or database work", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_denied" },
+        { status: 403 },
+      ),
+    });
+    const nextRequest = request(einBody());
+    const jsonSpy = vi.spyOn(nextRequest, "json");
+
+    const response = await saveBrandVerification(nextRequest);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "workspace_access_denied" });
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(mocks.registrationHasStartedForRisk).not.toHaveBeenCalled();
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
+  });
+
   it("requires authentication before reading or writing a business", async () => {
     const client = userClient({ user: null, business: null });
     mocks.createClient.mockResolvedValue(client);

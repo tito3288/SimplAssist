@@ -137,6 +137,8 @@ const BUSINESS = {
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: true,
+  billing_mode: "stripe",
+  partner_plan: null,
   ai_settings: { language: "en" },
 };
 

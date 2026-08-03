@@ -40,11 +40,13 @@ interface AISettingsFormProps {
   settings: AISettings;
   businessName: string;
   calendarEmail?: string | null;
+  calendarConnected?: boolean;
   businessId?: string;
   canCustomizeAi?: boolean;
   canUseCalendar?: boolean;
   canUseGuardrails?: boolean;
   planActive?: boolean;
+  googleOAuthSupported?: boolean;
 }
 
 function UpgradeNotice({
@@ -73,11 +75,13 @@ export default function AISettingsForm({
   settings,
   businessName,
   calendarEmail = null,
+  calendarConnected = calendarEmail !== null,
   businessId,
   canCustomizeAi = true,
   canUseCalendar = true,
   canUseGuardrails = true,
   planActive = true,
+  googleOAuthSupported = true,
 }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -189,7 +193,7 @@ export default function AISettingsForm({
                   key={opt.value}
                   className={`cursor-pointer p-4 border-2 rounded-lg text-center transition-colors ${
                     selectedTone === opt.value
-                      ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+                      ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
                       : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                   }`}
                 >
@@ -209,7 +213,7 @@ export default function AISettingsForm({
             <div className="flex gap-3">
               <label
                 className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-                  watch('business_voice') === 'we' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
+                  watch('business_voice') === 'we' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
                 <input type="radio" value="we" {...register('business_voice')} tabIndex={canCustomizeAi ? undefined : -1} className="sr-only" />
@@ -218,7 +222,7 @@ export default function AISettingsForm({
               </label>
               <label
                 className={`flex-1 cursor-pointer p-3 border-2 rounded-lg text-center transition-colors ${
-                  watch('business_voice') === 'business_name' ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
+                  watch('business_voice') === 'business_name' ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]' : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/[0.20]'
                 }`}
               >
                 <input type="radio" value="business_name" {...register('business_voice')} tabIndex={canCustomizeAi ? undefined : -1} className="sr-only" />
@@ -232,7 +236,7 @@ export default function AISettingsForm({
             <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1">Language</label>
             <select
               {...register('language')}
-              className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none"
+              className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none"
             >
               {LANGUAGE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -247,7 +251,7 @@ export default function AISettingsForm({
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Web Chat Greeting</h3>
         {canCustomizeAi ? (
           <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-            Configure your web chat greeting in <a href="/widget" className="text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] underline">Widget Settings</a>.
+            Configure your web chat greeting in <a href="/widget" className="text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] underline">Widget Settings</a>.
           </p>
         ) : (
           <UpgradeNotice plan="Growth" planActive={planActive}>Web chat settings require the</UpgradeNotice>
@@ -268,7 +272,7 @@ export default function AISettingsForm({
           aria-disabled={!canCustomizeAi}
         >
           <label className="block text-sm font-medium text-stone-700 dark:text-[#bdbdbf] mb-1">
-            SMS Response Delay: <span className="text-[#c2410c] dark:text-[#ff914d]">{getDelayLabel(responseDelay)}</span>
+            SMS Response Delay: <span className="text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]">{getDelayLabel(responseDelay)}</span>
           </label>
           <Controller
             name="sms_response_delay_seconds"
@@ -282,7 +286,7 @@ export default function AISettingsForm({
                 value={field.value}
                 onChange={(e) => field.onChange(Number(e.target.value))}
                 tabIndex={canCustomizeAi ? undefined : -1}
-                className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[#ea580c] dark:accent-[#ff914d]"
+                className="w-full h-2 bg-stone-200 dark:bg-white/[0.10] rounded-lg appearance-none cursor-pointer accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)]"
               />
             )}
           />
@@ -313,7 +317,7 @@ export default function AISettingsForm({
                 onClick={() => canUseCalendar && field.onChange(!field.value)}
                 disabled={!canUseCalendar}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  field.value ? 'bg-[#ea580c] dark:bg-[#ff914d]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                  field.value ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
                 }`}
               >
                 <span
@@ -329,18 +333,18 @@ export default function AISettingsForm({
         {bookingEnabled && (
           <>
             <div
-              className={`mt-3 space-y-2 border-l-2 border-[#ea580c]/30 pl-4 dark:border-[#ff914d]/30 ${!canUseCalendar ? 'pointer-events-none opacity-60' : ''}`}
+              className={`mt-3 space-y-2 border-l-2 border-[rgb(var(--brand-primary-rgb)/.30)] pl-4 dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] ${!canUseCalendar ? 'pointer-events-none opacity-60' : ''}`}
               aria-disabled={!canUseCalendar}
             >
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="collect_info" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
+                <input type="radio" value="collect_info" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[var(--brand-accent)] accent-[var(--brand-primary)] dark:text-[var(--brand-accent-dark)] dark:accent-[var(--brand-primary-dark)]" />
                 <div>
                   <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Collect customer info</p>
                   <p className="text-xs text-stone-500 dark:text-[#666]">AI gathers details, you confirm the booking</p>
                 </div>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="radio" value="schedule_direct" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[#c2410c] accent-[#ea580c] dark:text-[#ff914d] dark:accent-[#ff914d]" />
+                <input type="radio" value="schedule_direct" {...register('booking_mode')} tabIndex={canUseCalendar ? undefined : -1} className="text-[var(--brand-accent)] accent-[var(--brand-primary)] dark:text-[var(--brand-accent-dark)] dark:accent-[var(--brand-primary-dark)]" />
                 <div>
                   <p className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Direct scheduling</p>
                   <p className="text-xs text-stone-500 dark:text-[#666]">AI books appointments directly on your calendar</p>
@@ -355,19 +359,23 @@ export default function AISettingsForm({
                 <GoogleCalendarConnect
                   businessId={businessId}
                   connectedEmail={calendarEmail ?? null}
+                  isConnected={calendarConnected}
                   canConnect={canUseCalendar}
+                  oauthConnectSupported={googleOAuthSupported}
                 />
               </div>
             )}
           </>
         )}
 
-        {!canUseCalendar && businessId && calendarEmail && !bookingEnabled && (
+        {!canUseCalendar && businessId && calendarConnected && !bookingEnabled && (
           <div className="mt-4 rounded-xl border border-[#ece4d8] bg-white p-4 dark:border-white/[0.08] dark:bg-white/5">
             <GoogleCalendarConnect
               businessId={businessId}
-              connectedEmail={calendarEmail}
+              connectedEmail={calendarEmail ?? null}
+              isConnected={calendarConnected}
               canConnect={false}
+              oauthConnectSupported={googleOAuthSupported}
             />
           </div>
         )}
@@ -408,7 +416,7 @@ export default function AISettingsForm({
           {...register('guardrails_text')}
           rows={3}
           placeholder={"Don't give quotes over $500\nDon't promise same-day service\nAlways suggest calling for emergencies"}
-          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 focus:outline-none resize-none"
+          className="w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:outline-none resize-none"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
@@ -428,7 +436,7 @@ export default function AISettingsForm({
             if (text?.trim()) addGuardrail(text);
           }}
           disabled={!canUseGuardrails}
-          className="text-xs text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] mt-1"
+          className="text-xs text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] mt-1"
         >
           + Add rules
         </button>

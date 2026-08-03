@@ -15,6 +15,28 @@ import { cn } from '@/lib/utils';
 
 type Mode = 'hosted' | 'self_hosted' | 'existing';
 
+const FALLBACK_CANONICAL_ORIGIN = 'https://simplassist.com';
+
+export function canonicalComplianceUrl(
+  path: `/c/${string}/${'privacy' | 'terms'}`,
+  configuredOrigin = process.env.NEXT_PUBLIC_APP_URL,
+): string {
+  try {
+    const url = new URL(configuredOrigin || FALLBACK_CANONICAL_ORIGIN);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.username ||
+      url.password
+    ) {
+      throw new Error('Unsupported canonical URL');
+    }
+
+    return new URL(path, url.origin).toString();
+  } catch {
+    return new URL(path, FALLBACK_CANONICAL_ORIGIN).toString();
+  }
+}
+
 interface CompliancePanelProps {
   slug: string;
   business: LegalTemplateBusiness;
@@ -71,8 +93,11 @@ export default function CompliancePanel({
   const saveDisabled =
     submitting || pending || (mode === 'existing' && !allChecked);
 
-  const previewPrivacyHref = `/c/${slug}/privacy`;
-  const previewTermsHref = `/c/${slug}/terms`;
+  const encodedSlug = encodeURIComponent(slug);
+  const previewPrivacyHref = canonicalComplianceUrl(
+    `/c/${encodedSlug}/privacy`,
+  );
+  const previewTermsHref = canonicalComplianceUrl(`/c/${encodedSlug}/terms`);
 
   const handleCopy = async (kind: 'privacy' | 'terms') => {
     try {
@@ -176,7 +201,7 @@ export default function CompliancePanel({
               <button
                 type="button"
                 onClick={() => setShowGenerated((v) => !v)}
-                className="text-sm font-medium text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+                className="text-sm font-medium text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]"
               >
                 {showGenerated ? 'Hide generated copy' : 'View generated copy'}
               </button>
@@ -241,7 +266,7 @@ export default function CompliancePanel({
                             next[idx] = e.target.checked;
                             setChecklist(next);
                           }}
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#e3dacc] text-[#c2410c] dark:text-[#ff914d] focus:ring-[#ea580c]/40 dark:focus:ring-[#ff914d]/40"
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#e3dacc] text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] focus:ring-[rgb(var(--brand-primary-rgb)/.40)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.40)]"
                         />
                         <span>{item}</span>
                       </label>
@@ -329,7 +354,7 @@ function ModeOption({
       htmlFor={id}
       className={`block cursor-pointer rounded-xl border p-4 transition-colors ${
         checked
-          ? 'border-[#ea580c] ring-2 ring-[#ea580c]/25 bg-[#fdf1e7] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.10)]'
+          ? 'border-[var(--brand-primary)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.25)] bg-[var(--brand-accent-soft)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)]'
           : 'border-[#ece4d8] bg-[#faf7f2] hover:border-[#e3dacc] dark:border-white/[0.10] dark:bg-white/[0.04] dark:hover:border-white/20'
       }`}
     >
@@ -340,7 +365,7 @@ function ModeOption({
           type="radio"
           checked={checked}
           onChange={onChange}
-          className="mt-1 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d] focus:ring-[#ea580c]/40 dark:focus:ring-[#ff914d]/40"
+          className="mt-1 h-4 w-4 shrink-0 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] focus:ring-[rgb(var(--brand-primary-rgb)/.40)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.40)]"
         />
         <div className="flex-1">
           <div className="text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">
@@ -362,7 +387,7 @@ function PreviewRow({ label, href }: { label: string; href: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center justify-between gap-2 rounded-full border border-[#ece4d8] bg-white px-3 py-2 text-sm text-stone-700 transition-colors hover:border-[#ea580c] hover:text-[#c2410c] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[#ff914d] dark:hover:text-[#ff914d]"
+      className="inline-flex items-center justify-between gap-2 rounded-full border border-[#ece4d8] bg-white px-3 py-2 text-sm text-stone-700 transition-colors hover:border-[var(--brand-primary)] hover:text-[var(--brand-accent)] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[var(--brand-primary-dark)] dark:hover:text-[var(--brand-accent-dark)]"
     >
       <span>
         <span className="font-medium">{label}</span>
@@ -393,7 +418,7 @@ function GeneratedTextarea({
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[#ece4d8] bg-white px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:border-[#ea580c] hover:text-[#c2410c] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[#ff914d] dark:hover:text-[#ff914d]"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#ece4d8] bg-white px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:border-[var(--brand-primary)] hover:text-[var(--brand-accent)] dark:border-white/10 dark:bg-white/[0.03] dark:text-[#bdbdbf] dark:hover:border-[var(--brand-primary-dark)] dark:hover:text-[var(--brand-accent-dark)]"
         >
           {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
           {copied ? 'Copied' : 'Copy'}
@@ -403,7 +428,7 @@ function GeneratedTextarea({
         readOnly
         value={value}
         rows={10}
-        className="w-full rounded-lg border border-[#e3dacc] bg-white px-3 py-2 font-mono text-xs leading-relaxed text-stone-900 focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+        className="w-full rounded-lg border border-[#e3dacc] bg-white px-3 py-2 font-mono text-xs leading-relaxed text-stone-900 focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
       />
     </div>
   );
@@ -432,7 +457,7 @@ function UrlInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full px-3 py-2 rounded-lg border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30 ${
+        className={`w-full px-3 py-2 rounded-lg border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] ${
           error
             ? 'border-red-400 dark:border-red-500/50'
             : 'border-[#e3dacc] dark:border-white/[0.12]'

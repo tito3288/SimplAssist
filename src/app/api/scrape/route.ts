@@ -7,6 +7,7 @@ import {
 } from "@/lib/firecrawl/crawl";
 import { extractBusinessInfo } from "@/lib/firecrawl/extract";
 import { createClient } from "@/lib/supabase/server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const scrapeSchema = z.object({
   url: z.string().url().refine(
@@ -55,6 +56,9 @@ function isRateLimited(identifier: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   // This is the one Anthropic-backed pre-checkout exception: it only prefills
   // the editable onboarding form. Require an authenticated owner whose
   // onboarding is still incomplete so it cannot become a public or post-sale

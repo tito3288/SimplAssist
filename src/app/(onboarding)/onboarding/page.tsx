@@ -12,6 +12,7 @@ import BrandVerificationForm from '@/components/onboarding/BrandVerificationForm
 import SmsUseCaseForm from '@/components/onboarding/SmsUseCaseForm';
 import ReviewAndLaunch from '@/components/onboarding/ReviewAndLaunch';
 import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
+import { useBrand } from '@/components/branding/BrandProvider';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -31,6 +32,7 @@ import {
 import { supportHref } from '@/lib/support/constants';
 import { tile, statusWarning } from '@/lib/theme-v2/theme';
 import { evaluateContentQuality } from '@/lib/contentQuality';
+import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import type { BusinessType } from '@/types/database';
 
 type StateResponse = {
@@ -39,6 +41,7 @@ type StateResponse = {
 };
 
 export default function OnboardingPage() {
+  const brand = useBrand();
   const router = useRouter();
   const searchParams = useSearchParams();
   const finalizedSessionRef = useRef<string | null>(null);
@@ -149,7 +152,10 @@ export default function OnboardingPage() {
       <div className="space-y-4 text-center">
         <AlertTriangle className="mx-auto h-8 w-8 text-red-500" />
         <p className="text-sm text-red-600 dark:text-red-400">
-          {loadError ?? 'Could not load your setup progress.'}
+          {replaceDefaultBrandName(
+            loadError ?? 'Could not load your setup progress.',
+            brand.name
+          )}
         </p>
         <Button type="button" onClick={() => refreshState()}>
           Try again
@@ -270,7 +276,10 @@ export default function OnboardingPage() {
           <div className="space-y-4">
             {state.registration.status === 'failed' && state.registration.error && (
               <div className={`rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}>
-                {state.registration.error}
+                {replaceDefaultBrandName(
+                  state.registration.error,
+                  brand.name
+                )}
               </div>
             )}
             <SmsUseCaseForm
@@ -409,8 +418,8 @@ function PhoneNumberStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#fdf1e7] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))] border border-[#f5dcc4] dark:border-white/[0.10] mb-4">
-          <Phone className="w-6 h-6 text-[#c2410c] dark:text-[#ff914d]" />
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[var(--brand-accent-soft)] dark:bg-transparent dark:bg-[linear-gradient(135deg,rgb(var(--brand-primary-dark-rgb)/.22),rgba(255,255,255,.08))] border border-[var(--brand-accent-soft-border)] dark:border-white/[0.10] mb-4">
+          <Phone className="w-6 h-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">Choose a phone number for your AI assistant</h2>
         <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
@@ -437,7 +446,7 @@ function PhoneNumberStep({
           type="button"
           onClick={onNext}
           disabled={!state.phoneNumber}
-          className="py-2 px-6 bg-[#ea580c] hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33] text-white font-medium rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="py-2 px-6 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white font-medium rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Next
         </button>
@@ -450,9 +459,9 @@ function PhoneNumberStep({
 // primary/secondary variants — this is a navigation, not an action, so a
 // link beats a scripted button.
 const SUPPORT_LINK_BASE =
-  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#ea580c] dark:focus:ring-[#ff914d]';
+  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--brand-primary)] dark:focus:ring-[var(--brand-primary-dark)]';
 const SUPPORT_LINK_PRIMARY =
-  'bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33]';
+  'bg-[var(--brand-primary)] text-white hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)]';
 const SUPPORT_LINK_SECONDARY =
   'bg-white text-stone-700 border border-[#e7e0d4] hover:bg-[#faf6ef] hover:border-[#d9d0c1] dark:bg-white/[0.07] dark:text-white dark:border-white/[0.12] dark:hover:bg-white/[0.11]';
 
@@ -469,6 +478,7 @@ function CarrierReviewStatus({
   onDashboard: () => void;
   onFixStep: (step: OnboardingStep) => void;
 }) {
+  const brand = useBrand();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [statusRefreshing, setStatusRefreshing] = useState(false);
@@ -678,13 +688,13 @@ function CarrierReviewStatus({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[#f5dcc4] bg-[#fdf1e7] dark:border-white/[0.10] dark:bg-[linear-gradient(135deg,rgba(255,145,77,.22),rgba(255,255,255,.08))]">
+        <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] dark:border-white/[0.10] dark:bg-[linear-gradient(135deg,rgb(var(--brand-primary-dark-rgb)/.22),rgba(255,255,255,.08))]">
           {registration.smsReady ? (
             <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
           ) : registration.status === 'failed' || registration.brandStatus === 'rejected' || registration.campaignStatus === 'rejected' ? (
-            <AlertTriangle className="h-6 w-6 text-[#c2410c] dark:text-[#ff914d]" />
+            <AlertTriangle className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
           ) : (
-            <Clock className="h-6 w-6 text-[#c2410c] dark:text-[#ff914d]" />
+            <Clock className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
           )}
         </div>
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">{title}</h2>
@@ -711,7 +721,9 @@ function CarrierReviewStatus({
 
       {(retryError || (rejectionKind && carrierReason) || secondaryCarrierReason || extraError || assignmentNote) && (
         <div className={`space-y-2 rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}>
-          {retryError && <p>{retryError}</p>}
+          {retryError && (
+            <p>{replaceDefaultBrandName(retryError, brand.name)}</p>
+          )}
           {rejectionKind && carrierReason && (
             displayFriendlyReason ? (
               <>
@@ -740,8 +752,12 @@ function CarrierReviewStatus({
               SMS campaign rejection: {secondaryCarrierReason}
             </p>
           )}
-          {extraError && <p>{extraError}</p>}
-          {assignmentNote && <p>{assignmentNote}</p>}
+          {extraError && (
+            <p>{replaceDefaultBrandName(extraError, brand.name)}</p>
+          )}
+          {assignmentNote && (
+            <p>{replaceDefaultBrandName(assignmentNote, brand.name)}</p>
+          )}
         </div>
       )}
 
@@ -750,7 +766,7 @@ function CarrierReviewStatus({
           role="alert"
           className={`rounded-[18px] px-4 py-3 text-sm ${statusWarning}`}
         >
-          {statusRefreshError}
+          {replaceDefaultBrandName(statusRefreshError, brand.name)}
         </div>
       )}
 
@@ -759,7 +775,7 @@ function CarrierReviewStatus({
           role="status"
           className="text-sm text-stone-600 dark:text-[#bdbdbf]"
         >
-          {statusRefreshNotice}
+          {replaceDefaultBrandName(statusRefreshNotice, brand.name)}
         </p>
       )}
 

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   resolveBusinessEntitlements: vi.fn(),
   decideFeatureAccess: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 class TestEntitlementResolutionError extends Error {}
@@ -21,6 +22,9 @@ vi.mock("@/lib/billing/entitlements", () => ({
   decideFeatureAccess: mocks.decideFeatureAccess,
   isEntitlementResolutionError: (error: unknown) =>
     error instanceof TestEntitlementResolutionError,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { DELETE } from "./route";
@@ -83,10 +87,38 @@ beforeEach(() => {
     outcome: "resolved",
     allowed: true,
   });
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: "user_41" },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
   configureTables("sms");
 });
 
 describe("DELETE /api/conversations/[id] entitlement wall", () => {
+  it.each([
+    [401, { error: "Unauthorized" }],
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i before conversation or entitlement reads", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+
+    const response = await DELETE(request(), {
+      params: { id: CONVERSATION_ID },
+    });
+
+    expect(response.status).toBe(status);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+  });
+
   it("allows an entitled Starter owner to delete an SMS conversation", async () => {
     const response = await DELETE(request(), {
       params: { id: CONVERSATION_ID },

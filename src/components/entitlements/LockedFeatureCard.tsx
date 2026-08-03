@@ -20,7 +20,7 @@ export function LockedFeatureCard({
   return (
     <div className={`${card} ${compact ? "p-5" : "p-6 sm:p-8"}`}>
       <div className="flex items-start gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#fdf1e7] text-[#c2410c] dark:bg-[rgba(255,145,77,.14)] dark:text-[#ff914d]">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.14)] dark:text-[var(--brand-accent-dark)]">
           <Lock className="h-5 w-5" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
@@ -44,7 +44,7 @@ export function LockedFeatureCard({
           )}
           <Link
             href="/billing"
-            className="mt-4 inline-flex items-center justify-center rounded-full bg-[#ea580c] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#c2410c] active:bg-[#9a3412] dark:bg-[#ff914d] dark:text-[#16100b] dark:hover:bg-[#f57f33]"
+            className="mt-4 inline-flex items-center justify-center rounded-full bg-[var(--brand-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)]"
           >
             Manage plan
           </Link>

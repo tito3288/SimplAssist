@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import {
   canUseFeature,
   EntitlementResolutionError,
@@ -11,6 +10,7 @@ import {
   BusinessPartnerResolutionError,
   resolveWidgetAttribution,
 } from "@/lib/branding/businessPartner.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const widgetConfigMutationSchema = z
   .object({
@@ -37,31 +37,10 @@ export async function OPTIONS() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (businessError) {
-    console.error("Widget mutation business lookup error:", businessError);
-    return NextResponse.json(
-      { error: "Service temporarily unavailable", retryable: true },
-      { status: 503 }
-    );
-  }
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
+  const { business } = workspace.access;
 
   try {
     const entitlements = await resolveBusinessEntitlements(business.id);

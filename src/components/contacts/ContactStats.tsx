@@ -30,26 +30,26 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
       label: "Total Contacts",
       value: total,
       icon: Users,
-      color: "text-[#c2410c] dark:text-[#ff914d]",
+      color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
     {
       label: "New This Week",
       value: newThisWeek,
       icon: UserPlus,
-      color: "text-[#c2410c] dark:text-[#ff914d]",
+      color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
     {
       label: "Hot Leads",
       value: hotLeads,
       icon: Flame,
-      color: "text-[#c2410c] dark:text-[#ff914d]",
+      color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
     {
       label: "SMS / Web Chat",
       value: `${smsCount} / ${webChatCount}`,
       icon: Phone,
       secondIcon: MessageCircle,
-      color: "text-[#c2410c] dark:text-[#ff914d]",
+      color: "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]",
     },
   ];
 

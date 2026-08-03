@@ -29,6 +29,7 @@ export interface CalendarEvent {
 interface CalendarViewProps {
   isConnected: boolean;
   googleEmail: string | null;
+  oauthConnectSupported?: boolean;
   /** Dev-only demo mode (/demo routes): seed events and skip the Google
    *  Calendar fetch entirely. Real dashboard callers never pass this. */
   demoEvents?: CalendarEvent[];
@@ -87,6 +88,7 @@ function formatMonthYear(date: Date): string {
 export default function CalendarView({
   isConnected: initialConnected,
   googleEmail,
+  oauthConnectSupported = true,
   demoEvents,
 }: CalendarViewProps) {
   const today = new Date();
@@ -202,26 +204,31 @@ export default function CalendarView({
         <div
           className={`w-16 h-16 mx-auto mb-4 grid place-items-center ${orangeAccentIcon}`}
         >
-          <CalendarDays className="w-8 h-8 text-[#c2410c] dark:text-[#ff914d]" />
+          <CalendarDays className="w-8 h-8 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <h3 className={`text-lg font-bold mb-2 ${ink}`}>
-          Connect your Google Calendar
+          {oauthConnectSupported
+            ? "Connect your Google Calendar"
+            : "Google Calendar connection unavailable"}
         </h3>
         <p className={`mb-6 max-w-md mx-auto ${body}`}>
-          Link your Google Calendar to see your appointments and bookings here.
-          Go to Settings and enable Direct Scheduling to connect.
+          {oauthConnectSupported
+            ? "Link your Google Calendar to see your appointments and bookings here. Go to Settings and enable Direct Scheduling to connect."
+            : "Connecting or reconnecting Google Calendar is not available on this partner workspace. Existing connections remain available."}
           {googleEmail && (
             <span className="block mt-1 text-sm">
               Previously connected: {googleEmail}
             </span>
           )}
         </p>
-        <a
-          href="/settings"
-          className={`${btnPrimary} w-auto px-8`}
-        >
-          Go to Settings
-        </a>
+        {oauthConnectSupported && (
+          <a
+            href="/settings"
+            className={`${btnPrimary} w-auto px-8`}
+          >
+            Go to Settings
+          </a>
+        )}
       </div>
     );
   }
@@ -287,8 +294,8 @@ export default function CalendarView({
                     aspect-square p-1 flex flex-col items-center justify-center gap-1
                     rounded-xl transition-all text-sm relative
                     ${!isCurrentMonth ? "opacity-35" : ""}
-                    ${isSelected ? "bg-[rgba(234,88,12,.12)] border border-[#ea580c] dark:bg-[rgba(255,145,77,.18)] dark:border-[#ff914d]" : "border border-transparent hover:bg-[#faf6ef] dark:hover:bg-white/[0.06]"}
-                    ${isToday && !isSelected ? "bg-[rgba(234,88,12,.07)] dark:bg-[rgba(255,145,77,.08)]" : ""}
+                    ${isSelected ? "bg-[rgb(var(--brand-primary-rgb)/.12)] border border-[var(--brand-primary)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.18)] dark:border-[var(--brand-primary-dark)]" : "border border-transparent hover:bg-[#faf6ef] dark:hover:bg-white/[0.06]"}
+                    ${isToday && !isSelected ? "bg-[rgb(var(--brand-primary-rgb)/.07)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.08)]" : ""}
                   `}
                 >
                   <span
@@ -296,9 +303,9 @@ export default function CalendarView({
                       w-7 h-7 grid place-items-center rounded-full font-medium
                       ${
                         isToday
-                          ? "bg-[#ea580c] dark:bg-[#ff914d] text-white font-bold"
+                          ? "bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] text-white font-bold"
                           : dateHasEvents
-                            ? "text-[#c2410c] dark:text-[#ff914d] font-semibold"
+                            ? "text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] font-semibold"
                             : ink
                       }
                     `}
@@ -306,7 +313,7 @@ export default function CalendarView({
                     {date.getDate()}
                   </span>
                   {dateHasEvents && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#ea580c] dark:bg-[#ff914d] absolute bottom-1.5" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] absolute bottom-1.5" />
                   )}
                 </button>
               );
@@ -317,7 +324,7 @@ export default function CalendarView({
           {loading && (
             <div className="flex items-center justify-center py-4">
               <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 text-[#ea580c] dark:text-[#ff914d] animate-spin" />
+                <Loader2 className="w-4 h-4 text-[var(--brand-primary)] dark:text-[var(--brand-primary-dark)] animate-spin" />
                 <span className={`text-sm ${body}`}>
                   Loading events...
                 </span>
@@ -335,7 +342,7 @@ export default function CalendarView({
               </h3>
               <button
                 onClick={() => setCreateModalOpen(true)}
-                className="w-7 h-7 grid place-items-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] dark:bg-[#ff914d] dark:hover:bg-[#f57f33] text-white transition-colors"
+                className="w-7 h-7 grid place-items-center rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] dark:bg-[var(--brand-primary-dark)] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white transition-colors"
                 title="Create event"
               >
                 <Plus className="w-4 h-4" />
@@ -357,15 +364,15 @@ export default function CalendarView({
                     onClick={() => setViewEvent(event)}
                     className="
                       p-3.5 rounded-[22px] cursor-pointer
-                      border border-[#f0e2d0] dark:border-white/[0.10]
-                      bg-[#fdf3ea] dark:bg-white/[0.04]
-                      border-l-[3px] border-l-[#ea580c] dark:border-l-[#ff914d]
-                      hover:border-[#e6cdb0] dark:hover:border-white/[0.16] transition-colors
+                      border border-[var(--brand-calendar-border)] dark:border-white/[0.10]
+                      bg-[var(--brand-calendar-wash)] dark:bg-white/[0.04]
+                      border-l-[3px] border-l-[var(--brand-primary)] dark:border-l-[var(--brand-primary-dark)]
+                      hover:border-[var(--brand-calendar-muted)] dark:hover:border-white/[0.16] transition-colors
                     "
                   >
                     <div className="flex items-center gap-1.5 mb-1">
-                      <Clock className="w-3.5 h-3.5 text-[#c2410c] dark:text-[#ffb07a]" />
-                      <span className="text-xs font-medium text-[#9a3412] dark:text-[#e8a878]">
+                      <Clock className="w-3.5 h-3.5 text-[var(--brand-accent)] dark:text-[var(--brand-primary-soft-dark)]" />
+                      <span className="text-xs font-medium text-[var(--brand-primary-active)] dark:text-[var(--brand-calendar-accent)]">
                         {event.allDay
                           ? "All day"
                           : `${formatTime(event.start)} – ${formatTime(event.end)}`}
@@ -437,7 +444,7 @@ export default function CalendarView({
                 setEditEvent(viewEvent);
                 setViewEvent(null);
               }}
-              className="flex items-center gap-2 text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a] transition-colors"
+              className="flex items-center gap-2 text-sm text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)] transition-colors"
             >
               <Pencil className="w-4 h-4" />
               Edit Event

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 /**
  * POST /api/settings/compliance — Phase 6 compliance-mode update endpoint.
@@ -102,6 +103,9 @@ async function checkReachable(url: string): Promise<ReachabilityResult> {
 }
 
 export async function POST(request: NextRequest) {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   // 1. Auth
   const supabase = await createClient();
   const {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
+  requireWorkspacePageAccess: vi.fn(async () => undefined),
   getDashboardBusinessContext: vi.fn(),
   getDashboardEntitlements: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
+}));
 vi.mock("next/link", () => ({ default: () => null }));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,

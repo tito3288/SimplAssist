@@ -5,8 +5,11 @@ import {
   getGoogleOAuth2Client,
   GOOGLE_OAUTH_NONCE_COOKIE,
 } from "@/lib/google/client";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  requireFreshWorkspaceRouteAccess,
+  requireWorkspaceRouteAccess,
+} from "@/lib/customer/workspaceRouteResponse.server";
 import {
   canUseFeature,
   EntitlementResolutionError,
@@ -15,6 +18,17 @@ import {
 } from "@/lib/billing/entitlements";
 
 export async function GET(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return clearNonce(workspace.response);
+  if (workspace.access.hostKind === "partner") {
+    return clearNonce(
+      NextResponse.json(
+        { error: "google_oauth_unavailable_on_partner_host" },
+        { status: 403 }
+      )
+    );
+  }
+
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const stateValue = searchParams.get("state");
@@ -35,42 +49,16 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return clearNonce(
-      NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    );
-  }
-
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("id", state.businessId)
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (businessError) {
-    console.error("[google-callback] Owner lookup failed:", businessError);
-    return clearNonce(
-      NextResponse.json(
-        { error: "service_unavailable", retryable: true },
-        { status: 503 }
-      )
-    );
-  }
-
-  if (!business) {
+  if (state.businessId !== workspace.access.business.id) {
     return clearNonce(
       NextResponse.json({ error: "Forbidden" }, { status: 403 })
     );
   }
 
+  const businessId = workspace.access.business.id;
+
   const initialEntitlementFailure = await calendarEntitlementFailure(
-    business.id
+    businessId
   );
   if (initialEntitlementFailure) {
     return clearNonce(initialEntitlementFailure);
@@ -110,17 +98,33 @@ export async function GET(request: NextRequest) {
     // durable write so a downgrade while Google was responding cannot connect
     // Calendar after access was removed.
     const writeEntitlementFailure = await calendarEntitlementFailure(
-      business.id
+      businessId
     );
     if (writeEntitlementFailure) {
       return clearNonce(writeEntitlementFailure);
+    }
+
+    // The token exchange is also long enough for the signed-in account or an
+    // administrator-managed partner assignment to change. Bypass the shared
+    // request cache immediately before durable writes and require the exact
+    // canonical workspace decision that authorized this callback.
+    const freshWorkspace = await requireFreshWorkspaceRouteAccess();
+    if (!freshWorkspace.ok) {
+      return clearNonce(freshWorkspace.response);
+    }
+    if (
+      freshWorkspace.access.hostKind !== "canonical" ||
+      freshWorkspace.access.user.id !== workspace.access.user.id ||
+      freshWorkspace.access.business.id !== businessId
+    ) {
+      return clearNonce(workspaceChangedResponse());
     }
 
     const { error: dbError } = await supabaseAdmin
       .from("google_calendar_tokens")
       .upsert(
         {
-          business_id: business.id,
+          business_id: businessId,
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token,
           token_expiry: tokenExpiry,
@@ -144,7 +148,7 @@ export async function GET(request: NextRequest) {
     const { error: settingsError } = await supabaseAdmin
       .from("ai_settings")
       .update({ booking_enabled: true, booking_mode: "schedule_direct" })
-      .eq("business_id", business.id);
+      .eq("business_id", businessId);
 
     if (settingsError) {
       console.error("[google-callback] Booking settings update failed:", settingsError);
@@ -159,6 +163,13 @@ export async function GET(request: NextRequest) {
       NextResponse.redirect(`${appUrl}/settings`)
     );
   }
+}
+
+function workspaceChangedResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "workspace_access_denied" },
+    { status: 403 }
+  );
 }
 
 function noncesMatch(stateNonce: string, cookieNonce: string): boolean {

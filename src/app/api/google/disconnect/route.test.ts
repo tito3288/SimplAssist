@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextResponse } from "next/server";
 
 const mocks = vi.hoisted(() => ({
-  getUser: vi.fn(),
-  serverFrom: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
   adminFrom: vi.fn(),
   tokenLookup: vi.fn(),
   tokenDeleteEq: vi.fn(),
@@ -12,11 +12,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({
-    auth: { getUser: mocks.getUser },
-    from: mocks.serverFrom,
-  })),
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.adminFrom },
@@ -40,17 +37,18 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000002";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
-
-  const ownerChain: Record<string, ReturnType<typeof vi.fn>> = {};
-  for (const method of ["select", "eq", "maybeSingle"]) {
-    ownerChain[method] = vi.fn(() => ownerChain);
-  }
-  ownerChain.maybeSingle.mockResolvedValue({
-    data: { id: BUSINESS_ID },
-    error: null,
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: USER_ID },
+      business: {
+        id: BUSINESS_ID,
+        partner_id: "00000000-0000-4000-8000-000000000003",
+      },
+      hostKind: "partner",
+    },
   });
-  mocks.serverFrom.mockReturnValue(ownerChain);
 
   mocks.tokenLookup.mockResolvedValue({
     data: { access_token: "google-access-token" },
@@ -70,6 +68,29 @@ beforeEach(() => {
 });
 
 describe("Google Calendar disconnect", () => {
+  it.each([401, 403, 503] as const)(
+    "maps workspace %s before token lookup or Google revocation",
+    async (status) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(
+          status === 401
+            ? { error: "Unauthorized" }
+            : status === 403
+              ? { error: "workspace_access_denied" }
+              : { error: "workspace_access_unavailable", retryable: true },
+          { status }
+        ),
+      });
+
+      const response = await POST();
+
+      expect(response.status).toBe(status);
+      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(mocks.revokeToken).not.toHaveBeenCalled();
+    }
+  );
+
   it("remains available without entitlement and revokes then deletes the saved token", async () => {
     const response = await POST();
 

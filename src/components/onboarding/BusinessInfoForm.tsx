@@ -208,7 +208,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <input
           {...register('name')}
           placeholder="e.g. Joe's Barber Shop"
-          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
         />
         {errors.name && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.name.message}</p>}
       </div>
@@ -217,7 +217,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">Business Type *</label>
         <select
           {...register('business_type')}
-          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
         >
           {BUSINESS_TYPE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -230,7 +230,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
             <input
               {...register('business_type_other')}
               placeholder="e.g. Marketing Agency"
-              className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+              className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
             />
             {errors.business_type_other && (
               <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.business_type_other.message}</p>
@@ -245,14 +245,14 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           <input
             {...register('website')}
             placeholder="https://www.example.com"
-            className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+            className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
           />
           {websiteValue && (
             <button
               type="button"
               onClick={handleScanWebsite}
               disabled={scanning}
-              className="px-4 py-2 bg-[#fdf1e7] text-[#c2410c] border border-[#f5dcc4] hover:bg-[#fbe7d4] dark:bg-[rgba(255,145,77,0.12)] dark:text-[#ff914d] dark:border-white/[0.10] dark:hover:bg-[rgba(255,145,77,0.18)] font-medium rounded-full disabled:opacity-50 whitespace-nowrap"
+              className="px-4 py-2 bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] hover:bg-[var(--brand-tint)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)] dark:border-white/[0.10] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.18)] font-medium rounded-full disabled:opacity-50 whitespace-nowrap"
             >
               {scanning ? (
                 <span className="flex items-center gap-2.5">
@@ -278,7 +278,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <input
           {...register('phone')}
           placeholder="(555) 123-4567"
-          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
         />
         {errors.phone && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.phone.message}</p>}
       </div>
@@ -289,7 +289,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           {...register('email')}
           type="email"
           placeholder="info@yourbusiness.com"
-          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
         />
         {errors.email && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.email.message}</p>}
         <p className="text-xs text-stone-500 dark:text-[#bdbdbf] mt-1">The AI will suggest this email when it can&apos;t fully help a customer.</p>
@@ -299,7 +299,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">Address *</label>
         <input
           {...register('address')}
-          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
         />
         {errors.address && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.address.message}</p>}
       </div>
@@ -309,7 +309,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">City *</label>
           <input
             {...register('city')}
-            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
           />
           {errors.city && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.city.message}</p>}
         </div>
@@ -317,7 +317,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">State *</label>
           <select
             {...register('state')}
-            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
             defaultValue=""
           >
             <option value="" disabled>Select state</option>
@@ -331,7 +331,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
           <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">Zip *</label>
           <input
             {...register('zip')}
-            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+            className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
           />
           {errors.zip && <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errors.zip.message}</p>}
         </div>

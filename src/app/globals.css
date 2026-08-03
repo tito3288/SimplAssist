@@ -26,6 +26,22 @@
   --brand-accent-soft-border: #f5dcc4;
   --brand-accent-soft-dark: #ffd7bf;
   --brand-primary-soft-dark: #ffb07a;
+  --brand-tint-strong: #fbe6d4;
+  --brand-tint: #fbe7d4;
+  --brand-text-soft-dark: #ffd5bc;
+  --brand-surface-dark: #291b13;
+  --brand-selection-border: #e4a677;
+  --brand-wash-faint: #fffaf5;
+  --brand-wash: #fff7ef;
+  --brand-border-soft: #efc5a3;
+  --brand-border-strong: #e9ad7b;
+  --brand-calendar-border: #f0e2d0;
+  --brand-calendar-wash: #fdf3ea;
+  --brand-calendar-muted: #e6cdb0;
+  --brand-calendar-accent: #e8a878;
+  --brand-primary-alt: #f97316;
+  --brand-primary-alt-rgb: 249 115 22;
+  --brand-primary-alt-wash: #fff7ed;
 }
 
 /* Aligns with next-themes `class="dark"` on <html> (Tailwind darkMode: class) */

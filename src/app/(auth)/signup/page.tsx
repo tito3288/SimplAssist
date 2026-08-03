@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Mail } from "lucide-react";
+import { useRequestBrand } from "@/components/branding/BrandProvider";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
   body,
@@ -34,6 +35,38 @@ const signupSchema = z
 type SignupForm = z.infer<typeof signupSchema>;
 
 export default function SignupPage() {
+  const requestBrand = useRequestBrand();
+
+  // Preview changes presentation only. Public signup is unavailable solely on
+  // a real partner hostname, where accounts are provisioned by concierge flow.
+  if (requestBrand.source === "partner_host") {
+    return <PartnerConciergeAccess brandName={requestBrand.brand.name} />;
+  }
+
+  return <PublicSignupForm />;
+}
+
+function PartnerConciergeAccess({ brandName }: { brandName: string }) {
+  return (
+    <div className="text-center">
+      <h1 className={`text-2xl font-bold tracking-tight ${ink}`}>
+        Request access to {brandName}
+      </h1>
+      <p className={`mt-3 text-sm leading-6 ${body}`}>
+        New accounts are set up for you by {brandName}. Contact your account
+        administrator for concierge access.
+      </p>
+      <p className={`mt-7 text-sm ${body}`}>
+        Already have access?{" "}
+        <Link href="/login" className={inlineLink}>
+          Log in to {brandName}
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+function PublicSignupForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const supabase = createBrowserClient();
@@ -76,7 +109,7 @@ export default function SignupPage() {
             className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center ${tile}`}
           >
             <Mail
-              className="h-7 w-7 text-[#ea580c] dark:text-[#ff914d]"
+              className="h-7 w-7 text-[var(--brand-primary)] dark:text-[var(--brand-primary-dark)]"
               aria-hidden
             />
           </div>

@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getDashboardEntitlements: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   canUseFeature: vi.fn(),
+  getWorkspaceAccess: vi.fn(),
+  workspacePageRedirectTarget: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -21,6 +23,12 @@ vi.mock("@/lib/messaging/lookup", () => ({
 }));
 vi.mock("@/lib/billing/entitlements", () => ({
   canUseFeature: mocks.canUseFeature,
+}));
+vi.mock("@/lib/customer/workspaceAccess.server", () => ({
+  getWorkspaceAccess: mocks.getWorkspaceAccess,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  workspacePageRedirectTarget: mocks.workspacePageRedirectTarget,
 }));
 vi.mock("./_components/sidebar", () => ({
   default: () => null,
@@ -64,9 +72,49 @@ beforeEach(() => {
   mocks.getSmsReadinessForBusiness.mockResolvedValue({ smsReady: true });
   mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
   mocks.canUseFeature.mockReturnValue(true);
+  mocks.getWorkspaceAccess.mockResolvedValue({
+    status: "resolved",
+    user: { id: "user-1", email: "owner@example.com" },
+    business: { id: BUSINESS.id, partner_id: null },
+    hostKind: "canonical",
+  });
+  mocks.workspacePageRedirectTarget.mockReturnValue(null);
 });
 
 describe("DashboardLayout access gate", () => {
+  it("redirects an unauthenticated workspace before dashboard data reads", async () => {
+    mocks.getWorkspaceAccess.mockResolvedValue({ status: "unauthenticated" });
+    mocks.workspacePageRedirectTarget.mockReturnValue("/login");
+
+    await expect(
+      DashboardLayout({ children: <div>Dashboard child</div> })
+    ).rejects.toThrow("redirect:/login");
+
+    expect(mocks.getDashboardBusinessContext).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "business_not_found",
+    "mismatch",
+    "unknown_host",
+    "partner_unavailable",
+    "lookup_failed",
+  ])(
+    "redirects %s workspace decisions to the blocked page before dashboard reads",
+    async (status) => {
+      mocks.getWorkspaceAccess.mockResolvedValue({ status });
+      mocks.workspacePageRedirectTarget.mockReturnValue("/workspace-access");
+
+      await expect(
+        DashboardLayout({ children: <div>Dashboard child</div> })
+      ).rejects.toThrow("redirect:/workspace-access");
+
+      expect(mocks.getDashboardBusinessContext).not.toHaveBeenCalled();
+      expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    }
+  );
+
   it("uses the narrow SMS readiness lookup before rendering the dashboard", async () => {
     await expect(
       DashboardLayout({ children: <div>Dashboard child</div> })

@@ -17,6 +17,7 @@ describe("BusinessPartnerBillingForm", () => {
         businessId={BUSINESS_ID}
         initialPartnerId={PARTNER_ID}
         initialBillingMode="invoiced"
+        initialPartnerPlan="full"
         currentPartner={{
           id: PARTNER_ID,
           name: "Alpha Dog Agency",
@@ -36,15 +37,24 @@ describe("BusinessPartnerBillingForm", () => {
     expect(html).toContain("Alpha Dog Agency");
     expect(html).toContain("Current billing mode");
     expect(html).toContain("invoiced");
+    expect(html).toContain("Current partner plan");
+    expect(html).toMatch(
+      /Current partner plan<\/dt><dd class="text-right">Full<\/dd>/
+    );
     expect(html).toContain("Unassigned");
     expect(html).toContain("Partner invoiced");
     expect(html).toContain("Partner comped");
+    expect(html).toContain("Starter — 500 included SMS parts");
+    expect(html).toContain("Growth — 1,500 included SMS parts");
+    expect(html).toContain("Full — 2,500 included SMS parts");
+    expect(html).toContain("New partner assignments default to Growth.");
+    expect(html).toContain(
+      "Partner plans use the same feature matrix and included SMS allowances as Stripe plans."
+    );
     expect(html).toContain(
       "Non-Stripe assignment is refused while any subscription row exists"
     );
-    expect(html).toContain(
-      "Returning to Stripe removes the temporary comp bridge"
-    );
+    expect(html).toContain("Returning to Stripe clears the partner plan.");
     expect(html).toContain(
       "The business will require checkout before access continues."
     );
@@ -56,6 +66,7 @@ describe("BusinessPartnerBillingForm", () => {
         businessId={BUSINESS_ID}
         initialPartnerId={PARTNER_ID}
         initialBillingMode="comped"
+        initialPartnerPlan="sms_only"
         currentPartner={{
           id: PARTNER_ID,
           name: "Retired Partner",
@@ -77,6 +88,7 @@ describe("BusinessPartnerBillingForm", () => {
         businessId={BUSINESS_ID}
         initialPartnerId={PARTNER_ID}
         initialBillingMode="invoiced"
+        initialPartnerPlan="sms_and_chat"
         currentPartner={{
           id: PARTNER_ID,
           name: "Assigned partner",
@@ -88,5 +100,25 @@ describe("BusinessPartnerBillingForm", () => {
 
     expect(html).toContain("Assigned partner unavailable");
     expect(html).not.toContain("Current partner</dt><dd class=\"text-right\">Unassigned");
+  });
+
+  it("shows Stripe businesses as not partner-managed and defaults the disabled selector to Growth", () => {
+    const html = renderToStaticMarkup(
+      <BusinessPartnerBillingForm
+        businessId={BUSINESS_ID}
+        initialPartnerId={null}
+        initialBillingMode="stripe"
+        initialPartnerPlan={null}
+        currentPartner={null}
+        activePartners={[]}
+      />
+    );
+
+    expect(html).toMatch(
+      /Current partner plan<\/dt><dd class="text-right">Not partner-managed<\/dd>/
+    );
+    expect(html).toMatch(
+      /<select[^>]*disabled=""[^>]*><option value="sms_only">Starter — 500 included SMS parts<\/option><option value="sms_and_chat" selected="">Growth — 1,500 included SMS parts<\/option>/
+    );
   });
 });

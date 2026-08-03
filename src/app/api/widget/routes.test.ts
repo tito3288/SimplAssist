@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     AIProcessingBlockedError,
     AIProcessingStateError,
     BusinessPartnerResolutionError,
+    requireWorkspaceRouteAccess: vi.fn(),
   };
 });
 
@@ -56,6 +57,9 @@ vi.mock("@/lib/ai/knowledgeGaps", () => ({
 vi.mock("@/lib/branding/businessPartner.server", () => ({
   resolveWidgetAttribution: mocks.resolveWidgetAttribution,
   BusinessPartnerResolutionError: mocks.BusinessPartnerResolutionError,
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
@@ -162,10 +166,39 @@ beforeEach(() => {
     poweredByName: "SimplAssist",
     poweredByUrl: "https://simplassist.com",
   });
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+    ok: true,
+    access: {
+      status: "resolved",
+      user: { id: "user-1" },
+      business: { id: BUSINESS_ID, partner_id: null },
+      hostKind: "canonical",
+    },
+  });
   queueDatabaseResults();
 });
 
 describe("authenticated widget configuration mutations", () => {
+  it.each([
+    [401, { error: "Unauthorized" }],
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i before parsing, entitlements, or updates", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+    const guardedRequest = configPatchRequest();
+    const json = vi.spyOn(guardedRequest, "json");
+
+    const response = await patchConfig(guardedRequest);
+
+    expect(response.status).toBe(status);
+    expect(json).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it("returns 403 for a known web-chat entitlement denial", async () => {
     mocks.canUseFeature.mockReturnValue(false);
 
@@ -244,6 +277,7 @@ describe("public widget entitlement boundaries", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: false });
+    expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
   });
 
   it("returns retryable 503 when entitlement state cannot be determined", async () => {
@@ -618,7 +652,10 @@ describe("widget attribution responses", () => {
 
 describe("owner-only widget preview", () => {
   it("requires an authenticated owner", async () => {
-    mocks.getUser.mockResolvedValue({ data: { user: null } });
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
 
     const response = await getPreviewConfig(previewConfigRequest());
 
@@ -626,6 +663,26 @@ describe("owner-only widget preview", () => {
     expect(mocks.serverFrom).not.toHaveBeenCalled();
     expect(mocks.from).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])("returns workspace %i with private headers before preview reads", async (status, body) => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json(body, { status }),
+    });
+
+    const response = await getPreviewConfig(previewConfigRequest());
+
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("vary")).toBe("Cookie");
+    expect(mocks.serverFrom).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+  });
+
 
   it("returns 404 without revealing a widget owned by another user", async () => {
     setServerBusinessResult({ data: null, error: null });

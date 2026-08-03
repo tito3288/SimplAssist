@@ -4,16 +4,44 @@ import { stripe } from "@/lib/stripe/client";
 import { syncCheckoutSession } from "@/lib/stripe/subscriptionSync";
 import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import {
+  partnerManagedBillingMessage,
+  resolveAssignedPartnerName,
+} from "@/lib/billing/partnerManagedBilling.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import type { BillingMode } from "@/types/database";
+
+type FinalizeBusinessRow = {
+  id: string;
+  partner_id: string | null;
+  billing_mode: BillingMode;
+};
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
 
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = await createClient();
+
+  // Resolve the signed-in owner's billing authority before touching Stripe.
+  // Partner-managed accounts never retrieve or synchronize a stale Checkout
+  // Session, even if one was created before the assignment changed.
+  const { data: initialBusiness } = await supabase
+    .from("businesses")
+    .select("id, partner_id, billing_mode")
+    .eq("id", workspace.access.business.id)
+    .eq("owner_id", workspace.access.user.id)
+    .single<FinalizeBusinessRow>();
+
+  if (!initialBusiness) {
+    return NextResponse.json(
+      { error: "Business not found or unauthorized" },
+      { status: 403 }
+    );
+  }
+
+  if (initialBusiness.billing_mode !== "stripe") {
+    return partnerBillingResponse(initialBusiness.partner_id);
   }
 
   const { sessionId } = (await request.json().catch(() => ({}))) as {
@@ -37,18 +65,33 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (businessId !== initialBusiness.id) {
+    return NextResponse.json(
+      { error: "Business not found or unauthorized" },
+      { status: 403 }
+    );
+  }
+
+  // Re-read after the remote Stripe call. An administrator can assign partner
+  // billing while a Checkout Session is outstanding; this closes that stale
+  // finalize window before subscription retrieval, local synchronization, or
+  // launch. Migration 044's guarded sync RPC remains the final race defense.
   const { data: business } = await supabase
     .from("businesses")
-    .select("id")
+    .select("id, partner_id, billing_mode")
     .eq("id", businessId)
-    .eq("owner_id", user.id)
-    .single();
+    .eq("owner_id", workspace.access.user.id)
+    .single<FinalizeBusinessRow>();
 
   if (!business) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
       { status: 403 }
     );
+  }
+
+  if (business.billing_mode !== "stripe") {
+    return partnerBillingResponse(business.partner_id);
   }
 
   const synced = await syncCheckoutSession(session);
@@ -77,5 +120,16 @@ export async function POST(request: NextRequest) {
       state,
     },
     { status }
+  );
+}
+
+async function partnerBillingResponse(partnerId: string | null) {
+  const partnerName = await resolveAssignedPartnerName(partnerId);
+  return NextResponse.json(
+    {
+      error: "billing_managed_by_partner",
+      message: partnerManagedBillingMessage(partnerName),
+    },
+    { status: 409 }
   );
 }

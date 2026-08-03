@@ -45,6 +45,7 @@ const profile = {
   logoLightUrl: "https://cdn.example.com/logo-light.svg",
   logoDarkUrl: "https://cdn.example.com/logo-dark.svg",
   faviconUrl: "https://cdn.example.com/favicon.png",
+  emailFrom: "notifications@alphadogagency.ai",
   status: "active",
   colors,
 };
@@ -66,6 +67,10 @@ const row = {
   brand_primary_hover_dark: colors.primaryHoverDark,
   brand_primary_active_dark: colors.primaryActiveDark,
   brand_accent_dark: colors.accentDark,
+  email_from: profile.emailFrom,
+  email_from_status: "pending",
+  email_from_verified_at: null,
+  email_from_verified_by: null,
   status: "active",
   created_at: "2026-08-03T00:00:00.000Z",
   updated_at: "2026-08-03T01:00:00.000Z",
@@ -176,6 +181,21 @@ describe("/api/admin/partners/[partnerId]", () => {
   });
 
   it("preserves connected status for an ordinary same-domain profile update", async () => {
+    const verifiedRow = {
+      ...row,
+      email_from_status: "verified",
+      email_from_verified_at: "2026-08-03T00:30:00.000Z",
+      email_from_verified_by: ADMIN_ID,
+    };
+    mocks.readMaybeSingle.mockResolvedValue({
+      data: verifiedRow,
+      error: null,
+    });
+    mocks.updateMaybeSingle.mockResolvedValue({
+      data: { ...verifiedRow, name: "Updated Agency" },
+      error: null,
+    });
+
     const response = await route.PATCH(
       makeRequest({ action: "update", ...profile, name: "Updated Agency" }),
       context,
@@ -187,7 +207,187 @@ describe("/api/admin/partners/[partnerId]", () => {
         name: "Updated Agency",
         custom_domain: profile.customDomain,
         domain_status: "connected",
+        email_from: profile.emailFrom,
       }),
+    );
+    expect(mocks.update.mock.calls[0]?.[0]).not.toHaveProperty(
+      "email_from_status",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      partner: {
+        emailFromStatus: "verified",
+        emailFromVerifiedAt: verifiedRow.email_from_verified_at,
+        emailFromVerifiedBy: ADMIN_ID,
+      },
+    });
+  });
+
+  it("resets sender verification when the profile address changes", async () => {
+    const changedEmail = "hello@alphadogagency.ai";
+    mocks.readMaybeSingle.mockResolvedValue({
+      data: {
+        ...row,
+        email_from_status: "verified",
+        email_from_verified_at: "2026-08-03T00:30:00.000Z",
+        email_from_verified_by: ADMIN_ID,
+      },
+      error: null,
+    });
+    mocks.updateMaybeSingle.mockResolvedValue({
+      data: { ...row, email_from: changedEmail },
+      error: null,
+    });
+
+    const response = await route.PATCH(
+      makeRequest({ action: "update", ...profile, emailFrom: changedEmail }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email_from: changedEmail,
+        email_from_status: "pending",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
+      }),
+    );
+  });
+
+  it("sets a cleared sender to Unconfigured and clears verification audit", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({
+      data: {
+        ...row,
+        email_from: null,
+        email_from_status: "unconfigured",
+      },
+      error: null,
+    });
+
+    const response = await route.PATCH(
+      makeRequest({ action: "update", ...profile, emailFrom: null }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email_from: null,
+        email_from_status: "unconfigured",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
+      }),
+    );
+  });
+
+  it("marks only the unchanged saved sender verified with admin audit fields", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({
+      data: {
+        ...row,
+        email_from_status: "verified",
+        email_from_verified_at: "2026-08-03T02:00:00.000Z",
+        email_from_verified_by: ADMIN_ID,
+      },
+      error: null,
+    });
+
+    const response = await route.PATCH(
+      makeRequest({
+        action: "verify_email_from",
+        expectedEmailFrom: profile.emailFrom,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith({
+      email_from_status: "verified",
+      email_from_verified_at: expect.any(String),
+      email_from_verified_by: ADMIN_ID,
+    });
+    expect(mocks.updateEq).toHaveBeenCalledWith("id", PARTNER_ID);
+    expect(mocks.updateEq).toHaveBeenCalledWith("updated_at", row.updated_at);
+    expect(mocks.updateEq).toHaveBeenCalledWith(
+      "email_from",
+      profile.emailFrom,
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      partner: {
+        emailFrom: profile.emailFrom,
+        emailFromStatus: "verified",
+        emailFromVerifiedBy: ADMIN_ID,
+      },
+    });
+  });
+
+  it("rejects sender verification when no address is saved", async () => {
+    mocks.readMaybeSingle.mockResolvedValue({
+      data: {
+        ...row,
+        email_from: null,
+        email_from_status: "unconfigured",
+      },
+      error: null,
+    });
+
+    const response = await route.PATCH(
+      makeRequest({
+        action: "verify_email_from",
+        expectedEmailFrom: profile.emailFrom,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "partner_email_from_required",
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects sender verification when the expected address is stale", async () => {
+    mocks.readMaybeSingle.mockResolvedValue({
+      data: {
+        ...row,
+        email_from: "new@alphadogagency.ai",
+      },
+      error: null,
+    });
+
+    const response = await route.PATCH(
+      makeRequest({
+        action: "verify_email_from",
+        expectedEmailFrom: profile.emailFrom,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "partner_email_from_changed",
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("returns the optimistic conflict when sender verification loses an update race", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
+
+    const response = await route.PATCH(
+      makeRequest({
+        action: "verify_email_from",
+        expectedEmailFrom: profile.emailFrom,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "partner_update_conflict",
+    });
+    expect(mocks.updateEq).toHaveBeenCalledWith("updated_at", row.updated_at);
+    expect(mocks.updateEq).toHaveBeenCalledWith(
+      "email_from",
+      profile.emailFrom,
     );
   });
 

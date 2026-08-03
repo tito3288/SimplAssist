@@ -4,7 +4,9 @@ import type { ComponentProps } from "react";
 import type { RequestBrand } from "@/lib/branding/types";
 
 vi.mock("@/components/onboarding/PlanSelectionOption", () => ({
-  PlanSelectionOption: () => <div>Plan option</div>,
+  PlanSelectionOption: ({ plan }: { plan: { features: string[] } }) => (
+    <div>Plan option: {plan.features.join(" | ")}</div>
+  ),
 }));
 
 import { BrandProvider } from "@/components/branding/BrandProvider";
@@ -148,6 +150,7 @@ describe("ReviewAndLaunch visible brand copy", () => {
     expect(html).toContain(
       "Choose a SimplAssist number before submitting SMS registration."
     );
+    expect(html).toContain("One local SimplAssist number");
   });
 
   it("uses the partner name in plan and number copy", () => {
@@ -157,6 +160,7 @@ describe("ReviewAndLaunch visible brand copy", () => {
     expect(html).toContain(
       "Choose an Alpha Dog Agency number before submitting SMS registration."
     );
+    expect(html).toContain("One local Alpha Dog Agency number");
     expect(html).not.toContain("SimplAssist");
   });
 
@@ -179,6 +183,30 @@ describe("ReviewAndLaunch visible brand copy", () => {
       "SMS setup is paused. Contact Alpha Dog Agency support to continue."
     );
     expect(html).not.toContain("Contact SimplAssist support");
+  });
+
+  it("rebrands stored operational launch errors only for presentation", () => {
+    const html = renderReview(PARTNER_REQUEST_BRAND, {
+      ...baseProps,
+      billing: {
+        ...baseProps.billing,
+        mode: "invoiced",
+        plan: "sms_and_chat",
+      },
+      registration: {
+        ...registration,
+        status: "failed",
+        error:
+          "SimplAssist could not recheck your existing Telnyx brand right now.",
+      },
+    });
+
+    expect(html).toContain(
+      "Alpha Dog Agency could not recheck your existing Telnyx brand right now.",
+    );
+    expect(html).not.toContain(
+      "SimplAssist could not recheck your existing Telnyx brand right now.",
+    );
   });
 });
 

@@ -4,6 +4,7 @@ import { getAdminGateState } from "@/lib/admin/auth";
 import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
 import AdminLoginForm from "./AdminLoginForm";
 import AdminSignOutButton from "./AdminSignOutButton";
+import { AdminSetupLinkProvider } from "./AdminSetupLinkProvider";
 import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
 
 export const dynamic = "force-dynamic";
@@ -39,26 +40,31 @@ export default async function AdminLayout({
         // admin page must call it.
         <AdminLoginForm />
       ) : (
-        <div className="mx-auto max-w-6xl">
-          <header className="mb-6 flex items-center justify-between border-b border-[#ece4d8] pb-4 dark:border-white/[0.10]">
-            <Link href="/admin" className="text-lg font-semibold">
-              SimplAssist Admin
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link href="/admin/partners" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
-                Partners
+        <AdminSetupLinkProvider>
+          <div className="mx-auto max-w-6xl">
+            <header className="mb-6 flex items-center justify-between border-b border-[#ece4d8] pb-4 dark:border-white/[0.10]">
+              <Link href="/admin" className="text-lg font-semibold">
+                SimplAssist Admin
               </Link>
-              <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
-                Tickets
-              </Link>
-              <Link href="/admin/waitlist" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
-                Waitlist
-              </Link>
-              <AdminSignOutButton />
-            </div>
-          </header>
-          {children}
-        </div>
+              <div className="flex items-center gap-4">
+                <Link href="/admin/clients/new" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                  Create client
+                </Link>
+                <Link href="/admin/partners" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                  Partners
+                </Link>
+                <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                  Tickets
+                </Link>
+                <Link href="/admin/waitlist" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                  Waitlist
+                </Link>
+                <AdminSignOutButton />
+              </div>
+            </header>
+            {children}
+          </div>
+        </AdminSetupLinkProvider>
       )}
     </div>
   );

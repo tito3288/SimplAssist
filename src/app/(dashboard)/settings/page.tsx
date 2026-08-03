@@ -13,8 +13,10 @@ import DangerZone from '@/components/settings/DangerZone';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 import { canUseFeature } from '@/lib/billing/entitlements';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
+import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
 export default async function SettingsPage() {
+  const workspace = await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');
@@ -104,11 +106,13 @@ export default async function SettingsPage() {
           settings={aiSettings}
           businessName={business.name}
           calendarEmail={calendarToken?.google_email ?? null}
+          calendarConnected={!!calendarToken}
           businessId={business.id}
           canCustomizeAi={canCustomizeAi}
           canUseCalendar={canUseCalendar}
           canUseGuardrails={canUseGuardrails}
           planActive={entitlements.active}
+          googleOAuthSupported={workspace.hostKind === 'canonical'}
         />
       </div>
 

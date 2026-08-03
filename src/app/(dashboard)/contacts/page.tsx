@@ -2,8 +2,10 @@ import { redirect } from "next/navigation";
 import ContactStats from "@/components/contacts/ContactStats";
 import ContactsTable from "@/components/contacts/ContactsTable";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
+import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export default async function ContactsPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");

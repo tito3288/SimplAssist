@@ -20,6 +20,21 @@ export const DEFAULT_BRAND_SUPPORT_COLORS = {
   accentSoftBorder: "#f5dcc4",
   accentSoftDark: "#ffd7bf",
   primarySoftDark: "#ffb07a",
+  tintStrong: "#fbe6d4",
+  tint: "#fbe7d4",
+  textSoftDark: "#ffd5bc",
+  surfaceDark: "#291b13",
+  selectionBorder: "#e4a677",
+  washFaint: "#fffaf5",
+  wash: "#fff7ef",
+  borderSoft: "#efc5a3",
+  borderStrong: "#e9ad7b",
+  calendarBorder: "#f0e2d0",
+  calendarWash: "#fdf3ea",
+  calendarMuted: "#e6cdb0",
+  calendarAccent: "#e8a878",
+  primaryAlt: "#f97316",
+  primaryAltWash: "#fff7ed",
 } as const;
 
 export const DEFAULT_BRAND: PublicBrand = {

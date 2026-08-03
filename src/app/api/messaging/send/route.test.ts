@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   preflightOutboundSms: vi.fn(),
   recordOutboundSmsUsage: vi.fn(),
   send: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 class TestEntitlementResolutionError extends Error {}
@@ -38,6 +39,9 @@ vi.mock("@/lib/billing/usage", () => ({
 vi.mock("@/lib/messaging/client", () => ({
   telnyx: { messages: { send: mocks.send } },
 }));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
+}));
 
 import { POST } from "./route";
 
@@ -58,6 +62,7 @@ function request() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.getUser.mockResolvedValue({ data: { user: { id: "user_40" } } });
   mocks.from.mockImplementation((table: string) => {
@@ -95,6 +100,25 @@ beforeEach(() => {
 });
 
 describe("POST /api/messaging/send entitlement wall", () => {
+  it("returns a workspace denial before auth, entitlements, or Telnyx", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_denied" },
+        { status: 403 },
+      ),
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "workspace_access_denied" });
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
   it("allows Starter manual SMS and records the provider send", async () => {
     const response = await POST(request());
 

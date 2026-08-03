@@ -8,11 +8,11 @@ vi.mock("next/navigation", () => ({
 import { AdminFlagForm } from "./AdminFlagForm";
 
 const initial = {
-  billing_pilot: false,
+  billing_pilot: true,
   billing_comped: true,
-  billing_exempt: false,
+  billing_exempt: true,
   telnyx_submission_disabled: false,
-  sms_overage_opt_in: false,
+  sms_overage_opt_in: true,
   billing_admin_notes: null,
 };
 
@@ -26,32 +26,38 @@ function renderForm(billingMode: "stripe" | "invoiced" | "comped") {
   );
 }
 
-describe("AdminFlagForm partner bridge protection", () => {
+describe("AdminFlagForm native partner-billing protection", () => {
   it.each(["invoiced", "comped"] as const)(
-    "disables Comped and explains partner ownership in %s mode",
+    "disables every legacy entitlement control in %s mode",
     (billingMode) => {
       const html = renderForm(billingMode);
 
-      expect(html).toMatch(
-        /<input(?=[^>]*type="checkbox")(?=[^>]*checked="")(?=[^>]*disabled="")[^>]*\/>Comped/
+      for (const label of [
+        "Pilot",
+        "Comped",
+        "Billing exempt",
+        "Overage opt-in",
+      ]) {
+        expect(html).toMatch(
+          new RegExp(
+            `<input(?=[^>]*type="checkbox")(?=[^>]*disabled="")[^>]*\\/>${label}`
+          )
+        );
+      }
+      expect(html).not.toMatch(
+        /<input(?=[^>]*type="checkbox")(?=[^>]*disabled="")[^>]*\/>No Telnyx submit/
       );
+      expect(html).toContain("Partner billing owns Pilot, Comped");
       expect(html).toContain(
-        "Partner billing owns the temporary Comped flag."
-      );
-      expect(html).toContain(
-        "Return the business to Stripe mode before changing it manually."
+        "Its selected plan controls entitlements and the SMS allowance."
       );
     }
   );
 
-  it("keeps Comped editable in Stripe mode", () => {
+  it("keeps all legacy controls editable in Stripe mode", () => {
     const html = renderForm("stripe");
 
-    expect(html).not.toMatch(
-      /<input(?=[^>]*type="checkbox")(?=[^>]*checked="")(?=[^>]*disabled="")[^>]*\/>Comped/
-    );
-    expect(html).not.toContain(
-      "Partner billing owns the temporary Comped flag."
-    );
+    expect(html).not.toContain('disabled=""');
+    expect(html).not.toContain("Partner billing owns Pilot, Comped");
   });
 });

@@ -1,8 +1,12 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { adminUserIds } from "./allowlist";
+import { isCanonicalAdminHostname } from "./canonicalHost";
 import { createAdminSessionClient } from "./session";
+
+export { isCanonicalAdminHostname } from "./canonicalHost";
 
 export type AdminUser = {
   id: string;
@@ -14,12 +18,22 @@ export type AdminGateState =
   | { state: "forbidden" }
   | { state: "admin"; admin: AdminUser };
 
+async function isCanonicalAdminHost(): Promise<boolean> {
+  const requestHeaders = await headers();
+  return isCanonicalAdminHostname(requestHeaders.get("host"));
+}
+
 // Admin identity is read from the admin session channel (sa-admin-auth
 // cookies), never from the customer session — the two coexist in one
 // browser. An empty allowlist is "forbidden" before any session check so an
 // unconfigured deploy 404s instead of rendering a login form that can never
 // succeed.
 export async function getAdminGateState(): Promise<AdminGateState> {
+  // Admin identity is valid only on the configured canonical host. Perform
+  // this check before creating or reading the admin auth channel; forwarded
+  // and preview headers are deliberately outside this decision.
+  if (!(await isCanonicalAdminHost())) return { state: "forbidden" };
+
   const allowed = adminUserIds();
   if (allowed.size === 0) return { state: "forbidden" };
 

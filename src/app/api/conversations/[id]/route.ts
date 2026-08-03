@@ -5,37 +5,17 @@ import {
   isEntitlementResolutionError,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (businessError) {
-    console.error("[conversations] Business lookup failed:", businessError);
-    return NextResponse.json(
-      { error: "Unable to verify business", retryable: true },
-      { status: 503 }
-    );
-  }
-
-  if (!business) {
-    return NextResponse.json({ error: "Business not found" }, { status: 404 });
-  }
+  const { business } = workspace.access;
 
   // Verify conversation belongs to this business
   const { data: conversation, error: conversationError } = await supabase

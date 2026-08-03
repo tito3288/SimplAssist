@@ -16,6 +16,7 @@ import {
   partnerManagedBillingMessage,
   resolveAssignedPartnerName,
 } from "@/lib/billing/partnerManagedBilling.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import type {
   BillingMode,
   OnboardingRegistrationStatus,
@@ -48,6 +49,9 @@ type CheckoutSubscriptionRow = {
 };
 
 export async function POST(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   try {
     const { plan, mode: requestedMode } = await request.json();
 
@@ -62,21 +66,13 @@ export async function POST(request: NextRequest) {
     const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "billing";
 
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { data: business, error: bizError } = await supabase
       .from("businesses")
       .select(
         "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status"
       )
-      .eq("owner_id", user.id)
+      .eq("id", workspace.access.business.id)
+      .eq("owner_id", workspace.access.user.id)
       .single<CheckoutBusinessRow>();
 
     if (bizError || !business) {

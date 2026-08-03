@@ -70,7 +70,7 @@ export function FeatureStatusBanners({
       {pausedFeatures.length > 0 && !dismissed && (
         <div className={`${card} border-amber-200 p-4 dark:border-amber-500/30`}>
           <div className="flex items-start gap-3">
-            <Lock className="mt-0.5 h-5 w-5 shrink-0 text-[#c2410c] dark:text-[#ff914d]" />
+            <Lock className="mt-0.5 h-5 w-5 shrink-0 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-stone-900 dark:text-[#f5f5f5]">
                 Some saved features are paused
@@ -90,7 +90,7 @@ export function FeatureStatusBanners({
               </ul>
               <Link
                 href="/billing"
-                className="mt-3 inline-flex text-xs font-semibold text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+                className="mt-3 inline-flex text-xs font-semibold text-[var(--brand-accent)] hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]"
               >
                 Manage plan
               </Link>

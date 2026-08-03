@@ -181,7 +181,7 @@ describe("syncStripeSubscription status mapping", () => {
 });
 
 describe("syncCheckoutSession", () => {
-  it("propagates a guarded skip as null after retrieving the subscription", async () => {
+  it("returns null when the database guard refuses a stale partner-mode Checkout sync", async () => {
     mocks.retrieve.mockResolvedValue(subscription());
     mocks.rpc.mockResolvedValue({ data: false, error: null });
     const session = {
@@ -198,6 +198,10 @@ describe("syncCheckoutSession", () => {
 
     await expect(syncCheckoutSession(session)).resolves.toBeNull();
     expect(mocks.retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_stripe_subscription_if_business_active",
+      expect.objectContaining({ p_business_id: BUSINESS_ID })
+    );
   });
 
   it("returns null without a Stripe call when checkout linkage is incomplete", async () => {

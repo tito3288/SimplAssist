@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { AlertCircle, Check, PhoneForwarded } from 'lucide-react';
+import { useBrand } from '@/components/branding/BrandProvider';
+import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import { isE164PhoneNumber, normalizeE164Input } from '@/lib/phone/e164';
 import { primaryCtaInlineClass } from '@/lib/glass';
 import { tile, ink, body } from '@/lib/theme-v2/theme';
@@ -20,6 +22,13 @@ type ApiResponse = {
 };
 
 type PendingAction = 'toggle' | 'number' | null;
+
+export function presentCallForwardingError(
+  message: string,
+  brandName: string
+): string {
+  return replaceDefaultBrandName(message, brandName);
+}
 
 function forwardingFailureMessage(
   requestError: unknown,
@@ -41,6 +50,7 @@ export default function CallForwardingForm({
   initialForwardToNumber,
   smsPhoneNumber,
 }: CallForwardingFormProps) {
+  const brand = useBrand();
   const initialNumber = normalizeE164Input(initialForwardToNumber);
   const [enabled, setEnabled] = useState(initialEnabled);
   const [persistedEnabled, setPersistedEnabled] = useState(initialEnabled);
@@ -58,13 +68,13 @@ export default function CallForwardingForm({
       return 'Use E.164 format, like +13175551234';
     }
     if (normalizedDraft && normalizedDraft === smsPhoneNumber) {
-      return 'Forward-to number cannot be your SimplAssist number';
+      return `Forward-to number cannot be your ${brand.name} number`;
     }
     if (persistedEnabled && !normalizedDraft) {
       return 'Turn off call forwarding before clearing the forwarding number';
     }
     return '';
-  }, [normalizedDraft, persistedEnabled, smsPhoneNumber]);
+  }, [brand.name, normalizedDraft, persistedEnabled, smsPhoneNumber]);
 
   const canTurnOn = Boolean(
     persistedForwardToNumber &&
@@ -182,14 +192,17 @@ export default function CallForwardingForm({
     }
   };
 
-  const visibleError = error || validationError;
+  const visibleError = presentCallForwardingError(
+    error || validationError,
+    brand.name
+  );
 
   return (
     <div id="call-forwarding" className={`${tile} scroll-mt-24 p-4`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex gap-3">
-          <div className="mt-0.5 rounded-lg bg-orange-50 p-2 dark:bg-orange-500/10">
-            <PhoneForwarded className="h-5 w-5 text-[#c2410c] dark:text-[#ff914d]" aria-hidden />
+          <div className="mt-0.5 rounded-lg bg-[var(--brand-primary-alt-wash)] p-2 dark:bg-[rgb(var(--brand-primary-alt-rgb)/.10)]">
+            <PhoneForwarded className="h-5 w-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" aria-hidden />
           </div>
           <div>
             <h3 className={`font-semibold ${ink}`}>Call forwarding</h3>
@@ -216,7 +229,7 @@ export default function CallForwardingForm({
             disabled={busy || (!persistedEnabled && !canTurnOn)}
             aria-describedby={enableHelpVisible ? 'call-forwarding-enable-help' : undefined}
             aria-busy={pendingAction === 'toggle'}
-            className="h-5 w-5 rounded border-[#e3dacc] accent-[#ea580c] dark:accent-[#ff914d] text-[#c2410c] dark:text-[#ff914d] focus:ring-[#ea580c]/40 dark:focus:ring-[#ff914d]/40 disabled:cursor-not-allowed"
+            className="h-5 w-5 rounded border-[#e3dacc] accent-[var(--brand-primary)] dark:accent-[var(--brand-primary-dark)] text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] focus:ring-[rgb(var(--brand-primary-rgb)/.40)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.40)] disabled:cursor-not-allowed"
             aria-label="Enable call forwarding"
           />
         </label>
@@ -251,7 +264,7 @@ export default function CallForwardingForm({
             aria-invalid={Boolean(visibleError)}
             aria-describedby={visibleError ? 'call-forwarding-error' : undefined}
             placeholder="+13175551234"
-            className="w-full rounded-lg px-3 py-2 focus:outline-none bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[#ea580c] focus:ring-2 focus:ring-[#ea580c]/25 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[#ff914d] dark:focus:ring-[#ff914d]/30"
+            className="w-full rounded-lg px-3 py-2 focus:outline-none bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
           />
         </div>
         <button

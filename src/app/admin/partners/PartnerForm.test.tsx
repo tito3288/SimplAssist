@@ -5,7 +5,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
-import { PartnerForm, type AdminPartnerView } from "./PartnerForm";
+import {
+  deriveEmailFromDisplayState,
+  PartnerForm,
+  type AdminPartnerView,
+} from "./PartnerForm";
 
 const partner: AdminPartnerView = {
   id: "10000000-0000-4000-a000-000000000043",
@@ -16,6 +20,10 @@ const partner: AdminPartnerView = {
   logoLightUrl: "https://assets.example.com/logo-light.png",
   logoDarkUrl: "https://assets.example.com/logo-dark.png",
   faviconUrl: "https://assets.example.com/favicon.png",
+  emailFrom: "notifications@alphadogagency.ai",
+  emailFromStatus: "pending",
+  emailFromVerifiedAt: null,
+  emailFromVerifiedBy: null,
   status: "active",
   colors: {
     primary: "#ea580c",
@@ -32,6 +40,31 @@ const partner: AdminPartnerView = {
 };
 
 describe("PartnerForm", () => {
+  it("does not present stale verification while a saved sender edit is pending", () => {
+    expect(
+      deriveEmailFromDisplayState(
+        "new@alphadogagency.ai",
+        "notifications@alphadogagency.ai",
+        "verified",
+      ),
+    ).toMatchObject({
+      displayedStatus: "pending",
+      hasUnsavedChanges: true,
+      showPersistedAudit: false,
+    });
+    expect(
+      deriveEmailFromDisplayState(
+        "   ",
+        "notifications@alphadogagency.ai",
+        "verified",
+      ),
+    ).toMatchObject({
+      displayedStatus: "unconfigured",
+      hasUnsavedChanges: true,
+      showPersistedAudit: false,
+    });
+  });
+
   it("renders the complete create profile with pending enforced by the server contract", () => {
     const html = renderToStaticMarkup(<PartnerForm mode="create" />);
 
@@ -48,7 +81,9 @@ describe("PartnerForm", () => {
     expect(html).not.toContain("Mark Connected");
     expect(html).not.toContain('name="domainStatus"');
     expect(html.toLowerCase()).not.toContain("delete");
-    expect(html).not.toContain('name="emailFrom"');
+    expect(html).toContain('name="emailFrom"');
+    expect(html).toContain("Unconfigured");
+    expect(html).not.toContain("Mark verified");
   });
 
   it("renders validated edit values and distinct profile/domain actions", () => {
@@ -63,6 +98,9 @@ describe("PartnerForm", () => {
     expect(html).toContain("Mark Pending");
     expect(html).toContain("Mark Connected");
     expect(html).toContain("Current status: Connected");
+    expect(html).toContain("notifications@alphadogagency.ai");
+    expect(html).toContain("Pending");
+    expect(html).toContain("Mark verified");
     expect(html.toLowerCase()).not.toContain("delete");
   });
 
@@ -75,5 +113,37 @@ describe("PartnerForm", () => {
     );
 
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Mark Connected<\/button>/);
+  });
+
+  it("disables sender verification without a saved address or after verification", () => {
+    const unconfigured = renderToStaticMarkup(
+      <PartnerForm
+        mode="edit"
+        partner={{
+          ...partner,
+          emailFrom: null,
+          emailFromStatus: "unconfigured",
+        }}
+      />,
+    );
+    const verified = renderToStaticMarkup(
+      <PartnerForm
+        mode="edit"
+        partner={{
+          ...partner,
+          emailFromStatus: "verified",
+          emailFromVerifiedAt: "2026-08-03T02:00:00.000Z",
+          emailFromVerifiedBy: "10000000-0000-4000-a000-000000000099",
+        }}
+      />,
+    );
+
+    expect(unconfigured).toMatch(
+      /<button[^>]*disabled=""[^>]*>Mark verified<\/button>/,
+    );
+    expect(verified).toContain("Verified");
+    expect(verified).toMatch(
+      /<button[^>]*disabled=""[^>]*>Mark verified<\/button>/,
+    );
   });
 });

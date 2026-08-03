@@ -4,8 +4,11 @@ import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { getPlanPresentation } from "@/lib/billing/planPresentation";
+import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 import { secondaryCtaClass } from "@/lib/glass";
 import { getDashboardBusinessContext } from "@/lib/dashboard/context";
+import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import {
   partnerManagedBillingMessage,
   resolveAssignedPartnerName,
@@ -19,6 +22,7 @@ import {
 } from "@/lib/theme-v2/theme";
 
 export default async function BillingPage() {
+  await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");
@@ -68,6 +72,7 @@ export default async function BillingPage() {
   const includedSmsParts = usagePeriod?.included_sms_parts ?? 0;
   const usagePercent =
     includedSmsParts > 0 ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100)) : 0;
+  const { brand } = await getRequestBrand();
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -118,6 +123,7 @@ export default async function BillingPage() {
             ][]
           ).map(([key, plan]) => {
             const available = isPlanAvailable(key);
+            const presentedPlan = getPlanPresentation(key, brand.name);
 
             return (
               <div
@@ -127,17 +133,17 @@ export default async function BillingPage() {
                 }`}
               >
                 {key === "sms_and_chat" && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#ea580c] dark:bg-[#ff914d] px-3 py-0.5 text-xs font-medium text-white dark:text-[#16100b]">
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)] px-3 py-0.5 text-xs font-medium text-white dark:text-[#16100b]">
                     Recommended
                   </span>
                 )}
                 {!available && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#f5dcc4] bg-[#fdf1e7] px-3 py-0.5 text-xs font-semibold text-[#c2410c] dark:border-[#ff914d]/30 dark:bg-[#291b13] dark:text-[#ffd7bf]">
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] px-3 py-0.5 text-xs font-semibold text-[var(--brand-accent)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:bg-[var(--brand-surface-dark)] dark:text-[var(--brand-accent-soft-dark)]">
                     Coming Soon
                   </span>
                 )}
                 <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
-                  {plan.name}
+                  {presentedPlan.name}
                 </h3>
                 <p className="mt-2">
                   <span className="text-3xl font-bold text-stone-900 dark:text-[#f5f5f5]">
@@ -146,13 +152,13 @@ export default async function BillingPage() {
                   <span className="text-stone-500 dark:text-[#bdbdbf]">/mo</span>
                 </p>
                 <ul className="mt-6 space-y-3">
-                  {plan.features.map((feature) => (
+                  {presentedPlan.features.map((feature) => (
                     <li
                       key={feature}
                       className="flex items-start gap-2 text-sm text-stone-500 dark:text-[#bdbdbf]"
                     >
                       <svg
-                        className="mt-0.5 h-4 w-4 shrink-0 text-[#c2410c] dark:text-[#ff914d]"
+                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]"
                         fill="none"
                         viewBox="0 0 24 24"
                         strokeWidth={2}

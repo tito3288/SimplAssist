@@ -6,6 +6,7 @@ import {
   partnerManagedBillingMessage,
   resolveAssignedPartnerName,
 } from "@/lib/billing/partnerManagedBilling.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import type { BillingMode } from "@/types/database";
 
 type PortalBusinessRow = {
@@ -15,21 +16,17 @@ type PortalBusinessRow = {
 };
 
 export async function POST(request: NextRequest) {
+  const workspace = await requireWorkspaceRouteAccess();
+  if (!workspace.ok) return workspace.response;
+
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     const { data: business } = await supabase
       .from("businesses")
       .select("id, partner_id, billing_mode")
-      .eq("owner_id", user.id)
+      .eq("id", workspace.access.business.id)
+      .eq("owner_id", workspace.access.user.id)
       .single<PortalBusinessRow>();
 
     if (!business) {

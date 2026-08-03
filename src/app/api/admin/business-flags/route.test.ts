@@ -151,7 +151,7 @@ describe("POST /api/admin/business-flags", () => {
     expect(response.status).toBe(500);
   });
 
-  it("adds an atomic Stripe-mode predicate when clearing Comped", async () => {
+  it("adds an atomic Stripe-mode predicate when saving legacy flags", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
 
     const response = await POST(makeRequest(validBody));
@@ -161,7 +161,7 @@ describe("POST /api/admin/business-flags", () => {
     expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "stripe");
   });
 
-  it("rejects clearing Comped for a non-Stripe business", async () => {
+  it("rejects a stale Stripe form after the business becomes partner-managed", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
     mocks.updateSelect.mockResolvedValue({ data: [], error: null });
     mocks.maybeSingle.mockResolvedValue({
@@ -173,37 +173,75 @@ describe("POST /api/admin/business-flags", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "partner_billing_owns_comped",
+      error: "partner_billing_owns_legacy_flags",
       message:
-        "Partner billing owns the temporary Comped flag for this business.",
+        "Partner billing owns plan entitlements and SMS allowances for this business.",
     });
     expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "stripe");
     expect(mocks.lookupSelect).toHaveBeenCalledWith("id, billing_mode");
   });
 
-  it("rejects a non-Stripe form that explicitly tries to clear Comped before writing", async () => {
+  it("ignores every submitted partner-owned value while saving operational controls", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
+    mocks.updateSelect.mockResolvedValue({
+      data: [{ id: BUSINESS_ID, billing_mode: "comped" }],
+      error: null,
+    });
 
     const response = await POST(
-      makeRequest({ ...validBody, expectedBillingMode: "comped" })
+      makeRequest({
+        ...validBody,
+        expectedBillingMode: "comped",
+        billing_pilot: true,
+        billing_comped: true,
+        billing_exempt: true,
+        sms_overage_opt_in: true,
+      })
     );
 
-    expect(response.status).toBe(409);
-    expect(mocks.update).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    const written = mocks.update.mock.calls[0][0];
+    expect(written).toMatchObject({
+      telnyx_submission_disabled: true,
+      billing_admin_notes: "internal placeholder",
+      billing_flags_updated_by: ADMIN_ID,
+    });
+    expect(written).not.toHaveProperty("billing_pilot");
+    expect(written).not.toHaveProperty("billing_comped");
+    expect(written).not.toHaveProperty("billing_exempt");
+    expect(written).not.toHaveProperty("sms_overage_opt_in");
+    expect(written).not.toHaveProperty("sms_overage_opted_in_at");
+    expect(written).not.toHaveProperty("sms_overage_opted_in_by");
+    expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "comped");
   });
 
-  it("allows other flag edits that preserve Comped in non-Stripe mode", async () => {
+  it("allows unrelated operational edits without writing partner-owned fields", async () => {
     mocks.getAdminUser.mockResolvedValue({ id: ADMIN_ID, email: null });
 
     const response = await POST(
       makeRequest({
         ...validBody,
         expectedBillingMode: "invoiced",
-        billing_comped: true,
+        billing_pilot: false,
+        billing_comped: false,
+        billing_exempt: false,
+        sms_overage_opt_in: false,
       })
     );
 
     expect(response.status).toBe(200);
+    const written = mocks.update.mock.calls[0][0];
+    expect(written).toMatchObject({
+      telnyx_submission_disabled: true,
+      billing_admin_notes: "internal placeholder",
+      billing_flags_updated_by: ADMIN_ID,
+    });
+    expect(written).not.toHaveProperty("billing_pilot");
+    expect(written).not.toHaveProperty("billing_comped");
+    expect(written).not.toHaveProperty("billing_exempt");
+    expect(written).not.toHaveProperty("sms_overage_opt_in");
+    expect(written).not.toHaveProperty("sms_overage_opted_in_at");
+    expect(written).not.toHaveProperty("sms_overage_opted_in_by");
     expect(mocks.updateEq).toHaveBeenCalledWith("billing_mode", "invoiced");
     expect(mocks.updateEq).not.toHaveBeenCalledWith("billing_mode", "stripe");
     expect(mocks.maybeSingle).not.toHaveBeenCalled();
@@ -221,7 +259,10 @@ describe("POST /api/admin/business-flags", () => {
       makeRequest({
         ...validBody,
         expectedBillingMode: "invoiced",
-        billing_comped: true,
+        billing_pilot: false,
+        billing_comped: false,
+        billing_exempt: false,
+        sms_overage_opt_in: false,
       })
     );
 

@@ -7,12 +7,14 @@ const assignmentSchema = z.object({
   businessId: z.string().uuid(),
   partnerId: z.string().uuid().nullable(),
   billingMode: z.enum(["stripe", "invoiced", "comped"]),
+  partnerPlan: z.enum(["sms_only", "sms_and_chat", "full"]).nullable(),
 }).strict();
 
 const assignmentResultSchema = z.object({
   business_id: z.string().uuid(),
   partner_id: z.string().uuid().nullable(),
   billing_mode: z.enum(["stripe", "invoiced", "comped"]),
+  partner_plan: z.enum(["sms_only", "sms_and_chat", "full"]).nullable(),
   billing_comped: z.boolean(),
 });
 
@@ -60,7 +62,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { businessId, partnerId, billingMode } = parsed.data;
+  const { businessId, partnerId, billingMode, partnerPlan } = parsed.data;
   if (billingMode === "stripe" && partnerId) {
     return NextResponse.json(
       { error: "unsupported_partner_stripe" },
@@ -73,6 +75,18 @@ export async function POST(request: NextRequest) {
       { status: 409 }
     );
   }
+  if (billingMode === "stripe" && partnerPlan) {
+    return NextResponse.json(
+      { error: "invalid_partner_plan" },
+      { status: 400 }
+    );
+  }
+  if (billingMode !== "stripe" && !partnerPlan) {
+    return NextResponse.json(
+      { error: "invalid_partner_plan" },
+      { status: 400 }
+    );
+  }
 
   const { data, error } = await supabaseAdmin.rpc(
     "assign_business_partner_billing",
@@ -81,6 +95,7 @@ export async function POST(request: NextRequest) {
       p_partner_id: partnerId,
       p_billing_mode: billingMode,
       p_actor_user_id: admin.id,
+      p_partner_plan: partnerPlan,
     }
   );
 

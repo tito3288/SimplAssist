@@ -98,6 +98,8 @@ const LAUNCH_BUSINESS = {
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: true,
+  billing_mode: "stripe",
+  partner_plan: null,
   ai_settings: { language: "en" },
 };
 
@@ -228,6 +230,168 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       expect(mocks.registerBrand).not.toHaveBeenCalled();
       expect(mocks.purchaseNumber).not.toHaveBeenCalled();
       expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["invoiced", "sms_only"],
+    ["invoiced", "sms_and_chat"],
+    ["invoiced", "full"],
+    ["comped", "sms_only"],
+    ["comped", "sms_and_chat"],
+    ["comped", "full"],
+  ] as const)(
+    "launches a valid %s/%s partner plan without a subscription, setup fee, or legacy override",
+    async (billingMode, partnerPlan) => {
+      queueResults(
+        {
+          data: {
+            ...LAUNCH_BUSINESS,
+            billing_mode: billingMode,
+            partner_plan: partnerPlan,
+            billing_exempt: false,
+          },
+          error: null,
+        },
+        { data: null, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+        { error: null },
+        { error: null }
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result.status).toBe("submitted");
+      expect(mocks.purchaseNumber).toHaveBeenCalledWith(
+        PENDING_NUMBER,
+        BUSINESS_ID
+      );
+      expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
+    }
+  );
+
+  it.each([null, "enterprise"])(
+    "rejects malformed native partner plan %# before risk, claims, or Telnyx work",
+    async (partnerPlan) => {
+      queueResults(
+        {
+          data: {
+            ...LAUNCH_BUSINESS,
+            billing_mode: "invoiced",
+            partner_plan: partnerPlan,
+            billing_pilot: true,
+            billing_comped: true,
+            billing_exempt: true,
+          },
+          error: null,
+        },
+        { data: null, error: null }
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result.status).toBe("billing_required");
+      expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+      expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+      expect(
+        mocks.prepareExistingTelnyxBrandLinkForLaunch
+      ).not.toHaveBeenCalled();
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+      expect(mocks.createVoiceApplication).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+      expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, null, "external"])(
+    "rejects malformed billing mode %# even when every legacy override is set",
+    async (billingMode) => {
+      queueResults(
+        {
+          data: {
+            ...LAUNCH_BUSINESS,
+            billing_mode: billingMode,
+            partner_plan: null,
+            billing_pilot: true,
+            billing_comped: true,
+            billing_exempt: true,
+          },
+          error: null,
+        },
+        { data: null, error: null }
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result.status).toBe("billing_required");
+      expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+      expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+      expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects a Stripe business carrying a partner plan before provider work", async () => {
+    queueResults(
+      {
+        data: {
+          ...LAUNCH_BUSINESS,
+          partner_plan: "full",
+          billing_exempt: true,
+        },
+        error: null,
+      },
+      { data: null, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("billing_required");
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+  });
+
+  it.each(["billing_pilot", "billing_comped", "billing_exempt"] as const)(
+    "preserves Stripe-mode legacy %s launch authorization",
+    async (flag) => {
+      queueResults(
+        {
+          data: {
+            ...LAUNCH_BUSINESS,
+            billing_pilot: false,
+            billing_comped: false,
+            billing_exempt: false,
+            [flag]: true,
+          },
+          error: null,
+        },
+        { data: null, error: null },
+        {
+          data: {
+            id: "number-row-legacy-override",
+            phone_number: PENDING_NUMBER,
+            telnyx_phone_number_id: TELNYX_NUMBER_ID,
+          },
+          error: null,
+        }
+      );
+      mocks.claimRegistrationAttempt.mockResolvedValue({
+        claimed: false,
+        reason: "already_submitted",
+      });
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result.status).toBe("already_submitted");
+      expect(mocks.claimRegistrationAttempt).toHaveBeenCalledWith(BUSINESS_ID);
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
     }
   );
 

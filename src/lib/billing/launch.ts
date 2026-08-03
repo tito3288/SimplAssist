@@ -44,7 +44,11 @@ import {
 } from "@/lib/onboarding/registrationAttempt";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
-import type { Language, OnboardingRegistrationStatus } from "@/types/database";
+import type {
+  Language,
+  OnboardingRegistrationStatus,
+  SubscriptionPlan,
+} from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
@@ -104,6 +108,8 @@ interface BusinessLaunchRow {
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
+  billing_mode: unknown;
+  partner_plan: unknown;
   onboarding_completed_at: string | null;
   onboarding_registration_status: OnboardingRegistrationStatus | null;
   brand_status: string | null;
@@ -396,7 +402,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status, ai_settings(language)"
+      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, billing_mode, partner_plan, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status, ai_settings(language)"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();
@@ -444,42 +450,69 @@ async function isBillingReady(
     );
   }
 
-  // A synchronized subscription is authoritative. Internal pilot/comped/
-  // exempt access applies only when no subscription row exists, matching the
-  // runtime entitlement resolver and preventing a canceled paid account from
-  // provisioning new Telnyx resources through an old override flag.
-  if (!data) {
-    if (
-      business.billing_exempt ||
-      business.billing_comped ||
-      business.billing_pilot
-    ) {
-      return { ready: true };
-    }
-    return { ready: false, message: BILLING_REQUIRED_MESSAGE };
-  }
-
-  if (data.status === "past_due") {
+  // Any synchronized subscription row remains authoritative, including for
+  // an impossible split-authority row. Native partner billing is considered
+  // only when no subscription exists, and never requires Stripe's setup fee.
+  if (data?.status === "past_due") {
     return {
       ready: false,
       message: "Your subscription payment needs attention before SMS registration can continue.",
     };
   }
-  if (data.status === "canceled") {
+  if (data?.status === "canceled") {
     return {
       ready: false,
       message: "Choose an active plan before SMS registration can continue.",
     };
   }
-  if (data.status !== "active" && data.status !== "trialing") {
+  if (data && data.status !== "active" && data.status !== "trialing") {
     throw new Error(
       `[billing:launch] Subscription for ${business.id} has unknown status ${data.status}`
     );
   }
-  if (!data.setup_fee_paid_at) {
+  if (data && !data.setup_fee_paid_at) {
     return { ready: false, message: BILLING_REQUIRED_MESSAGE };
   }
-  return { ready: true };
+  if (data) {
+    return { ready: true };
+  }
+
+  if (
+    business.billing_mode === "invoiced" ||
+    business.billing_mode === "comped"
+  ) {
+    return isSubscriptionPlan(business.partner_plan)
+      ? { ready: true }
+      : { ready: false, message: BILLING_REQUIRED_MESSAGE };
+  }
+
+  // Only the exact database modes are accepted at this trusted boundary.
+  // Missing or malformed modes must not fall through to legacy overrides.
+  if (business.billing_mode !== "stripe") {
+    return { ready: false, message: BILLING_REQUIRED_MESSAGE };
+  }
+  if (business.partner_plan !== null) {
+    return { ready: false, message: BILLING_REQUIRED_MESSAGE };
+  }
+
+  // Legacy overrides retain their existing Stripe-mode behavior only when no
+  // subscription row exists. Native partner accounts never inherit access
+  // from these flags.
+  if (
+    business.billing_exempt ||
+    business.billing_comped ||
+    business.billing_pilot
+  ) {
+    return { ready: true };
+  }
+
+  return { ready: false, message: BILLING_REQUIRED_MESSAGE };
+}
+
+function isSubscriptionPlan(value: unknown): value is SubscriptionPlan {
+  return (
+    value === "sms_only" || value === "sms_and_chat" || value === "full"
+  );
 }
 
 // Three-step resolver for the purchase-save two-phase-commit gap. Telnyx

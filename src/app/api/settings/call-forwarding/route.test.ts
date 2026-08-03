@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   businessUpdateEq: vi.fn(),
   businessUpdateSelect: vi.fn(),
   businessUpdateSingle: vi.fn(),
+  requireWorkspaceRouteAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -25,6 +26,9 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.adminFrom },
+}));
+vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
+  requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 
 import { POST } from "./route";
@@ -110,6 +114,7 @@ function setUpdatedBusiness(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
   vi.useFakeTimers();
   vi.setSystemTime(new Date(RESOLVED_AT));
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -162,6 +167,26 @@ afterEach(() => {
 });
 
 describe("POST /api/settings/call-forwarding", () => {
+  it("returns a workspace denial before auth, JSON parsing, or business writes", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: Response.json(
+        { error: "workspace_access_denied" },
+        { status: 403 },
+      ),
+    });
+    const request = makeRequest({ enabled: false });
+    const jsonSpy = vi.spyOn(request, "json");
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "workspace_access_denied" });
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
+  });
+
   it("returns 401 before reading business data when the user is unauthenticated", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null } });
 

@@ -24,6 +24,7 @@ const profile = {
   logoLightUrl: "https://cdn.example.com/logo-light.svg",
   logoDarkUrl: "https://cdn.example.com/logo-dark.svg",
   faviconUrl: "https://cdn.example.com/favicon.png",
+  emailFrom: "NOTIFICATIONS@ALPHADOGAGENCY.AI",
   status: "active",
   colors,
 };
@@ -45,6 +46,10 @@ const row = {
   brand_primary_hover_dark: "#F57F33",
   brand_primary_active_dark: "#E8752C",
   brand_accent_dark: "#FF914D",
+  email_from: "notifications@alphadogagency.ai",
+  email_from_status: "verified",
+  email_from_verified_at: "2026-08-03T00:30:00.000Z",
+  email_from_verified_by: "10000000-0000-4000-a000-000000000099",
   status: "active",
   created_at: "2026-08-03T00:00:00.000Z",
   updated_at: "2026-08-03T01:00:00.000Z",
@@ -58,6 +63,7 @@ describe("partnerProfileInputSchema", () => {
       name: "Alpha Dog Agency",
       slug: "alpha-dog",
       customDomain: "app.alphadogagency.ai",
+      emailFrom: "notifications@alphadogagency.ai",
       colors: {
         primary: "#ea580c",
         primaryHover: "#c2410c",
@@ -131,6 +137,34 @@ describe("partnerProfileInputSchema", () => {
     ).toBe(false);
   });
 
+  it.each([
+    "Alpha Dog <notifications@alphadogagency.ai>",
+    "notifications@localhost",
+    "notifications@example",
+    "notifications @alphadogagency.ai",
+    "notifications@alpha dog.ai",
+    "notifications\t@alphadogagency.ai",
+    "notifications@alphadogagency.ai\n",
+    "notifications@alphadogagency.ai,other@example.com",
+    "notifications@-alphadogagency.ai",
+    "notifications@alphadogagency-.ai",
+  ])("rejects non-mailbox From email %s", (emailFrom) => {
+    expect(
+      partnerProfileInputSchema.safeParse({ ...profile, emailFrom }).success,
+    ).toBe(false);
+  });
+
+  it("trims and lowercases a canonical mailbox", () => {
+    expect(
+      partnerProfileInputSchema.parse({
+        ...profile,
+        emailFrom: "  NOTIFICATIONS@ALPHADOGAGENCY.AI  ",
+      }).emailFrom,
+    ).toBe(
+      "notifications@alphadogagency.ai",
+    );
+  });
+
   it("normalizes empty optional domain and asset fields to null", () => {
     expect(
       partnerProfileInputSchema.parse({
@@ -139,12 +173,14 @@ describe("partnerProfileInputSchema", () => {
         logoLightUrl: "",
         logoDarkUrl: null,
         faviconUrl: "",
+        emailFrom: "   ",
       }),
     ).toMatchObject({
       customDomain: null,
       logoLightUrl: null,
       logoDarkUrl: null,
       faviconUrl: null,
+      emailFrom: null,
     });
   });
 
@@ -181,6 +217,20 @@ describe("partnerPatchInputSchema", () => {
 
     expect(
       partnerPatchInputSchema.safeParse({
+        action: "verify_email_from",
+        expectedEmailFrom: "NOTIFICATIONS@ALPHADOGAGENCY.AI",
+      }).success,
+    ).toBe(true);
+    expect(
+      partnerPatchInputSchema.safeParse({
+        action: "verify_email_from",
+        expectedEmailFrom: "notifications@alphadogagency.ai",
+        emailFromStatus: "verified",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      partnerPatchInputSchema.safeParse({
         action: "set_domain_status",
         domainStatus: "connected",
       }).success,
@@ -201,6 +251,10 @@ describe("partner read-boundary validation", () => {
       logoLightUrl: row.logo_light_url,
       logoDarkUrl: row.logo_dark_url,
       faviconUrl: row.favicon_url,
+      emailFrom: row.email_from,
+      emailFromStatus: "verified",
+      emailFromVerifiedAt: row.email_from_verified_at,
+      emailFromVerifiedBy: row.email_from_verified_by,
       status: "active",
       colors: {
         primary: "#ea580c",
@@ -226,6 +280,37 @@ describe("partner read-boundary validation", () => {
     ).toThrow();
   });
 
+  it("rejects noncanonical or inconsistent stored sender state", () => {
+    expect(() =>
+      parseAdminPartnerRow({
+        ...row,
+        email_from: "Notifications@alphadogagency.ai",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseAdminPartnerRow({
+        ...row,
+        email_from_status: "pending",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseAdminPartnerRow({
+        ...row,
+        email_from: null,
+        email_from_status: "unconfigured",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseAdminPartnerRow({
+        ...row,
+        email_from: null,
+        email_from_status: "unconfigured",
+        email_from_verified_at: null,
+        email_from_verified_by: null,
+      }),
+    ).not.toThrow();
+  });
+
   it("projects only explicit writable columns", () => {
     const parsed = partnerProfileInputSchema.parse(profile);
     expect(partnerProfileToDatabaseWrite(parsed)).toEqual({
@@ -235,6 +320,7 @@ describe("partner read-boundary validation", () => {
       logo_light_url: profile.logoLightUrl,
       logo_dark_url: profile.logoDarkUrl,
       favicon_url: profile.faviconUrl,
+      email_from: "notifications@alphadogagency.ai",
       status: "active",
       brand_primary: "#ea580c",
       brand_primary_hover: "#c2410c",

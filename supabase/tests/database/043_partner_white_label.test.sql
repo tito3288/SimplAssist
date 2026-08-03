@@ -55,6 +55,9 @@ SELECT is(
     'brand_primary_active_dark', 'text',
     'brand_accent_dark', 'text',
     'email_from', 'text',
+    'email_from_status', 'text',
+    'email_from_verified_at', 'timestamp with time zone',
+    'email_from_verified_by', 'uuid',
     'status', 'text',
     'created_at', 'timestamp with time zone',
     'updated_at', 'timestamp with time zone'
@@ -71,7 +74,7 @@ SELECT is(
       AND attribute.attnum > 0
       AND NOT attribute.attisdropped
   ),
-  20,
+  23,
   'partners have no extra or missing columns'
 );
 
@@ -96,6 +99,7 @@ SELECT is(
     'brand_primary_hover_dark',
     'created_at',
     'domain_status',
+    'email_from_status',
     'id',
     'name',
     'slug',
@@ -129,6 +133,7 @@ SELECT is(
     'brand_primary_hover_dark', '''#f57f33''::text',
     'brand_primary_active_dark', '''#e8752c''::text',
     'brand_accent_dark', '''#ff914d''::text',
+    'email_from_status', '''unconfigured''::text',
     'status', '''active''::text',
     'created_at', 'now()',
     'updated_at', 'now()'
@@ -150,6 +155,9 @@ SELECT is(
     'partners_connected_domain_required',
     'partners_custom_domain_canonical',
     'partners_domain_status_check',
+    'partners_email_from_mailbox',
+    'partners_email_from_state',
+    'partners_email_from_status_check',
     'partners_name_check',
     'partners_slug_check',
     'partners_status_check'
@@ -366,7 +374,8 @@ SELECT ok(
     '%billing_flags_updated_at%',
     '%billing_flags_updated_by%',
     '%partner_id%',
-    '%billing_mode%'
+    '%billing_mode%',
+    '%partner_plan%'
   ]),
   'the billing guard preserves every migration-031 field and adds assignment'
 );
@@ -417,16 +426,16 @@ SELECT ok(
 SELECT has_function(
   'public',
   'assign_business_partner_billing',
-  ARRAY['uuid', 'uuid', 'text', 'uuid'],
+  ARRAY['uuid', 'uuid', 'text', 'uuid', 'text'],
   'the atomic partner billing RPC has its stable signature'
 );
 
 -- 26
 SELECT is(
   pg_get_function_result(
-    'public.assign_business_partner_billing(uuid,uuid,text,uuid)'::regprocedure
+    'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)'::regprocedure
   ),
-  'TABLE(business_id uuid, partner_id uuid, billing_mode text, billing_comped boolean)',
+  'TABLE(business_id uuid, partner_id uuid, billing_mode text, partner_plan text, billing_comped boolean)',
   'the assignment RPC returns only its approved final state'
 );
 
@@ -440,7 +449,7 @@ SELECT ok(
        AND pg_get_functiondef(procedure_row.oid) LIKE '%deleted_at IS NULL%'
     FROM pg_proc AS procedure_row
     WHERE procedure_row.oid =
-      'public.assign_business_partner_billing(uuid,uuid,text,uuid)'::regprocedure
+      'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)'::regprocedure
   ),
   'the invoker-secure RPC contains the approved business and partner lock clauses'
 );
@@ -454,22 +463,22 @@ SELECT ok(
       COALESCE(procedure_row.proacl, acldefault('f', procedure_row.proowner))
     ) AS acl_row
     WHERE procedure_row.oid =
-      'public.assign_business_partner_billing(uuid,uuid,text,uuid)'::regprocedure
+      'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)'::regprocedure
       AND acl_row.grantee = 0
   )
   AND NOT has_function_privilege(
     'anon',
-    'public.assign_business_partner_billing(uuid,uuid,text,uuid)',
+    'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)',
     'EXECUTE'
   )
   AND NOT has_function_privilege(
     'authenticated',
-    'public.assign_business_partner_billing(uuid,uuid,text,uuid)',
+    'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)',
     'EXECUTE'
   )
   AND has_function_privilege(
     'service_role',
-    'public.assign_business_partner_billing(uuid,uuid,text,uuid)',
+    'public.assign_business_partner_billing(uuid,uuid,text,uuid,text)',
     'EXECUTE'
   )
   AND has_table_privilege(
@@ -518,6 +527,9 @@ SELECT ok(
        AND brand_primary_active_dark = '#e8752c'
        AND brand_accent_dark = '#ff914d'
        AND email_from IS NULL
+       AND email_from_status = 'unconfigured'
+       AND email_from_verified_at IS NULL
+       AND email_from_verified_by IS NULL
        AND status = 'active'
        AND created_at IS NOT NULL
        AND updated_at IS NOT NULL
@@ -681,6 +693,7 @@ SELECT ok(
     FROM public.businesses
     WHERE billing_mode IS DISTINCT FROM 'stripe'
        OR partner_id IS NOT NULL
+       OR partner_plan IS NOT NULL
   ),
   'all businesses present when migration 043 lands backfill to Stripe mode'
 );
@@ -704,8 +717,8 @@ INSERT INTO public.partners (
     '20000000-0000-4000-a043-000000000003',
     'Disposable Partner',
     'disposable-partner',
-    NULL,
-    'pending',
+    'disposable.example.com',
+    'connected',
     'active'
   );
 
@@ -755,7 +768,11 @@ WHERE owner_id = '00000000-0000-4000-a043-000000000004';
 -- 43
 SELECT ok(
   (
-    SELECT bool_and(billing_mode = 'stripe' AND partner_id IS NULL)
+    SELECT bool_and(
+      billing_mode = 'stripe'
+      AND partner_id IS NULL
+      AND partner_plan IS NULL
+    )
     FROM public.businesses
     WHERE owner_id IN (
       '00000000-0000-4000-a043-000000000001',
@@ -1015,7 +1032,7 @@ SELECT ok(
 );
 
 -- ---------------------------------------------------------------------------
--- Service-only RPC errors and bridge transitions
+-- Service-only RPC errors and billing-authority transitions
 -- ---------------------------------------------------------------------------
 
 SET LOCAL ROLE anon;
@@ -1191,6 +1208,7 @@ SELECT ok(
   (
     SELECT partner_id IS NULL
        AND billing_mode = 'stripe'
+       AND partner_plan IS NULL
        AND NOT billing_comped
        AND billing_flags_updated_at IS NULL
        AND billing_flags_updated_by IS NULL
@@ -1216,10 +1234,11 @@ SELECT results_eq(
       '10000000-0000-4000-a043-000000000001'::uuid,
       '20000000-0000-4000-a043-000000000001'::uuid,
       'invoiced'::text,
-      true
+      'sms_and_chat'::text,
+      false
     )
   $$,
-  'invoiced assignment returns the final bridged state'
+  'four-argument invoiced assignment defaults to the Growth partner plan'
 );
 
 -- 71
@@ -1227,14 +1246,17 @@ SELECT ok(
   (
     SELECT partner_id = '20000000-0000-4000-a043-000000000001'::uuid
        AND billing_mode = 'invoiced'
-       AND billing_comped
+       AND partner_plan = 'sms_and_chat'
+       AND NOT billing_pilot
+       AND NOT billing_comped
+       AND NOT billing_exempt
        AND billing_flags_updated_at IS NOT NULL
        AND billing_flags_updated_by =
          '90000000-0000-4000-a043-000000000001'
     FROM public.businesses
     WHERE id = '10000000-0000-4000-a043-000000000001'
   ),
-  'non-Stripe assignment stores its partner, bridge, timestamp, and actor'
+  'non-Stripe assignment stores its partner and plan without a legacy bridge'
 );
 
 -- 72
@@ -1253,10 +1275,11 @@ SELECT results_eq(
       '10000000-0000-4000-a043-000000000001'::uuid,
       '20000000-0000-4000-a043-000000000001'::uuid,
       'comped'::text,
-      true
+      'sms_and_chat'::text,
+      false
     )
   $$,
-  'switching between non-Stripe modes keeps the bridge enabled'
+  'switching non-Stripe modes preserves the omitted same-partner plan'
 );
 
 -- 73
@@ -1275,10 +1298,11 @@ SELECT results_eq(
       '10000000-0000-4000-a043-000000000001'::uuid,
       NULL::uuid,
       'stripe'::text,
+      NULL::text,
       false
     )
   $$,
-  'returning to unassigned Stripe mode clears the temporary bridge'
+  'returning to unassigned Stripe mode clears partner billing terms'
 );
 
 UPDATE public.businesses
@@ -1303,6 +1327,7 @@ SELECT results_eq(
       '10000000-0000-4000-a043-000000000001'::uuid,
       NULL::uuid,
       'stripe'::text,
+      NULL::text,
       true
     )
   $$,
@@ -1325,10 +1350,11 @@ SELECT results_eq(
       '10000000-0000-4000-a043-000000000003'::uuid,
       '20000000-0000-4000-a043-000000000003'::uuid,
       'invoiced'::text,
-      true
+      'sms_and_chat'::text,
+      false
     )
   $$,
-  'an active partner remains assignable while its domain is pending'
+  'an active connected partner is assignable with the default plan'
 );
 
 -- 76
@@ -1350,7 +1376,10 @@ SELECT ok(
     WHERE id = '10000000-0000-4000-a043-000000000003'
       AND partner_id IS NULL
       AND billing_mode = 'invoiced'
-      AND billing_comped
+      AND partner_plan = 'sms_and_chat'
+      AND NOT billing_pilot
+      AND NOT billing_comped
+      AND NOT billing_exempt
   ),
   'ON DELETE SET NULL leaves the intentional externally managed orphan state'
 );

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const MISSING_COMPLIANCE_MESSAGE =
   "Finish business verification before submitting SMS registration.";
@@ -10,6 +11,9 @@ const REGISTRATION_FAILURE_MESSAGE =
   "Couldn't submit your SMS registration right now. Please try again or contact support.";
 
 export async function POST() {
+  const workspaceGate = await requireWorkspaceRouteAccess();
+  if (!workspaceGate.ok) return workspaceGate.response;
+
   const supabase = await createClient();
   const {
     data: { user },

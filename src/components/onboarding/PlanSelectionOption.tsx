@@ -37,12 +37,12 @@ export function PlanSelectionOption({
               {plan.name}
             </span>
             {recommended && (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-[#ea580c] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-white dark:bg-[#ff914d] dark:text-[#16100b]">
+              <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--brand-primary)] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-white dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]">
                 Recommended
               </span>
             )}
             {!available && (
-              <span className="inline-flex shrink-0 items-center rounded-full border border-[#f5dcc4] bg-[#fdf1e7] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#c2410c] dark:border-[#ff914d]/30 dark:bg-[#ff914d]/10 dark:text-[#ffd7bf]">
+              <span className="inline-flex shrink-0 items-center rounded-full border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--brand-accent)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.10)] dark:text-[var(--brand-accent-soft-dark)]">
                 Coming Soon
               </span>
             )}
@@ -64,9 +64,9 @@ export function PlanSelectionOption({
               className={cn(
                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors duration-150",
                 selected
-                  ? "border-[#ea580c] bg-[#ea580c] text-white dark:border-[#ff914d] dark:bg-[#ff914d] dark:text-[#16100b]"
+                  ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white dark:border-[var(--brand-primary-dark)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b]"
                   : recommended
-                    ? "border-[#e4a677] bg-white/80 text-transparent dark:border-[#ff914d]/50 dark:bg-white/[0.05]"
+                    ? "border-[var(--brand-selection-border)] bg-white/80 text-transparent dark:border-[rgb(var(--brand-primary-dark-rgb)/.50)] dark:bg-white/[0.05]"
                     : "border-stone-300 bg-white/80 text-transparent dark:border-white/[0.20] dark:bg-white/[0.05]"
               )}
             >
@@ -88,7 +88,7 @@ export function PlanSelectionOption({
     return (
       <div
         aria-label={`${plan.name}, coming soon`}
-        className="relative block rounded-[18px] border border-[#f5dcc4] bg-[#fffaf5] px-4 py-4 text-sm dark:border-[#ff914d]/30 dark:bg-[rgba(255,145,77,0.055)]"
+        className="relative block rounded-[18px] border border-[var(--brand-accent-soft-border)] bg-[var(--brand-wash-faint)] px-4 py-4 text-sm dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.055)]"
       >
         {content}
       </div>
@@ -100,13 +100,13 @@ export function PlanSelectionOption({
       className={cn(
         "group relative block cursor-pointer rounded-[18px] border px-4 py-4 text-sm",
         "transition-[border-color,background-color,box-shadow] duration-150 motion-reduce:transition-none",
-        "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#ea580c]/60",
+        "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[rgb(var(--brand-primary-rgb)/.60)]",
         "has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-[#faf7f2]",
-        "dark:has-[:focus-visible]:ring-[#ff914d]/60 dark:has-[:focus-visible]:ring-offset-[#11100f]",
+        "dark:has-[:focus-visible]:ring-[rgb(var(--brand-primary-dark-rgb)/.60)] dark:has-[:focus-visible]:ring-offset-[#11100f]",
         selected
-          ? "border-[#ea580c] bg-[#fff7ef] ring-2 ring-[#ea580c]/20 shadow-[0_10px_28px_-22px_rgba(154,52,18,0.75)] dark:border-[#ff914d] dark:bg-[rgba(255,145,77,0.11)] dark:ring-[#ff914d]/20"
+          ? "border-[var(--brand-primary)] bg-[var(--brand-wash)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.20)] shadow-[0_10px_28px_-22px_rgb(var(--brand-primary-active-rgb)/.75)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.11)] dark:ring-[rgb(var(--brand-primary-dark-rgb)/.20)]"
           : recommended
-            ? "border-[#efc5a3] bg-[#fffaf5] hover:border-[#e9ad7b] dark:border-[#ff914d]/35 dark:bg-[rgba(255,145,77,0.055)] dark:hover:border-[#ff914d]/55"
+            ? "border-[var(--brand-border-soft)] bg-[var(--brand-wash-faint)] hover:border-[var(--brand-border-strong)] dark:border-[rgb(var(--brand-primary-dark-rgb)/.35)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.055)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.55)]"
             : "border-[#e9e0d4] bg-white/70 hover:border-[#d8ccbc] hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.035] dark:hover:border-white/[0.17] dark:hover:bg-white/[0.055]"
       )}
     >

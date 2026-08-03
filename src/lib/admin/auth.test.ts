@@ -1,18 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
+  headers: vi.fn(),
+  createAdminSessionClient: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("next/headers", () => ({ headers: mocks.headers }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound }));
 vi.mock("@/lib/admin/session", () => ({
-  createAdminSessionClient: vi.fn(async () => ({
-    auth: { getUser: mocks.getUser },
-  })),
+  createAdminSessionClient: mocks.createAdminSessionClient,
 }));
 
 import { getAdminGateState, getAdminUser, requireAdminUser } from "./auth";
@@ -31,10 +32,102 @@ function noSession() {
   });
 }
 
+function requestHeaders(
+  host: string | null,
+  extras: Record<string, string> = {},
+) {
+  mocks.headers.mockResolvedValue(
+    new Headers({ ...(host === null ? {} : { host }), ...extras }),
+  );
+}
+
+beforeEach(() => {
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000");
+  requestHeaders("localhost:3000");
+  mocks.createAdminSessionClient.mockImplementation(async () => ({
+    auth: { getUser: mocks.getUser },
+  }));
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
   mocks.getUser.mockReset();
+  mocks.headers.mockReset();
+  mocks.createAdminSessionClient.mockReset();
   mocks.notFound.mockClear();
+});
+
+describe("canonical host enforcement", () => {
+  it.each([
+    ["a partner host", "app.alphadogagency.ai"],
+    ["an unknown host", "unknown.example"],
+    ["a suffix lookalike", "localhost.evil.example"],
+    ["a malformed Host", "https://localhost:3000/path"],
+    ["a missing Host", null],
+  ])("fails closed before reading the admin session for %s", async (_, host) => {
+    vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+    requestHeaders(host);
+    sessionUser(ADMIN_ID);
+
+    expect(await getAdminGateState()).toEqual({ state: "forbidden" });
+    expect(mocks.createAdminSessionClient).not.toHaveBeenCalled();
+    expect(mocks.getUser).not.toHaveBeenCalled();
+  });
+
+  it("accepts canonical Host normalization for case, port, and a final DNS dot", async () => {
+    vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+    requestHeaders("LOCALHOST.:8443");
+    sessionUser(ADMIN_ID);
+
+    expect((await getAdminGateState()).state).toBe("admin");
+    expect(mocks.createAdminSessionClient).toHaveBeenCalledOnce();
+  });
+
+  it("ignores X-Forwarded-Host when the actual Host is canonical", async () => {
+    vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+    requestHeaders("localhost:3000", {
+      "x-forwarded-host": "app.alphadogagency.ai",
+      forwarded: "host=app.alphadogagency.ai",
+    });
+    sessionUser(ADMIN_ID);
+
+    expect((await getAdminGateState()).state).toBe("admin");
+  });
+
+  it("does not let a forwarded canonical host rescue a noncanonical Host", async () => {
+    vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+    requestHeaders("app.alphadogagency.ai", {
+      "x-forwarded-host": "localhost:3000",
+      forwarded: "host=localhost:3000",
+    });
+    sessionUser(ADMIN_ID);
+
+    expect(await getAdminGateState()).toEqual({ state: "forbidden" });
+    expect(mocks.createAdminSessionClient).not.toHaveBeenCalled();
+  });
+
+  it("maps a noncanonical Host to null/404 through the public admin helpers", async () => {
+    vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+    requestHeaders("app.alphadogagency.ai");
+    sessionUser(ADMIN_ID);
+
+    await expect(getAdminUser()).resolves.toBeNull();
+    await expect(requireAdminUser()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mocks.notFound).toHaveBeenCalledOnce();
+    expect(mocks.createAdminSessionClient).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "not a URL", "ftp://localhost"])(
+    "fails closed for invalid canonical configuration %j",
+    async (configuredOrigin) => {
+      vi.stubEnv("NEXT_PUBLIC_APP_URL", configuredOrigin);
+      vi.stubEnv("SIMPLASSIST_ADMIN_USER_IDS", ADMIN_ID);
+      sessionUser(ADMIN_ID);
+
+      expect(await getAdminGateState()).toEqual({ state: "forbidden" });
+      expect(mocks.createAdminSessionClient).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("allowlist parsing (fail-closed)", () => {
