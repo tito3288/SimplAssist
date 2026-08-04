@@ -3,17 +3,31 @@ import {
   card,
   tile,
 } from "@/lib/theme-v2/theme";
+import {
+  parseAdminAccountFilters,
+  type AdminAccountFilterSearchParams,
+} from "@/lib/admin/accountFilters";
 import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
 import { loadAdminAccountHealthList } from "@/lib/admin/accountHealth.server";
 import { requireAdminUser } from "@/lib/admin/auth";
+import { loadAdminPartnerFilterOptions } from "@/lib/admin/partnerFilterOptions.server";
+import { AdminAccountFilters } from "./AdminAccountFilters";
 import { AdminAccountRow } from "./AdminAccountRow";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminPage() {
+export default async function AdminPage(
+  {
+    searchParams,
+  }: { searchParams?: AdminAccountFilterSearchParams },
+) {
   await requireAdminUser();
 
-  const records = await loadAdminAccountHealthList();
+  const filters = parseAdminAccountFilters(searchParams);
+  const [records, partnerOptions] = await Promise.all([
+    loadAdminAccountHealthList(filters),
+    loadAdminPartnerFilterOptions(),
+  ]);
   const activeRecords = records.filter(
     ({ business }) =>
       getAdminBusinessLifecycle({
@@ -50,20 +64,28 @@ export default async function AdminPage() {
         <Metric label="Visible accounts" value={records.length} />
       </section>
 
+      <AdminAccountFilters filters={filters} partners={partnerOptions} />
+
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Accounts</h2>
         <div className={`overflow-hidden ${card}`}>
-          {records.map(({ business, subscription, usage, health }) => {
-            return (
-              <AdminAccountRow
-                key={business.id}
-                business={business}
-                subscription={subscription}
-                usage={usage}
-                health={health}
-              />
-            );
-          })}
+          {records.length === 0 ? (
+            <p className={`px-5 py-6 text-sm ${bodyFaint}`}>
+              No accounts match these filters.
+            </p>
+          ) : (
+            records.map(({ business, subscription, usage, health }) => {
+              return (
+                <AdminAccountRow
+                  key={business.id}
+                  business={business}
+                  subscription={subscription}
+                  usage={usage}
+                  health={health}
+                />
+              );
+            })
+          )}
         </div>
       </section>
     </main>

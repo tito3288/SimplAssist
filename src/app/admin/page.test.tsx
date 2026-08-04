@@ -6,6 +6,7 @@ import type { AdminAccountHealthRecord } from "@/lib/admin/accountHealth.server"
 const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
   loadHealthList: vi.fn(),
+  loadPartnerOptions: vi.fn(),
 }));
 
 vi.mock("@/lib/admin/auth", () => ({
@@ -13,6 +14,9 @@ vi.mock("@/lib/admin/auth", () => ({
 }));
 vi.mock("@/lib/admin/accountHealth.server", () => ({
   loadAdminAccountHealthList: mocks.loadHealthList,
+}));
+vi.mock("@/lib/admin/partnerFilterOptions.server", () => ({
+  loadAdminPartnerFilterOptions: mocks.loadPartnerOptions,
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -141,6 +145,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireAdminUser.mockResolvedValue({ id: "admin-1", email: null });
   mocks.loadHealthList.mockResolvedValue([]);
+  mocks.loadPartnerOptions.mockResolvedValue([]);
 });
 
 describe("AdminPage account lifecycle and health rendering", () => {
@@ -179,12 +184,16 @@ describe("AdminPage account lifecycle and health rendering", () => {
       }),
     ]);
 
-    const html = renderToStaticMarkup(await AdminPage());
+    const html = renderToStaticMarkup(await AdminPage({}));
 
     expect(mocks.requireAdminUser).toHaveBeenCalledOnce();
     expect(mocks.loadHealthList).toHaveBeenCalledOnce();
+    expect(mocks.loadPartnerOptions).toHaveBeenCalledOnce();
     expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.loadHealthList.mock.invocationCallOrder[0],
+    );
+    expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.loadPartnerOptions.mock.invocationCallOrder[0],
     );
     expect(html).toMatch(/A2P review queue<\/p><p[^>]*>1<\/p>/);
     expect(html).toMatch(/High usage accounts<\/p><p[^>]*>1<\/p>/);
@@ -221,7 +230,7 @@ describe("AdminPage billing presentation", () => {
       }),
     ]);
 
-    const html = renderToStaticMarkup(await AdminPage());
+    const html = renderToStaticMarkup(await AdminPage({}));
 
     expect(html).toContain("sms_only · active");
     expect(html).toContain("100 / 500 SMS parts (20%)");
@@ -257,7 +266,7 @@ describe("AdminPage billing presentation", () => {
         }),
       ]);
 
-      const html = renderToStaticMarkup(await AdminPage());
+      const html = renderToStaticMarkup(await AdminPage({}));
 
       expect(html).toContain(
         `Alpha Dog Agency · ${planLabel} · ${billingMode}`,
@@ -279,7 +288,7 @@ describe("AdminPage billing presentation", () => {
       }),
     ]);
 
-    const html = renderToStaticMarkup(await AdminPage());
+    const html = renderToStaticMarkup(await AdminPage({}));
 
     expect(html).toContain("Partner billing configuration invalid");
     expect(html).not.toContain("no plan · no subscription");
@@ -291,8 +300,89 @@ describe("AdminPage billing presentation", () => {
       new Error("Could not load admin account health."),
     );
 
-    await expect(AdminPage()).rejects.toThrow(
+    await expect(AdminPage({})).rejects.toThrow(
       "Could not load admin account health.",
     );
+  });
+
+  it("surfaces a partner-choice failure instead of rendering an incomplete filter", async () => {
+    mocks.loadPartnerOptions.mockRejectedValue(
+      new Error("Could not load admin partner filter options."),
+    );
+
+    await expect(AdminPage({})).rejects.toThrow(
+      "Could not load admin partner filter options.",
+    );
+  });
+});
+
+describe("AdminPage server-side filters", () => {
+  it("passes every valid filter to the batch RPC and preserves the GET form state", async () => {
+    const partnerId = "20000000-0000-4000-a045-000000000001";
+    mocks.loadPartnerOptions.mockResolvedValue([
+      { id: partnerId, name: "Retired Agency" },
+    ]);
+
+    const html = renderToStaticMarkup(
+      await AdminPage({
+        searchParams: {
+          lifecycle: "failed_setup",
+          ownership: "partner",
+          partner: partnerId,
+          plan: "full",
+          q: "  River City Dental  ",
+        },
+      }),
+    );
+
+    expect(mocks.loadHealthList).toHaveBeenCalledOnce();
+    expect(mocks.loadHealthList).toHaveBeenCalledWith({
+      lifecycle: "failed_setup",
+      ownership: "partner",
+      partnerId,
+      plan: "full",
+      query: "River City Dental",
+    });
+    expect(mocks.loadPartnerOptions).toHaveBeenCalledOnce();
+    expect(html).toContain('action="/admin" method="get"');
+    expect(html).toMatch(
+      /<option value="failed_setup" selected="">Failed setup<\/option>/,
+    );
+    expect(html).toMatch(
+      new RegExp(
+        `<option value="${partnerId}" selected="">Retired Agency</option>`,
+      ),
+    );
+    expect(html).toContain('value="River City Dental"');
+    expect(html).toContain("No accounts match these filters.");
+  });
+
+  it("normalizes repeated and invalid values independently before the RPC", async () => {
+    await AdminPage({
+      searchParams: {
+        lifecycle: ["live", "onboarding"],
+        ownership: "direct",
+        partner: "20000000-0000-4000-a045-000000000001",
+        plan: "enterprise",
+        q: "  Dental  ",
+      },
+    });
+
+    expect(mocks.loadHealthList).toHaveBeenCalledWith({
+      lifecycle: null,
+      ownership: "direct",
+      partnerId: null,
+      plan: null,
+      query: "Dental",
+    });
+  });
+
+  it("does not start either service-role read when admin authentication fails", async () => {
+    mocks.requireAdminUser.mockRejectedValue(new Error("NEXT_NOT_FOUND"));
+
+    await expect(AdminPage({})).rejects.toThrow("NEXT_NOT_FOUND");
+
+    expect(mocks.loadHealthList).not.toHaveBeenCalled();
+    expect(mocks.loadPartnerOptions).not.toHaveBeenCalled();
   });
 });

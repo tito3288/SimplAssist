@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
 SET LOCAL search_path = public, extensions;
 
-SELECT plan(54);
+SELECT plan(58);
 
 -- ---------------------------------------------------------------------------
 -- Catalog and authorization boundary
@@ -803,6 +803,7 @@ SELECT is(
   'an expired unresolved provisioning lease needs attention'
 );
 
+-- 29-32: ordinary states that must not become failed setup.
 SELECT ok(
   (
     SELECT NOT failed_setup
@@ -848,7 +849,7 @@ SELECT ok(
   'past-due billing remains a separate warning with its synchronized plan'
 );
 
--- 29
+-- 33
 SELECT ok(
   (
     SELECT snapshot_at = now()
@@ -865,7 +866,7 @@ SELECT ok(
 -- Valid filters combine with AND
 -- ---------------------------------------------------------------------------
 
--- 30-34
+-- 34-38
 SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000001',
   p_lifecycle => 'live')), 1::bigint, 'live means active and completed');
@@ -886,7 +887,30 @@ SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000010',
   p_lifecycle => 'failed_setup')), 1::bigint, 'failed setup uses persisted needs-attention facts');
 
--- 35-38
+-- 39-40: lifecycle choices are predicates and may overlap.
+SELECT ok(
+  (SELECT count(*) FROM public.list_admin_business_health(
+    p_business_id => '10000000-0000-4000-a047-000000000004',
+    p_lifecycle => 'onboarding')) = 1
+  AND
+  (SELECT count(*) FROM public.list_admin_business_health(
+    p_business_id => '10000000-0000-4000-a047-000000000004',
+    p_lifecycle => 'past_due')) = 1,
+  'the same onboarding account can also match the past-due predicate'
+);
+
+SELECT ok(
+  (SELECT count(*) FROM public.list_admin_business_health(
+    p_business_id => '10000000-0000-4000-a047-000000000010',
+    p_lifecycle => 'onboarding')) = 1
+  AND
+  (SELECT count(*) FROM public.list_admin_business_health(
+    p_business_id => '10000000-0000-4000-a047-000000000010',
+    p_lifecycle => 'failed_setup')) = 1,
+  'the same onboarding account can also match the failed-setup predicate'
+);
+
+-- 41-44
 SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000001',
   p_ownership => 'direct')), 1::bigint, 'direct ownership matches no partner');
@@ -907,7 +931,7 @@ SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_partner => '20000000-0000-4000-a047-000000000002')), 1::bigint,
   'specific partner is ignored outside partner ownership');
 
--- 39-41
+-- 45-47
 SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000004',
   p_plan => 'sms_only')), 1::bigint, 'sms-only filters effective Stripe plan');
@@ -920,7 +944,7 @@ SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000003',
   p_plan => 'full')), 1::bigint, 'full filters an inactive partner-owned account');
 
--- 42-44
+-- 48-50
 SELECT is((SELECT count(*) FROM public.list_admin_business_health(
   p_business_id => '10000000-0000-4000-a047-000000000001',
   p_query => 'Before Limit Target')), 1::bigint, 'search matches business name');
@@ -942,7 +966,7 @@ SELECT is((SELECT count(*) FROM public.list_admin_business_health(
 -- Invalid arguments fail closed
 -- ---------------------------------------------------------------------------
 
--- 45-48
+-- 51-54
 SELECT throws_ok(
   $$SELECT * FROM public.list_admin_business_health(p_lifecycle => 'terminal')$$,
   '22023',
@@ -971,6 +995,18 @@ SELECT throws_ok(
   'search longer than one hundred trimmed characters is rejected'
 );
 
+-- 55
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.list_admin_business_health()
+    WHERE business_id = '10000000-0000-4000-a047-000000000006'
+      AND deleted_at IS NOT NULL
+      AND deletion_scheduled_for IS NULL
+  ),
+  'the unfiltered pre-cap view retains a terminal tombstone'
+);
+
 -- ---------------------------------------------------------------------------
 -- Filter-before-limit and service-role execution
 -- ---------------------------------------------------------------------------
@@ -993,7 +1029,7 @@ SELECT
     + (series.value * interval '1 day')
 FROM generate_series(1, 76) AS series(value);
 
--- 49
+-- 56
 SELECT ok(
   NOT EXISTS (
     SELECT 1
@@ -1006,7 +1042,23 @@ SELECT ok(
   'the default view orders newest-first and retains the seventy-five row cap'
 );
 
--- 50
+-- 57
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.list_admin_business_health(
+      p_lifecycle => 'onboarding',
+      p_ownership => 'partner',
+      p_partner => '20000000-0000-4000-a047-000000000001',
+      p_plan => 'sms_and_chat'
+    )
+    WHERE business_id = '10000000-0000-4000-a047-000000000002'
+  ),
+  1::bigint,
+  'lifecycle, ownership, partner, and plan filters all run before the cap'
+);
+
+-- 58
 SET LOCAL ROLE service_role;
 
 SELECT is(
