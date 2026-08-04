@@ -20,7 +20,7 @@ export function AdminAccountHealthCard({
           Account health
         </h2>
         <p className={`mt-1 text-sm ${bodyFaint}`}>
-          Durable billing, setup, channel, and activity signals.
+          Durable operations, billing, setup, channel, and activity signals.
         </p>
       </div>
 
@@ -48,6 +48,49 @@ export function AdminAccountHealthCard({
       ) : null}
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <HealthSection title="Operations">
+          <HealthRow
+            label="Account operations"
+            value={
+              health.operations.state === "suspended"
+                ? "Suspended"
+                : "Active"
+            }
+          />
+          <HealthRow
+            label="Suspended at"
+            value={formatTimestamp(health.operations.suspendedAt)}
+          />
+          <HealthRow
+            label="AI replies"
+            value={serviceStateLabel(
+              health.operations.services.aiReplies.state,
+            )}
+          />
+          <HealthRow
+            label="AI replies paused at"
+            value={formatTimestamp(
+              health.operations.services.aiReplies.pausedAt,
+            )}
+          />
+          <HealthRow
+            label="Texting"
+            value={serviceStateLabel(health.operations.services.texting.state)}
+          />
+          <HealthRow
+            label="Texting paused at"
+            value={formatTimestamp(health.operations.services.texting.pausedAt)}
+          />
+          <HealthRow
+            label="Bookings"
+            value={serviceStateLabel(health.operations.services.bookings.state)}
+          />
+          <HealthRow
+            label="Bookings paused at"
+            value={formatTimestamp(health.operations.services.bookings.pausedAt)}
+          />
+        </HealthSection>
+
         <HealthSection title="Lifecycle and activity">
           <HealthRow label="Lifecycle" value={lifecycleLabel(health)} />
           {health.lifecycle.state === "onboarding" ? (
@@ -210,6 +253,10 @@ function bookingLabel(health: AdminAccountHealth): string {
   return health.booking.state === "not_configured"
     ? "Not configured"
     : "Disabled";
+}
+
+function serviceStateLabel(state: "active" | "paused"): string {
+  return state === "paused" ? "Paused" : "Active";
 }
 
 function humanize(value: string): string {

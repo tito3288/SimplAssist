@@ -35,16 +35,17 @@ export function AdminAccountFilters({
       className={`space-y-4 p-4 ${card}`}
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <FilterLabel label="Lifecycle">
+        <FilterLabel label="Account state">
           <select
             name="lifecycle"
             defaultValue={filters.lifecycle ?? ""}
             className={controlClass}
           >
-            <option value="">All lifecycles</option>
+            <option value="">All account states</option>
             <option value="live">Live</option>
             <option value="onboarding">Onboarding</option>
             <option value="past_due">Past due</option>
+            <option value="suspended">Suspended</option>
             <option value="pending_deletion">Pending deletion</option>
             <option value="failed_setup">Failed setup</option>
           </select>

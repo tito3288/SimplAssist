@@ -59,6 +59,10 @@ export interface AdminAccountHealthInput {
   now: Date | string;
   deletedAt: string | null;
   deletionScheduledFor: string | null;
+  operationsSuspendedAt: string | null;
+  aiRepliesPausedAt: string | null;
+  textingPausedAt: string | null;
+  bookingsPausedAt: string | null;
   onboardingCompletedAt: string | null;
   onboardingStep: OnboardingStep;
   billingMode: BillingMode;
@@ -106,6 +110,15 @@ export interface AdminFailedSetupReason {
 
 export interface AdminAccountHealth {
   businessId: string;
+  operations: {
+    state: "active" | "suspended";
+    suspendedAt: string | null;
+    services: {
+      aiReplies: AdminServiceOperationHealth;
+      texting: AdminServiceOperationHealth;
+      bookings: AdminServiceOperationHealth;
+    };
+  };
   lifecycle: {
     state: AdminAccountLifecycleHealth;
     onboardingCompleted: boolean;
@@ -173,6 +186,11 @@ export interface AdminAccountHealth {
   lastActivityAt: string | null;
 }
 
+export interface AdminServiceOperationHealth {
+  state: "active" | "paused";
+  pausedAt: string | null;
+}
+
 const FAILED_SETUP_LABELS = {
   registration_failed: "Registration failed",
   registration_submission_stale: "Registration submission stalled",
@@ -224,9 +242,31 @@ export function normalizeAdminAccountHealth(
   const lifecycle = lifecycleFromFacts(input);
   const reasons = failedSetupReasons(input, activePhoneCount, now);
   const registrationState = registrationStateFromFacts(input, reasons);
+  const operationsSuspendedAt = validTimestampOrNull(
+    input.operationsSuspendedAt,
+  );
+  const operationsSuspended = operationsSuspendedAt !== null;
 
   return {
     businessId: input.businessId,
+    operations: {
+      state: operationsSuspended ? "suspended" : "active",
+      suspendedAt: operationsSuspendedAt,
+      services: {
+        aiReplies: serviceOperationHealth(
+          operationsSuspended,
+          input.aiRepliesPausedAt,
+        ),
+        texting: serviceOperationHealth(
+          operationsSuspended,
+          input.textingPausedAt,
+        ),
+        bookings: serviceOperationHealth(
+          operationsSuspended,
+          input.bookingsPausedAt,
+        ),
+      },
+    },
     lifecycle: {
       state: lifecycle,
       onboardingCompleted: input.onboardingCompletedAt !== null,
@@ -314,6 +354,17 @@ export function normalizeAdminAccountHealth(
       reasons,
     },
     lastActivityAt: validTimestampOrNull(input.lastActivityAt),
+  };
+}
+
+function serviceOperationHealth(
+  operationsSuspended: boolean,
+  storedPausedAt: string | null,
+): AdminServiceOperationHealth {
+  const pausedAt = validTimestampOrNull(storedPausedAt);
+  return {
+    state: operationsSuspended || pausedAt !== null ? "paused" : "active",
+    pausedAt,
   };
 }
 

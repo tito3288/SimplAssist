@@ -140,6 +140,15 @@ function storedHealth(
 ): AdminAccountHealth {
   return {
     businessId: BUSINESS_ID,
+    operations: {
+      state: "active",
+      suspendedAt: null,
+      services: {
+        aiReplies: { state: "active", pausedAt: null },
+        texting: { state: "active", pausedAt: null },
+        bookings: { state: "active", pausedAt: null },
+      },
+    },
     lifecycle: {
       state: "live",
       onboardingCompleted: true,

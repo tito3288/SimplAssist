@@ -28,6 +28,22 @@ export type BookingMode = "collect_info" | "schedule_direct";
 
 export type Channel = "sms" | "web_chat";
 
+export type OperationalService = "ai_replies" | "texting" | "bookings";
+
+export type OperationalBlockReason =
+  | "account_suspended"
+  | "ai_replies_paused"
+  | "texting_paused"
+  | "bookings_paused";
+
+export interface BusinessOperationalControls {
+  businessId: string;
+  operationsSuspendedAt: string | null;
+  aiRepliesPausedAt: string | null;
+  textingPausedAt: string | null;
+  bookingsPausedAt: string | null;
+}
+
 export type ConversationStatus = "active" | "closed" | "handed_off";
 
 export type MessageRole = "customer" | "assistant" | "human_agent" | "system";
@@ -70,6 +86,10 @@ export type PartnerClientProvisioningOperationKind =
 
 export type AdminActionEventAction =
   | "account_deletion_scheduled"
+  | "account_operations_suspended"
+  | "account_operations_reactivated"
+  | "account_service_paused"
+  | "account_service_resumed"
   | "provisioning_job_dismissed"
   | "provisioning_job_restored";
 
@@ -323,6 +343,10 @@ export interface Business {
   call_forwarding_enabled: boolean;
   forward_to_number: string | null;
   call_forwarding_nudge_resolved_at: string | null;
+  operations_suspended_at: string | null;
+  ai_replies_paused_at: string | null;
+  texting_paused_at: string | null;
+  bookings_paused_at: string | null;
   partner_id: string | null;
   billing_mode: BillingMode;
   partner_plan: SubscriptionPlan | null;

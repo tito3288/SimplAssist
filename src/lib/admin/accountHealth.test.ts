@@ -16,6 +16,10 @@ function input(
     now: NOW,
     deletedAt: null,
     deletionScheduledFor: null,
+    operationsSuspendedAt: null,
+    aiRepliesPausedAt: null,
+    textingPausedAt: null,
+    bookingsPausedAt: null,
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
@@ -60,6 +64,15 @@ describe("normalizeAdminAccountHealth", () => {
   it("normalizes a fully operational account from durable facts", () => {
     expect(normalizeAdminAccountHealth(input())).toMatchObject({
       businessId: BUSINESS_ID,
+      operations: {
+        state: "active",
+        suspendedAt: null,
+        services: {
+          aiReplies: { state: "active", pausedAt: null },
+          texting: { state: "active", pausedAt: null },
+          bookings: { state: "active", pausedAt: null },
+        },
+      },
       lifecycle: {
         state: "live",
         onboardingCompleted: true,
@@ -79,6 +92,40 @@ describe("normalizeAdminAccountHealth", () => {
       booking: { state: "operational", mode: "schedule_direct" },
       failedSetup: { failed: false, reasons: [] },
       lastActivityAt: "2026-08-04T11:45:00.000Z",
+    });
+  });
+
+  it("derives effective service pauses without erasing stored pause timestamps", () => {
+    const suspendedAt = "2026-08-04T11:30:00.000Z";
+    const textingPausedAt = "2026-08-03T09:15:00.000Z";
+    const suspended = normalizeAdminAccountHealth(
+      input({
+        operationsSuspendedAt: suspendedAt,
+        textingPausedAt,
+      }),
+    );
+
+    expect(suspended.operations).toEqual({
+      state: "suspended",
+      suspendedAt,
+      services: {
+        aiReplies: { state: "paused", pausedAt: null },
+        texting: { state: "paused", pausedAt: textingPausedAt },
+        bookings: { state: "paused", pausedAt: null },
+      },
+    });
+
+    const resumed = normalizeAdminAccountHealth(
+      input({ textingPausedAt }),
+    );
+    expect(resumed.operations).toEqual({
+      state: "active",
+      suspendedAt: null,
+      services: {
+        aiReplies: { state: "active", pausedAt: null },
+        texting: { state: "paused", pausedAt: textingPausedAt },
+        bookings: { state: "active", pausedAt: null },
+      },
     });
   });
 

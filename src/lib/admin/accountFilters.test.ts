@@ -25,6 +25,7 @@ describe("parseAdminAccountFilters", () => {
     "live",
     "onboarding",
     "past_due",
+    "suspended",
     "pending_deletion",
     "failed_setup",
   ] as const)("accepts the %s lifecycle predicate", (lifecycle) => {
@@ -142,5 +143,8 @@ describe("parseAdminAccountFilters", () => {
       plan: null,
       query: null,
     });
+    expect(
+      parseAdminAccountFilters({ lifecycle: "Suspended" }).lifecycle,
+    ).toBeNull();
   });
 });

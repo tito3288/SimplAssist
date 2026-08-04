@@ -28,6 +28,10 @@ function rpcRow(overrides: Record<string, unknown> = {}) {
     snapshot_at: SNAPSHOT_AT,
     deleted_at: null,
     deletion_scheduled_for: null,
+    operations_suspended_at: null,
+    ai_replies_paused_at: null,
+    texting_paused_at: null,
+    bookings_paused_at: null,
     onboarding_completed_at: "2026-07-02T12:00:00.000Z",
     onboarding_step: "complete",
     partner_id: null,
@@ -98,6 +102,7 @@ describe("loadAdminAccountHealthList", () => {
     const records = await loadAdminAccountHealthList();
 
     expect(mocks.rpc).toHaveBeenCalledOnce();
+    expect(ADMIN_BUSINESS_HEALTH_RPC).toBe("list_admin_business_health_v2");
     expect(mocks.rpc).toHaveBeenCalledWith(ADMIN_BUSINESS_HEALTH_RPC, {
       p_business_id: null,
       p_lifecycle: null,
@@ -121,11 +126,46 @@ describe("loadAdminAccountHealthList", () => {
         outbound_sms_parts: 60,
       },
       health: {
+        operations: {
+          state: "active",
+          services: {
+            aiReplies: { state: "active", pausedAt: null },
+            texting: { state: "active", pausedAt: null },
+            bookings: { state: "active", pausedAt: null },
+          },
+        },
         lifecycle: { state: "live" },
         phone: { state: "ready", smsReady: true },
         ai: { state: "active" },
         booking: { state: "operational" },
         lastActivityAt: "2026-08-04T11:45:00.000Z",
+      },
+    });
+  });
+
+  it("derives effective operation state while preserving independent pause timestamps", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        rpcRow({
+          operations_suspended_at: "2026-08-04T11:30:00.000Z",
+          ai_replies_paused_at: "2026-08-03T09:00:00.000Z",
+        }),
+      ],
+      error: null,
+    });
+
+    const [record] = await loadAdminAccountHealthList();
+
+    expect(record.health?.operations).toEqual({
+      state: "suspended",
+      suspendedAt: "2026-08-04T11:30:00.000Z",
+      services: {
+        aiReplies: {
+          state: "paused",
+          pausedAt: "2026-08-03T09:00:00.000Z",
+        },
+        texting: { state: "paused", pausedAt: null },
+        bookings: { state: "paused", pausedAt: null },
       },
     });
   });
@@ -146,6 +186,19 @@ describe("loadAdminAccountHealthList", () => {
       p_partner: "20000000-0000-4000-a045-000000000001",
       p_plan: "full",
       p_query: "Dental",
+    });
+  });
+
+  it("passes the suspended account-state predicate to the v2 RPC", async () => {
+    await loadAdminAccountHealthList({ lifecycle: "suspended" });
+
+    expect(mocks.rpc).toHaveBeenCalledWith(ADMIN_BUSINESS_HEALTH_RPC, {
+      p_business_id: null,
+      p_lifecycle: "suspended",
+      p_ownership: null,
+      p_partner: null,
+      p_plan: null,
+      p_query: null,
     });
   });
 
@@ -286,6 +339,32 @@ describe("loadAdminAccountHealthList", () => {
   it("rejects unexpected sensitive projection fields", async () => {
     mocks.rpc.mockResolvedValue({
       data: [rpcRow({ access_token: "must-not-leave-the-read-model" })],
+      error: null,
+    });
+
+    await expect(loadAdminAccountHealthList()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
+  it.each([
+    "operations_suspended_at",
+    "ai_replies_paused_at",
+    "texting_paused_at",
+    "bookings_paused_at",
+  ])("requires the v2 %s projection field", async (field) => {
+    const row: Record<string, unknown> = rpcRow();
+    delete row[field];
+    mocks.rpc.mockResolvedValue({ data: [row], error: null });
+
+    await expect(loadAdminAccountHealthList()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
+  it("rejects malformed operation timestamps from the v2 read model", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [rpcRow({ operations_suspended_at: "not-a-timestamp" })],
       error: null,
     });
 

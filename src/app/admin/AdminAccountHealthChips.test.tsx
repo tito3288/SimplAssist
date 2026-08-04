@@ -14,6 +14,10 @@ function healthInput(
     now: "2026-08-04T12:00:00.000Z",
     deletedAt: null,
     deletionScheduledFor: null,
+    operationsSuspendedAt: null,
+    aiRepliesPausedAt: null,
+    textingPausedAt: null,
+    bookingsPausedAt: null,
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
@@ -95,6 +99,65 @@ describe("AdminAccountHealthChips", () => {
     expect(html).toContain("Past due");
     expect(html).toContain("AI: active (SMS + web chat)");
   });
+
+  it("orders account and stored pause chips before live technical health without duplicating effective pauses", () => {
+    const html = render({
+      operationsSuspendedAt: "2026-08-04T11:30:00.000Z",
+      textingPausedAt: "2026-08-03T09:15:00.000Z",
+    });
+
+    expect(html).toContain("Account suspended");
+    expect(html).toContain("Texting paused");
+    expect(html).not.toContain("AI replies paused");
+    expect(html).not.toContain("Bookings paused");
+    expect(html.indexOf("Account suspended")).toBeLessThan(
+      html.indexOf("Texting paused"),
+    );
+    expect(html.indexOf("Texting paused")).toBeLessThan(
+      html.indexOf("Lifecycle: live"),
+    );
+    expect(html.indexOf("Lifecycle: live")).toBeLessThan(
+      html.indexOf("Billing:"),
+    );
+  });
+
+  it.each([
+    [
+      "pending deletion",
+      {
+        deletedAt: "2026-08-04T12:00:00.000Z",
+        deletionScheduledFor: "2026-10-03T12:00:00.000Z",
+      },
+      "Lifecycle: pending deletion",
+    ],
+    [
+      "terminal cleanup",
+      {
+        deletedAt: "2026-08-04T12:00:00.000Z",
+        deletionScheduledFor: null,
+      },
+      "Lifecycle: terminal",
+    ],
+  ] as const)(
+    "keeps %s ahead of operation and technical chips",
+    (_label, lifecycle, lifecycleChip) => {
+      const html = render({
+        ...lifecycle,
+        operationsSuspendedAt: "2026-08-04T11:30:00.000Z",
+        aiRepliesPausedAt: "2026-08-03T09:15:00.000Z",
+      });
+
+      expect(html.indexOf(lifecycleChip)).toBeLessThan(
+        html.indexOf("Account suspended"),
+      );
+      expect(html.indexOf("Account suspended")).toBeLessThan(
+        html.indexOf("AI replies paused"),
+      );
+      expect(html.indexOf("AI replies paused")).toBeLessThan(
+        html.indexOf("Billing:"),
+      );
+    },
+  );
 
   it("shows onboarding progress, ambiguous phones, and stable setup reasons", () => {
     const html = render({

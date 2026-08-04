@@ -4,6 +4,7 @@ export const ADMIN_ACCOUNT_LIFECYCLE_FILTERS = [
   "live",
   "onboarding",
   "past_due",
+  "suspended",
   "pending_deletion",
   "failed_setup",
 ] as const;

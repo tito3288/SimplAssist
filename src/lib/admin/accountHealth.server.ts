@@ -24,12 +24,13 @@ import {
   type AdminFailedSetupReasonCode,
 } from "./accountHealth";
 
-export const ADMIN_BUSINESS_HEALTH_RPC = "list_admin_business_health";
+export const ADMIN_BUSINESS_HEALTH_RPC = "list_admin_business_health_v2";
 
 export type AdminLifecycleHealthFilter =
   | "live"
   | "onboarding"
   | "past_due"
+  | "suspended"
   | "pending_deletion"
   | "failed_setup";
 export type AdminOwnershipHealthFilter = "direct" | "partner";
@@ -182,6 +183,10 @@ const rpcRowSchema = z
     snapshot_at: timestampSchema,
     deleted_at: nullableTimestampSchema,
     deletion_scheduled_for: nullableTimestampSchema,
+    operations_suspended_at: nullableTimestampSchema,
+    ai_replies_paused_at: nullableTimestampSchema,
+    texting_paused_at: nullableTimestampSchema,
+    bookings_paused_at: nullableTimestampSchema,
     onboarding_completed_at: nullableTimestampSchema,
     onboarding_step: onboardingStepSchema,
     partner_id: z.string().uuid().nullable(),
@@ -506,6 +511,10 @@ function normalizeHealth(row: AdminBusinessHealthRpcRow): AdminAccountHealth {
     now: row.snapshot_at,
     deletedAt: row.deleted_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    operationsSuspendedAt: row.operations_suspended_at,
+    aiRepliesPausedAt: row.ai_replies_paused_at,
+    textingPausedAt: row.texting_paused_at,
+    bookingsPausedAt: row.bookings_paused_at,
     onboardingCompletedAt: row.onboarding_completed_at,
     onboardingStep: row.onboarding_step as OnboardingStep,
     billingMode: row.billing_mode,

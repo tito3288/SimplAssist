@@ -14,6 +14,10 @@ function input(
     now: "2026-08-04T12:00:00.000Z",
     deletedAt: null,
     deletionScheduledFor: null,
+    operationsSuspendedAt: null,
+    aiRepliesPausedAt: null,
+    textingPausedAt: null,
+    bookingsPausedAt: null,
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
@@ -68,6 +72,8 @@ describe("AdminAccountHealthCard", () => {
 
     for (const label of [
       "Account health",
+      "Operations",
+      "Account operations",
       "Lifecycle and activity",
       "Billing",
       "Phone and A2P registration",
@@ -78,6 +84,44 @@ describe("AdminAccountHealthCard", () => {
     ]) {
       expect(html).toContain(label);
     }
+  });
+
+  it("shows effective service pauses while retaining only independently stored pause times", () => {
+    const html = render({
+      operationsSuspendedAt: "2026-08-04T11:30:00.000Z",
+      textingPausedAt: "2026-08-03T09:15:00.000Z",
+    });
+
+    expect(html).toMatch(
+      /Account operations<\/dt><dd[^>]*>Suspended<\/dd>/,
+    );
+    expect(html).toContain("Aug 4, 2026, 11:30 AM");
+    expect(html).toMatch(/AI replies<\/dt><dd[^>]*>Paused<\/dd>/);
+    expect(html).toMatch(/Texting<\/dt><dd[^>]*>Paused<\/dd>/);
+    expect(html).toMatch(/Bookings<\/dt><dd[^>]*>Paused<\/dd>/);
+    expect(html).toMatch(
+      /AI replies paused at<\/dt><dd[^>]*>None recorded<\/dd>/,
+    );
+    expect(html).toMatch(
+      /Texting paused at<\/dt><dd[^>]*>Aug 3, 2026, 9:15 AM<\/dd>/,
+    );
+    expect(html).toMatch(
+      /Bookings paused at<\/dt><dd[^>]*>None recorded<\/dd>/,
+    );
+  });
+
+  it("distinguishes an independent pause from active account operations", () => {
+    const html = render({
+      bookingsPausedAt: "2026-08-03T09:15:00.000Z",
+    });
+
+    expect(html).toMatch(/Account operations<\/dt><dd[^>]*>Active<\/dd>/);
+    expect(html).toMatch(/AI replies<\/dt><dd[^>]*>Active<\/dd>/);
+    expect(html).toMatch(/Texting<\/dt><dd[^>]*>Active<\/dd>/);
+    expect(html).toMatch(/Bookings<\/dt><dd[^>]*>Paused<\/dd>/);
+    expect(html).toMatch(
+      /Bookings paused at<\/dt><dd[^>]*>Aug 3, 2026, 9:15 AM<\/dd>/,
+    );
   });
 
   it("explains that past-due billing remains feature-active", () => {

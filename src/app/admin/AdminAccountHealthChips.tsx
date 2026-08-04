@@ -20,13 +20,33 @@ export function AdminAccountHealthChips({
   const registration = registrationPresentation(health);
   const ai = aiPresentation(health);
   const booking = bookingPresentation(health);
+  const lifecycleHasPriority =
+    health.lifecycle.state === "pending_deletion" ||
+    health.lifecycle.state === "terminal";
 
   return (
     <div
       aria-label="Account health"
       className="mt-2 flex flex-wrap gap-2"
     >
-      <HealthChip tone={lifecycle.tone}>{lifecycle.label}</HealthChip>
+      {lifecycleHasPriority ? (
+        <HealthChip tone={lifecycle.tone}>{lifecycle.label}</HealthChip>
+      ) : null}
+      {health.operations.state === "suspended" ? (
+        <HealthChip tone="danger">Account suspended</HealthChip>
+      ) : null}
+      {health.operations.services.aiReplies.pausedAt ? (
+        <HealthChip tone="warning">AI replies paused</HealthChip>
+      ) : null}
+      {health.operations.services.texting.pausedAt ? (
+        <HealthChip tone="warning">Texting paused</HealthChip>
+      ) : null}
+      {health.operations.services.bookings.pausedAt ? (
+        <HealthChip tone="warning">Bookings paused</HealthChip>
+      ) : null}
+      {!lifecycleHasPriority ? (
+        <HealthChip tone={lifecycle.tone}>{lifecycle.label}</HealthChip>
+      ) : null}
       <HealthChip tone={billingTone(health)}>
         {billingLabel(health)}
       </HealthChip>

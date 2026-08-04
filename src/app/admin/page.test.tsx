@@ -74,6 +74,15 @@ function health(
 ): AdminAccountHealth {
   return {
     businessId,
+    operations: {
+      state: "active",
+      suspendedAt: null,
+      services: {
+        aiReplies: { state: "active", pausedAt: null },
+        texting: { state: "active", pausedAt: null },
+        bookings: { state: "active", pausedAt: null },
+      },
+    },
     lifecycle: {
       state: lifecycle,
       onboardingCompleted: lifecycle !== "onboarding",
@@ -206,6 +215,39 @@ describe("AdminPage account lifecycle and health rendering", () => {
     expect(html).toContain(`href="/admin/${SCHEDULED_ID}"`);
     expect(html).toContain(`href="/admin/${TERMINAL_ID}"`);
   });
+
+  it("surfaces account suspension and only independently stored service pauses on the account list", async () => {
+    mocks.loadHealthList.mockResolvedValue([
+      record({
+        business: business(ACTIVE_ID, "Suspended Dental"),
+        health: health(ACTIVE_ID, "live", {
+          operations: {
+            state: "suspended",
+            suspendedAt: "2026-08-04T11:30:00.000Z",
+            services: {
+              aiReplies: {
+                state: "paused",
+                pausedAt: "2026-08-03T09:15:00.000Z",
+              },
+              texting: { state: "paused", pausedAt: null },
+              bookings: { state: "paused", pausedAt: null },
+            },
+          },
+        }),
+      }),
+    ]);
+
+    const html = renderToStaticMarkup(await AdminPage({}));
+
+    expect(html).toContain("Suspended Dental");
+    expect(html).toContain("Account suspended");
+    expect(html).toContain("AI replies paused");
+    expect(html).not.toContain("Texting paused");
+    expect(html).not.toContain("Bookings paused");
+    expect(html.indexOf("Account suspended")).toBeLessThan(
+      html.indexOf("Lifecycle: live"),
+    );
+  });
 });
 
 describe("AdminPage billing presentation", () => {
@@ -326,7 +368,7 @@ describe("AdminPage server-side filters", () => {
     const html = renderToStaticMarkup(
       await AdminPage({
         searchParams: {
-          lifecycle: "failed_setup",
+          lifecycle: "suspended",
           ownership: "partner",
           partner: partnerId,
           plan: "full",
@@ -337,7 +379,7 @@ describe("AdminPage server-side filters", () => {
 
     expect(mocks.loadHealthList).toHaveBeenCalledOnce();
     expect(mocks.loadHealthList).toHaveBeenCalledWith({
-      lifecycle: "failed_setup",
+      lifecycle: "suspended",
       ownership: "partner",
       partnerId,
       plan: "full",
@@ -346,7 +388,7 @@ describe("AdminPage server-side filters", () => {
     expect(mocks.loadPartnerOptions).toHaveBeenCalledOnce();
     expect(html).toContain('action="/admin" method="get"');
     expect(html).toMatch(
-      /<option value="failed_setup" selected="">Failed setup<\/option>/,
+      /<option value="suspended" selected="">Suspended<\/option>/,
     );
     expect(html).toMatch(
       new RegExp(

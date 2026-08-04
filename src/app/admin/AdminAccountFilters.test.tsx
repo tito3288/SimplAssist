@@ -24,6 +24,8 @@ describe("AdminAccountFilters", () => {
       '<form action="/admin" method="get" aria-label="Filter accounts"',
     );
     expect(html).toContain('name="lifecycle"');
+    expect(html).toContain("Account state");
+    expect(html).toContain("All account states");
     expect(html).toContain('name="ownership"');
     expect(html).toContain('name="partner"');
     expect(html).toContain('name="plan"');
@@ -38,7 +40,7 @@ describe("AdminAccountFilters", () => {
     );
   });
 
-  it("offers only the specified lifecycle, ownership, and plan predicates", () => {
+  it("offers only the specified account-state, ownership, and plan predicates", () => {
     const html = renderToStaticMarkup(
       <AdminAccountFilters
         filters={{
@@ -56,6 +58,7 @@ describe("AdminAccountFilters", () => {
       "live",
       "onboarding",
       "past_due",
+      "suspended",
       "pending_deletion",
       "failed_setup",
       "direct",
@@ -67,7 +70,25 @@ describe("AdminAccountFilters", () => {
       expect(html).toContain(`value="${value}"`);
     }
     expect(html).not.toContain('value="terminal"');
-    expect(html).not.toContain('value="suspended"');
+  });
+
+  it("preserves the suspended account-state selection", () => {
+    const html = renderToStaticMarkup(
+      <AdminAccountFilters
+        filters={{
+          lifecycle: "suspended",
+          ownership: null,
+          partnerId: null,
+          plan: null,
+          query: null,
+        }}
+        partners={[]}
+      />,
+    );
+
+    expect(html).toMatch(
+      /<option value="suspended" selected="">Suspended<\/option>/,
+    );
   });
 
   it("preserves parsed selections and escaped search text in the form", () => {
