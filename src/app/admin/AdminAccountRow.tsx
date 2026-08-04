@@ -3,6 +3,7 @@ import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
 import { isSubscriptionPlan } from "@/lib/billing/features";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import type { AdminAccountHealth } from "@/lib/admin/accountHealth";
 import {
   body,
   statusDanger,
@@ -15,6 +16,7 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "@/types/database";
+import { AdminAccountHealthChips } from "./AdminAccountHealthChips";
 
 type PartnerSummary = {
   name: string;
@@ -42,7 +44,7 @@ export type AdminAccountBusinessRow = {
   sms_overage_opt_in: boolean;
   deleted_at: string | null;
   deletion_scheduled_for: string | null;
-  created_at: string;
+  created_at: string | null;
 };
 
 export type AdminAccountSubscriptionRow = {
@@ -65,10 +67,12 @@ export function AdminAccountRow({
   business,
   subscription,
   usage,
+  health,
 }: {
   business: AdminAccountBusinessRow;
   subscription: AdminAccountSubscriptionRow | undefined;
   usage: AdminAccountUsageRow | undefined;
+  health: AdminAccountHealth | null;
 }) {
   const lifecycle = getAdminBusinessLifecycle({
     deletedAt: business.deleted_at,
@@ -128,6 +132,9 @@ export function AdminAccountRow({
               </>
             )}
           </div>
+          {lifecycle !== "terminal" && health ? (
+            <AdminAccountHealthChips health={health} />
+          ) : null}
         </div>
         {lifecycle === "terminal" ? (
           <div className={`text-sm ${body} md:text-right`}>

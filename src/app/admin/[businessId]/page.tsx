@@ -16,8 +16,14 @@ import {
   getAdminAccountDeletionPreview,
 } from "@/lib/account/deletion.server";
 import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
+import {
+  applyDeletionPreviewLifecycle,
+  type AdminAccountHealth,
+} from "@/lib/admin/accountHealth";
+import { loadAdminAccountHealth } from "@/lib/admin/accountHealth.server";
 import { card, statusDanger, statusWarning } from "@/lib/theme-v2/theme";
 import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
+import { AdminAccountHealthCard } from "./AdminAccountHealthCard";
 import type {
   BillingMode,
   PartnerDomainStatus,
@@ -93,7 +99,7 @@ export default async function AdminBusinessPage({
 }) {
   await requireAdminUser();
 
-  const { data: business } = await supabaseAdmin
+  const { data: business, error: businessError } = await supabaseAdmin
     .from("businesses")
     .select(
       "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
@@ -101,6 +107,9 @@ export default async function AdminBusinessPage({
     .eq("id", params.businessId)
     .maybeSingle<DetailBusiness>();
 
+  if (businessError) {
+    throw new Error("Failed to load admin account.");
+  }
   if (!business) notFound();
 
   const lifecycle = getAdminBusinessLifecycle({
@@ -113,7 +122,9 @@ export default async function AdminBusinessPage({
   }
 
   let deletionPreview;
+  let healthSnapshot: AdminAccountHealth | null;
   try {
+    healthSnapshot = await loadAdminAccountHealth(business.id);
     deletionPreview = await getAdminAccountDeletionPreview(business.id);
   } catch (error) {
     if (
@@ -124,17 +135,31 @@ export default async function AdminBusinessPage({
     }
     throw error;
   }
+  if (!healthSnapshot) notFound();
 
   // The preview is loaded after the business row and therefore wins if a
   // concurrent schedule/reactivation changed lifecycle state between reads.
+  const effectiveHealth = applyDeletionPreviewLifecycle(
+    healthSnapshot,
+    deletionPreview,
+  );
   const effectiveLifecycle =
-    deletionPreview.lifecycleStage === "suspended" ? "scheduled" : "active";
+    effectiveHealth.lifecycle.state === "pending_deletion"
+      ? "scheduled"
+      : "active";
 
   if (effectiveLifecycle === "scheduled") {
     return (
       <main className="space-y-6">
         <BackToAdmin />
-        <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
+        <BusinessHeading
+          business={business}
+          lifecycle={effectiveLifecycle}
+          deletionScheduledFor={
+            effectiveHealth.lifecycle.deletionScheduledFor
+          }
+        />
+        <AdminAccountHealthCard health={effectiveHealth} />
         <AdminAccountDeletionPanel initialPreview={deletionPreview} />
       </main>
     );
@@ -205,6 +230,7 @@ export default async function AdminBusinessPage({
     <main className="space-y-6">
       <BackToAdmin />
       <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
+      <AdminAccountHealthCard health={effectiveHealth} />
 
       <section className="grid gap-4 md:grid-cols-2">
         <Card title="A2P Review">
@@ -416,10 +442,14 @@ function BackToAdmin() {
 function BusinessHeading({
   business,
   lifecycle,
+  deletionScheduledFor,
 }: {
   business: DetailBusiness;
   lifecycle: "active" | "scheduled" | "terminal";
+  deletionScheduledFor?: string | null;
 }) {
+  const terminalCleanupAt =
+    deletionScheduledFor ?? business.deletion_scheduled_for;
   return (
     <section>
       <div className="flex flex-wrap items-center gap-3">
@@ -439,9 +469,9 @@ function BusinessHeading({
         {business.website_url ?? "No website"} ·{" "}
         {business.business_type_other ?? business.business_type ?? "unknown"}
       </p>
-      {lifecycle === "scheduled" && business.deletion_scheduled_for ? (
+      {lifecycle === "scheduled" && terminalCleanupAt ? (
         <p className="mt-1 text-sm text-amber-700 dark:text-amber-200">
-          Terminal cleanup: {formatDate(business.deletion_scheduled_for)}
+          Terminal cleanup: {formatDate(terminalCleanupAt)}
         </p>
       ) : null}
     </section>

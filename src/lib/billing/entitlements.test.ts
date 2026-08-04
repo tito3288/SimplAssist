@@ -16,6 +16,8 @@ import {
   decideFeatureAccess,
   EntitlementResolutionError,
   resolveBusinessEntitlements,
+  resolveBusinessEntitlementsFromSnapshot,
+  type BusinessEntitlementSnapshot,
 } from "./entitlements";
 
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000031";
@@ -32,6 +34,16 @@ const SUBSCRIPTION = {
   status: "active",
   cancel_at_period_end: false,
 };
+
+function entitlementSnapshot(
+  overrides: Partial<BusinessEntitlementSnapshot> = {}
+): BusinessEntitlementSnapshot {
+  return {
+    business: BUSINESS,
+    subscription: SUBSCRIPTION,
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -254,6 +266,29 @@ describe("resolveBusinessEntitlements", () => {
     });
   });
 
+  it("preserves business identity error precedence over a parallel subscription error", async () => {
+    mocks.results.set("businesses", { data: null, error: null });
+    mocks.results.set("subscriptions", {
+      data: null,
+      error: { message: "subscription DB down" },
+    });
+
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).rejects.toMatchObject({
+      code: "business_not_found",
+      retryable: true,
+    });
+
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, id: "unexpected-business" },
+      error: null,
+    });
+
+    await expect(resolveBusinessEntitlements(BUSINESS_ID)).rejects.toMatchObject({
+      code: "malformed_business",
+      retryable: true,
+    });
+  });
+
   it("keeps subscription_missing for Stripe mode with no subscription or legacy flags", async () => {
     mocks.results.set("subscriptions", { data: null, error: null });
 
@@ -320,6 +355,128 @@ describe("resolveBusinessEntitlements", () => {
       code: "invalid_business_id",
     });
     expect(mocks.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveBusinessEntitlementsFromSnapshot", () => {
+  it.each(["active", "trialing", "past_due"] as const)(
+    "keeps %s subscriptions feature-active without a database read",
+    (status) => {
+      expect(
+        resolveBusinessEntitlementsFromSnapshot(
+          BUSINESS_ID,
+          entitlementSnapshot({
+            subscription: {
+              ...SUBSCRIPTION,
+              status,
+              cancel_at_period_end: true,
+            },
+          })
+        )
+      ).toEqual({
+        businessId: BUSINESS_ID,
+        plan: "sms_and_chat",
+        status,
+        source: "subscription",
+        active: true,
+        cancelAtPeriodEnd: true,
+      });
+    }
+  );
+
+  it("preserves subscription precedence over malformed business billing fields", () => {
+    expect(
+      resolveBusinessEntitlementsFromSnapshot(
+        BUSINESS_ID,
+        entitlementSnapshot({
+          business: {
+            ...BUSINESS,
+            billing_mode: "invalid",
+            partner_plan: "invalid",
+            billing_pilot: null,
+          },
+          subscription: {
+            ...SUBSCRIPTION,
+            plan: "full",
+            status: "canceled",
+          },
+        })
+      )
+    ).toMatchObject({
+      plan: "full",
+      status: "canceled",
+      source: "subscription",
+      active: false,
+    });
+  });
+
+  it("resolves partner billing and protected legacy overrides from snapshots", () => {
+    expect(
+      resolveBusinessEntitlementsFromSnapshot(
+        BUSINESS_ID,
+        entitlementSnapshot({
+          business: {
+            ...BUSINESS,
+            billing_mode: "invoiced",
+            partner_plan: "sms_only",
+          },
+          subscription: null,
+        })
+      )
+    ).toMatchObject({
+      plan: "sms_only",
+      status: "partner_billing",
+      source: "partner_billing",
+      active: true,
+    });
+
+    expect(
+      resolveBusinessEntitlementsFromSnapshot(
+        BUSINESS_ID,
+        entitlementSnapshot({
+          business: { ...BUSINESS, billing_exempt: true },
+          subscription: null,
+        })
+      )
+    ).toMatchObject({
+      plan: "full",
+      status: "billing_override",
+      source: "billing_override",
+      active: true,
+    });
+  });
+
+  it.each([
+    [
+      "business_not_found",
+      entitlementSnapshot({ business: null }),
+    ],
+    [
+      "malformed_business",
+      entitlementSnapshot({
+        business: { ...BUSINESS, id: "unexpected-business" },
+      }),
+    ],
+    [
+      "malformed_subscription",
+      entitlementSnapshot({
+        subscription: { ...SUBSCRIPTION, status: "unknown" },
+      }),
+    ],
+    [
+      "subscription_missing",
+      entitlementSnapshot({ subscription: null }),
+    ],
+  ] as const)("fails closed with %s", (code, snapshot) => {
+    expect(() =>
+      resolveBusinessEntitlementsFromSnapshot(BUSINESS_ID, snapshot)
+    ).toThrowError(EntitlementResolutionError);
+
+    try {
+      resolveBusinessEntitlementsFromSnapshot(BUSINESS_ID, snapshot);
+    } catch (error) {
+      expect(error).toMatchObject({ code, retryable: true });
+    }
   });
 });
 

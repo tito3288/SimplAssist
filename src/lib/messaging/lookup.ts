@@ -16,6 +16,22 @@ export interface SmsReadiness {
   messagingProfileId: string | null;
 }
 
+/**
+ * Already-loaded SMS configuration facts consumed by the pure readiness
+ * reducer. This shape can be populated by the existing point reads or by an
+ * aggregated admin RPC without triggering another database query.
+ */
+export interface SmsReadinessSnapshot {
+  hasActivePhone: boolean;
+  phoneNumber: string | null;
+  messagingProfileId: string | null;
+  campaignStatus: RegistrationStatus | null;
+  expectedCampaignId: string | null;
+  assignmentStatus: CampaignAssignmentStatus | null;
+  assignedCampaignId: string | null;
+  assignmentFailureReason: string | null;
+}
+
 export interface OutboundSendContext extends SmsReadiness {
   businessId: string;
   phoneNumber: string;
@@ -76,35 +92,28 @@ async function getSmsReadinessForBusinessInternal(
 
   if (!row) {
     const business = await readBusinessContext(businessId);
-    return {
-      smsReady: false,
-      blockReason: "missing_phone_number",
-      campaignStatus: business?.campaign_status ?? null,
-      assignmentStatus: null,
-      assignmentFailureReason: null,
-      phoneNumber: null,
-      messagingProfileId: business?.telnyx_messaging_profile_id ?? null,
-    };
+    return reduceSmsReadinessSnapshot(
+      missingPhoneSnapshot({
+        campaignStatus: business?.campaign_status ?? null,
+        messagingProfileId:
+          business?.telnyx_messaging_profile_id ?? null,
+        expectedCampaignId: business?.telnyx_campaign_id ?? null,
+      })
+    );
   }
 
-  let readiness = buildReadiness(row);
+  let snapshot = smsReadinessSnapshotFromPhoneContext(row);
+  let readiness = reduceSmsReadinessSnapshot(snapshot);
   if (
     allowAssignmentRefresh &&
-    shouldLazyRefreshAssignmentForReadiness(readiness, row)
+    shouldLazyRefreshAssignmentForReadiness(readiness, snapshot)
   ) {
     await runLazyAssignmentRefresh(businessId, "dashboard_lazy_refresh");
     row = await readActivePhoneContextForBusiness(businessId);
-    readiness = row
-      ? buildReadiness(row)
-      : {
-          smsReady: false,
-          blockReason: "missing_phone_number",
-          campaignStatus: null,
-          assignmentStatus: null,
-          assignmentFailureReason: null,
-          phoneNumber: null,
-          messagingProfileId: null,
-        };
+    snapshot = row
+      ? smsReadinessSnapshotFromPhoneContext(row)
+      : missingPhoneSnapshot();
+    readiness = reduceSmsReadinessSnapshot(snapshot);
   }
 
   return readiness;
@@ -201,7 +210,9 @@ async function readBusinessContext(
 }
 
 function buildOutboundContext(row: PhoneContextRow): OutboundSendContext {
-  const readiness = buildReadiness(row);
+  const readiness = reduceSmsReadinessSnapshot(
+    smsReadinessSnapshotFromPhoneContext(row)
+  );
   return {
     ...readiness,
     businessId: row.business_id,
@@ -209,22 +220,73 @@ function buildOutboundContext(row: PhoneContextRow): OutboundSendContext {
   };
 }
 
-function buildReadiness(row: PhoneContextRow): SmsReadiness {
+function smsReadinessSnapshotFromPhoneContext(
+  row: PhoneContextRow
+): SmsReadinessSnapshot {
   const business = unwrapBusiness(row.businesses);
-  const campaignStatus = business?.campaign_status ?? null;
-  const messagingProfileId = business?.telnyx_messaging_profile_id ?? null;
-  const expectedCampaignId = business?.telnyx_campaign_id ?? null;
-  const assignmentStatus =
-    row.telnyx_campaign_assignment_status ?? "unassigned";
+  return {
+    hasActivePhone: true,
+    phoneNumber: row.phone_number,
+    messagingProfileId: business?.telnyx_messaging_profile_id ?? null,
+    campaignStatus: business?.campaign_status ?? null,
+    expectedCampaignId: business?.telnyx_campaign_id ?? null,
+    assignmentStatus: row.telnyx_campaign_assignment_status ?? null,
+    assignedCampaignId:
+      row.telnyx_campaign_assignment_campaign_id ?? null,
+    assignmentFailureReason:
+      row.telnyx_campaign_assignment_failure_reason ?? null,
+  };
+}
+
+function missingPhoneSnapshot(
+  business: {
+    messagingProfileId: string | null;
+    campaignStatus: RegistrationStatus | null;
+    expectedCampaignId: string | null;
+  } = {
+    messagingProfileId: null,
+    campaignStatus: null,
+    expectedCampaignId: null,
+  }
+): SmsReadinessSnapshot {
+  return {
+    hasActivePhone: false,
+    phoneNumber: null,
+    messagingProfileId: business.messagingProfileId,
+    campaignStatus: business.campaignStatus,
+    expectedCampaignId: business.expectedCampaignId,
+    assignmentStatus: null,
+    assignedCampaignId: null,
+    assignmentFailureReason: null,
+  };
+}
+
+/** Reduce already-loaded SMS configuration facts into send readiness. */
+export function reduceSmsReadinessSnapshot(
+  snapshot: SmsReadinessSnapshot
+): SmsReadiness {
+  if (!snapshot.hasActivePhone) {
+    return {
+      smsReady: false,
+      blockReason: "missing_phone_number",
+      campaignStatus: snapshot.campaignStatus,
+      assignmentStatus: null,
+      assignmentFailureReason: null,
+      phoneNumber: null,
+      messagingProfileId: snapshot.messagingProfileId,
+    };
+  }
+
+  const assignmentStatus = snapshot.assignmentStatus ?? "unassigned";
   const assignedToExpectedCampaign =
     assignmentStatus === "assigned" &&
-    Boolean(expectedCampaignId) &&
-    row.telnyx_campaign_assignment_campaign_id === expectedCampaignId;
+    Boolean(snapshot.expectedCampaignId) &&
+    snapshot.assignedCampaignId === snapshot.expectedCampaignId;
 
   let blockReason: SmsBlockReason | null = null;
-  if (!messagingProfileId) {
+  if (!snapshot.messagingProfileId) {
     blockReason = "missing_messaging_profile";
-  } else if (campaignStatus !== "approved") {
+  } else if (snapshot.campaignStatus !== "approved") {
     blockReason = "campaign_not_approved";
   } else if (!assignedToExpectedCampaign) {
     blockReason =
@@ -234,12 +296,11 @@ function buildReadiness(row: PhoneContextRow): SmsReadiness {
   return {
     smsReady: blockReason === null,
     blockReason,
-    campaignStatus,
+    campaignStatus: snapshot.campaignStatus,
     assignmentStatus,
-    assignmentFailureReason:
-      row.telnyx_campaign_assignment_failure_reason ?? null,
-    phoneNumber: row.phone_number,
-    messagingProfileId,
+    assignmentFailureReason: snapshot.assignmentFailureReason,
+    phoneNumber: snapshot.phoneNumber,
+    messagingProfileId: snapshot.messagingProfileId,
   };
 }
 
@@ -254,17 +315,19 @@ function shouldLazyRefreshAssignment(
   context: OutboundSendContext,
   row: PhoneContextRow
 ): boolean {
-  return shouldLazyRefreshAssignmentForReadiness(context, row);
+  return shouldLazyRefreshAssignmentForReadiness(
+    context,
+    smsReadinessSnapshotFromPhoneContext(row)
+  );
 }
 
 function shouldLazyRefreshAssignmentForReadiness(
   readiness: SmsReadiness,
-  row: PhoneContextRow
+  snapshot: SmsReadinessSnapshot
 ): boolean {
-  const business = unwrapBusiness(row.businesses);
   return (
     readiness.campaignStatus === "approved" &&
-    Boolean(business?.telnyx_campaign_id) &&
+    Boolean(snapshot.expectedCampaignId) &&
     Boolean(readiness.messagingProfileId) &&
     readiness.assignmentStatus !== "assigned"
   );

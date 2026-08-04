@@ -31,6 +31,27 @@ export interface BusinessEntitlements {
   cancelAtPeriodEnd: boolean;
 }
 
+/**
+ * Durable billing facts needed to resolve entitlements without performing any
+ * database reads. Unknown field types are deliberate: the resolver validates
+ * service-role/RPC snapshots with the same fail-closed rules as direct reads.
+ */
+export interface BusinessEntitlementSnapshot {
+  business: {
+    id: unknown;
+    billing_mode: unknown;
+    partner_plan: unknown;
+    billing_pilot: unknown;
+    billing_comped: unknown;
+    billing_exempt: unknown;
+  } | null;
+  subscription: {
+    plan: unknown;
+    status: unknown;
+    cancel_at_period_end: unknown;
+  } | null;
+}
+
 export type EntitlementResolutionErrorCode =
   | "invalid_business_id"
   | "business_lookup_failed"
@@ -83,20 +104,12 @@ export type FeatureAccessDecision =
       status: EntitlementStatus;
     };
 
-interface BusinessEntitlementRow {
-  id: string;
-  billing_mode: unknown;
-  partner_plan: unknown;
-  billing_pilot: unknown;
-  billing_comped: unknown;
-  billing_exempt: unknown;
-}
-
-interface SubscriptionEntitlementRow {
-  plan: unknown;
-  status: unknown;
-  cancel_at_period_end: unknown;
-}
+type BusinessEntitlementRow = NonNullable<
+  BusinessEntitlementSnapshot["business"]
+>;
+type SubscriptionEntitlementRow = NonNullable<
+  BusinessEntitlementSnapshot["subscription"]
+>;
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>([
   "active",
@@ -165,21 +178,14 @@ export async function resolveBusinessEntitlements(
       cause: businessResult.error,
     });
   }
-  if (!businessResult.data) {
-    throw new EntitlementResolutionError({
-      code: "business_not_found",
-      businessId,
-      message: `Business ${businessId} was not found while resolving entitlements.`,
+  // Preserve the existing lookup precedence: an absent or mismatched business
+  // is authoritative even when the parallel subscription read also errored.
+  if (!businessResult.data || businessResult.data.id !== businessId) {
+    return resolveBusinessEntitlementsFromSnapshot(businessId, {
+      business: businessResult.data,
+      subscription: null,
     });
   }
-  if (businessResult.data.id !== businessId) {
-    throw new EntitlementResolutionError({
-      code: "malformed_business",
-      businessId,
-      message: `Business entitlement lookup returned an unexpected row for ${businessId}.`,
-    });
-  }
-
   if (subscriptionResult.error) {
     throw new EntitlementResolutionError({
       code: "subscription_lookup_failed",
@@ -189,11 +195,51 @@ export async function resolveBusinessEntitlements(
     });
   }
 
-  if (subscriptionResult.data) {
-    return entitlementsFromSubscription(businessId, subscriptionResult.data);
+  return resolveBusinessEntitlementsFromSnapshot(businessId, {
+    business: businessResult.data,
+    subscription: subscriptionResult.data,
+  });
+}
+
+/**
+ * Resolve authoritative entitlements from already-loaded durable facts.
+ *
+ * A synchronized subscription has precedence over business billing fields,
+ * matching `resolveBusinessEntitlements`. Any indeterminate or malformed state
+ * throws a retryable EntitlementResolutionError instead of fabricating access.
+ */
+export function resolveBusinessEntitlementsFromSnapshot(
+  businessId: string,
+  snapshot: BusinessEntitlementSnapshot
+): BusinessEntitlements {
+  if (typeof businessId !== "string" || businessId.trim() === "") {
+    throw new EntitlementResolutionError({
+      code: "invalid_business_id",
+      businessId,
+      message: "Cannot resolve entitlements without a business ID.",
+    });
   }
 
-  const business = businessResult.data;
+  const business = snapshot.business;
+  if (!business) {
+    throw new EntitlementResolutionError({
+      code: "business_not_found",
+      businessId,
+      message: `Business ${businessId} was not found while resolving entitlements.`,
+    });
+  }
+  if (business.id !== businessId) {
+    throw new EntitlementResolutionError({
+      code: "malformed_business",
+      businessId,
+      message: `Business entitlement lookup returned an unexpected row for ${businessId}.`,
+    });
+  }
+
+  if (snapshot.subscription) {
+    return entitlementsFromSubscription(businessId, snapshot.subscription);
+  }
+
   if (
     !isBillingMode(business.billing_mode) ||
     typeof business.billing_pilot !== "boolean" ||
