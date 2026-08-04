@@ -20,7 +20,7 @@ export default function DangerZone() {
         <p className={cn("text-sm mb-4", body)}>
           Permanently delete your account and all associated data. This action has a 60-day grace period.
         </p>
-        <Button variant="danger" size="md" onClick={() => setShowModal(true)}>
+        <Button type="button" variant="danger" size="md" onClick={() => setShowModal(true)}>
           Delete Account
         </Button>
       </div>

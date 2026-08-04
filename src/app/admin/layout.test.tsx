@@ -28,7 +28,7 @@ vi.mock("./AdminSignOutButton", () => ({
 import AdminLayout from "./layout";
 
 describe("AdminLayout navigation", () => {
-  it("links authenticated admins to client creation and partner management", async () => {
+  it("links authenticated admins to the client queue and partner management", async () => {
     mocks.getAdminGateState.mockResolvedValue({
       state: "admin",
       admin: { id: "admin-1", email: null },
@@ -38,8 +38,9 @@ describe("AdminLayout navigation", () => {
       await AdminLayout({ children: <main>Admin content</main> }),
     );
 
-    expect(html).toContain('href="/admin/clients/new"');
-    expect(html).toContain(">Create client</a>");
+    expect(html).toContain('href="/admin/clients"');
+    expect(html).toContain(">Clients</a>");
+    expect(html).not.toContain('href="/admin/clients/new"');
     expect(html).toContain('href="/admin/partners"');
     expect(html).toContain(">Partners</a>");
   });

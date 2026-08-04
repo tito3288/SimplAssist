@@ -18,7 +18,7 @@ const REQUIRED_ROUTES: RouteInventory[] = [
   },
   { path: "./conversations/[id]/route.ts", methods: ["DELETE"] },
   { path: "./google/auth/route.ts", methods: ["GET"] },
-  { path: "./google/callback/route.ts", methods: ["GET"] },
+  { path: "./google/complete/route.ts", methods: ["GET"] },
   { path: "./google/disconnect/route.ts", methods: ["POST"] },
   { path: "./messaging/numbers/purchase/route.ts", methods: ["POST"] },
   { path: "./messaging/numbers/search/route.ts", methods: ["GET"] },
@@ -46,7 +46,10 @@ function handlerSource(source: string, method: string): string {
   const start = source.indexOf(marker);
   if (start === -1) return "";
 
-  const nextHandler = source.indexOf("export async function ", start + marker.length);
+  const nextHandler = source.indexOf(
+    "export async function ",
+    start + marker.length,
+  );
   return source.slice(start, nextHandler === -1 ? undefined : nextHandler);
 }
 
@@ -88,9 +91,27 @@ describe("authenticated API workspace-access inventory", () => {
       "./messaging/registration/status/route.ts",
       "./messaging/voice/route.ts",
       "./auth/callback/route.ts",
+      "./google/callback/route.ts",
     ]) {
       expect(routeSource(path)).not.toContain("requireWorkspaceRouteAccess");
     }
+  });
+
+  it("protects the sessionless Google callback with exact canonical Host and atomic attempt staging", () => {
+    const callback = handlerSource(
+      routeSource("./google/callback/route.ts"),
+      "GET",
+    );
+    const exactHost = callback.indexOf(
+      'isExactCanonicalGoogleCallbackHost(request.headers.get("host"))',
+    );
+    const stage = callback.indexOf("await stageGoogleCalendarOAuthHandoff(");
+
+    expect(exactHost).toBeGreaterThan(-1);
+    expect(stage).toBeGreaterThan(exactHost);
+    expect(stage).toBe(callback.indexOf("await "));
+    expect(callback).not.toContain("supabaseAdmin");
+    expect(callback).not.toContain(".rpc(");
   });
 
   it("uses optional workspace attribution for support tickets", () => {

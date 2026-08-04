@@ -3,9 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { bodyFaint, card } from "@/lib/theme-v2/theme";
-import {
-  CreateClientForm,
-} from "../CreateClientForm";
+import { CreateClientForm } from "../CreateClientForm";
 import { parseActiveConnectedPartnerOptions } from "../partnerOptions";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +23,9 @@ export default async function NewPartnerClientPage() {
 
   if (error) throw new Error("Could not load eligible partners");
 
-  const { partners, invalidRecordCount } =
-    parseActiveConnectedPartnerOptions(data ?? []);
+  const { partners, invalidRecordCount } = parseActiveConnectedPartnerOptions(
+    data ?? [],
+  );
   if (invalidRecordCount > 0) {
     console.error(
       `[admin-clients] Hid ${invalidRecordCount} eligible partner record(s) that failed read validation.`,
@@ -37,10 +36,10 @@ export default async function NewPartnerClientPage() {
     <main className="space-y-6">
       <section>
         <Link
-          href="/admin"
+          href="/admin/clients"
           className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
         >
-          Back to admin
+          Back to clients
         </Link>
         <h1 className="mt-3 text-2xl font-bold">Create partner client</h1>
         <p className={`mt-1 max-w-3xl text-sm ${bodyFaint}`}>

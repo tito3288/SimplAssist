@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminGateState } from "@/lib/admin/auth";
-import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/theme";
+import {
+  pageShell,
+  fontStack,
+  lightAmbient,
+  darkAmbient,
+} from "@/lib/theme-v2/theme";
 import AdminLoginForm from "./AdminLoginForm";
 import AdminSignOutButton from "./AdminSignOutButton";
 import { AdminSetupLinkProvider } from "./AdminSetupLinkProvider";
@@ -47,16 +52,28 @@ export default async function AdminLayout({
                 SimplAssist Admin
               </Link>
               <div className="flex items-center gap-4">
-                <Link href="/admin/clients/new" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
-                  Create client
+                <Link
+                  href="/admin/clients"
+                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+                >
+                  Clients
                 </Link>
-                <Link href="/admin/partners" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                <Link
+                  href="/admin/partners"
+                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+                >
                   Partners
                 </Link>
-                <Link href="/admin/tickets" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                <Link
+                  href="/admin/tickets"
+                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+                >
                   Tickets
                 </Link>
-                <Link href="/admin/waitlist" className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]">
+                <Link
+                  href="/admin/waitlist"
+                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
+                >
                   Waitlist
                 </Link>
                 <AdminSignOutButton />

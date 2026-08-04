@@ -709,6 +709,12 @@ SELECT is(
     'last_error_code', 'text',
     'setup_email_sent_at', 'timestamp with time zone',
     'invite_attempt_count', 'integer',
+    'dismissed_at', 'timestamp with time zone',
+    'dismissed_by_admin_id', 'uuid',
+    'operation_token', 'uuid',
+    'operation_kind', 'text',
+    'operation_started_at', 'timestamp with time zone',
+    'operation_expires_at', 'timestamp with time zone',
     'created_by_admin_id', 'uuid',
     'created_at', 'timestamp with time zone',
     'updated_at', 'timestamp with time zone'
@@ -725,7 +731,7 @@ SELECT is(
       AND attribute.attnum > 0
       AND NOT attribute.attisdropped
   ),
-  15,
+  21,
   'provisioning jobs have no extra or missing columns'
 );
 
@@ -794,7 +800,9 @@ SELECT is(
     'partner_client_provisioning_jobs_partner_plan_check',
     'partner_client_provisioning_jobs_requested_business_name_check',
     'partner_client_provisioning_jobs_status_check',
-    'provisioning_email_canonical'
+    'provisioning_dismissed_shape',
+    'provisioning_email_canonical',
+    'provisioning_operation_shape'
   ]::name[],
   'all provisioning value checks exist and are validated'
 );

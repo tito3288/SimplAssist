@@ -16,21 +16,18 @@ vi.mock("@/lib/email/conciergeSetup", () => ({
 vi.mock("@/lib/admin/auth", () => ({
   getAdminUser: mocks.getAdminUser,
 }));
-vi.mock(
-  "@/lib/admin/clientProvisioning.server",
-  async (importOriginal) => {
-    const actual = await importOriginal<
+vi.mock("@/lib/admin/clientProvisioning.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<
       typeof import("@/lib/admin/clientProvisioning.server")
     >();
-    return {
-      ...actual,
-      provisionPartnerClient: mocks.provisionPartnerClient,
-      retryPartnerClientProvisioning:
-        mocks.retryPartnerClientProvisioning,
-      sendPartnerClientSetupEmail: mocks.sendPartnerClientSetupEmail,
-    };
-  },
-);
+  return {
+    ...actual,
+    provisionPartnerClient: mocks.provisionPartnerClient,
+    retryPartnerClientProvisioning: mocks.retryPartnerClientProvisioning,
+    sendPartnerClientSetupEmail: mocks.sendPartnerClientSetupEmail,
+  };
+});
 
 import { ClientProvisioningError } from "@/lib/admin/clientProvisioning.server";
 import { POST as createClient } from "./route";
@@ -131,11 +128,15 @@ describe("admin client provisioning routes", () => {
   it("authorizes before origin/body processing and returns a non-disclosing 404", async () => {
     mocks.getAdminUser.mockResolvedValue(null);
     const response = await createClient(
-      request("/api/admin/clients", {}, {
-        origin: "https://attacker.example",
-        contentType: "text/plain",
-        rawBody: "not-json",
-      }),
+      request(
+        "/api/admin/clients",
+        {},
+        {
+          origin: "https://attacker.example",
+          contentType: "text/plain",
+          rawBody: "not-json",
+        },
+      ),
     );
 
     expect(response.status).toBe(404);
@@ -149,16 +150,19 @@ describe("admin client provisioning routes", () => {
     { origin: "https://attacker.example", fetchSite: "cross-site" },
     { origin: "https://simplassist.com.evil.test", fetchSite: "same-origin" },
     { origin: "https://simplassist.com", fetchSite: "cross-site" },
-  ])("rejects a non-same-origin mutation before provisioning: %o", async (headers) => {
-    const response = await createClient(
-      request("/api/admin/clients", CREATE_BODY, headers),
-    );
+  ])(
+    "rejects a non-same-origin mutation before provisioning: %o",
+    async (headers) => {
+      const response = await createClient(
+        request("/api/admin/clients", CREATE_BODY, headers),
+      );
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
-    expect(mocks.provisionPartnerClient).not.toHaveBeenCalled();
-    expectPrivateNoStore(response);
-  });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+      expect(mocks.provisionPartnerClient).not.toHaveBeenCalled();
+      expectPrivateNoStore(response);
+    },
+  );
 
   it("defaults create to admin-only setup mode and normalizes validated input", async () => {
     const response = await createClient(
@@ -243,9 +247,33 @@ describe("admin client provisioning routes", () => {
     expectPrivateNoStore(response);
   });
 
+  it.each([
+    "provisioning_in_progress",
+    "provisioning_outcome_unknown",
+    "job_dismissed",
+    "auth_identity_mismatch",
+  ] as const)("passes through the stable lease failure %s", async (code) => {
+    mocks.provisionPartnerClient.mockRejectedValue(
+      new ClientProvisioningError(code, 409, "hidden detail", JOB_ID),
+    );
+
+    const response = await createClient(
+      request("/api/admin/clients", CREATE_BODY),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: code,
+      provisioningId: JOB_ID,
+    });
+    expectPrivateNoStore(response);
+  });
+
   it("redacts unknown error details from logs and JSON", async () => {
     const secret = "token_hash=should-never-be-logged";
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     mocks.provisionPartnerClient.mockRejectedValue(new Error(secret));
 
     const response = await createClient(

@@ -27,7 +27,7 @@ export default function DeleteAccountModal({ open, onClose }: DeleteAccountModal
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Failed to delete account");
+        throw new Error(data.message || data.error || "Failed to delete account");
       }
 
       showToast("Account scheduled for deletion. You have 60 days to reactivate.", "info");
@@ -78,6 +78,7 @@ export default function DeleteAccountModal({ open, onClose }: DeleteAccountModal
 
         <div className="flex gap-3 pt-1">
           <Button
+            type="button"
             variant="secondary"
             size="md"
             onClick={handleClose}
@@ -86,6 +87,7 @@ export default function DeleteAccountModal({ open, onClose }: DeleteAccountModal
             Cancel
           </Button>
           <Button
+            type="button"
             variant="danger"
             size="md"
             loading={loading}

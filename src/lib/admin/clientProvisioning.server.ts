@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getCanonicalAppHostname } from "@/lib/branding/defaultBrand";
@@ -33,6 +33,12 @@ const JOB_COLUMNS = [
   "last_error_code",
   "setup_email_sent_at",
   "invite_attempt_count",
+  "dismissed_at",
+  "dismissed_by_admin_id",
+  "operation_token",
+  "operation_kind",
+  "operation_started_at",
+  "operation_expires_at",
   "created_by_admin_id",
   "created_at",
   "updated_at",
@@ -56,10 +62,17 @@ const storedJobSchema = z.object({
     "invite_pending",
     "setup_email_sent",
     "needs_attention",
+    "dismissed",
   ]),
   last_error_code: z.string().nullable(),
   setup_email_sent_at: z.string().nullable(),
   invite_attempt_count: z.number().int().nonnegative(),
+  dismissed_at: z.string().nullable(),
+  dismissed_by_admin_id: z.string().uuid().nullable(),
+  operation_token: z.string().uuid().nullable(),
+  operation_kind: z.enum(["provision", "retry", "send_setup"]).nullable(),
+  operation_started_at: z.string().nullable(),
+  operation_expires_at: z.string().nullable(),
   created_by_admin_id: z.string().uuid(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -79,15 +92,19 @@ const businessSchema = z.object({
   name: z.string(),
   partner_id: z.string().uuid().nullable(),
   billing_mode: z.enum(["stripe", "invoiced", "comped"]),
-  partner_plan: z
-    .enum(["sms_only", "sms_and_chat", "full"])
-    .nullable(),
+  partner_plan: z.enum(["sms_only", "sms_and_chat", "full"]).nullable(),
   deleted_at: z.string().nullable(),
 });
 
 type StoredProvisioningJob = z.infer<typeof storedJobSchema>;
 type ProvisioningPartner = z.infer<typeof partnerSchema> & { origin: string };
 type ProvisioningBusiness = z.infer<typeof businessSchema>;
+type ProvisioningOperationKind = "provision" | "retry" | "send_setup";
+
+type ProvisioningOperation = {
+  token: string;
+  job: StoredProvisioningJob;
+};
 
 type ProvisioningAuthUser = {
   id: string;
@@ -128,9 +145,18 @@ export type ClientProvisioningDependencies = {
     adminId: string,
   ) => Promise<{ job: StoredProvisioningJob; created: boolean }>;
   loadJobById: (id: string) => Promise<StoredProvisioningJob | null>;
+  claimOperation: (input: {
+    jobId: string;
+    kind: ProvisioningOperationKind;
+    token: string;
+    reconciledToken: string | null;
+    now: string;
+  }) => Promise<StoredProvisioningJob>;
   updateJob: (
     id: string,
+    operationToken: string,
     patch: JobPatch,
+    release: boolean,
   ) => Promise<StoredProvisioningJob>;
   loadPartner: (id: string) => Promise<ProvisioningPartner | null>;
   createAuthUser: (input: {
@@ -142,13 +168,9 @@ export type ClientProvisioningDependencies = {
     | { status: "email_exists" }
     | { status: "failed" }
   >;
-  findAuthUserByEmail: (
-    email: string,
-  ) => Promise<ProvisioningAuthUser | null>;
+  findAuthUserByEmail: (email: string) => Promise<ProvisioningAuthUser | null>;
   getAuthUserById: (id: string) => Promise<ProvisioningAuthUser | null>;
-  loadBusinessesByOwner: (
-    ownerId: string,
-  ) => Promise<ProvisioningBusiness[]>;
+  loadBusinessesByOwner: (ownerId: string) => Promise<ProvisioningBusiness[]>;
   updateBusinessName: (
     businessId: string,
     ownerId: string,
@@ -176,11 +198,15 @@ export type ClientProvisioningDependencies = {
     setupUrl: string;
   }) => Promise<void>;
   randomPassword: () => string;
+  randomOperationToken: () => string;
   now: () => string;
 };
 
 export type ClientProvisioningErrorCode =
   | "job_not_found"
+  | "job_dismissed"
+  | "provisioning_in_progress"
+  | "provisioning_outcome_unknown"
   | "partner_inactive"
   | "provisioning_conflict"
   | "email_in_use"
@@ -219,10 +245,7 @@ function errorFor(
   return new ClientProvisioningError(code, status, code, provisioningId);
 }
 
-function withProvisioningId(
-  error: unknown,
-  provisioningId: string,
-): unknown {
+function withProvisioningId(error: unknown, provisioningId: string): unknown {
   if (error instanceof ClientProvisioningError) {
     if (error.code === "job_not_found" || error.provisioningId) return error;
     return new ClientProvisioningError(
@@ -254,7 +277,7 @@ function assertJobMatchesInput(
   }
 }
 
-function assertAuthIdentity(
+function assertAuthProvisioningIdentity(
   user: ProvisioningAuthUser,
   job: StoredProvisioningJob,
 ): void {
@@ -266,6 +289,13 @@ function assertAuthIdentity(
   ) {
     throw errorFor("auth_identity_mismatch", 409);
   }
+}
+
+function assertAuthIdentity(
+  user: ProvisioningAuthUser,
+  job: StoredProvisioningJob,
+): void {
+  assertAuthProvisioningIdentity(user, job);
   if (user.appMetadata.must_set_password !== true) {
     throw errorFor("setup_already_completed", 409);
   }
@@ -294,38 +324,91 @@ function publicJob(
   });
 }
 
-async function bestEffortFailure(
+function isOperationOwnershipError(
+  error: unknown,
+): error is ClientProvisioningError {
+  return (
+    error instanceof ClientProvisioningError &&
+    ["provisioning_in_progress", "provisioning_outcome_unknown"].includes(
+      error.code,
+    )
+  );
+}
+
+async function recordOperationFailure(
   dependencies: ClientProvisioningDependencies,
-  job: StoredProvisioningJob,
-  code: ClientProvisioningErrorCode,
+  operation: ProvisioningOperation,
+  failure: ClientProvisioningError,
   status: "needs_attention" | "invite_pending" = "needs_attention",
-): Promise<void> {
+  release = true,
+  patch: JobPatch = {},
+): Promise<never> {
   try {
-    await dependencies.updateJob(job.id, {
-      status,
-      last_error_code: code,
-    });
-  } catch {
-    // Preserve the stage error. A failed durability update must not cause a
-    // retry to attach a different Auth user or business.
+    await dependencies.updateJob(
+      operation.job.id,
+      operation.token,
+      {
+        ...patch,
+        status,
+        last_error_code: failure.code,
+      },
+      release,
+    );
+  } catch (writeError) {
+    if (isOperationOwnershipError(writeError)) throw writeError;
+    throw errorFor("provisioning_outcome_unknown", 409);
   }
+  throw failure;
 }
 
 async function saveProgress(
   dependencies: ClientProvisioningDependencies,
-  job: StoredProvisioningJob,
+  operation: ProvisioningOperation,
   status: "auth_created" | "business_prepared" | "assigned",
   patch: JobPatch = {},
-): Promise<StoredProvisioningJob> {
-  return dependencies.updateJob(job.id, {
-    ...patch,
-    ...(isTerminalStatus(job.status) ? {} : { status }),
-    last_error_code: null,
-  });
+): Promise<ProvisioningOperation> {
+  const job = await dependencies.updateJob(
+    operation.job.id,
+    operation.token,
+    {
+      ...patch,
+      ...(isTerminalStatus(operation.job.status) ? {} : { status }),
+      last_error_code: null,
+    },
+    false,
+  );
+  return { ...operation, job };
 }
 
-function validatePartner(partner: ProvisioningPartner | null): ProvisioningPartner {
-  if (!partner || partner.status !== "active" || partner.domain_status !== "connected") {
+async function releaseOperation(
+  dependencies: ClientProvisioningDependencies,
+  operation: ProvisioningOperation,
+  patch: JobPatch = {},
+): Promise<StoredProvisioningJob> {
+  return dependencies.updateJob(operation.job.id, operation.token, patch, true);
+}
+
+async function releaseOperationOrFailUnknown(
+  dependencies: ClientProvisioningDependencies,
+  operation: ProvisioningOperation,
+  patch: JobPatch = {},
+): Promise<StoredProvisioningJob> {
+  try {
+    return await releaseOperation(dependencies, operation, patch);
+  } catch (error) {
+    if (isOperationOwnershipError(error)) throw error;
+    throw errorFor("provisioning_outcome_unknown", 409);
+  }
+}
+
+function validatePartner(
+  partner: ProvisioningPartner | null,
+): ProvisioningPartner {
+  if (
+    !partner ||
+    partner.status !== "active" ||
+    partner.domain_status !== "connected"
+  ) {
     throw errorFor("partner_inactive", 409);
   }
 
@@ -365,48 +448,218 @@ function validateRecoveredBusiness(
   return business;
 }
 
+type ReconciledProvisioningIdentity = {
+  authUserId: string | null;
+  businessId: string | null;
+};
+
+function operationIsExpired(job: StoredProvisioningJob, now: string): boolean {
+  if (!job.operation_token || !job.operation_expires_at) return false;
+  const expiresAt = Date.parse(job.operation_expires_at);
+  const currentTime = Date.parse(now);
+  return (
+    Number.isFinite(expiresAt) &&
+    Number.isFinite(currentTime) &&
+    expiresAt <= currentTime
+  );
+}
+
+function assertReconciledBusinessState(
+  business: ProvisioningBusiness,
+  job: StoredProvisioningJob,
+): void {
+  const unassigned =
+    business.partner_id === null &&
+    business.billing_mode === "stripe" &&
+    business.partner_plan === null;
+  const assigned =
+    business.partner_id === job.partner_id &&
+    business.billing_mode === job.billing_mode &&
+    business.partner_plan === job.partner_plan;
+
+  if (!unassigned && !assigned) {
+    throw errorFor("business_identity_mismatch", 409);
+  }
+  if (
+    ["assigned", "admin_setup", "invite_pending", "setup_email_sent"].includes(
+      job.status,
+    ) &&
+    !assigned
+  ) {
+    throw errorFor("business_identity_mismatch", 409);
+  }
+}
+
+async function reconcileExpiredOperation(
+  dependencies: ClientProvisioningDependencies,
+  job: StoredProvisioningJob,
+): Promise<ReconciledProvisioningIdentity> {
+  // The paginated email lookup is exhaustive. It proves the recovered Auth
+  // identity is the only account for the canonical email; a stored UUID alone
+  // is not sufficient reconciliation evidence after an unknown createUser
+  // outcome.
+  const user = await dependencies.findAuthUserByEmail(job.email);
+
+  if (!user) {
+    if (
+      job.auth_user_id !== null ||
+      job.business_id !== null ||
+      !["pending", "needs_attention"].includes(job.status)
+    ) {
+      throw errorFor("auth_identity_mismatch", 409);
+    }
+    return { authUserId: null, businessId: null };
+  }
+
+  // A matching user that already completed password setup is still valid
+  // reconciliation evidence. After the stale token is atomically replaced,
+  // the ordinary Auth stage will detect completion and release the fresh
+  // operation without mutating the business or generating another link.
+  assertAuthProvisioningIdentity(user, job);
+  if (job.auth_user_id !== null && job.auth_user_id !== user.id) {
+    throw errorFor("auth_identity_mismatch", 409);
+  }
+
+  const business = validateRecoveredBusiness(
+    await dependencies.loadBusinessesByOwner(user.id),
+    job,
+    user.id,
+  );
+  assertReconciledBusinessState(business, job);
+
+  return { authUserId: user.id, businessId: business.id };
+}
+
+async function beginOperation(
+  dependencies: ClientProvisioningDependencies,
+  job: StoredProvisioningJob,
+  kind: ProvisioningOperationKind,
+  reconcileExpired: boolean,
+): Promise<ProvisioningOperation> {
+  const observedAt = dependencies.now();
+  let reconciledToken: string | null = null;
+  let reconciliation: ReconciledProvisioningIdentity | null = null;
+
+  if (job.operation_token && operationIsExpired(job, observedAt)) {
+    if (reconcileExpired) {
+      reconciliation = await reconcileExpiredOperation(dependencies, job);
+      reconciledToken = job.operation_token;
+    }
+  }
+
+  // Reconciliation may require paginated Auth reads. Start the replacement
+  // lease from a fresh timestamp, not from the time of the initial stale read.
+  const claimNow = dependencies.now();
+  const token = dependencies.randomOperationToken();
+  const claimed = await dependencies.claimOperation({
+    jobId: job.id,
+    kind,
+    token,
+    reconciledToken,
+    now: claimNow,
+  });
+  let operation = { token, job: claimed };
+
+  if (reconciliation?.authUserId) {
+    const recovered = await dependencies.updateJob(
+      claimed.id,
+      token,
+      {
+        auth_user_id: reconciliation.authUserId,
+        business_id: reconciliation.businessId,
+      },
+      false,
+    );
+    operation = { token, job: recovered };
+  }
+
+  return operation;
+}
+
 export function createClientProvisioningService(
   dependencies: ClientProvisioningDependencies,
 ) {
+  async function loadJob(id: string): Promise<StoredProvisioningJob> {
+    const job = await dependencies.loadJobById(id);
+    if (!job) throw errorFor("job_not_found", 404);
+    return job;
+  }
+
   async function loadValidatedJob(id: string): Promise<{
     job: StoredProvisioningJob;
     partner: ProvisioningPartner;
   }> {
-    const job = await dependencies.loadJobById(id);
-    if (!job) throw errorFor("job_not_found", 404);
+    const job = await loadJob(id);
     try {
-      const partner = validatePartner(
-        await dependencies.loadPartner(job.partner_id),
+      return {
+        job,
+        partner: validatePartner(
+          await dependencies.loadPartner(job.partner_id),
+        ),
+      };
+    } catch (error) {
+      throw withProvisioningId(error, job.id);
+    }
+  }
+
+  async function loadPartnerForOperation(
+    operation: ProvisioningOperation,
+  ): Promise<ProvisioningPartner> {
+    try {
+      return validatePartner(
+        await dependencies.loadPartner(operation.job.partner_id),
       );
-      return { job, partner };
+    } catch (error) {
+      const failure =
+        error instanceof ClientProvisioningError
+          ? error
+          : errorFor("provisioning_failed");
+      return recordOperationFailure(dependencies, operation, failure);
+    }
+  }
+
+  async function claim(
+    job: StoredProvisioningJob,
+    kind: ProvisioningOperationKind,
+    reconcileExpired: boolean,
+  ): Promise<ProvisioningOperation> {
+    try {
+      return await beginOperation(dependencies, job, kind, reconcileExpired);
     } catch (error) {
       throw withProvisioningId(error, job.id);
     }
   }
 
   async function ensureAuthUser(
-    originalJob: StoredProvisioningJob,
-  ): Promise<{ job: StoredProvisioningJob; user: ProvisioningAuthUser }> {
-    let job = originalJob;
+    originalOperation: ProvisioningOperation,
+  ): Promise<{
+    operation: ProvisioningOperation;
+    user: ProvisioningAuthUser;
+  }> {
+    let operation = originalOperation;
     let user: ProvisioningAuthUser | null = null;
+    let mutationOutcomeUnknown = false;
 
     try {
-      if (job.auth_user_id) {
-        user = await dependencies.getAuthUserById(job.auth_user_id);
+      if (operation.job.auth_user_id) {
+        user = await dependencies.getAuthUserById(operation.job.auth_user_id);
         if (!user) throw errorFor("auth_identity_mismatch", 409);
       } else {
+        mutationOutcomeUnknown = true;
         const result = await dependencies.createAuthUser({
-          email: job.email,
+          email: operation.job.email,
           password: dependencies.randomPassword(),
-          provisioningId: job.id,
+          provisioningId: operation.job.id,
         });
 
         if (result.status === "created") {
+          mutationOutcomeUnknown = false;
           user = result.user;
         } else if (result.status === "email_exists") {
-          user = await dependencies.findAuthUserByEmail(job.email);
+          mutationOutcomeUnknown = false;
+          user = await dependencies.findAuthUserByEmail(operation.job.email);
           if (!user) throw errorFor("email_in_use", 409);
-          if (user.appMetadata.concierge_provisioning_id !== job.id) {
+          if (user.appMetadata.concierge_provisioning_id !== operation.job.id) {
             throw errorFor("email_in_use", 409);
           }
         } else {
@@ -414,133 +667,200 @@ export function createClientProvisioningService(
         }
       }
 
-      assertAuthIdentity(user, job);
-      if (job.auth_user_id !== null && job.auth_user_id !== user.id) {
+      assertAuthIdentity(user, operation.job);
+      if (
+        operation.job.auth_user_id !== null &&
+        operation.job.auth_user_id !== user.id
+      ) {
         throw errorFor("auth_identity_mismatch", 409);
       }
-      job = await saveProgress(dependencies, job, "auth_created", {
+      operation = await saveProgress(dependencies, operation, "auth_created", {
         auth_user_id: user.id,
       });
-      return { job, user };
+      return { operation, user };
     } catch (error) {
+      if (isOperationOwnershipError(error)) throw error;
       const failure =
         error instanceof ClientProvisioningError
           ? error
           : errorFor("auth_creation_failed");
-      // A completed setup is an expected, terminal identity state. Do not
-      // rewrite the durable job or continue into any business/link mutation.
-      if (failure.code !== "setup_already_completed") {
-        await bestEffortFailure(dependencies, job, failure.code);
+      if (failure.code === "setup_already_completed") {
+        await releaseOperationOrFailUnknown(dependencies, operation);
+        throw failure;
       }
-      throw failure;
+      return recordOperationFailure(
+        dependencies,
+        operation,
+        failure,
+        "needs_attention",
+        !mutationOutcomeUnknown,
+      );
     }
   }
 
   async function ensureBusiness(
-    originalJob: StoredProvisioningJob,
+    originalOperation: ProvisioningOperation,
     authUser: ProvisioningAuthUser,
-  ): Promise<{ job: StoredProvisioningJob; business: ProvisioningBusiness }> {
-    let job = originalJob;
+  ): Promise<{
+    operation: ProvisioningOperation;
+    business: ProvisioningBusiness;
+  }> {
+    let operation = originalOperation;
+    let mutationOutcomeUnknown = false;
     try {
       const business = validateRecoveredBusiness(
         await dependencies.loadBusinessesByOwner(authUser.id),
-        job,
+        operation.job,
         authUser.id,
       );
 
-      // The name write deliberately precedes assignment. A failed name write
-      // leaves a resumable job and never creates a partially configured client.
-      try {
-        await dependencies.updateBusinessName(
-          business.id,
-          authUser.id,
-          job.requested_business_name,
-        );
-      } catch {
-        throw errorFor("business_update_failed");
-      }
+      mutationOutcomeUnknown = true;
+      await dependencies.updateBusinessName(
+        business.id,
+        authUser.id,
+        operation.job.requested_business_name,
+      );
+      mutationOutcomeUnknown = false;
 
-      job = await saveProgress(dependencies, job, "business_prepared", {
-        business_id: business.id,
-      });
-      return { job, business: { ...business, name: job.requested_business_name } };
+      operation = await saveProgress(
+        dependencies,
+        operation,
+        "business_prepared",
+        { business_id: business.id },
+      );
+      return {
+        operation,
+        business: {
+          ...business,
+          name: operation.job.requested_business_name,
+        },
+      };
     } catch (error) {
+      if (isOperationOwnershipError(error)) throw error;
       const failure =
         error instanceof ClientProvisioningError
           ? error
-          : errorFor("provisioning_failed");
-      await bestEffortFailure(dependencies, job, failure.code);
-      throw failure;
+          : errorFor(
+              mutationOutcomeUnknown
+                ? "business_update_failed"
+                : "provisioning_failed",
+            );
+      return recordOperationFailure(
+        dependencies,
+        operation,
+        failure,
+        "needs_attention",
+        !mutationOutcomeUnknown,
+      );
     }
   }
 
   async function ensureAssignment(
-    originalJob: StoredProvisioningJob,
+    originalOperation: ProvisioningOperation,
     business: ProvisioningBusiness,
     adminId: string,
-  ): Promise<StoredProvisioningJob> {
-    const job = originalJob;
+  ): Promise<ProvisioningOperation> {
+    let mutationOutcomeUnknown = true;
     try {
       const result = await dependencies.assignPartnerBilling({
         businessId: business.id,
-        partnerId: job.partner_id,
-        billingMode: job.billing_mode,
-        partnerPlan: job.partner_plan,
+        partnerId: originalOperation.job.partner_id,
+        billingMode: originalOperation.job.billing_mode,
+        partnerPlan: originalOperation.job.partner_plan,
         adminId,
       });
+      mutationOutcomeUnknown = false;
       if (!result.ok) {
-        const status = result.code === "business_not_found" ? 404 :
-          result.code === "assignment_failed" ? 500 : 409;
+        const status =
+          result.code === "business_not_found"
+            ? 404
+            : result.code === "assignment_failed"
+              ? 500
+              : 409;
         throw errorFor(result.code, status);
       }
-      return await saveProgress(dependencies, job, "assigned");
+      return await saveProgress(dependencies, originalOperation, "assigned");
     } catch (error) {
+      if (isOperationOwnershipError(error)) throw error;
       const failure =
         error instanceof ClientProvisioningError
           ? error
           : errorFor("assignment_failed");
-      await bestEffortFailure(dependencies, job, failure.code);
-      throw failure;
+      return recordOperationFailure(
+        dependencies,
+        originalOperation,
+        failure,
+        "needs_attention",
+        !mutationOutcomeUnknown,
+      );
     }
   }
 
   async function prepare(
-    job: StoredProvisioningJob,
+    operation: ProvisioningOperation,
     adminId: string,
-  ): Promise<StoredProvisioningJob> {
-    const auth = await ensureAuthUser(job);
-    const preparedBusiness = await ensureBusiness(auth.job, auth.user);
-    return ensureAssignment(preparedBusiness.job, preparedBusiness.business, adminId);
+  ): Promise<ProvisioningOperation> {
+    const auth = await ensureAuthUser(operation);
+    const preparedBusiness = await ensureBusiness(auth.operation, auth.user);
+    return ensureAssignment(
+      preparedBusiness.operation,
+      preparedBusiness.business,
+      adminId,
+    );
+  }
+
+  async function assertCurrentBusinessAssignment(
+    operation: ProvisioningOperation,
+  ): Promise<void> {
+    if (!operation.job.auth_user_id || !operation.job.business_id) {
+      throw errorFor("business_identity_mismatch", 409);
+    }
+    const business = validateRecoveredBusiness(
+      await dependencies.loadBusinessesByOwner(operation.job.auth_user_id),
+      operation.job,
+      operation.job.auth_user_id,
+    );
+    assertReconciledBusinessState(business, operation.job);
   }
 
   async function generateSetupUrl(
-    originalJob: StoredProvisioningJob,
-    partner: ProvisioningPartner,
-  ): Promise<{ job: StoredProvisioningJob; setupUrl: string }> {
-    // Re-authorize the recovery identity immediately before asking Supabase
-    // for a bearer link. This catches a completed setup without changing the
-    // job, incrementing attempts, or generating/resetting another recovery.
-    if (!originalJob.auth_user_id) {
-      throw errorFor("auth_identity_mismatch", 409);
-    }
-    const currentUser = await dependencies.getAuthUserById(
-      originalJob.auth_user_id,
-    );
-    if (!currentUser) throw errorFor("auth_identity_mismatch", 409);
-    assertAuthIdentity(currentUser, originalJob);
-    if (currentUser.id !== originalJob.auth_user_id) {
-      throw errorFor("auth_identity_mismatch", 409);
-    }
-
+    originalOperation: ProvisioningOperation,
+  ): Promise<{
+    operation: ProvisioningOperation;
+    setupUrl: string;
+    partner: ProvisioningPartner;
+  }> {
+    let operation = originalOperation;
+    // Revalidate immediately before minting a partner-host bearer URL. The
+    // partner may have been disabled while Auth/business preparation ran.
+    const partner = await loadPartnerForOperation(operation);
+    let attemptedGeneration = false;
+    let mutationOutcomeUnknown = false;
     try {
+      if (!operation.job.auth_user_id) {
+        throw errorFor("auth_identity_mismatch", 409);
+      }
+      const currentUser = await dependencies.getAuthUserById(
+        operation.job.auth_user_id,
+      );
+      if (!currentUser) throw errorFor("auth_identity_mismatch", 409);
+      assertAuthIdentity(currentUser, operation.job);
+      if (currentUser.id !== operation.job.auth_user_id) {
+        throw errorFor("auth_identity_mismatch", 409);
+      }
+      await assertCurrentBusinessAssignment(operation);
+
       const callback = new URL("/api/auth/callback", partner.origin);
+      attemptedGeneration = true;
+      mutationOutcomeUnknown = true;
       const generated = await dependencies.generateRecoveryLink({
-        email: originalJob.email,
+        email: operation.job.email,
         redirectTo: callback.toString(),
       });
-      assertAuthIdentity(generated.user, originalJob);
+      mutationOutcomeUnknown = false;
+      assertAuthIdentity(generated.user, operation.job);
       if (
-        generated.user.id !== originalJob.auth_user_id ||
+        generated.user.id !== operation.job.auth_user_id ||
         generated.verificationType !== "recovery" ||
         !generated.hashedToken
       ) {
@@ -550,82 +870,107 @@ export function createClientProvisioningService(
       callback.searchParams.set("token_hash", generated.hashedToken);
       callback.searchParams.set("type", "recovery");
       callback.searchParams.set("flow", "concierge");
-      const job = await dependencies.updateJob(originalJob.id, {
-        status: "invite_pending",
-        last_error_code: null,
-        invite_attempt_count: originalJob.invite_attempt_count + 1,
-      });
-      return { job, setupUrl: callback.toString() };
+      const job = await dependencies.updateJob(
+        operation.job.id,
+        operation.token,
+        {
+          status: "invite_pending",
+          last_error_code: null,
+          invite_attempt_count: operation.job.invite_attempt_count + 1,
+        },
+        false,
+      );
+      operation = { ...operation, job };
+      return { operation, setupUrl: callback.toString(), partner };
     } catch (error) {
+      if (isOperationOwnershipError(error)) throw error;
       const failure =
         error instanceof ClientProvisioningError
           ? error
           : errorFor("link_generation_failed");
-      // A generated response can reveal that setup completed between the
-      // preflight read and link generation. Preserve the durable job exactly
-      // in that race; the unused bearer URL is neither returned nor sent.
-      if (failure.code !== "setup_already_completed") {
-        try {
-          await dependencies.updateJob(originalJob.id, {
-            status: "invite_pending",
-            last_error_code: failure.code,
-            invite_attempt_count: originalJob.invite_attempt_count + 1,
-          });
-        } catch {
-          // The original stage remains resumable even if failure recording is
-          // unavailable. Never surface provider details to the route.
-        }
+      if (failure.code === "setup_already_completed") {
+        await releaseOperationOrFailUnknown(dependencies, operation);
+        throw failure;
       }
-      throw failure;
+      return recordOperationFailure(
+        dependencies,
+        operation,
+        failure,
+        attemptedGeneration ? "invite_pending" : "needs_attention",
+        !mutationOutcomeUnknown,
+        attemptedGeneration
+          ? {
+              invite_attempt_count: operation.job.invite_attempt_count + 1,
+            }
+          : {},
+      );
     }
   }
 
   async function finishManualSetup(
-    originalJob: StoredProvisioningJob,
-    partner: ProvisioningPartner,
+    operation: ProvisioningOperation,
   ): Promise<ProvisioningRouteResponse> {
-    const generated = await generateSetupUrl(originalJob, partner);
-    const job = await dependencies.updateJob(generated.job.id, {
-      status: "admin_setup",
-      last_error_code: null,
-    });
-    return { provisioning: publicJob(job, partner), adminSetupUrl: generated.setupUrl };
+    const generated = await generateSetupUrl(operation);
+    const job = await releaseOperationOrFailUnknown(
+      dependencies,
+      generated.operation,
+      { status: "admin_setup", last_error_code: null },
+    );
+    return {
+      provisioning: publicJob(job, generated.partner),
+      adminSetupUrl: generated.setupUrl,
+    };
   }
 
   async function finishEmailSetup(
-    originalJob: StoredProvisioningJob,
-    partner: ProvisioningPartner,
+    operation: ProvisioningOperation,
   ): Promise<SetupEmailRouteResponse> {
-    const generated = await generateSetupUrl(originalJob, partner);
+    const generated = await generateSetupUrl(operation);
+    let sendOutcomeUnknown = false;
     try {
-      if (!generated.job.business_id) {
-        throw errorFor("business_identity_mismatch", 409);
-      }
+      await assertCurrentBusinessAssignment(generated.operation);
+      sendOutcomeUnknown = true;
       await dependencies.sendSetupEmail({
-        businessId: generated.job.business_id,
-        businessName: generated.job.requested_business_name,
-        recipient: generated.job.email,
+        businessId: generated.operation.job.business_id!,
+        businessName: generated.operation.job.requested_business_name,
+        recipient: generated.operation.job.email,
         setupUrl: generated.setupUrl,
       });
-      const job = await dependencies.updateJob(generated.job.id, {
-        status: "setup_email_sent",
-        last_error_code: null,
-        setup_email_sent_at: dependencies.now(),
-      });
-      return { provisioning: publicJob(job, partner) };
+      sendOutcomeUnknown = false;
+      const job = await releaseOperationOrFailUnknown(
+        dependencies,
+        generated.operation,
+        {
+          status: "setup_email_sent",
+          last_error_code: null,
+          setup_email_sent_at: dependencies.now(),
+        },
+      );
+      return { provisioning: publicJob(job, generated.partner) };
     } catch (error) {
+      if (isOperationOwnershipError(error)) throw error;
       const failure =
         error instanceof ClientProvisioningError
           ? error
           : errorFor("setup_email_failed");
-      await bestEffortFailure(
+      return recordOperationFailure(
         dependencies,
-        generated.job,
-        failure.code,
+        generated.operation,
+        failure,
         "invite_pending",
+        !sendOutcomeUnknown,
       );
-      throw failure;
     }
+  }
+
+  async function handOffToEmailOperation(
+    operation: ProvisioningOperation,
+  ): Promise<ProvisioningOperation> {
+    const released = await releaseOperationOrFailUnknown(
+      dependencies,
+      operation,
+    );
+    return claim(released, "send_setup", false);
   }
 
   return {
@@ -642,26 +987,34 @@ export function createClientProvisioningService(
       try {
         // Validate before inserting a durable provisioning job so stale,
         // disconnected, or malformed partner configuration leaves no job.
-        const partner = validatePartner(
-          await dependencies.loadPartner(input.partnerId),
-        );
+        validatePartner(await dependencies.loadPartner(input.partnerId));
         const loaded = await dependencies.createOrLoadJob(input, adminId);
         provisioningId = loaded.job.id;
+        if (loaded.job.status === "dismissed") {
+          throw errorFor("job_dismissed", 409);
+        }
         assertJobMatchesInput(loaded.job, input);
         const startingStatus = loaded.job.status;
-        const job = await prepare(loaded.job, adminId);
+        let operation = await claim(loaded.job, "provision", false);
+        const partnerForClaimedJob = await loadPartnerForOperation(operation);
+        operation = await prepare(operation, adminId);
 
         if (input.sendSetupEmailNow) {
           if (!loaded.created && startingStatus === "setup_email_sent") {
-            return { provisioning: publicJob(job, partner) };
+            const job = await releaseOperationOrFailUnknown(
+              dependencies,
+              operation,
+            );
+            return { provisioning: publicJob(job, partnerForClaimedJob) };
           }
-          return await finishEmailSetup(job, partner);
+          const emailOperation = await handOffToEmailOperation(operation);
+          return await finishEmailSetup(emailOperation);
         }
 
         // Manual setup URLs are deliberately memory-only. Every create/resume
         // request in manual mode generates a fresh URL so a lost response is
         // recoverable without storing the bearer token.
-        return await finishManualSetup(job, partner);
+        return await finishManualSetup(operation);
       } catch (error) {
         throw provisioningId
           ? withProvisioningId(error, provisioningId)
@@ -675,16 +1028,23 @@ export function createClientProvisioningService(
       adminId: string,
     ): Promise<ProvisioningRouteResponse> {
       try {
-        const loaded = await loadValidatedJob(id);
-        const startingStatus = loaded.job.status;
-        const job = await prepare(loaded.job, adminId);
+        const job = await loadJob(id);
+        const startingStatus = job.status;
+        let operation = await claim(job, "retry", true);
+        const partner = await loadPartnerForOperation(operation);
+        operation = await prepare(operation, adminId);
         if (input.sendSetupEmailNow) {
           if (startingStatus === "setup_email_sent") {
-            return { provisioning: publicJob(job, loaded.partner) };
+            const released = await releaseOperationOrFailUnknown(
+              dependencies,
+              operation,
+            );
+            return { provisioning: publicJob(released, partner) };
           }
-          return await finishEmailSetup(job, loaded.partner);
+          const emailOperation = await handOffToEmailOperation(operation);
+          return await finishEmailSetup(emailOperation);
         }
-        return await finishManualSetup(job, loaded.partner);
+        return await finishManualSetup(operation);
       } catch (error) {
         throw withProvisioningId(error, id);
       }
@@ -695,9 +1055,11 @@ export function createClientProvisioningService(
       adminId: string,
     ): Promise<SetupEmailRouteResponse> {
       try {
-        const loaded = await loadValidatedJob(id);
-        const job = await prepare(loaded.job, adminId);
-        return await finishEmailSetup(job, loaded.partner);
+        const job = await loadJob(id);
+        let operation = await claim(job, "send_setup", false);
+        await loadPartnerForOperation(operation);
+        operation = await prepare(operation, adminId);
+        return await finishEmailSetup(operation);
       } catch (error) {
         throw withProvisioningId(error, id);
       }
@@ -731,16 +1093,25 @@ function authUser(user: User): ProvisioningAuthUser {
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(
-    error && typeof error === "object" && "code" in error && error.code === "23505",
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "23505",
   );
 }
 
 function isEmailExistsError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
   const message =
-    "message" in error && typeof error.message === "string" ? error.message : "";
-  return code === "email_exists" || /already (?:been )?registered|already exists/i.test(message);
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  return (
+    code === "email_exists" ||
+    /already (?:been )?registered|already exists/i.test(message)
+  );
 }
 
 export function conciergeAuthCreatePayload(input: {
@@ -764,7 +1135,8 @@ function rpcConflictCode(error: unknown): AssignmentErrorCode {
     error && typeof error === "object"
       ? ["message", "details", "hint"]
           .map((key) =>
-            key in error && typeof (error as Record<string, unknown>)[key] === "string"
+            key in error &&
+            typeof (error as Record<string, unknown>)[key] === "string"
               ? (error as Record<string, string>)[key]
               : "",
           )
@@ -779,6 +1151,34 @@ function rpcConflictCode(error: unknown): AssignmentErrorCode {
     if (new RegExp(`\\b${code}\\b`).test(text)) return code;
   }
   return "assignment_failed";
+}
+
+function provisioningOperationError(error: unknown): ClientProvisioningError {
+  const text =
+    error && typeof error === "object"
+      ? ["message", "details", "hint"]
+          .map((key) =>
+            key in error &&
+            typeof (error as Record<string, unknown>)[key] === "string"
+              ? (error as Record<string, string>)[key]
+              : "",
+          )
+          .join(" ")
+      : "";
+  for (const code of [
+    "job_dismissed",
+    "provisioning_in_progress",
+    "provisioning_outcome_unknown",
+    "auth_identity_mismatch",
+  ] as const) {
+    if (new RegExp(`\\b${code}\\b`).test(text)) {
+      return errorFor(code, 409);
+    }
+  }
+  if (/\bprovisioning_job_not_found\b/.test(text)) {
+    return errorFor("job_not_found", 404);
+  }
+  return errorFor("provisioning_outcome_unknown", 409);
 }
 
 const defaultDependencies: ClientProvisioningDependencies = {
@@ -821,14 +1221,59 @@ const defaultDependencies: ClientProvisioningDependencies = {
     return result.data ? parseStoredJob(result.data) : null;
   },
 
-  async updateJob(id, patch) {
+  async claimOperation(input) {
+    const result = await supabaseAdmin.rpc(
+      "claim_partner_client_provisioning_operation",
+      {
+        p_job_id: input.jobId,
+        p_operation_kind: input.kind,
+        p_operation_token: input.token,
+        p_reconciled_operation_token: input.reconciledToken,
+        p_now: input.now,
+      },
+    );
+    if (result.error) throw provisioningOperationError(result.error);
+    const row = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!row) throw errorFor("provisioning_outcome_unknown", 409);
+    const job = parseStoredJob(row);
+    if (
+      job.id !== input.jobId ||
+      job.operation_token !== input.token ||
+      job.operation_kind !== input.kind
+    ) {
+      throw errorFor("provisioning_outcome_unknown", 409);
+    }
+    return job;
+  },
+
+  async updateJob(id, operationToken, patch, release) {
+    const checkedAt = new Date().toISOString();
+    const operationPatch = release
+      ? {
+          operation_token: null,
+          operation_kind: null,
+          operation_started_at: null,
+          operation_expires_at: null,
+        }
+      : {
+          operation_expires_at: new Date(
+            Date.parse(checkedAt) + 15 * 60 * 1000,
+          ).toISOString(),
+        };
     const result = await supabaseAdmin
       .from("partner_client_provisioning_jobs")
-      .update(patch)
+      .update({ ...patch, ...operationPatch })
       .eq("id", id)
+      .eq("operation_token", operationToken)
+      .gt("operation_expires_at", checkedAt)
       .select(JOB_COLUMNS)
-      .single();
-    if (result.error) throw result.error;
+      .maybeSingle();
+    if (result.error) {
+      throw errorFor("provisioning_outcome_unknown", 409);
+    }
+    if (!result.data) {
+      throw errorFor("provisioning_outcome_unknown", 409);
+    }
     return parseStoredJob(result.data);
   },
 
@@ -886,7 +1331,9 @@ const defaultDependencies: ClientProvisioningDependencies = {
   async loadBusinessesByOwner(ownerId) {
     const result = await supabaseAdmin
       .from("businesses")
-      .select("id,owner_id,name,partner_id,billing_mode,partner_plan,deleted_at")
+      .select(
+        "id,owner_id,name,partner_id,billing_mode,partner_plan,deleted_at",
+      )
       .eq("owner_id", ownerId)
       .is("deleted_at", null);
     if (result.error) throw result.error;
@@ -947,6 +1394,7 @@ const defaultDependencies: ClientProvisioningDependencies = {
 
   sendSetupEmail: sendConciergeSetupEmail,
   randomPassword: () => `${randomBytes(48).toString("base64url")}Aa1!`,
+  randomOperationToken: () => randomUUID(),
   now: () => new Date().toISOString(),
 };
 

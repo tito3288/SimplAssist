@@ -49,6 +49,7 @@ export function Modal({ open, onClose, title, description, children }: ModalProp
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="text-stone-400 dark:text-[#bdbdbf] hover:text-stone-600 dark:hover:text-white transition-colors"
           >

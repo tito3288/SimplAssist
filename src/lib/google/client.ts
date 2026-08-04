@@ -1,5 +1,6 @@
 import { OAuth2Client, type Credentials } from "google-auth-library";
 import { google, calendar_v3 } from "googleapis";
+import { getCanonicalAppOrigin } from "@/lib/branding/defaultBrand";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const SCOPES = [
@@ -10,62 +11,71 @@ const SCOPES = [
 ];
 
 export { SCOPES };
-export const GOOGLE_OAUTH_NONCE_COOKIE = "sa_google_calendar_oauth_nonce";
-export const GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS = 10 * 60;
+export const GOOGLE_OAUTH_ORIGIN_COOKIE = "sa_google_calendar_oauth_origin";
+export const GOOGLE_OAUTH_MAX_AGE_SECONDS = 10 * 60;
 
-export interface GoogleOAuthState {
-  businessId: string;
-  nonce: string;
+const OPAQUE_OAUTH_STATE = /^[A-Za-z0-9_-]{43}$/;
+
+export function getCanonicalGoogleRedirectUri(): string {
+  const expected = `${getCanonicalAppOrigin()}/api/google/callback`;
+  const configured = process.env.GOOGLE_REDIRECT_URI;
+
+  if (!configured || configured !== configured.trim()) {
+    throw new Error("Google OAuth redirect URI is not configured");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error("Google OAuth redirect URI is invalid");
+  }
+
+  if (
+    configured !== expected ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error(
+      "Google OAuth redirect URI must use the canonical callback",
+    );
+  }
+
+  return expected;
 }
 
 export function getGoogleOAuth2Client(): OAuth2Client {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("Google OAuth credentials are not configured");
+  }
+
   return new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID!,
-    process.env.GOOGLE_CLIENT_SECRET!,
-    process.env.GOOGLE_REDIRECT_URI!
+    clientId,
+    clientSecret,
+    getCanonicalGoogleRedirectUri(),
   );
 }
 
-export function encodeGoogleOAuthState(state: GoogleOAuthState): string {
-  return Buffer.from(
-    JSON.stringify({
-      version: 1,
-      businessId: state.businessId,
-      nonce: state.nonce,
-    })
-  ).toString("base64url");
-}
-
-export function decodeGoogleOAuthState(value: string): GoogleOAuthState | null {
-  try {
-    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf-8"));
-    if (
-      decoded?.version !== 1 ||
-      typeof decoded.businessId !== "string" ||
-      decoded.businessId.length === 0 ||
-      typeof decoded.nonce !== "string" ||
-      decoded.nonce.length < 32
-    ) {
-      return null;
-    }
-    return { businessId: decoded.businessId, nonce: decoded.nonce };
-  } catch {
-    return null;
+export function generateAuthUrl(state: string): string {
+  if (!OPAQUE_OAUTH_STATE.test(state)) {
+    throw new Error("Google OAuth state is invalid");
   }
-}
 
-export function generateAuthUrl(businessId: string, nonce: string): string {
   const client = getGoogleOAuth2Client();
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES,
-    state: encodeGoogleOAuthState({ businessId, nonce }),
+    state,
   });
 }
 
 export async function getAuthenticatedClient(
-  businessId: string
+  businessId: string,
 ): Promise<OAuth2Client | null> {
   const { data: token, error: tokenError } = await supabaseAdmin
     .from("google_calendar_tokens")
@@ -75,7 +85,7 @@ export async function getAuthenticatedClient(
 
   if (tokenError) {
     throw new Error(
-      `Failed to load Google Calendar credentials: ${tokenError.message}`
+      `Failed to load Google Calendar credentials: ${tokenError.message}`,
     );
   }
 
@@ -117,7 +127,7 @@ export async function getAuthenticatedClient(
 
     if (updateError) {
       throw new Error(
-        `Failed to save refreshed Google Calendar credentials: ${updateError.message}`
+        `Failed to save refreshed Google Calendar credentials: ${updateError.message}`,
       );
     }
   }
@@ -125,8 +135,6 @@ export async function getAuthenticatedClient(
   return client;
 }
 
-export function getCalendarService(
-  client: OAuth2Client
-): calendar_v3.Calendar {
+export function getCalendarService(client: OAuth2Client): calendar_v3.Calendar {
   return google.calendar({ version: "v3", auth: client });
 }

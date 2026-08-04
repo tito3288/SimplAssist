@@ -41,6 +41,7 @@ export const provisioningStatusSchema = z.enum([
   "invite_pending",
   "setup_email_sent",
   "needs_attention",
+  "dismissed",
 ]);
 
 export type ProvisioningStatus = z.infer<typeof provisioningStatusSchema>;
@@ -54,6 +55,7 @@ export const PROVISIONING_STATUS_PRESENTATION = {
   invite_pending: { label: "Setup delivery needs attention", tone: "danger" },
   setup_email_sent: { label: "Setup email sent", tone: "success" },
   needs_attention: { label: "Needs attention", tone: "danger" },
+  dismissed: { label: "Dismissed", tone: "neutral" },
 } as const satisfies Record<
   ProvisioningStatus,
   {
@@ -82,14 +84,132 @@ export const publicProvisioningJobSchema = z
   })
   .strict();
 
+export const provisioningPartnerAvailabilitySchema = z.enum([
+  "active_connected",
+  "inactive",
+  "domain_pending",
+  "unavailable",
+]);
+
+export const provisioningOperationStateSchema = z.enum([
+  "idle",
+  "active",
+  "unknown",
+]);
+
+export const provisioningDismissalStateSchema = z.enum([
+  "dismissible",
+  "restore",
+  "has_resources",
+  "in_progress",
+  "outcome_unknown",
+  "not_dismissible",
+]);
+
+const httpsOriginSchema = z.string().refine((value) => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      url.origin === value &&
+      url.pathname === "/" &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+});
+
+export const adminProvisioningRecordSchema = z
+  .object({
+    provisioning: publicProvisioningJobSchema,
+    accountBusinessId: z.string().uuid().nullable(),
+    partnerAvailability: provisioningPartnerAvailabilitySchema,
+    partnerOrigin: httpsOriginSchema.nullable(),
+    operationState: provisioningOperationStateSchema,
+    dismissalState: provisioningDismissalStateSchema,
+    dismissedAt: z.string().nullable(),
+  })
+  .strict()
+  .superRefine((record, context) => {
+    if (
+      (record.provisioning.businessId !== null &&
+        record.accountBusinessId !== record.provisioning.businessId) ||
+      (record.provisioning.businessId === null &&
+        record.provisioning.authUserId === null &&
+        record.accountBusinessId !== null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Account business linkage is inconsistent",
+      });
+    }
+    if (
+      (record.partnerAvailability === "active_connected") !==
+      (record.partnerOrigin !== null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Partner availability is inconsistent",
+      });
+    }
+    if (
+      (record.provisioning.status === "dismissed") !==
+        (record.dismissedAt !== null) ||
+      (record.provisioning.status === "dismissed") !==
+        (record.dismissalState === "restore")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Dismissal state is inconsistent",
+      });
+    }
+    if (
+      (record.operationState === "active") !==
+      (record.dismissalState === "in_progress")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Active operation state is inconsistent",
+      });
+    }
+    if (
+      (record.operationState === "unknown") !==
+      (record.dismissalState === "outcome_unknown")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Unknown operation state is inconsistent",
+      });
+    }
+  });
+
+export const provisioningLifecycleResponseSchema = z
+  .object({
+    provisioningId: z.string().uuid(),
+    status: provisioningStatusSchema,
+  })
+  .strict();
+
 export type CreatePartnerClientInput = z.infer<
   typeof createPartnerClientSchema
 >;
-export type RetryPartnerClientInput = z.infer<
-  typeof retryPartnerClientSchema
+export type RetryPartnerClientInput = z.infer<typeof retryPartnerClientSchema>;
+export type PublicProvisioningJob = z.infer<typeof publicProvisioningJobSchema>;
+export type AdminProvisioningRecord = z.infer<
+  typeof adminProvisioningRecordSchema
 >;
-export type PublicProvisioningJob = z.infer<
-  typeof publicProvisioningJobSchema
+export type ProvisioningPartnerAvailability = z.infer<
+  typeof provisioningPartnerAvailabilitySchema
+>;
+export type ProvisioningDismissalState = z.infer<
+  typeof provisioningDismissalStateSchema
+>;
+export type ProvisioningLifecycleResponse = z.infer<
+  typeof provisioningLifecycleResponseSchema
 >;
 
 export type ProvisioningRouteResponse = {

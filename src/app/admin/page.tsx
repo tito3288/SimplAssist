@@ -1,9 +1,22 @@
 import Link from "next/link";
-import { body, bodyFaint, card, statusDanger, statusNeutral, tile } from "@/lib/theme-v2/theme";
+import {
+  body,
+  bodyFaint,
+  card,
+  statusDanger,
+  statusNeutral,
+  statusWarning,
+  tile,
+} from "@/lib/theme-v2/theme";
+import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
-import type { A2pRiskReviewStatus, SubscriptionPlan, SubscriptionStatus } from "@/types/database";
+import type {
+  A2pRiskReviewStatus,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +35,8 @@ type BusinessRow = {
   billing_exempt: boolean;
   telnyx_submission_disabled: boolean;
   sms_overage_opt_in: boolean;
+  deleted_at: string | null;
+  deletion_scheduled_for: string | null;
   created_at: string;
 };
 
@@ -47,13 +62,21 @@ export default async function AdminPage() {
   const { data: businesses } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, website_url, business_type, a2p_risk_review_status, a2p_risk_review_message, onboarding_registration_status, brand_status, campaign_status, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, created_at"
+      "id, name, website_url, business_type, a2p_risk_review_status, a2p_risk_review_message, onboarding_registration_status, brand_status, campaign_status, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, deleted_at, deletion_scheduled_for, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(75)
     .returns<BusinessRow[]>();
 
-  const businessIds = (businesses ?? []).map((business) => business.id);
+  const businessIds = (businesses ?? [])
+    .filter(
+      (business) =>
+        getAdminBusinessLifecycle({
+          deletedAt: business.deleted_at,
+          deletionScheduledFor: business.deletion_scheduled_for,
+        }) !== "terminal",
+    )
+    .map((business) => business.id);
   const [{ data: subscriptions }, { data: usageRows }] = await Promise.all([
     businessIds.length > 0
       ? supabaseAdmin
@@ -66,7 +89,7 @@ export default async function AdminPage() {
       ? supabaseAdmin
           .from("billing_usage_periods")
           .select(
-            "business_id, included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start"
+            "business_id, included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start",
           )
           .in("business_id", businessIds)
           .order("period_start", { ascending: false })
@@ -78,7 +101,7 @@ export default async function AdminPage() {
     (subscriptions ?? []).map((subscription) => [
       subscription.business_id,
       subscription,
-    ])
+    ]),
   );
   const latestUsageByBusiness = new Map<string, UsageRow>();
   for (const row of usageRows ?? []) {
@@ -87,12 +110,19 @@ export default async function AdminPage() {
     }
   }
 
-  const reviewQueue = (businesses ?? []).filter((business) =>
-    ["pending_review", "blocked", "admin_approved"].includes(
-      business.a2p_risk_review_status ?? ""
-    )
+  const activeBusinesses = (businesses ?? []).filter(
+    (business) =>
+      getAdminBusinessLifecycle({
+        deletedAt: business.deleted_at,
+        deletionScheduledFor: business.deletion_scheduled_for,
+      }) === "active",
   );
-  const highUsage = (businesses ?? []).filter((business) => {
+  const reviewQueue = activeBusinesses.filter((business) =>
+    ["pending_review", "blocked", "admin_approved"].includes(
+      business.a2p_risk_review_status ?? "",
+    ),
+  );
+  const highUsage = activeBusinesses.filter((business) => {
     const usage = latestUsageByBusiness.get(business.id);
     if (!usage || usage.included_sms_parts <= 0) return false;
     return (
@@ -121,6 +151,10 @@ export default async function AdminPage() {
         <h2 className="text-lg font-semibold">Accounts</h2>
         <div className={`overflow-hidden ${card}`}>
           {(businesses ?? []).map((business) => {
+            const lifecycle = getAdminBusinessLifecycle({
+              deletedAt: business.deleted_at,
+              deletionScheduledFor: business.deletion_scheduled_for,
+            });
             const subscription = subscriptionByBusiness.get(business.id);
             const usage = latestUsageByBusiness.get(business.id);
             const used = usage
@@ -129,8 +163,9 @@ export default async function AdminPage() {
             const included = usage?.included_sms_parts ?? 0;
             const usagePercent =
               included > 0 ? Math.round((used / included) * 100) : 0;
-            const revenue =
-              subscription?.plan ? SUBSCRIPTION_PLANS[subscription.plan].price : 0;
+            const revenue = subscription?.plan
+              ? SUBSCRIPTION_PLANS[subscription.plan].price
+              : 0;
             const estimatedSmsCost = used * 0.01;
             const roughMargin = revenue - estimatedSmsCost - 10;
 
@@ -144,23 +179,62 @@ export default async function AdminPage() {
                   <div>
                     <p className="font-medium">{business.name}</p>
                     <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
-                      {business.website_url ?? "No website"} · {business.business_type ?? "unknown"}
+                      {business.website_url ?? "No website"} ·{" "}
+                      {business.business_type ?? "unknown"}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Badge>Risk: {business.a2p_risk_review_status ?? "not_started"}</Badge>
-                      <Badge>Brand: {business.brand_status ?? "not submitted"}</Badge>
-                      <Badge>Campaign: {business.campaign_status ?? "not submitted"}</Badge>
-                      {business.telnyx_submission_disabled && <Badge tone="danger">No Telnyx submit</Badge>}
-                      {business.billing_pilot && <Badge>Pilot</Badge>}
-                      {business.billing_comped && <Badge>Comped</Badge>}
-                      {business.billing_exempt && <Badge>Billing exempt</Badge>}
+                      {lifecycle === "terminal" ? (
+                        <Badge tone="danger">Terminally cleaned</Badge>
+                      ) : (
+                        <>
+                          <Badge>
+                            Risk:{" "}
+                            {business.a2p_risk_review_status ?? "not_started"}
+                          </Badge>
+                          <Badge>
+                            Brand: {business.brand_status ?? "not submitted"}
+                          </Badge>
+                          <Badge>
+                            Campaign:{" "}
+                            {business.campaign_status ?? "not submitted"}
+                          </Badge>
+                          {business.telnyx_submission_disabled && (
+                            <Badge tone="danger">No Telnyx submit</Badge>
+                          )}
+                          {business.billing_pilot && <Badge>Pilot</Badge>}
+                          {business.billing_comped && <Badge>Comped</Badge>}
+                          {business.billing_exempt && (
+                            <Badge>Billing exempt</Badge>
+                          )}
+                          {lifecycle === "scheduled" && (
+                            <Badge tone="warning">
+                              Deletion scheduled
+                              {business.deletion_scheduled_for
+                                ? ` · ${formatDate(business.deletion_scheduled_for)}`
+                                : ""}
+                            </Badge>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className={`text-sm ${body} md:text-right`}>
-                    <p>{subscription?.plan ?? "no plan"} · {subscription?.status ?? "no subscription"}</p>
-                    <p>{used.toLocaleString()} / {included.toLocaleString()} SMS parts ({usagePercent}%)</p>
-                    <p>Rough margin: ${roughMargin.toFixed(2)}</p>
-                  </div>
+                  {lifecycle === "terminal" ? (
+                    <div className={`text-sm ${body} md:text-right`}>
+                      <p>Read-only retained tombstone</p>
+                    </div>
+                  ) : (
+                    <div className={`text-sm ${body} md:text-right`}>
+                      <p>
+                        {subscription?.plan ?? "no plan"} ·{" "}
+                        {subscription?.status ?? "no subscription"}
+                      </p>
+                      <p>
+                        {used.toLocaleString()} / {included.toLocaleString()}{" "}
+                        SMS parts ({usagePercent}%)
+                      </p>
+                      <p>Rough margin: ${roughMargin.toFixed(2)}</p>
+                    </div>
+                  )}
                 </div>
               </Link>
             );
@@ -185,15 +259,23 @@ function Badge({
   tone = "default",
 }: {
   children: React.ReactNode;
-  tone?: "default" | "danger";
+  tone?: "default" | "danger" | "warning";
 }) {
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs ${
-        tone === "danger" ? statusDanger : statusNeutral
+        tone === "danger"
+          ? statusDanger
+          : tone === "warning"
+            ? statusWarning
+            : statusNeutral
       }`}
     >
       {children}
     </span>
   );
+}
+
+function formatDate(value: string): string {
+  return new Date(value).toLocaleDateString();
 }

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  reconcileAccountDeletionStripeActionLazily,
+  type AccountDeletionStripeReconcileResult,
+} from "@/lib/account/deletion.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { reconcilePendingCalendarBookings } from "@/lib/google/bookingReconciler";
-import { reconcileAccountDeletionStripeAction } from "@/lib/stripe/accountDeletionReconciler";
+import { purgeExpiredGoogleCalendarOAuthAttempts } from "@/lib/google/oauthAttempt.server";
 
 const CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
 
@@ -57,6 +61,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // OAuth state, verifier, handoff, and authorization codes are short-lived.
+  // Keep their private rows bounded even when no new OAuth attempt invokes
+  // the creation-time purge.
+  try {
+    await purgeExpiredGoogleCalendarOAuthAttempts();
+  } catch {
+    console.error("[cleanup] Google OAuth attempt purge failed");
+  }
+
   const { data: expiredBusinesses, error: queryError } = await supabaseAdmin
     .from("businesses")
     .select("id")
@@ -65,15 +78,20 @@ export async function POST(request: NextRequest) {
 
   if (queryError) {
     console.error("[cleanup] Query error:", queryError);
-    return NextResponse.json({ error: "Failed to query expired accounts" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to query expired accounts" },
+      { status: 500 },
+    );
   }
 
   const expiredBusinessIds = new Set(
-    (expiredBusinesses ?? []).map((business) => business.id)
+    (expiredBusinesses ?? []).map((business) => business.id),
   );
   const failedIds = new Set<string>();
   const fail = (businessId: string, step: string, detail: string) => {
-    console.error(`[cleanup] ${step} failed for business ${businessId}: ${detail}`);
+    console.error(
+      `[cleanup] ${step} failed for business ${businessId}: ${detail}`,
+    );
     failedIds.add(businessId);
   };
 
@@ -84,10 +102,13 @@ export async function POST(request: NextRequest) {
     .in("status", ["pending", "blocked"]);
 
   if (graceActionError) {
-    console.error("[cleanup] Grace-period Stripe action query error:", graceActionError);
+    console.error(
+      "[cleanup] Grace-period Stripe action query error:",
+      graceActionError,
+    );
     return NextResponse.json(
       { error: "Failed to query pending Stripe billing actions" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -97,7 +118,7 @@ export async function POST(request: NextRequest) {
       console.error("[cleanup] Invalid grace-period Stripe action payload");
       return NextResponse.json(
         { error: "Invalid pending Stripe billing action" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -110,13 +131,13 @@ export async function POST(request: NextRequest) {
       fail(
         action.businessId,
         `Stripe ${action.desiredAction}`,
-        action.lastErrorCode ? `blocked (${action.lastErrorCode})` : "blocked"
+        action.lastErrorCode ? `blocked (${action.lastErrorCode})` : "blocked",
       );
       continue;
     }
 
     try {
-      const result = await reconcileAccountDeletionStripeAction({
+      const result = await reconcileAccountDeletionStripeActionLazily({
         businessId: action.businessId,
         generation: action.generation,
       });
@@ -136,14 +157,14 @@ export async function POST(request: NextRequest) {
         fail(
           action.businessId,
           `Stripe ${action.desiredAction}`,
-          reconciliationFailureDetail(result)
+          reconciliationFailureDetail(result),
         );
       }
     } catch (stripeError) {
       fail(
         action.businessId,
         `Stripe ${action.desiredAction}`,
-        errorMessage(stripeError)
+        errorMessage(stripeError),
       );
     }
   }
@@ -156,7 +177,9 @@ export async function POST(request: NextRequest) {
 
     // 0. Claim — compare-and-swap on cleanup_attempted_at. Zero rows means
     //    another run holds this business: skip, not a failure.
-    const claimCutoff = new Date(Date.now() - CLAIM_STALE_AFTER_MS).toISOString();
+    const claimCutoff = new Date(
+      Date.now() - CLAIM_STALE_AFTER_MS,
+    ).toISOString();
     const { data: claimed, error: claimError } = await supabaseAdmin
       .from("businesses")
       .update({ cleanup_attempted_at: new Date().toISOString() })
@@ -168,16 +191,18 @@ export async function POST(request: NextRequest) {
       continue;
     }
     if (!claimed || claimed.length === 0) {
-      console.log(`[cleanup] Business ${business.id} is claimed by another run, skipping`);
+      console.log(
+        `[cleanup] Business ${business.id} is claimed by another run, skipping`,
+      );
       continue;
     }
 
     // 1. Atomic DB teardown — everything or nothing. Returns the auth user
     //    that still needs deletion (null when none remains).
-    const { data: pendingAuthUserId, error: rpcError } = await supabaseAdmin.rpc(
-      "cleanup_expired_business",
-      { p_business_id: business.id }
-    );
+    const { data: pendingAuthUserId, error: rpcError } =
+      await supabaseAdmin.rpc("cleanup_expired_business", {
+        p_business_id: business.id,
+      });
     if (rpcError) {
       failBusiness("cleanup RPC", rpcError.message);
       continue;
@@ -196,7 +221,7 @@ export async function POST(request: NextRequest) {
     const { data: actionData, error: actionError } = await supabaseAdmin
       .from("account_deletion_stripe_actions")
       .select(
-        "business_id, desired_action, generation, status, applied_action, last_error_code"
+        "business_id, desired_action, generation, status, applied_action, last_error_code",
       )
       .eq("business_id", business.id)
       .maybeSingle();
@@ -209,7 +234,10 @@ export async function POST(request: NextRequest) {
       ? parseCleanupStripeAction(actionData, business.id)
       : null;
     if (actionData && !stripeAction) {
-      failBusiness("Stripe action query", "invalid cancellation action payload");
+      failBusiness(
+        "Stripe action query",
+        "invalid cancellation action payload",
+      );
       continue;
     }
 
@@ -218,20 +246,23 @@ export async function POST(request: NextRequest) {
         "Stripe cancellation",
         stripeAction.lastErrorCode
           ? `blocked (${stripeAction.lastErrorCode})`
-          : "blocked"
+          : "blocked",
       );
       continue;
     }
 
     if (stripeAction?.status === "pending") {
       try {
-        const result = await reconcileAccountDeletionStripeAction({
+        const result = await reconcileAccountDeletionStripeActionLazily({
           businessId: business.id,
           generation: stripeAction.generation,
         });
 
         if (result.outcome !== "applied" || result.appliedAction !== "cancel") {
-          failBusiness("Stripe cancellation", reconciliationFailureDetail(result));
+          failBusiness(
+            "Stripe cancellation",
+            reconciliationFailureDetail(result),
+          );
           continue;
         }
       } catch (stripeError) {
@@ -244,9 +275,8 @@ export async function POST(request: NextRequest) {
     //    linkage column survives, so the next run retries the deletion —
     //    no restore path needed.
     if (pendingAuthUserId) {
-      const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(
-        pendingAuthUserId
-      );
+      const { error: authError } =
+        await supabaseAdmin.auth.admin.deleteUser(pendingAuthUserId);
       if (authError && authError.status !== 404) {
         failBusiness("auth user delete", authError.message);
         continue;
@@ -261,12 +291,12 @@ export async function POST(request: NextRequest) {
       {
         p_business_id: business.id,
         p_generation: stripeAction?.generation ?? null,
-      }
+      },
     );
     if (completionError || completed !== true) {
       failBusiness(
         "completion RPC",
-        completionError?.message ?? "invalid completion response"
+        completionError?.message ?? "invalid completion response",
       );
       continue;
     }
@@ -317,7 +347,7 @@ function parseGraceStripeAction(value: unknown): GraceStripeAction | null {
 
 function parseCleanupStripeAction(
   value: unknown,
-  expectedBusinessId: string
+  expectedBusinessId: string,
 ): CleanupStripeAction | null {
   if (
     !isRecord(value) ||
@@ -345,7 +375,7 @@ function parseCleanupStripeAction(
 }
 
 function reconciliationFailureDetail(
-  result: Awaited<ReturnType<typeof reconcileAccountDeletionStripeAction>>
+  result: AccountDeletionStripeReconcileResult,
 ): string {
   if (result.outcome === "pending" || result.outcome === "blocked") {
     return `${result.outcome} (${result.errorCode})`;
@@ -367,13 +397,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStripeActionStatus(
-  value: unknown
+  value: unknown,
 ): value is CleanupStripeAction["status"] {
   return value === "pending" || value === "applied" || value === "blocked";
 }
 
 function isNullableStripeAction(
-  value: unknown
+  value: unknown,
 ): value is "pause" | "resume" | "cancel" | null {
   return (
     value === null ||

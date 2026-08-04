@@ -70,6 +70,36 @@ describe("ClientProvisioningActions", () => {
     expect(html).not.toContain("token_hash");
   });
 
+  it("disables setup actions when the assigned partner is unavailable", () => {
+    const html = renderToStaticMarkup(
+      <ClientProvisioningActions
+        initialProvisioning={PROVISIONING}
+        expectedPartnerOrigin={null}
+      />,
+    );
+
+    expect(html).toContain("Generate fresh admin setup link");
+    expect(html).toContain("Send fresh setup email");
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).toContain(
+      "Setup-link and email actions require an active partner with a connected domain.",
+    );
+    expect(html).not.toContain("One-time admin setup link");
+  });
+
+  it("defensively disables setup actions for a dismissed job", () => {
+    const html = renderToStaticMarkup(
+      <ClientProvisioningActions
+        initialProvisioning={{ ...PROVISIONING, status: "dismissed" }}
+        expectedPartnerOrigin="https://partner.example.com"
+      />,
+    );
+
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).toContain("Dismissed");
+    expect(html).toContain("This job remains available for inspection");
+  });
+
   it("consumes staged links in an idempotent mount effect", () => {
     const source = readFileSync(
       new URL("./ClientProvisioningActions.tsx", import.meta.url),
@@ -80,10 +110,14 @@ describe("ClientProvisioningActions", () => {
     expect(source).toContain(
       "consumedProvisioningId.current === initialProvisioning.id",
     );
-    expect(source).toContain(
-      "setupLinkTransfer.take(initialProvisioning.id)",
+    expect(source).toContain("setupLinkTransfer.take(initialProvisioning.id)");
+    expect(source.indexOf("setupLinkTransfer.take")).toBeLessThan(
+      source.indexOf("const safeSetupUrl = expectedPartnerOrigin"),
     );
-    expect(source).toContain("if (safeSetupUrl) setAdminSetupUrl(safeSetupUrl)");
+    expect(source).toContain("const safeSetupUrl = expectedPartnerOrigin");
+    expect(source).toContain(
+      "if (safeSetupUrl) setAdminSetupUrl(safeSetupUrl)",
+    );
     expect(source).not.toMatch(
       /useState<string \| null>\(\(\) =>[\s\S]*setupLinkTransfer\.take/,
     );

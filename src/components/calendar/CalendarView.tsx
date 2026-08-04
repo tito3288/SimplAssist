@@ -25,11 +25,9 @@ export interface CalendarEvent {
   allDay: boolean;
   description: string | null;
 }
-
 interface CalendarViewProps {
   isConnected: boolean;
   googleEmail: string | null;
-  oauthConnectSupported?: boolean;
   /** Dev-only demo mode (/demo routes): seed events and skip the Google
    *  Calendar fetch entirely. Real dashboard callers never pass this. */
   demoEvents?: CalendarEvent[];
@@ -88,7 +86,6 @@ function formatMonthYear(date: Date): string {
 export default function CalendarView({
   isConnected: initialConnected,
   googleEmail,
-  oauthConnectSupported = true,
   demoEvents,
 }: CalendarViewProps) {
   const today = new Date();
@@ -207,28 +204,23 @@ export default function CalendarView({
           <CalendarDays className="w-8 h-8 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
         </div>
         <h3 className={`text-lg font-bold mb-2 ${ink}`}>
-          {oauthConnectSupported
-            ? "Connect your Google Calendar"
-            : "Google Calendar connection unavailable"}
+          Connect your Google Calendar
         </h3>
         <p className={`mb-6 max-w-md mx-auto ${body}`}>
-          {oauthConnectSupported
-            ? "Link your Google Calendar to see your appointments and bookings here. Go to Settings and enable Direct Scheduling to connect."
-            : "Connecting or reconnecting Google Calendar is not available on this partner workspace. Existing connections remain available."}
+          Link your Google Calendar to see your appointments and bookings here.
+          Go to Settings and enable Direct Scheduling to connect.
           {googleEmail && (
             <span className="block mt-1 text-sm">
               Previously connected: {googleEmail}
             </span>
           )}
         </p>
-        {oauthConnectSupported && (
-          <a
-            href="/settings"
-            className={`${btnPrimary} w-auto px-8`}
-          >
-            Go to Settings
-          </a>
-        )}
+        <a
+          href="/settings"
+          className={`${btnPrimary} w-auto px-8`}
+        >
+          Go to Settings
+        </a>
       </div>
     );
   }

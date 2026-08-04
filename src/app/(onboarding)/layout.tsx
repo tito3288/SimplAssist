@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getOnboardingStateForOwner } from '@/lib/onboarding/state';
 import { card, pageShell, fontStack, lightAmbient, darkAmbient } from '@/lib/theme-v2/theme';
 import { ThemeToggleV2 } from '@/lib/theme-v2/ui';
+import OnboardingDeleteAccount from '@/components/onboarding/OnboardingDeleteAccount';
 import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
 import { PRIVATE_ROUTE_METADATA } from '@/lib/seo/privateMetadata';
 import { getWorkspaceAccess } from '@/lib/customer/workspaceAccess.server';
@@ -88,6 +89,7 @@ export default async function OnboardingLayout({
 
       <div className="relative z-[1] w-full max-w-[720px]">
         <div className="mb-4 flex items-center justify-end gap-2">
+          <OnboardingDeleteAccount />
           <OnboardingSignOut />
           <ThemeToggleV2 />
         </div>

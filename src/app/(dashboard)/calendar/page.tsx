@@ -9,7 +9,7 @@ import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteRespons
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 
 export default async function CalendarPage() {
-  const workspace = await requireWorkspacePageAccess();
+  await requireWorkspacePageAccess();
   const requestBrand = await getRequestBrand();
   const context = await getDashboardEntitledContext();
   if (context.status === "unauthenticated") redirect("/login");
@@ -71,7 +71,6 @@ export default async function CalendarPage() {
       <CalendarView
         isConnected={!!calendarToken}
         googleEmail={calendarToken?.google_email ?? null}
-        oauthConnectSupported={workspace.hostKind === "canonical"}
       />
     </div>
   );

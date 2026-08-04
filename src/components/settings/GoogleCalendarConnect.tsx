@@ -8,14 +8,11 @@ interface GoogleCalendarConnectProps {
   connectedEmail: string | null;
   isConnected?: boolean;
   canConnect?: boolean;
-  oauthConnectSupported?: boolean;
 }
-
 export default function GoogleCalendarConnect({
   connectedEmail,
   isConnected = connectedEmail !== null,
   canConnect = true,
-  oauthConnectSupported = true,
 }: GoogleCalendarConnectProps) {
   const router = useRouter();
   const [disconnecting, setDisconnecting] = useState(false);
@@ -63,15 +60,6 @@ export default function GoogleCalendarConnect({
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
         </button>
       </div>
-    );
-  }
-
-  if (!oauthConnectSupported) {
-    return (
-      <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
-        Connecting or reconnecting Google Calendar is not available on this
-        partner workspace. Existing connections remain available.
-      </p>
     );
   }
 

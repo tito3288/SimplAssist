@@ -28,7 +28,7 @@ vi.mock("next/headers", () => ({
     get: (name: string) => mocks.requestHeaders.get(name.toLowerCase()) ?? null,
   }),
 }));
-vi.mock("react", () => ({ cache: <Value,>(value: Value) => value }));
+vi.mock("react", () => ({ cache: <Value>(value: Value) => value }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: mocks.getUser },
@@ -67,9 +67,7 @@ vi.mock("@/lib/supabase/admin", () => ({
         if (mocks.partnerThrows) throw new Error("partner lookup failed");
         const id = filters.get("id");
         if (id) {
-          return (
-            mocks.partnerById.get(id) ?? { data: null, error: null }
-          );
+          return mocks.partnerById.get(id) ?? { data: null, error: null };
         }
         const hostname = filters.get("custom_domain");
         return hostname
@@ -104,7 +102,7 @@ beforeEach(() => {
     error: null,
   });
   mocks.businessResult = {
-    data: { id: BUSINESS_ID, partner_id: null },
+    data: { id: BUSINESS_ID, partner_id: null, billing_mode: "stripe" },
     error: null,
   };
   mocks.businessThrows = false;
@@ -120,7 +118,11 @@ describe("getWorkspaceAccess", () => {
   it("provides an explicit fresh policy decision after assignment changes", async () => {
     await expect(getFreshWorkspaceAccess()).resolves.toMatchObject({
       status: "resolved",
-      business: { id: BUSINESS_ID, partner_id: null },
+      business: {
+        id: BUSINESS_ID,
+        partner_id: null,
+        billing_mode: "stripe",
+      },
       hostKind: "canonical",
     });
 
@@ -133,8 +135,8 @@ describe("getWorkspaceAccess", () => {
       expectedName: "Partner A",
     });
     expect(mocks.customerSelects).toEqual([
-      "id, partner_id",
-      "id, partner_id",
+      "id, partner_id, billing_mode",
+      "id, partner_id, billing_mode",
     ]);
   });
 
@@ -155,7 +157,7 @@ describe("getWorkspaceAccess", () => {
     await expect(getWorkspaceAccess()).resolves.toEqual({
       status: "business_not_found",
     });
-    expect(mocks.customerSelects).toEqual(["id, partner_id"]);
+    expect(mocks.customerSelects).toEqual(["id, partner_id, billing_mode"]);
     expect(mocks.customerFilters).toEqual([["owner_id", USER_ID]]);
   });
 
@@ -199,10 +201,34 @@ describe("getWorkspaceAccess", () => {
 
   it.each([
     ["customer query error", { data: null, error: { message: "down" } }],
-    ["malformed business id", { data: { id: "bad", partner_id: null }, error: null }],
+    [
+      "malformed business id",
+      {
+        data: { id: "bad", partner_id: null, billing_mode: "stripe" },
+        error: null,
+      },
+    ],
     [
       "malformed partner id",
-      { data: { id: BUSINESS_ID, partner_id: "bad" }, error: null },
+      {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: "bad",
+          billing_mode: "stripe",
+        },
+        error: null,
+      },
+    ],
+    [
+      "malformed billing mode",
+      {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "free",
+        },
+        error: null,
+      },
     ],
   ])("fails closed for %s", async (_label, businessResult) => {
     mocks.businessResult = businessResult;
@@ -233,16 +259,19 @@ describe("getWorkspaceAccess", () => {
     "SIMPLASSIST.COM",
     "simplassist.com.",
     "simplassist.com:443",
-  ])("allows an unassigned business on normalized canonical Host %s", async (host) => {
-    setHost(host);
+  ])(
+    "allows an unassigned business on normalized canonical Host %s",
+    async (host) => {
+      setHost(host);
 
-    await expect(getWorkspaceAccess()).resolves.toMatchObject({
-      status: "resolved",
-      business: { id: BUSINESS_ID, partner_id: null },
-      hostKind: "canonical",
-    });
-    expect(mocks.partnerSelects).toEqual([]);
-  });
+      await expect(getWorkspaceAccess()).resolves.toMatchObject({
+        status: "resolved",
+        business: { id: BUSINESS_ID, partner_id: null },
+        hostKind: "canonical",
+      });
+      expect(mocks.partnerSelects).toEqual([]);
+    },
+  );
 
   it.each([
     "partner-a.example",
@@ -360,24 +389,27 @@ describe("getWorkspaceAccess", () => {
   it.each([
     ["inactive", partnerA({ status: "inactive" })],
     ["pending", partnerA({ domain_status: "pending" })],
-  ])("makes an assigned %s partner unavailable everywhere", async (_label, partner) => {
-    setBusinessPartner(PARTNER_A_ID);
-    addPartner(partner);
+  ])(
+    "makes an assigned %s partner unavailable everywhere",
+    async (_label, partner) => {
+      setBusinessPartner(PARTNER_A_ID);
+      addPartner(partner);
 
-    await expect(getWorkspaceAccess()).resolves.toEqual({
-      status: "partner_unavailable",
-    });
+      await expect(getWorkspaceAccess()).resolves.toEqual({
+        status: "partner_unavailable",
+      });
 
-    setHost("partner-a.example");
-    await expect(getWorkspaceAccess()).resolves.toEqual({
-      status: "partner_unavailable",
-    });
+      setHost("partner-a.example");
+      await expect(getWorkspaceAccess()).resolves.toEqual({
+        status: "partner_unavailable",
+      });
 
-    setHost(null);
-    await expect(getWorkspaceAccess()).resolves.toEqual({
-      status: "partner_unavailable",
-    });
-  });
+      setHost(null);
+      await expect(getWorkspaceAccess()).resolves.toEqual({
+        status: "partner_unavailable",
+      });
+    },
+  );
 
   it("makes a deleted assigned partner unavailable", async () => {
     setBusinessPartner(PARTNER_A_ID);
@@ -490,7 +522,11 @@ function setHost(value: string | null): void {
 
 function setBusinessPartner(partnerId: string | null): void {
   mocks.businessResult = {
-    data: { id: BUSINESS_ID, partner_id: partnerId },
+    data: {
+      id: BUSINESS_ID,
+      partner_id: partnerId,
+      billing_mode: partnerId ? "invoiced" : "stripe",
+    },
     error: null,
   };
 }

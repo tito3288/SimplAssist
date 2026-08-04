@@ -16,7 +16,7 @@ import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
 export default async function SettingsPage() {
-  const workspace = await requireWorkspacePageAccess();
+  await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');
@@ -112,7 +112,6 @@ export default async function SettingsPage() {
           canUseCalendar={canUseCalendar}
           canUseGuardrails={canUseGuardrails}
           planActive={entitlements.active}
-          googleOAuthSupported={workspace.hostKind === 'canonical'}
         />
       </div>
 

@@ -41,6 +41,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_request: "Review the client details and try again.",
   provisioning_conflict:
     "The existing provisioning state could not be resumed safely.",
+  provisioning_in_progress:
+    "Another provisioning operation is still in progress. Try again shortly.",
+  provisioning_outcome_unknown:
+    "The prior provisioning outcome must be reconciled from the client detail page.",
+  job_dismissed:
+    "This email belongs to a dismissed provisioning job. Restore that job before retrying.",
+  auth_identity_mismatch:
+    "The existing Auth identity does not match this provisioning job.",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -191,14 +199,16 @@ export function CreateClientForm({
       const response = await fetch("/api/admin/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildCreatePartnerClientRequest({
-          email,
-          businessName,
-          partnerId,
-          billingMode,
-          partnerPlan,
-          sendSetupEmailNow,
-        })),
+        body: JSON.stringify(
+          buildCreatePartnerClientRequest({
+            email,
+            businessName,
+            partnerId,
+            billingMode,
+            partnerPlan,
+            sendSetupEmailNow,
+          }),
+        ),
       });
       const rawPayload: unknown = await response.json().catch(() => null);
 
@@ -364,7 +374,10 @@ export function CreateClientForm({
       </label>
 
       {error && (
-        <p role="alert" className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`}>
+        <p
+          role="alert"
+          className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`}
+        >
           {error}
         </p>
       )}

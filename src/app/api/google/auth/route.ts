@@ -1,45 +1,80 @@
-import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   generateAuthUrl,
-  GOOGLE_OAUTH_NONCE_COOKIE,
-  GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS,
+  getCanonicalGoogleRedirectUri,
 } from "@/lib/google/client";
 import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import {
+  createGoogleCalendarOAuthAttempt,
+  createGoogleOAuthOpaqueToken,
+  GoogleOAuthAttemptError,
+  resolveGoogleOAuthWorkspaceIdentity,
+  requireGoogleCalendarSettings,
+} from "@/lib/google/oauthAttempt.server";
+import {
+  secureGoogleOAuthResponse,
+  setGoogleOAuthOriginVerifier,
+} from "@/lib/google/oauthRouteResponse.server";
 
 export async function GET(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
-  if (!workspace.ok) return workspace.response;
-  if (workspace.access.hostKind === "partner") {
-    return NextResponse.json(
-      { error: "google_oauth_unavailable_on_partner_host" },
-      { status: 403 }
-    );
-  }
+  if (!workspace.ok) return secureGoogleOAuthResponse(workspace.response);
 
   const access = await requireAuthenticatedFeature("calendar");
-  if (!access.ok) return access.response;
+  if (!access.ok) return secureGoogleOAuthResponse(access.response);
   if (access.businessId !== workspace.access.business.id) {
-    return NextResponse.json(
-      { error: "workspace_access_unavailable", retryable: true },
-      { status: 503 }
+    return secureGoogleOAuthResponse(
+      NextResponse.json(
+        { error: "workspace_access_unavailable", retryable: true },
+        { status: 503 },
+      ),
     );
   }
 
-  const nonce = randomBytes(32).toString("base64url");
-  const url = generateAuthUrl(access.businessId, nonce);
-  const response = NextResponse.redirect(url);
+  try {
+    getCanonicalGoogleRedirectUri();
+    const identity = await resolveGoogleOAuthWorkspaceIdentity(
+      workspace.access,
+      request.headers.get("host"),
+    );
+    await requireGoogleCalendarSettings(identity.businessId);
 
-  response.cookies.set(GOOGLE_OAUTH_NONCE_COOKIE, nonce, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure:
-      request.nextUrl.protocol === "https:" ||
-      process.env.NODE_ENV === "production",
-    path: "/api/google/callback",
-    maxAge: GOOGLE_OAUTH_NONCE_MAX_AGE_SECONDS,
-  });
+    const state = createGoogleOAuthOpaqueToken();
+    const originVerifier = createGoogleOAuthOpaqueToken();
+    const url = generateAuthUrl(state);
 
-  return response;
+    await createGoogleCalendarOAuthAttempt({
+      identity,
+      state,
+      originVerifier,
+    });
+
+    return setGoogleOAuthOriginVerifier(
+      NextResponse.redirect(url),
+      originVerifier,
+    );
+  } catch (error) {
+    if (error instanceof GoogleOAuthAttemptError) {
+      return secureGoogleOAuthResponse(
+        NextResponse.json(
+          {
+            error:
+              error.status === 403
+                ? "workspace_access_denied"
+                : "service_unavailable",
+            ...(error.status === 503 ? { retryable: true } : {}),
+          },
+          { status: error.status },
+        ),
+      );
+    }
+
+    return secureGoogleOAuthResponse(
+      NextResponse.json(
+        { error: "service_unavailable", retryable: true },
+        { status: 503 },
+      ),
+    );
+  }
 }

@@ -5,7 +5,7 @@ import {
 } from "@/lib/admin/clientProvisioning.shared";
 import { retryPartnerClientProvisioning } from "@/lib/admin/clientProvisioning.server";
 import {
-  authorizeProvisioningMutation,
+  authorizeAdminMutation,
   provisioningFailure,
   provisioningJson,
   readProvisioningJson,
@@ -15,7 +15,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { provisioningId: string } },
 ) {
-  const authorization = await authorizeProvisioningMutation(request);
+  const authorization = await authorizeAdminMutation(request);
   if ("response" in authorization) return authorization.response;
 
   const id = provisioningIdSchema.safeParse(params.provisioningId);

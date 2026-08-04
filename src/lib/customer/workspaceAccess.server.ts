@@ -16,10 +16,12 @@ import {
 import { normalizeHostHeader } from "@/lib/branding/hostname";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import type { BillingMode } from "@/types/database";
 
 export type CustomerBusiness = {
   id: string;
   partner_id: string | null;
+  billing_mode: BillingMode;
 };
 
 export type ResolvedWorkspaceAccess = {
@@ -63,7 +65,7 @@ type PartnerLookup =
   | { status: "missing" }
   | { status: "failed" };
 
-const CUSTOMER_BUSINESS_COLUMNS = "id, partner_id";
+const CUSTOMER_BUSINESS_COLUMNS = "id, partner_id, billing_mode";
 const PARTNER_TENANCY_COLUMNS =
   "id, name, custom_domain, status, domain_status";
 const UUID =
@@ -177,7 +179,12 @@ function parseCustomerBusiness(value: unknown): CustomerBusiness | null {
   const row = value as Record<string, unknown>;
   if (!isUuid(row.id)) return null;
   if (row.partner_id !== null && !isUuid(row.partner_id)) return null;
-  return { id: row.id, partner_id: row.partner_id };
+  if (!isBillingMode(row.billing_mode)) return null;
+  return {
+    id: row.id,
+    partner_id: row.partner_id,
+    billing_mode: row.billing_mode,
+  };
 }
 
 function parsePartner(value: unknown): PartnerTenancy | null {
@@ -290,6 +297,10 @@ function canonicalWorkspace(): {
 
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
+}
+
+function isBillingMode(value: unknown): value is BillingMode {
+  return value === "stripe" || value === "invoiced" || value === "comped";
 }
 
 function isUnauthenticatedAuthError(error: unknown): boolean {

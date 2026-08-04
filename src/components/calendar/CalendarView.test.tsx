@@ -7,27 +7,9 @@ const DIRECT_BRAND_COLOR =
   /#(?:f97316|ea580c|c2410c|9a3412|ff914d|f57f33|e8752c|ffb07a|fdf1e7|f0e2d0|fdf3ea|e6cdb0|e8a878)\b|rgba?\(\s*(?:234\s*,\s*88\s*,\s*12|194\s*,\s*65\s*,\s*12|154\s*,\s*52\s*,\s*18|255\s*,\s*145\s*,\s*77|249\s*,\s*115\s*,\s*22)/i;
 
 describe("CalendarView Google OAuth availability", () => {
-  it("hides the settings connect prompt on partner hosts", () => {
+  it("shows the settings connect prompt for every resolved workspace", () => {
     const html = renderToStaticMarkup(
-      <CalendarView
-        isConnected={false}
-        googleEmail={null}
-        oauthConnectSupported={false}
-      />
-    );
-
-    expect(html).toContain("Google Calendar connection unavailable");
-    expect(html).toContain("not available on this partner workspace");
-    expect(html).not.toContain('href="/settings"');
-  });
-
-  it("preserves the canonical settings connect prompt", () => {
-    const html = renderToStaticMarkup(
-      <CalendarView
-        isConnected={false}
-        googleEmail={null}
-        oauthConnectSupported
-      />
+      <CalendarView isConnected={false} googleEmail={null} />
     );
 
     expect(html).toContain("Connect your Google Calendar");
@@ -58,5 +40,22 @@ describe("Calendar Phase 2 branding", () => {
 
     expect(source).not.toContain("SimplAssist");
     expect(source).toContain("requestBrand.brand.name");
+  });
+  it("does not disable Calendar OAuth on a partner workspace page", () => {
+    const calendarPage = readFileSync(
+      new URL("../../app/(dashboard)/calendar/page.tsx", import.meta.url),
+      "utf8"
+    );
+    const settingsPage = readFileSync(
+      new URL("../../app/(dashboard)/settings/page.tsx", import.meta.url),
+      "utf8"
+    );
+
+    expect(calendarPage).toContain("await requireWorkspacePageAccess()");
+    expect(settingsPage).toContain("await requireWorkspacePageAccess()");
+    expect(calendarPage).not.toContain("oauthConnectSupported");
+    expect(settingsPage).not.toContain("googleOAuthSupported");
+    expect(calendarPage).not.toContain('hostKind === "canonical"');
+    expect(settingsPage).not.toContain("hostKind === 'canonical'");
   });
 });

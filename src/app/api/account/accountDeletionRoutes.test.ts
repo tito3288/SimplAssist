@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
 }));
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/stripe/accountDeletionReconciler", () => ({
   reconcileAccountDeletionStripeAction: mocks.reconcile,
 }));
@@ -23,11 +24,10 @@ import { POST as reactivateAccount } from "./reactivate/route";
 const USER_ID = "00000000-0000-4000-8000-000000000010";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const GENERATION = 4;
-const REACTIVATION_RESERVATION_TOKEN =
-  "00000000-0000-4000-8000-000000000014";
+const REACTIVATION_RESERVATION_TOKEN = "00000000-0000-4000-8000-000000000014";
 
 function scheduledDeletion(
-  status: "pending" | "applied" | "blocked" = "pending"
+  status: "pending" | "applied" | "blocked" = "pending",
 ) {
   return {
     business_id: BUSINESS_ID,
@@ -38,13 +38,23 @@ function scheduledDeletion(
       desired_action: "pause",
       generation: GENERATION,
       status,
+      applied_action: status === "applied" ? "pause" : null,
     },
+  };
+}
+
+function partnerScheduledDeletion() {
+  return {
+    business_id: BUSINESS_ID,
+    deleted_at: "2026-07-14T16:00:00.000Z",
+    deletion_scheduled_for: "2026-09-12T16:00:00.000Z",
+    stripe_action: null,
   };
 }
 
 function preparedReactivation(
   status: "pending" | "applied" | "blocked" = "pending",
-  appliedAction: "pause" | "resume" | "cancel" | null = null
+  appliedAction: "pause" | "resume" | "cancel" | null = null,
 ) {
   return {
     business_id: BUSINESS_ID,
@@ -70,7 +80,11 @@ beforeEach(() => {
     access: {
       status: "resolved",
       user: { id: USER_ID },
-      business: { id: BUSINESS_ID, partner_id: null },
+      business: {
+        id: BUSINESS_ID,
+        partner_id: null,
+        billing_mode: "stripe",
+      },
       hostKind: "canonical",
     },
   });
@@ -137,6 +151,85 @@ describe("DELETE /api/account", () => {
     expect(mocks.reconcile).not.toHaveBeenCalled();
   });
 
+  it.each(["invoiced", "comped"])(
+    "schedules %s partner deletion without loading Stripe work",
+    async (billingMode) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: true,
+        access: {
+          status: "resolved",
+          user: { id: USER_ID },
+          business: {
+            id: BUSINESS_ID,
+            partner_id: "00000000-0000-4000-8000-000000000020",
+            billing_mode: billingMode,
+          },
+          hostKind: "partner",
+        },
+      });
+      mocks.rpc.mockResolvedValue({
+        data: partnerScheduledDeletion(),
+        error: null,
+      });
+
+      const response = await deleteAccount();
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        success: true,
+        deletion_scheduled_for: "2026-09-12T16:00:00.000Z",
+      });
+      expect(mocks.reconcile).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed without Stripe when a partner schedule contains an action", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: USER_ID },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: "00000000-0000-4000-8000-000000000020",
+          billing_mode: "invoiced",
+        },
+        hostKind: "partner",
+      },
+    });
+    mocks.rpc.mockResolvedValue({ data: scheduledDeletion(), error: null });
+
+    const response = await deleteAccount();
+
+    expect(response.status).toBe(500);
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "provisioning_in_progress",
+    "provisioning_outcome_unknown",
+    "partner_subscription_conflict",
+    "stripe_action_in_progress",
+    "stripe_action_outcome_unknown",
+  ])("maps %s to a stable safe conflict", async (code) => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message: `Database rejected operation: ${code}`,
+        details: "customer@example.com +15555550100 must not escape",
+      },
+    });
+
+    const response = await deleteAccount();
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ error: code, code });
+    expect(JSON.stringify(body)).not.toContain("customer@example.com");
+    expect(JSON.stringify(body)).not.toContain("+15555550100");
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+
   it("blocks the route when the atomic deletion schedule fails", async () => {
     mocks.rpc.mockResolvedValue({
       data: null,
@@ -179,21 +272,99 @@ describe("DELETE /api/account", () => {
   it.each([
     [403, { error: "workspace_access_denied" }],
     [503, { error: "workspace_access_unavailable", retryable: true }],
-  ])("returns workspace %i before scheduling or Stripe work", async (status, body) => {
-    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json(body, { status }),
-    });
+  ])(
+    "returns workspace %i before scheduling or Stripe work",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
 
-    const response = await deleteAccount();
+      const response = await deleteAccount();
 
-    expect(response.status).toBe(status);
-    expect(mocks.rpc).not.toHaveBeenCalled();
-    expect(mocks.reconcile).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(status);
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.reconcile).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("POST /api/account/reactivate", () => {
+  it.each(["invoiced", "comped"])(
+    "reactivates %s partner billing with a null Stripe generation",
+    async (billingMode) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: true,
+        access: {
+          status: "resolved",
+          user: { id: USER_ID },
+          business: {
+            id: BUSINESS_ID,
+            partner_id: "00000000-0000-4000-8000-000000000020",
+            billing_mode: billingMode,
+          },
+          hostKind: "partner",
+        },
+      });
+      mocks.rpc.mockImplementation(async (name: string) => {
+        if (name === "prepare_account_reactivation") {
+          return {
+            data: {
+              business_id: BUSINESS_ID,
+              already_active: false,
+              deletion_scheduled_for: "2026-09-12T16:00:00.000Z",
+              reactivation_reservation_token: REACTIVATION_RESERVATION_TOKEN,
+              reactivation_reservation_expires_at: "2099-09-12T16:30:00.000Z",
+              stripe_action: null,
+            },
+            error: null,
+          };
+        }
+        return { data: true, error: null };
+      });
+
+      const response = await reactivateAccount();
+
+      expect(response.status).toBe(200);
+      expect(mocks.reconcile).not.toHaveBeenCalled();
+      expect(mocks.rpc).toHaveBeenCalledWith("complete_account_reactivation", {
+        p_business_id: BUSINESS_ID,
+        p_owner_id: USER_ID,
+        p_generation: null,
+        p_reactivation_reservation_token: REACTIVATION_RESERVATION_TOKEN,
+      });
+    },
+  );
+
+  it("does not misreport a partner consistency conflict as permanent deletion", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: USER_ID },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: "00000000-0000-4000-8000-000000000020",
+          billing_mode: "invoiced",
+        },
+        hostKind: "partner",
+      },
+    });
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "55000", message: "partner_subscription_conflict" },
+    });
+
+    const response = await reactivateAccount();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "partner_subscription_conflict",
+      code: "partner_subscription_conflict",
+    });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+
   it("completes reactivation only after the exact resume generation applies", async () => {
     mocks.rpc.mockImplementation(async (name: string) => {
       if (name === "prepare_account_reactivation") {
@@ -227,22 +398,28 @@ describe("POST /api/account/reactivate", () => {
     [401, { error: "Unauthorized" }],
     [403, { error: "workspace_access_denied" }],
     [503, { error: "workspace_access_unavailable", retryable: true }],
-  ])("returns workspace %i before reactivation or Stripe work", async (status, body) => {
-    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json(body, { status }),
-    });
+  ])(
+    "returns workspace %i before reactivation or Stripe work",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
 
-    const response = await reactivateAccount();
+      const response = await reactivateAccount();
 
-    expect(response.status).toBe(status);
-    expect(mocks.rpc).not.toHaveBeenCalled();
-    expect(mocks.reconcile).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(status);
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.reconcile).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a missing reactivation reservation before calling Stripe", async () => {
     const invalidPreparation = { ...preparedReactivation() };
-    Reflect.deleteProperty(invalidPreparation, "reactivation_reservation_token");
+    Reflect.deleteProperty(
+      invalidPreparation,
+      "reactivation_reservation_token",
+    );
     mocks.rpc.mockResolvedValue({ data: invalidPreparation, error: null });
 
     const response = await reactivateAccount();
@@ -251,7 +428,7 @@ describe("POST /api/account/reactivate", () => {
     expect(mocks.reconcile).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -274,7 +451,7 @@ describe("POST /api/account/reactivate", () => {
     mocks.rpc.mockImplementation(async (name: string) =>
       name === "prepare_account_reactivation"
         ? { data: preparedReactivation(), error: null }
-        : { data: true, error: null }
+        : { data: true, error: null },
     );
     mocks.reconcile.mockResolvedValue({
       outcome: "applied",
@@ -288,14 +465,17 @@ describe("POST /api/account/reactivate", () => {
     expect(response.status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.objectContaining({ p_generation: GENERATION })
+      expect.objectContaining({ p_generation: GENERATION }),
     );
   });
 
   it.each(["pending", "not_claimed", "stale"])(
     "keeps the account deleted for a %s resume result",
     async (outcome) => {
-      mocks.rpc.mockResolvedValue({ data: preparedReactivation(), error: null });
+      mocks.rpc.mockResolvedValue({
+        data: preparedReactivation(),
+        error: null,
+      });
       mocks.reconcile.mockResolvedValue({
         outcome,
         businessId: BUSINESS_ID,
@@ -312,9 +492,9 @@ describe("POST /api/account/reactivate", () => {
       });
       expect(mocks.rpc).not.toHaveBeenCalledWith(
         "complete_account_reactivation",
-        expect.anything()
+        expect.anything(),
       );
-    }
+    },
   );
 
   it("returns the blocked contract and leaves deletion intact", async () => {
@@ -335,7 +515,7 @@ describe("POST /api/account/reactivate", () => {
     });
     expect(mocks.rpc).not.toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -366,7 +546,7 @@ describe("POST /api/account/reactivate", () => {
     });
     expect(mocks.rpc).not.toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -374,7 +554,7 @@ describe("POST /api/account/reactivate", () => {
     mocks.rpc.mockImplementation(async (name: string) =>
       name === "prepare_account_reactivation"
         ? { data: preparedReactivation("applied", "resume"), error: null }
-        : { data: true, error: null }
+        : { data: true, error: null },
     );
 
     const response = await reactivateAccount();
@@ -383,7 +563,7 @@ describe("POST /api/account/reactivate", () => {
     expect(mocks.reconcile).not.toHaveBeenCalled();
     expect(mocks.rpc).toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.objectContaining({ p_generation: GENERATION })
+      expect.objectContaining({ p_generation: GENERATION }),
     );
   });
 
@@ -391,7 +571,7 @@ describe("POST /api/account/reactivate", () => {
     mocks.rpc.mockImplementation(async (name: string) =>
       name === "prepare_account_reactivation"
         ? { data: preparedReactivation(), error: null }
-        : { data: false, error: null }
+        : { data: false, error: null },
     );
     mocks.reconcile.mockResolvedValue({
       outcome: "applied",
@@ -424,7 +604,7 @@ describe("POST /api/account/reactivate", () => {
     expect(mocks.reconcile).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalledWith(
       "complete_account_reactivation",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -440,6 +620,24 @@ describe("POST /api/account/reactivate", () => {
     expect(mocks.rpc).toHaveBeenCalledWith("prepare_account_reactivation", {
       p_business_id: BUSINESS_ID,
       p_owner_id: USER_ID,
+    });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+
+  it("preserves 410 after Telnyx resources cross the point of no return", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "55000",
+        message: `business ${BUSINESS_ID} Telnyx resources can no longer be automatically reactivated`,
+      },
+    });
+
+    const response = await reactivateAccount();
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toEqual({
+      error: "Account has been permanently deleted and cannot be reactivated",
     });
     expect(mocks.reconcile).not.toHaveBeenCalled();
   });

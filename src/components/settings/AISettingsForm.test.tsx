@@ -35,7 +35,6 @@ describe("AISettingsForm Google Calendar connection state", () => {
         calendarEmail={null}
         calendarConnected
         canUseCalendar={false}
-        googleOAuthSupported={false}
       />
     );
 

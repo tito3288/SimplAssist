@@ -1,226 +1,97 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
-  decodeGoogleOAuthState,
-  getGoogleOAuth2Client,
-  GOOGLE_OAUTH_NONCE_COOKIE,
-} from "@/lib/google/client";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-import {
-  requireFreshWorkspaceRouteAccess,
-  requireWorkspaceRouteAccess,
-} from "@/lib/customer/workspaceRouteResponse.server";
-import {
-  canUseFeature,
-  EntitlementResolutionError,
-  requiredPlanForFeature,
-  resolveBusinessEntitlements,
-} from "@/lib/billing/entitlements";
+  GoogleOAuthAttemptError,
+  isExactCanonicalGoogleCallbackHost,
+  parseGoogleOAuthOpaqueToken,
+  stageGoogleCalendarOAuthHandoff,
+  type GoogleOAuthSanitizedResult,
+} from "@/lib/google/oauthAttempt.server";
+import { secureGoogleOAuthResponse } from "@/lib/google/oauthRouteResponse.server";
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 export async function GET(request: NextRequest) {
-  const workspace = await requireWorkspaceRouteAccess();
-  if (!workspace.ok) return clearNonce(workspace.response);
-  if (workspace.access.hostKind === "partner") {
-    return clearNonce(
-      NextResponse.json(
-        { error: "google_oauth_unavailable_on_partner_host" },
-        { status: 403 }
-      )
-    );
+  if (!isExactCanonicalGoogleCallbackHost(request.headers.get("host"))) {
+    return neutralError(404);
   }
 
-  const { searchParams } = request.nextUrl;
-  const code = searchParams.get("code");
-  const stateValue = searchParams.get("state");
-  const oauthError = searchParams.get("error");
-  const appUrl = getAppUrl(request);
-
-  if (oauthError || !code || !stateValue) {
-    return clearNonce(
-      NextResponse.redirect(`${appUrl}/settings`)
-    );
-  }
-
-  const state = decodeGoogleOAuthState(stateValue);
-  const cookieNonce = request.cookies.get(GOOGLE_OAUTH_NONCE_COOKIE)?.value;
-  if (!state || !cookieNonce || !noncesMatch(state.nonce, cookieNonce)) {
-    return clearNonce(
-      NextResponse.json({ error: "Invalid OAuth state" }, { status: 400 })
-    );
-  }
-
-  if (state.businessId !== workspace.access.business.id) {
-    return clearNonce(
-      NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    );
-  }
-
-  const businessId = workspace.access.business.id;
-
-  const initialEntitlementFailure = await calendarEntitlementFailure(
-    businessId
-  );
-  if (initialEntitlementFailure) {
-    return clearNonce(initialEntitlementFailure);
-  }
+  const parsed = parseCallback(request.nextUrl.searchParams);
+  if (!parsed) return neutralError(400);
 
   try {
-    const client = getGoogleOAuth2Client();
-    const { tokens } = await client.getToken(code);
-
-    if (!tokens.access_token || !tokens.refresh_token) {
-      console.error("[google-callback] Missing tokens");
-      return clearNonce(
-        NextResponse.redirect(`${appUrl}/settings`)
-      );
-    }
-
-    // Try to extract email from the ID token (if present).
-    let googleEmail: string | null = null;
-    if (tokens.id_token) {
-      try {
-        const ticket = await client.verifyIdToken({
-          idToken: tokens.id_token,
-          audience: process.env.GOOGLE_CLIENT_ID!,
-        });
-        const payload = ticket.getPayload();
-        googleEmail = payload?.email || null;
-      } catch {
-        // ID token parsing failed — continue without email.
-      }
-    }
-
-    const tokenExpiry = tokens.expiry_date
-      ? new Date(tokens.expiry_date).toISOString()
-      : new Date(Date.now() + 3600 * 1000).toISOString();
-
-    // Token exchange is a network hop. Re-resolve immediately before the
-    // durable write so a downgrade while Google was responding cannot connect
-    // Calendar after access was removed.
-    const writeEntitlementFailure = await calendarEntitlementFailure(
-      businessId
-    );
-    if (writeEntitlementFailure) {
-      return clearNonce(writeEntitlementFailure);
-    }
-
-    // The token exchange is also long enough for the signed-in account or an
-    // administrator-managed partner assignment to change. Bypass the shared
-    // request cache immediately before durable writes and require the exact
-    // canonical workspace decision that authorized this callback.
-    const freshWorkspace = await requireFreshWorkspaceRouteAccess();
-    if (!freshWorkspace.ok) {
-      return clearNonce(freshWorkspace.response);
-    }
+    const staged = await stageGoogleCalendarOAuthHandoff(parsed);
+    const destination = new URL("/api/google/complete", staged.returnOrigin);
+    destination.searchParams.set("handoff", staged.handoff);
+    return secureGoogleOAuthResponse(NextResponse.redirect(destination));
+  } catch (error) {
     if (
-      freshWorkspace.access.hostKind !== "canonical" ||
-      freshWorkspace.access.user.id !== workspace.access.user.id ||
-      freshWorkspace.access.business.id !== businessId
+      error instanceof GoogleOAuthAttemptError &&
+      error.code === "service_unavailable"
     ) {
-      return clearNonce(workspaceChangedResponse());
-    }
-
-    const { error: dbError } = await supabaseAdmin
-      .from("google_calendar_tokens")
-      .upsert(
-        {
-          business_id: businessId,
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          token_expiry: tokenExpiry,
-          google_email: googleEmail,
-          calendar_id: "primary",
-        },
-        { onConflict: "business_id" }
-      );
-
-    if (dbError) {
-      console.error("[google-callback] Token save failed:", dbError);
-      return clearNonce(
+      return secureGoogleOAuthResponse(
         NextResponse.json(
           { error: "service_unavailable", retryable: true },
-          { status: 503 }
-        )
+          { status: 503 },
+        ),
       );
     }
 
-    // Connecting Calendar opts the business into direct scheduling.
-    const { error: settingsError } = await supabaseAdmin
-      .from("ai_settings")
-      .update({ booking_enabled: true, booking_mode: "schedule_direct" })
-      .eq("business_id", businessId);
-
-    if (settingsError) {
-      console.error("[google-callback] Booking settings update failed:", settingsError);
-    }
-
-    return clearNonce(
-      NextResponse.redirect(`${appUrl}/settings`)
-    );
-  } catch (error) {
-    console.error("[google-callback] Google OAuth exchange failed:", error);
-    return clearNonce(
-      NextResponse.redirect(`${appUrl}/settings`)
-    );
+    return neutralError(400);
   }
 }
 
-function workspaceChangedResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "workspace_access_denied" },
-    { status: 403 }
-  );
-}
-
-function noncesMatch(stateNonce: string, cookieNonce: string): boolean {
-  const stateBuffer = Buffer.from(stateNonce);
-  const cookieBuffer = Buffer.from(cookieNonce);
-  return (
-    stateBuffer.length === cookieBuffer.length &&
-    timingSafeEqual(stateBuffer, cookieBuffer)
-  );
-}
-
-async function calendarEntitlementFailure(
-  businessId: string
-): Promise<NextResponse | null> {
-  try {
-    const entitlements = await resolveBusinessEntitlements(businessId);
-    if (canUseFeature(entitlements, "calendar")) return null;
-
-    return NextResponse.json(
-      {
-        error: "feature_unavailable",
-        feature: "calendar",
-        requiredPlan: requiredPlanForFeature("calendar"),
-      },
-      { status: 403 }
-    );
-  } catch (error) {
-    if (error instanceof EntitlementResolutionError) {
-      return NextResponse.json(
-        { error: "service_unavailable", retryable: true },
-        { status: 503 }
-      );
-    }
-    throw error;
+function parseCallback(searchParams: URLSearchParams): {
+  state: string;
+  authorizationCode: string | null;
+  sanitizedResult: GoogleOAuthSanitizedResult | null;
+} | null {
+  const states = searchParams.getAll("state");
+  const codes = searchParams.getAll("code");
+  const errors = searchParams.getAll("error");
+  if (
+    states.length !== 1 ||
+    parseGoogleOAuthOpaqueToken(states[0]) === null ||
+    (codes.length === 1) === (errors.length === 1) ||
+    codes.length > 1 ||
+    errors.length > 1
+  ) {
+    return null;
   }
+
+  if (codes.length === 1) {
+    const authorizationCode = codes[0];
+    if (
+      authorizationCode.length === 0 ||
+      authorizationCode.length > 4096 ||
+      CONTROL_CHARACTER.test(authorizationCode)
+    ) {
+      return null;
+    }
+    return {
+      state: states[0],
+      authorizationCode,
+      sanitizedResult: null,
+    };
+  }
+
+  const providerError = errors[0];
+  if (
+    providerError.length === 0 ||
+    providerError.length > 256 ||
+    CONTROL_CHARACTER.test(providerError)
+  ) {
+    return null;
+  }
+  return {
+    state: states[0],
+    authorizationCode: null,
+    sanitizedResult:
+      providerError === "access_denied" ? "access_denied" : "provider_error",
+  };
 }
 
-function clearNonce(response: NextResponse): NextResponse {
-  response.cookies.set(GOOGLE_OAUTH_NONCE_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/api/google/callback",
-    maxAge: 0,
-  });
-  return response;
-}
-
-function getAppUrl(request: NextRequest): string {
-  const origin = request.nextUrl.origin;
-  return origin.includes("localhost:3000")
-    ? origin
-    : process.env.NEXT_PUBLIC_APP_URL || origin;
+function neutralError(status: 400 | 404): NextResponse {
+  return secureGoogleOAuthResponse(
+    NextResponse.json({ error: "oauth_request_invalid" }, { status }),
+  );
 }

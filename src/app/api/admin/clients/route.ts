@@ -1,17 +1,15 @@
 import type { NextRequest } from "next/server";
-import {
-  createPartnerClientSchema,
-} from "@/lib/admin/clientProvisioning.shared";
+import { createPartnerClientSchema } from "@/lib/admin/clientProvisioning.shared";
 import { provisionPartnerClient } from "@/lib/admin/clientProvisioning.server";
 import {
-  authorizeProvisioningMutation,
+  authorizeAdminMutation,
   provisioningFailure,
   provisioningJson,
   readProvisioningJson,
 } from "@/lib/admin/clientProvisioningRoute.server";
 
 export async function POST(request: NextRequest) {
-  const authorization = await authorizeProvisioningMutation(request);
+  const authorization = await authorizeAdminMutation(request);
   if ("response" in authorization) return authorization.response;
 
   const body = await readProvisioningJson(request);

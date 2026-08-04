@@ -37,7 +37,10 @@ function readErrorCode(value: unknown): string | null {
 export function parseSetupEmailRouteResponse(
   value: unknown,
 ): SetupEmailRouteResponse | null {
-  if (!isRecord(value) || Object.keys(value).some((key) => key !== "provisioning")) {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => key !== "provisioning")
+  ) {
     return null;
   }
   const provisioning = publicProvisioningJobSchema.safeParse(
@@ -67,6 +70,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   setup_already_completed:
     "Password setup is already complete for this client.",
   setup_email_failed: "The setup email could not be sent.",
+  provisioning_in_progress:
+    "Another provisioning operation is still in progress. Try again shortly.",
+  provisioning_outcome_unknown:
+    "The prior operation has an unknown outcome. Use Retry to reconcile it before continuing.",
+  job_dismissed:
+    "This provisioning job is dismissed. Restore it before continuing.",
+  auth_identity_mismatch:
+    "The Auth identity no longer matches this provisioning job.",
 };
 
 export function ClientProvisioningActions({
@@ -74,7 +85,7 @@ export function ClientProvisioningActions({
   expectedPartnerOrigin,
 }: {
   initialProvisioning: PublicProvisioningJob;
-  expectedPartnerOrigin: string;
+  expectedPartnerOrigin: string | null;
 }) {
   const setupLinkTransfer = useAdminSetupLinkTransfer();
   const [provisioning, setProvisioning] =
@@ -89,10 +100,10 @@ export function ClientProvisioningActions({
     if (consumedProvisioningId.current === initialProvisioning.id) return;
     consumedProvisioningId.current = initialProvisioning.id;
 
-    const safeSetupUrl = parseConciergeRecoveryCallbackUrl(
-      setupLinkTransfer.take(initialProvisioning.id),
-      expectedPartnerOrigin,
-    );
+    const stagedSetupUrl = setupLinkTransfer.take(initialProvisioning.id);
+    const safeSetupUrl = expectedPartnerOrigin
+      ? parseConciergeRecoveryCallbackUrl(stagedSetupUrl, expectedPartnerOrigin)
+      : null;
     // Strict Mode may invoke this effect twice. Never let a second empty take
     // clear the secret consumed by the first invocation.
     if (safeSetupUrl) setAdminSetupUrl(safeSetupUrl);
@@ -115,8 +126,12 @@ export function ClientProvisioningActions({
     );
   }
 
+  const operationsAvailable =
+    expectedPartnerOrigin !== null && provisioning.status !== "dismissed";
+
   async function generateAdminSetupLink() {
-    if (pendingAction) return;
+    if (pendingAction || !operationsAvailable || !expectedPartnerOrigin) return;
+    const partnerOrigin = expectedPartnerOrigin;
     setPendingAction("retry");
     setAdminSetupUrl(null);
     setError(null);
@@ -141,7 +156,7 @@ export function ClientProvisioningActions({
       const payload = parseProvisioningRouteResponse(rawPayload);
       const safeSetupUrl = parseConciergeRecoveryCallbackUrl(
         payload?.adminSetupUrl,
-        expectedPartnerOrigin,
+        partnerOrigin,
       );
       if (
         !payload ||
@@ -165,7 +180,7 @@ export function ClientProvisioningActions({
   }
 
   async function sendFreshSetupEmail() {
-    if (pendingAction) return;
+    if (pendingAction || !operationsAvailable) return;
     setPendingAction("send_email");
     setAdminSetupUrl(null);
     setError(null);
@@ -222,8 +237,8 @@ export function ClientProvisioningActions({
           <p className="text-sm font-medium">One-time admin setup link</p>
           <p className="text-xs">
             This recovery link is held only in memory and is consumed once when
-            this detail view opens. It will not be available after navigation
-            or a full reload.
+            this detail view opens. It will not be available after navigation or
+            a full reload.
           </p>
           <a
             href={adminSetupUrl}
@@ -241,7 +256,7 @@ export function ClientProvisioningActions({
         <button
           type="button"
           onClick={generateAdminSetupLink}
-          disabled={pendingAction !== null}
+          disabled={pendingAction !== null || !operationsAvailable}
           className={`${btnSecondaryCompact} disabled:cursor-not-allowed disabled:opacity-60`}
         >
           {pendingAction === "retry"
@@ -251,7 +266,7 @@ export function ClientProvisioningActions({
         <button
           type="button"
           onClick={sendFreshSetupEmail}
-          disabled={pendingAction !== null}
+          disabled={pendingAction !== null || !operationsAvailable}
           className={`${btnPrimaryCompact} disabled:cursor-not-allowed disabled:opacity-60`}
         >
           {pendingAction === "send_email"
@@ -260,9 +275,22 @@ export function ClientProvisioningActions({
         </button>
       </div>
 
-      {notice && <p className="text-sm text-green-700 dark:text-green-300">{notice}</p>}
+      {!operationsAvailable ? (
+        <p className={`rounded-xl px-4 py-3 text-sm ${statusWarning}`}>
+          Setup-link and email actions require an active partner with a
+          connected domain. This job remains available for inspection and
+          lifecycle actions.
+        </p>
+      ) : null}
+
+      {notice && (
+        <p className="text-sm text-green-700 dark:text-green-300">{notice}</p>
+      )}
       {error && (
-        <p role="alert" className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`}>
+        <p
+          role="alert"
+          className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`}
+        >
           {error}
         </p>
       )}

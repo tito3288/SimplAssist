@@ -7,10 +7,12 @@ const mocks = vi.hoisted(() => ({
   deleteUser: vi.fn(),
   reconcile: vi.fn(),
   reconcileBookings: vi.fn(),
+  purgeOAuthAttempts: vi.fn(),
   graceEq: vi.fn(),
   graceIn: vi.fn(),
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: {
     from: mocks.from,
@@ -23,6 +25,9 @@ vi.mock("@/lib/stripe/accountDeletionReconciler", () => ({
 }));
 vi.mock("@/lib/google/bookingReconciler", () => ({
   reconcilePendingCalendarBookings: mocks.reconcileBookings,
+}));
+vi.mock("@/lib/google/oauthAttempt.server", () => ({
+  purgeExpiredGoogleCalendarOAuthAttempts: mocks.purgeOAuthAttempts,
 }));
 
 import { POST as cleanupAccounts } from "./route";
@@ -48,7 +53,7 @@ type SetupOptions = {
 
 function cancelAction(
   status: "pending" | "applied" | "blocked" = "pending",
-  appliedAction: "pause" | "resume" | "cancel" | null = null
+  appliedAction: "pause" | "resume" | "cancel" | null = null,
 ) {
   return {
     business_id: BUSINESS_ID,
@@ -61,9 +66,7 @@ function cancelAction(
   };
 }
 
-function graceAction(
-  status: "pending" | "blocked" = "pending"
-) {
+function graceAction(status: "pending" | "blocked" = "pending") {
   return {
     business_id: BUSINESS_ID,
     desired_action: "pause",
@@ -81,8 +84,7 @@ function installDatabase(options: SetupOptions = {}) {
       : options.expiredBusinesses;
   const claimed =
     options.claimed === undefined ? [{ id: BUSINESS_ID }] : options.claimed;
-  const action =
-    options.action === undefined ? cancelAction() : options.action;
+  const action = options.action === undefined ? cancelAction() : options.action;
   const graceActions = options.graceActions ?? [];
 
   mocks.from.mockImplementation((table: string) => {
@@ -131,7 +133,7 @@ function installDatabase(options: SetupOptions = {}) {
                   }),
                 }),
               }
-            : graceQuery
+            : graceQuery,
         ),
       };
     }
@@ -177,6 +179,7 @@ beforeEach(() => {
     notFound: 0,
     failed: 0,
   });
+  mocks.purgeOAuthAttempts.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -191,6 +194,34 @@ describe("POST /api/account/cleanup", () => {
     expect(response.status).toBe(401);
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.reconcileBookings).not.toHaveBeenCalled();
+    expect(mocks.purgeOAuthAttempts).not.toHaveBeenCalled();
+  });
+
+  it("purges expired private OAuth attempts on an authorized heartbeat", async () => {
+    installDatabase({ expiredBusinesses: [] });
+
+    const response = await cleanupAccounts(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.purgeOAuthAttempts).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps account cleanup available when OAuth attempt purging fails", async () => {
+    installDatabase({ action: null, pendingAuthUserId: null });
+    mocks.purgeOAuthAttempts.mockRejectedValueOnce(new Error("private detail"));
+
+    const response = await cleanupAccounts(request());
+
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      deleted_count: 1,
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "[cleanup] Google OAuth attempt purge failed",
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining("private detail"),
+    );
   });
 
   it("runs calendar booking reconciliation on an authorized maintenance heartbeat", async () => {
@@ -205,7 +236,7 @@ describe("POST /api/account/cleanup", () => {
   it("continues account cleanup when calendar booking reconciliation fails", async () => {
     installDatabase({ action: null, pendingAuthUserId: null });
     mocks.reconcileBookings.mockRejectedValueOnce(
-      new Error("calendar provider unavailable")
+      new Error("calendar provider unavailable"),
     );
 
     const response = await cleanupAccounts(request());
@@ -218,10 +249,10 @@ describe("POST /api/account/cleanup", () => {
     });
     expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
     expect(mocks.reconcileBookings.mock.invocationCallOrder[0]).toBeGreaterThan(
-      Math.max(...mocks.rpc.mock.invocationCallOrder)
+      Math.max(...mocks.rpc.mock.invocationCallOrder),
     );
     expect(console.error).toHaveBeenCalledWith(
-      "[cleanup] Calendar booking reconciliation failed"
+      "[cleanup] Calendar booking reconciliation failed",
     );
   });
 
@@ -337,17 +368,17 @@ describe("POST /api/account/cleanup", () => {
     expect(mocks.deleteUser).toHaveBeenCalledWith(AUTH_USER_ID);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "complete_expired_business_cleanup",
-      { p_business_id: BUSINESS_ID, p_generation: GENERATION }
+      { p_business_id: BUSINESS_ID, p_generation: GENERATION },
     );
 
     const completionIndex = mocks.rpc.mock.calls.findIndex(
-      ([name]) => name === "complete_expired_business_cleanup"
+      ([name]) => name === "complete_expired_business_cleanup",
     );
     expect(mocks.reconcile.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.deleteUser.mock.invocationCallOrder[0]
+      mocks.deleteUser.mock.invocationCallOrder[0],
     );
     expect(mocks.deleteUser.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.rpc.mock.invocationCallOrder[completionIndex]
+      mocks.rpc.mock.invocationCallOrder[completionIndex],
     );
   });
 
@@ -374,9 +405,9 @@ describe("POST /api/account/cleanup", () => {
       expect(mocks.deleteUser).not.toHaveBeenCalled();
       expect(mocks.rpc).not.toHaveBeenCalledWith(
         "complete_expired_business_cleanup",
-        expect.anything()
+        expect.anything(),
       );
-    }
+    },
   );
 
   it("does not retry a durably blocked cancellation or delete auth", async () => {
@@ -405,7 +436,7 @@ describe("POST /api/account/cleanup", () => {
     expect(mocks.deleteUser).toHaveBeenCalledWith(AUTH_USER_ID);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "complete_expired_business_cleanup",
-      expect.objectContaining({ p_generation: GENERATION })
+      expect.objectContaining({ p_generation: GENERATION }),
     );
   });
 
@@ -440,7 +471,7 @@ describe("POST /api/account/cleanup", () => {
     });
     expect(mocks.rpc).not.toHaveBeenCalledWith(
       "complete_expired_business_cleanup",
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -472,7 +503,7 @@ describe("POST /api/account/cleanup", () => {
     expect(mocks.deleteUser).not.toHaveBeenCalled();
     expect(mocks.rpc).toHaveBeenCalledWith(
       "complete_expired_business_cleanup",
-      { p_business_id: BUSINESS_ID, p_generation: null }
+      { p_business_id: BUSINESS_ID, p_generation: null },
     );
   });
 

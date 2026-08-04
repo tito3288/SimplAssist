@@ -46,9 +46,7 @@ interface AISettingsFormProps {
   canUseCalendar?: boolean;
   canUseGuardrails?: boolean;
   planActive?: boolean;
-  googleOAuthSupported?: boolean;
 }
-
 function UpgradeNotice({
   plan,
   planActive,
@@ -81,7 +79,6 @@ export default function AISettingsForm({
   canUseCalendar = true,
   canUseGuardrails = true,
   planActive = true,
-  googleOAuthSupported = true,
 }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -361,7 +358,6 @@ export default function AISettingsForm({
                   connectedEmail={calendarEmail ?? null}
                   isConnected={calendarConnected}
                   canConnect={canUseCalendar}
-                  oauthConnectSupported={googleOAuthSupported}
                 />
               </div>
             )}
@@ -375,7 +371,6 @@ export default function AISettingsForm({
               connectedEmail={calendarEmail ?? null}
               isConnected={calendarConnected}
               canConnect={false}
-              oauthConnectSupported={googleOAuthSupported}
             />
           </div>
         )}

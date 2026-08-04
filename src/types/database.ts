@@ -60,7 +60,28 @@ export type PartnerClientProvisioningStatus =
   | "assigned"
   | "invite_pending"
   | "setup_email_sent"
-  | "needs_attention";
+  | "needs_attention"
+  | "dismissed";
+
+export type PartnerClientProvisioningOperationKind =
+  | "provision"
+  | "retry"
+  | "send_setup";
+
+export type AdminActionEventAction =
+  | "account_deletion_scheduled"
+  | "provisioning_job_dismissed"
+  | "provisioning_job_restored";
+
+export type GoogleCalendarOAuthAttemptStatus =
+  | "initiated"
+  | "handoff_ready"
+  | "claimed"
+  | "failed";
+
+export type GoogleCalendarOAuthSanitizedResult =
+  | "access_denied"
+  | "provider_error";
 
 export type WidgetPosition = "bottom_right" | "bottom_left";
 
@@ -218,7 +239,43 @@ export interface PartnerClientProvisioningJob {
   last_error_code: string | null;
   setup_email_sent_at: string | null;
   invite_attempt_count: number;
+  dismissed_at: string | null;
+  dismissed_by_admin_id: string | null;
+  operation_token: string | null;
+  operation_kind: PartnerClientProvisioningOperationKind | null;
+  operation_started_at: string | null;
+  operation_expires_at: string | null;
   created_by_admin_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminActionEvent {
+  id: string;
+  actor_admin_user_id: string;
+  action: AdminActionEventAction;
+  business_id: string | null;
+  provisioning_job_id: string | null;
+  deletion_scheduled_for: string | null;
+  summary: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface GoogleCalendarOAuthAttempt {
+  id: string;
+  state_digest: string;
+  origin_verifier_digest: string;
+  handoff_digest: string | null;
+  business_id: string;
+  owner_user_id: string;
+  origin_partner_id: string | null;
+  origin_hostname: string;
+  status: GoogleCalendarOAuthAttemptStatus;
+  authorization_code: string | null;
+  sanitized_result: GoogleCalendarOAuthSanitizedResult | null;
+  expires_at: string;
+  handoff_expires_at: string | null;
+  claimed_at: string | null;
   created_at: string;
   updated_at: string;
 }

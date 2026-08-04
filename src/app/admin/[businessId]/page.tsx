@@ -11,7 +11,13 @@ import { BusinessPartnerBillingForm } from "../BusinessPartnerBillingForm";
 import { A2pApproveForm } from "../A2pApproveForm";
 import { ExistingTelnyxBrandForm } from "../ExistingTelnyxBrandForm";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
-import { card } from "@/lib/theme-v2/theme";
+import {
+  AccountDeletionServiceError,
+  getAdminAccountDeletionPreview,
+} from "@/lib/account/deletion.server";
+import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
+import { card, statusDanger, statusWarning } from "@/lib/theme-v2/theme";
+import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
 import type {
   BillingMode,
   PartnerDomainStatus,
@@ -23,6 +29,9 @@ export const dynamic = "force-dynamic";
 
 type DetailBusiness = {
   id: string;
+  owner_id: string | null;
+  deleted_at: string | null;
+  deletion_scheduled_for: string | null;
   partner_id: string | null;
   billing_mode: BillingMode;
   partner_plan: SubscriptionPlan | null;
@@ -84,38 +93,75 @@ export default async function AdminBusinessPage({
 }) {
   await requireAdminUser();
 
+  const { data: business } = await supabaseAdmin
+    .from("businesses")
+    .select(
+      "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
+    )
+    .eq("id", params.businessId)
+    .maybeSingle<DetailBusiness>();
+
+  if (!business) notFound();
+
+  const lifecycle = getAdminBusinessLifecycle({
+    deletedAt: business.deleted_at,
+    deletionScheduledFor: business.deletion_scheduled_for,
+  });
+
+  if (lifecycle === "terminal") {
+    return <TerminalBusiness business={business} />;
+  }
+
+  let deletionPreview;
+  try {
+    deletionPreview = await getAdminAccountDeletionPreview(business.id);
+  } catch (error) {
+    if (
+      error instanceof AccountDeletionServiceError &&
+      error.code === "business_not_found"
+    ) {
+      notFound();
+    }
+    throw error;
+  }
+
+  // The preview is loaded after the business row and therefore wins if a
+  // concurrent schedule/reactivation changed lifecycle state between reads.
+  const effectiveLifecycle =
+    deletionPreview.lifecycleStage === "suspended" ? "scheduled" : "active";
+
+  if (effectiveLifecycle === "scheduled") {
+    return (
+      <main className="space-y-6">
+        <BackToAdmin />
+        <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
+        <AdminAccountDeletionPanel initialPreview={deletionPreview} />
+      </main>
+    );
+  }
+
   const [
-    { data: business },
     { data: usage },
     existingBrandLinkState,
     { data: partners, error: partnersError },
-  ] =
-    await Promise.all([
-      supabaseAdmin
-        .from("businesses")
-        .select(
-          "id, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes"
-        )
-        .eq("id", params.businessId)
-        .maybeSingle<DetailBusiness>(),
-      supabaseAdmin
-        .from("billing_usage_periods")
-        .select(
-          "included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start, period_end"
-        )
-        .eq("business_id", params.businessId)
-        .order("period_start", { ascending: false })
-        .limit(1)
-        .maybeSingle<UsageRow>(),
-      getExistingTelnyxBrandLinkState(params.businessId),
-      supabaseAdmin
-        .from("partners")
-        .select("id, name, status, domain_status")
-        .order("name", { ascending: true })
-        .returns<PartnerRow[]>(),
-    ]);
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("billing_usage_periods")
+      .select(
+        "included_sms_parts, inbound_sms_parts, outbound_sms_parts, inbound_mms_events, outbound_mms_events, period_start, period_end",
+      )
+      .eq("business_id", params.businessId)
+      .order("period_start", { ascending: false })
+      .limit(1)
+      .maybeSingle<UsageRow>(),
+    getExistingTelnyxBrandLinkState(params.businessId),
+    supabaseAdmin
+      .from("partners")
+      .select("id, name, status, domain_status")
+      .order("name", { ascending: true })
+      .returns<PartnerRow[]>(),
+  ]);
 
-  if (!business) notFound();
   if (partnersError) {
     throw new Error("Failed to load partner options");
   }
@@ -151,35 +197,46 @@ export default async function AdminBusinessPage({
   const activePartners = (partners ?? [])
     .filter(
       (partner) =>
-        partner.status === "active" && partner.domain_status === "connected"
+        partner.status === "active" && partner.domain_status === "connected",
     )
     .map(({ id, name }) => ({ id, name }));
 
   return (
     <main className="space-y-6">
-      <Link href="/admin" className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]">
-        Back to admin
-      </Link>
-
-      <section>
-        <h1 className="text-2xl font-bold">{business.name}</h1>
-        <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
-          {business.website_url ?? "No website"} · {business.business_type_other ?? business.business_type ?? "unknown"}
-        </p>
-      </section>
+      <BackToAdmin />
+      <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
 
       <section className="grid gap-4 md:grid-cols-2">
         <Card title="A2P Review">
           <dl className="space-y-2 text-sm">
-            <Row label="Status" value={business.a2p_risk_review_status ?? "not_started"} />
-            <Row label="Hash matches current input" value={hashMatches ? "yes" : "no"} />
-            <Row label="Customer answer" value={business.a2p_risk_review_customer_answer ?? "none"} />
+            <Row
+              label="Status"
+              value={business.a2p_risk_review_status ?? "not_started"}
+            />
+            <Row
+              label="Hash matches current input"
+              value={hashMatches ? "yes" : "no"}
+            />
+            <Row
+              label="Customer answer"
+              value={business.a2p_risk_review_customer_answer ?? "none"}
+            />
             <Row
               label="Selections"
-              value={(business.a2p_risk_review_customer_selections ?? []).join(", ") || "none"}
+              value={
+                (business.a2p_risk_review_customer_selections ?? []).join(
+                  ", ",
+                ) || "none"
+              }
             />
-            <Row label="Message" value={business.a2p_risk_review_message ?? "none"} />
-            <Row label="Reason" value={business.a2p_risk_review_reason ?? "none"} />
+            <Row
+              label="Message"
+              value={business.a2p_risk_review_message ?? "none"}
+            />
+            <Row
+              label="Reason"
+              value={business.a2p_risk_review_reason ?? "none"}
+            />
           </dl>
           {(business.a2p_risk_review_status === "pending_review" ||
             business.a2p_risk_review_status === "blocked") && (
@@ -224,19 +281,47 @@ export default async function AdminBusinessPage({
       <section className="grid gap-4 md:grid-cols-2">
         <Card title="Usage">
           <dl className="space-y-2 text-sm">
-            <Row label="Period" value={usage ? `${formatDate(usage.period_start)} - ${formatDate(usage.period_end)}` : "none"} />
-            <Row label="SMS parts" value={`${usedSms.toLocaleString()} / ${(usage?.included_sms_parts ?? 0).toLocaleString()}`} />
-            <Row label="Inbound MMS events" value={(usage?.inbound_mms_events ?? 0).toLocaleString()} />
-            <Row label="Outbound MMS events" value={(usage?.outbound_mms_events ?? 0).toLocaleString()} />
+            <Row
+              label="Period"
+              value={
+                usage
+                  ? `${formatDate(usage.period_start)} - ${formatDate(usage.period_end)}`
+                  : "none"
+              }
+            />
+            <Row
+              label="SMS parts"
+              value={`${usedSms.toLocaleString()} / ${(usage?.included_sms_parts ?? 0).toLocaleString()}`}
+            />
+            <Row
+              label="Inbound MMS events"
+              value={(usage?.inbound_mms_events ?? 0).toLocaleString()}
+            />
+            <Row
+              label="Outbound MMS events"
+              value={(usage?.outbound_mms_events ?? 0).toLocaleString()}
+            />
           </dl>
         </Card>
 
         <Card title="Registration">
           <dl className="space-y-2 text-sm">
-            <Row label="Onboarding registration" value={business.onboarding_registration_status ?? "not_started"} />
-            <Row label="Brand" value={business.brand_status ?? "not submitted"} />
-            <Row label="Campaign" value={business.campaign_status ?? "not submitted"} />
-            <Row label="Pending number" value={business.pending_phone_number ?? "none"} />
+            <Row
+              label="Onboarding registration"
+              value={business.onboarding_registration_status ?? "not_started"}
+            />
+            <Row
+              label="Brand"
+              value={business.brand_status ?? "not submitted"}
+            />
+            <Row
+              label="Campaign"
+              value={business.campaign_status ?? "not submitted"}
+            />
+            <Row
+              label="Pending number"
+              value={business.pending_phone_number ?? "none"}
+            />
           </dl>
         </Card>
       </section>
@@ -251,7 +336,10 @@ export default async function AdminBusinessPage({
       <Card title="Carrier-Safe Review Fields">
         <div className="space-y-4 text-sm">
           <Block label="Use case" value={business.use_case_description} />
-          <Block label="Opt-in description" value={business.opt_in_description} />
+          <Block
+            label="Opt-in description"
+            value={business.opt_in_description}
+          />
           <div>
             <p className="font-medium">Sample messages</p>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-stone-600 dark:text-[#bdbdbf]">
@@ -265,13 +353,20 @@ export default async function AdminBusinessPage({
 
       <Card title="Risk Findings">
         {(business.a2p_risk_review_findings ?? []).length === 0 ? (
-          <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">No findings stored.</p>
+          <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+            No findings stored.
+          </p>
         ) : (
           <div className="space-y-3">
             {(business.a2p_risk_review_findings ?? []).map((finding) => (
-              <div key={finding.ruleId} className="rounded-md border border-[#ece4d8] p-3 text-sm dark:border-white/[0.10]">
+              <div
+                key={finding.ruleId}
+                className="rounded-md border border-[#ece4d8] p-3 text-sm dark:border-white/[0.10]"
+              >
                 <p className="font-medium">{finding.label}</p>
-                <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">{finding.severity} · {finding.source}</p>
+                <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+                  {finding.severity} · {finding.source}
+                </p>
                 <ul className="mt-2 list-disc pl-5 text-stone-600 dark:text-[#bdbdbf]">
                   {finding.evidence.map((evidence) => (
                     <li key={evidence}>{evidence}</li>
@@ -282,11 +377,84 @@ export default async function AdminBusinessPage({
           </div>
         )}
       </Card>
+
+      <AdminAccountDeletionPanel initialPreview={deletionPreview} />
     </main>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function TerminalBusiness({ business }: { business: DetailBusiness }) {
+  return (
+    <main className="space-y-6">
+      <BackToAdmin />
+      <BusinessHeading business={business} lifecycle="terminal" />
+      <section className={`${card} p-5`}>
+        <h2 className="text-lg font-semibold">Terminally cleaned account</h2>
+        <p className="mt-2 text-sm text-stone-600 dark:text-[#bdbdbf]">
+          This retained tombstone is read-only. Customer identity, partner
+          assignment, configuration, credentials, and account-linked
+          provisioning state have completed terminal cleanup under the account
+          lifecycle policy.
+        </p>
+        <p className="mt-3 font-mono text-xs text-stone-500">{business.id}</p>
+      </section>
+    </main>
+  );
+}
+
+function BackToAdmin() {
+  return (
+    <Link
+      href="/admin"
+      className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+    >
+      Back to admin
+    </Link>
+  );
+}
+
+function BusinessHeading({
+  business,
+  lifecycle,
+}: {
+  business: DetailBusiness;
+  lifecycle: "active" | "scheduled" | "terminal";
+}) {
+  return (
+    <section>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold">{business.name}</h1>
+        {lifecycle === "scheduled" ? (
+          <span className={`rounded-full px-2 py-0.5 text-xs ${statusWarning}`}>
+            Deletion scheduled
+          </span>
+        ) : null}
+        {lifecycle === "terminal" ? (
+          <span className={`rounded-full px-2 py-0.5 text-xs ${statusDanger}`}>
+            Terminally cleaned
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+        {business.website_url ?? "No website"} ·{" "}
+        {business.business_type_other ?? business.business_type ?? "unknown"}
+      </p>
+      {lifecycle === "scheduled" && business.deletion_scheduled_for ? (
+        <p className="mt-1 text-sm text-amber-700 dark:text-amber-200">
+          Terminal cleanup: {formatDate(business.deletion_scheduled_for)}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className={`${card} p-4`}>
       <h2 className="mb-3 text-lg font-semibold">{title}</h2>
