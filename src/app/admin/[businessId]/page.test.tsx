@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   hashRisk: vi.fn(),
   getExistingBrand: vi.fn(),
   loadHealth: vi.fn(),
+  loadActivity: vi.fn(),
   results: new Map<
     string,
     { data: unknown; error: { message: string } | null }
@@ -46,6 +47,9 @@ vi.mock("@/lib/account/deletion.server", () => ({
 }));
 vi.mock("@/lib/admin/accountHealth.server", () => ({
   loadAdminAccountHealth: mocks.loadHealth,
+}));
+vi.mock("@/lib/admin/accountActivity.server", () => ({
+  loadAdminAccountActivity: mocks.loadActivity,
 }));
 vi.mock("@/lib/messaging/registration/riskScreening", () => ({
   buildA2pRiskInputForBusiness: mocks.buildRisk,
@@ -192,6 +196,7 @@ beforeEach(() => {
   ]);
   mocks.getPreview.mockResolvedValue(preview());
   mocks.loadHealth.mockResolvedValue(storedHealth());
+  mocks.loadActivity.mockResolvedValue([]);
   mocks.buildRisk.mockResolvedValue({ input: { businessName: "Lifecycle" } });
   mocks.hashRisk.mockReturnValue("risk-hash");
   mocks.getExistingBrand.mockResolvedValue({ state: "none" });
@@ -215,6 +220,19 @@ beforeEach(() => {
 });
 
 describe("AdminBusinessPage account lifecycle rendering", () => {
+  it("completes admin authentication before starting any service-role read", async () => {
+    mocks.requireAdminUser.mockRejectedValue(new Error("NOT_FOUND"));
+
+    await expect(
+      AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    ).rejects.toThrow("NOT_FOUND");
+
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.loadActivity).not.toHaveBeenCalled();
+    expect(mocks.loadHealth).not.toHaveBeenCalled();
+    expect(mocks.getPreview).not.toHaveBeenCalled();
+  });
+
   it("loads an active preview and renders the operational forms plus Danger Zone", async () => {
     const html = renderToStaticMarkup(
       await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
@@ -227,6 +245,9 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.loadHealth.mock.invocationCallOrder[0],
     );
+    expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.loadActivity.mock.invocationCallOrder[0],
+    );
     const businessQuery = mocks.from.mock.results[0]?.value;
     expect(businessQuery.select).toHaveBeenCalledWith(
       expect.stringContaining("owner_id, deleted_at, deletion_scheduled_for"),
@@ -234,6 +255,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.getPreview).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.loadHealth).toHaveBeenCalledOnce();
     expect(mocks.loadHealth).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.loadActivity).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.loadHealth.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.getPreview.mock.invocationCallOrder[0],
     );
@@ -246,6 +268,8 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).toContain("A2P_APPROVE_FORM");
     expect(html).toContain("EXISTING_TELNYX_FORM");
     expect(html).toContain("Account health");
+    expect(html).toContain("Account activity");
+    expect(html).toContain("Recorded activity only.");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Onboarding");
   });
@@ -272,10 +296,12 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.getPreview).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.loadHealth).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.loadActivity).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.buildRisk).not.toHaveBeenCalled();
     expect(mocks.getExistingBrand).not.toHaveBeenCalled();
     expect(html).toContain("Deletion scheduled");
     expect(html).toContain("Account health");
+    expect(html).toContain("Account activity");
     expect(html).toContain("Pending deletion");
     expect(html).toContain(
       "customer may reactivate during the 60-day grace period",
@@ -301,6 +327,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
 
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.loadHealth).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.loadActivity).toHaveBeenCalledWith(BUSINESS_ID);
     expect(html).toContain("Deletion scheduled");
     expect(html).toContain("Pending deletion");
     expect(html).toContain("Oct 3, 2026");
@@ -325,6 +352,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
 
     expect(mocks.buildRisk).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.loadHealth).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.loadActivity).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.getExistingBrand).toHaveBeenCalledWith(BUSINESS_ID);
     expect(html).not.toContain("Deletion scheduled");
     expect(html).toContain("ADMIN_FLAG_FORM");
@@ -344,6 +372,16 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
       }),
       error: null,
     });
+    mocks.loadActivity.mockResolvedValue([
+      {
+        id: "lifecycle:deletion:scheduled",
+        category: "lifecycle",
+        occurredAt: "2026-04-01T12:00:00.000Z",
+        title: "Account deletion scheduled",
+        detail: null,
+        actor: null,
+      },
+    ]);
 
     const html = renderToStaticMarkup(
       await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
@@ -352,6 +390,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.getPreview).not.toHaveBeenCalled();
     expect(mocks.loadHealth).not.toHaveBeenCalled();
+    expect(mocks.loadActivity).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.buildRisk).not.toHaveBeenCalled();
     expect(mocks.hashRisk).not.toHaveBeenCalled();
     expect(mocks.getExistingBrand).not.toHaveBeenCalled();
@@ -364,6 +403,27 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("A2P_APPROVE_FORM");
     expect(html).not.toContain("EXISTING_TELNYX_FORM");
     expect(html).not.toContain("Account health");
+    expect(html).toContain("Account activity");
+    expect(html).toContain("Account deletion scheduled");
+  });
+
+  it("shows an explicit unavailable state instead of partial activity", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.loadActivity.mockRejectedValue(new Error("activity source failed"));
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toContain("Timeline unavailable");
+    expect(html).toContain("No partial timeline is shown.");
+    expect(html).toContain("Account health");
+    expect(html).toContain("ADMIN_FLAG_FORM");
+    expect(log).toHaveBeenCalledWith(
+      "[admin-account-activity] Timeline unavailable",
+      expect.any(Error),
+    );
+    log.mockRestore();
   });
 
   it("fails closed when the initial business read fails", async () => {
@@ -376,6 +436,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
       AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
     ).rejects.toThrow("Failed to load admin account.");
     expect(mocks.loadHealth).not.toHaveBeenCalled();
+    expect(mocks.loadActivity).not.toHaveBeenCalled();
     expect(mocks.getPreview).not.toHaveBeenCalled();
   });
 });

@@ -21,8 +21,13 @@ import {
   type AdminAccountHealth,
 } from "@/lib/admin/accountHealth";
 import { loadAdminAccountHealth } from "@/lib/admin/accountHealth.server";
+import {
+  loadAdminAccountActivity,
+  type AdminAccountActivityEvent,
+} from "@/lib/admin/accountActivity.server";
 import { card, statusDanger, statusWarning } from "@/lib/theme-v2/theme";
 import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
+import { AdminAccountActivityTimeline } from "./AdminAccountActivityTimeline";
 import { AdminAccountHealthCard } from "./AdminAccountHealthCard";
 import type {
   BillingMode,
@@ -116,9 +121,10 @@ export default async function AdminBusinessPage({
     deletedAt: business.deleted_at,
     deletionScheduledFor: business.deletion_scheduled_for,
   });
+  const activity = await loadAccountActivityState(business.id);
 
   if (lifecycle === "terminal") {
-    return <TerminalBusiness business={business} />;
+    return <TerminalBusiness business={business} activity={activity} />;
   }
 
   let deletionPreview;
@@ -160,6 +166,7 @@ export default async function AdminBusinessPage({
           }
         />
         <AdminAccountHealthCard health={effectiveHealth} />
+        <AdminAccountActivityTimeline {...activity} />
         <AdminAccountDeletionPanel initialPreview={deletionPreview} />
       </main>
     );
@@ -231,6 +238,7 @@ export default async function AdminBusinessPage({
       <BackToAdmin />
       <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
       <AdminAccountHealthCard health={effectiveHealth} />
+      <AdminAccountActivityTimeline {...activity} />
 
       <section className="grid gap-4 md:grid-cols-2">
         <Card title="A2P Review">
@@ -409,7 +417,13 @@ export default async function AdminBusinessPage({
   );
 }
 
-function TerminalBusiness({ business }: { business: DetailBusiness }) {
+function TerminalBusiness({
+  business,
+  activity,
+}: {
+  business: DetailBusiness;
+  activity: AdminAccountActivityState;
+}) {
   return (
     <main className="space-y-6">
       <BackToAdmin />
@@ -424,8 +438,28 @@ function TerminalBusiness({ business }: { business: DetailBusiness }) {
         </p>
         <p className="mt-3 font-mono text-xs text-stone-500">{business.id}</p>
       </section>
+      <AdminAccountActivityTimeline {...activity} />
     </main>
   );
+}
+
+type AdminAccountActivityState = {
+  events: AdminAccountActivityEvent[];
+  unavailable: boolean;
+};
+
+async function loadAccountActivityState(
+  businessId: string,
+): Promise<AdminAccountActivityState> {
+  try {
+    return {
+      events: await loadAdminAccountActivity(businessId),
+      unavailable: false,
+    };
+  } catch (error) {
+    console.error("[admin-account-activity] Timeline unavailable", error);
+    return { events: [], unavailable: true };
+  }
 }
 
 function BackToAdmin() {
