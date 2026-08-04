@@ -1,72 +1,35 @@
-import Link from "next/link";
 import {
-  body,
   bodyFaint,
   card,
-  statusDanger,
-  statusNeutral,
-  statusWarning,
   tile,
 } from "@/lib/theme-v2/theme";
 import { getAdminBusinessLifecycle } from "@/lib/admin/accountLifecycle";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
-import type {
-  A2pRiskReviewStatus,
-  SubscriptionPlan,
-  SubscriptionStatus,
-} from "@/types/database";
+import {
+  AdminAccountRow,
+  type AdminAccountBusinessRow,
+  type AdminAccountSubscriptionRow,
+  type AdminAccountUsageRow,
+} from "./AdminAccountRow";
 
 export const dynamic = "force-dynamic";
-
-type BusinessRow = {
-  id: string;
-  name: string;
-  website_url: string | null;
-  business_type: string | null;
-  a2p_risk_review_status: A2pRiskReviewStatus | null;
-  a2p_risk_review_message: string | null;
-  onboarding_registration_status: string | null;
-  brand_status: string | null;
-  campaign_status: string | null;
-  billing_pilot: boolean;
-  billing_comped: boolean;
-  billing_exempt: boolean;
-  telnyx_submission_disabled: boolean;
-  sms_overage_opt_in: boolean;
-  deleted_at: string | null;
-  deletion_scheduled_for: string | null;
-  created_at: string;
-};
-
-type SubscriptionRow = {
-  business_id: string;
-  plan: SubscriptionPlan;
-  status: SubscriptionStatus;
-};
-
-type UsageRow = {
-  business_id: string;
-  included_sms_parts: number;
-  inbound_sms_parts: number;
-  outbound_sms_parts: number;
-  inbound_mms_events: number;
-  outbound_mms_events: number;
-  period_start: string;
-};
 
 export default async function AdminPage() {
   await requireAdminUser();
 
-  const { data: businesses } = await supabaseAdmin
+  const { data: businesses, error: businessesError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, website_url, business_type, a2p_risk_review_status, a2p_risk_review_message, onboarding_registration_status, brand_status, campaign_status, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, deleted_at, deletion_scheduled_for, created_at",
+      "id, name, website_url, business_type, a2p_risk_review_status, a2p_risk_review_message, onboarding_registration_status, brand_status, campaign_status, partner_id, billing_mode, partner_plan, partner:partners!businesses_partner_id_fkey(name, slug), billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, deleted_at, deletion_scheduled_for, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(75)
-    .returns<BusinessRow[]>();
+    .returns<AdminAccountBusinessRow[]>();
+
+  if (businessesError) {
+    throw new Error("Could not load admin accounts.");
+  }
 
   const businessIds = (businesses ?? [])
     .filter(
@@ -77,14 +40,17 @@ export default async function AdminPage() {
         }) !== "terminal",
     )
     .map((business) => business.id);
-  const [{ data: subscriptions }, { data: usageRows }] = await Promise.all([
+  const [subscriptionsResult, usageResult] = await Promise.all([
     businessIds.length > 0
       ? supabaseAdmin
           .from("subscriptions")
           .select("business_id, plan, status")
           .in("business_id", businessIds)
-          .returns<SubscriptionRow[]>()
-      : Promise.resolve({ data: [] as SubscriptionRow[] }),
+          .returns<AdminAccountSubscriptionRow[]>()
+      : Promise.resolve({
+          data: [] as AdminAccountSubscriptionRow[],
+          error: null,
+        }),
     businessIds.length > 0
       ? supabaseAdmin
           .from("billing_usage_periods")
@@ -93,9 +59,16 @@ export default async function AdminPage() {
           )
           .in("business_id", businessIds)
           .order("period_start", { ascending: false })
-          .returns<UsageRow[]>()
-      : Promise.resolve({ data: [] as UsageRow[] }),
+          .returns<AdminAccountUsageRow[]>()
+      : Promise.resolve({ data: [] as AdminAccountUsageRow[], error: null }),
   ]);
+
+  if (subscriptionsResult.error || usageResult.error) {
+    throw new Error("Could not load admin account statistics.");
+  }
+
+  const subscriptions = subscriptionsResult.data;
+  const usageRows = usageResult.data;
 
   const subscriptionByBusiness = new Map(
     (subscriptions ?? []).map((subscription) => [
@@ -103,7 +76,7 @@ export default async function AdminPage() {
       subscription,
     ]),
   );
-  const latestUsageByBusiness = new Map<string, UsageRow>();
+  const latestUsageByBusiness = new Map<string, AdminAccountUsageRow>();
   for (const row of usageRows ?? []) {
     if (!latestUsageByBusiness.has(row.business_id)) {
       latestUsageByBusiness.set(row.business_id, row);
@@ -151,92 +124,13 @@ export default async function AdminPage() {
         <h2 className="text-lg font-semibold">Accounts</h2>
         <div className={`overflow-hidden ${card}`}>
           {(businesses ?? []).map((business) => {
-            const lifecycle = getAdminBusinessLifecycle({
-              deletedAt: business.deleted_at,
-              deletionScheduledFor: business.deletion_scheduled_for,
-            });
-            const subscription = subscriptionByBusiness.get(business.id);
-            const usage = latestUsageByBusiness.get(business.id);
-            const used = usage
-              ? usage.inbound_sms_parts + usage.outbound_sms_parts
-              : 0;
-            const included = usage?.included_sms_parts ?? 0;
-            const usagePercent =
-              included > 0 ? Math.round((used / included) * 100) : 0;
-            const revenue = subscription?.plan
-              ? SUBSCRIPTION_PLANS[subscription.plan].price
-              : 0;
-            const estimatedSmsCost = used * 0.01;
-            const roughMargin = revenue - estimatedSmsCost - 10;
-
             return (
-              <Link
+              <AdminAccountRow
                 key={business.id}
-                href={`/admin/${business.id}`}
-                className="block border-b border-[#f0e9de] px-4 py-4 last:border-b-0 hover:bg-[#faf6ef] dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="font-medium">{business.name}</p>
-                    <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
-                      {business.website_url ?? "No website"} ·{" "}
-                      {business.business_type ?? "unknown"}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {lifecycle === "terminal" ? (
-                        <Badge tone="danger">Terminally cleaned</Badge>
-                      ) : (
-                        <>
-                          <Badge>
-                            Risk:{" "}
-                            {business.a2p_risk_review_status ?? "not_started"}
-                          </Badge>
-                          <Badge>
-                            Brand: {business.brand_status ?? "not submitted"}
-                          </Badge>
-                          <Badge>
-                            Campaign:{" "}
-                            {business.campaign_status ?? "not submitted"}
-                          </Badge>
-                          {business.telnyx_submission_disabled && (
-                            <Badge tone="danger">No Telnyx submit</Badge>
-                          )}
-                          {business.billing_pilot && <Badge>Pilot</Badge>}
-                          {business.billing_comped && <Badge>Comped</Badge>}
-                          {business.billing_exempt && (
-                            <Badge>Billing exempt</Badge>
-                          )}
-                          {lifecycle === "scheduled" && (
-                            <Badge tone="warning">
-                              Deletion scheduled
-                              {business.deletion_scheduled_for
-                                ? ` · ${formatDate(business.deletion_scheduled_for)}`
-                                : ""}
-                            </Badge>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {lifecycle === "terminal" ? (
-                    <div className={`text-sm ${body} md:text-right`}>
-                      <p>Read-only retained tombstone</p>
-                    </div>
-                  ) : (
-                    <div className={`text-sm ${body} md:text-right`}>
-                      <p>
-                        {subscription?.plan ?? "no plan"} ·{" "}
-                        {subscription?.status ?? "no subscription"}
-                      </p>
-                      <p>
-                        {used.toLocaleString()} / {included.toLocaleString()}{" "}
-                        SMS parts ({usagePercent}%)
-                      </p>
-                      <p>Rough margin: ${roughMargin.toFixed(2)}</p>
-                    </div>
-                  )}
-                </div>
-              </Link>
+                business={business}
+                subscription={subscriptionByBusiness.get(business.id)}
+                usage={latestUsageByBusiness.get(business.id)}
+              />
             );
           })}
         </div>
@@ -252,30 +146,4 @@ function Metric({ label, value }: { label: string; value: number }) {
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </div>
   );
-}
-
-function Badge({
-  children,
-  tone = "default",
-}: {
-  children: React.ReactNode;
-  tone?: "default" | "danger" | "warning";
-}) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs ${
-        tone === "danger"
-          ? statusDanger
-          : tone === "warning"
-            ? statusWarning
-            : statusNeutral
-      }`}
-    >
-      {children}
-    </span>
-  );
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString();
 }

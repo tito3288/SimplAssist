@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
   from: vi.fn(),
-  results: new Map<string, { data: unknown; error: null }>(),
+  results: new Map<
+    string,
+    { data: unknown; error: { message: string } | null }
+  >(),
 }));
 
 vi.mock("@/lib/admin/auth", () => ({
@@ -46,6 +49,10 @@ function business(
     onboarding_registration_status: "pending",
     brand_status: "pending",
     campaign_status: "pending",
+    partner_id: null,
+    billing_mode: "stripe",
+    partner_plan: null,
+    partner: null,
     billing_pilot: false,
     billing_comped: false,
     billing_exempt: false,
@@ -165,4 +172,109 @@ describe("AdminPage account lifecycle rendering", () => {
     expect(html).toContain(`href="/admin/${SCHEDULED_ID}"`);
     expect(html).toContain(`href="/admin/${TERMINAL_ID}"`);
   });
+});
+
+describe("AdminPage billing presentation", () => {
+  it("preserves the existing Stripe billing and margin presentation", async () => {
+    mocks.results.set("businesses", {
+      data: [business(ACTIVE_ID, "Stripe Dental")],
+      error: null,
+    });
+    mocks.results.set("subscriptions", {
+      data: [{ business_id: ACTIVE_ID, plan: "sms_only", status: "active" }],
+      error: null,
+    });
+    mocks.results.set("billing_usage_periods", {
+      data: [
+        {
+          business_id: ACTIVE_ID,
+          included_sms_parts: 500,
+          inbound_sms_parts: 40,
+          outbound_sms_parts: 60,
+          inbound_mms_events: 0,
+          outbound_mms_events: 0,
+          period_start: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(await AdminPage());
+
+    expect(html).toContain("sms_only · active");
+    expect(html).toContain("100 / 500 SMS parts (20%)");
+    expect(html).toContain("Rough margin: $14.00");
+  });
+
+  it.each([
+    ["invoiced", "sms_and_chat", "Growth / SMS + Web Chat"],
+    ["comped", "full", "Pro / Full Suite"],
+  ] as const)(
+    "renders partner %s billing without a fabricated margin",
+    async (billingMode, partnerPlan, planLabel) => {
+      mocks.results.set("businesses", {
+        data: [
+          business(ACTIVE_ID, "Partner Dental", {
+            partner_id: "20000000-0000-4000-a045-000000000001",
+            billing_mode: billingMode,
+            partner_plan: partnerPlan,
+            partner: { name: "Alpha Dog Agency", slug: "alpha-dog" },
+          }),
+        ],
+        error: null,
+      });
+
+      const html = renderToStaticMarkup(await AdminPage());
+
+      const businessQuery = mocks.from.mock.results[0]?.value;
+      expect(businessQuery.select).toHaveBeenCalledWith(
+        "id, name, website_url, business_type, a2p_risk_review_status, a2p_risk_review_message, onboarding_registration_status, brand_status, campaign_status, partner_id, billing_mode, partner_plan, partner:partners!businesses_partner_id_fkey(name, slug), billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, deleted_at, deletion_scheduled_for, created_at",
+      );
+      expect(html).toContain(
+        `Alpha Dog Agency · ${planLabel} · ${billingMode}`,
+      );
+      expect(html).not.toContain("no plan · no subscription");
+      expect(html).not.toContain("Rough margin:");
+    },
+  );
+
+  it("labels malformed partner billing instead of inventing a plan", async () => {
+    mocks.results.set("businesses", {
+      data: [
+        business(ACTIVE_ID, "Broken Partner Dental", {
+          partner_id: "20000000-0000-4000-a045-000000000001",
+          billing_mode: "invoiced",
+          partner_plan: null,
+          partner: null,
+        }),
+      ],
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(await AdminPage());
+
+    expect(html).toContain("Partner billing configuration invalid");
+    expect(html).not.toContain("no plan · no subscription");
+    expect(html).not.toContain("Rough margin:");
+  });
+
+  it.each(["businesses", "subscriptions", "billing_usage_periods"])(
+    "fails closed when the %s read fails",
+    async (table) => {
+      mocks.results.set("businesses", {
+        data: [business(ACTIVE_ID, "Failure Dental")],
+        error: null,
+      });
+      mocks.results.set(table, {
+        data: null,
+        error: { message: "database unavailable" },
+      });
+
+      await expect(AdminPage()).rejects.toThrow(
+        table === "businesses"
+          ? "Could not load admin accounts."
+          : "Could not load admin account statistics.",
+      );
+    },
+  );
 });
