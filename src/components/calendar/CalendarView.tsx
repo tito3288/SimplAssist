@@ -25,9 +25,17 @@ export interface CalendarEvent {
   allDay: boolean;
   description: string | null;
 }
+
+export type CalendarEventCreationState =
+  | "available"
+  | "account_suspended"
+  | "bookings_paused"
+  | "state_unavailable";
+
 interface CalendarViewProps {
   isConnected: boolean;
   googleEmail: string | null;
+  eventCreationState?: CalendarEventCreationState;
   /** Dev-only demo mode (/demo routes): seed events and skip the Google
    *  Calendar fetch entirely. Real dashboard callers never pass this. */
   demoEvents?: CalendarEvent[];
@@ -86,6 +94,7 @@ function formatMonthYear(date: Date): string {
 export default function CalendarView({
   isConnected: initialConnected,
   googleEmail,
+  eventCreationState = "available",
   demoEvents,
 }: CalendarViewProps) {
   const today = new Date();
@@ -97,6 +106,9 @@ export default function CalendarView({
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(initialConnected);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [runtimeEventCreationState, setRuntimeEventCreationState] = useState(
+    eventCreationState
+  );
   const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [viewEvent, setViewEvent] = useState<CalendarEvent | null>(null);
@@ -158,6 +170,11 @@ export default function CalendarView({
     fetchEvents();
   }, [fetchEvents]);
 
+  useEffect(() => {
+    setRuntimeEventCreationState(eventCreationState);
+    if (eventCreationState !== "available") setCreateModalOpen(false);
+  }, [eventCreationState]);
+
   const days = getDaysInMonthGrid(
     currentMonth.getFullYear(),
     currentMonth.getMonth()
@@ -175,6 +192,37 @@ export default function CalendarView({
   }
 
   const selectedEvents = getEventsForDate(selectedDate);
+  const canCreateEvents = runtimeEventCreationState === "available";
+  const creationUnavailableLead =
+    runtimeEventCreationState === "account_suspended"
+      ? "New event creation is unavailable while your account is suspended."
+      : runtimeEventCreationState === "bookings_paused"
+        ? "New event creation is paused."
+        : runtimeEventCreationState === "state_unavailable"
+          ? "New event creation is temporarily unavailable while we check booking status."
+          : null;
+  const creationUnavailableCopy = creationUnavailableLead
+    ? `${creationUnavailableLead} ${
+        connected
+          ? "Existing events can still be viewed, edited, or deleted."
+          : "You can still connect or manage Google Calendar in Settings."
+      }`
+    : null;
+  const creationUnavailableNotice = creationUnavailableCopy ? (
+    <div
+      role="status"
+      className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100"
+    >
+      {creationUnavailableCopy}
+    </div>
+  ) : null;
+
+  function handleEventCreationUnavailable(
+    state: Exclude<CalendarEventCreationState, "available">
+  ) {
+    setRuntimeEventCreationState(state);
+    setCreateModalOpen(false);
+  }
 
   function goToPrevMonth() {
     setCurrentMonth(
@@ -197,36 +245,42 @@ export default function CalendarView({
   // Not connected state
   if (!connected) {
     return (
-      <div className={`p-10 text-center ${card}`}>
-        <div
-          className={`w-16 h-16 mx-auto mb-4 grid place-items-center ${orangeAccentIcon}`}
-        >
-          <CalendarDays className="w-8 h-8 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
+      <div className="space-y-4">
+        {creationUnavailableNotice}
+        <div className={`p-10 text-center ${card}`}>
+          <div
+            className={`w-16 h-16 mx-auto mb-4 grid place-items-center ${orangeAccentIcon}`}
+          >
+            <CalendarDays className="w-8 h-8 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
+          </div>
+          <h3 className={`text-lg font-bold mb-2 ${ink}`}>
+            Connect your Google Calendar
+          </h3>
+          <p className={`mb-6 max-w-md mx-auto ${body}`}>
+            Link your Google Calendar to see your appointments and bookings here.
+            Go to Settings and enable Direct Scheduling to connect.
+            {googleEmail && (
+              <span className="block mt-1 text-sm">
+                Previously connected: {googleEmail}
+              </span>
+            )}
+          </p>
+          <a
+            href="/settings"
+            className={`${btnPrimary} w-auto px-8`}
+          >
+            Go to Settings
+          </a>
         </div>
-        <h3 className={`text-lg font-bold mb-2 ${ink}`}>
-          Connect your Google Calendar
-        </h3>
-        <p className={`mb-6 max-w-md mx-auto ${body}`}>
-          Link your Google Calendar to see your appointments and bookings here.
-          Go to Settings and enable Direct Scheduling to connect.
-          {googleEmail && (
-            <span className="block mt-1 text-sm">
-              Previously connected: {googleEmail}
-            </span>
-          )}
-        </p>
-        <a
-          href="/settings"
-          className={`${btnPrimary} w-auto px-8`}
-        >
-          Go to Settings
-        </a>
       </div>
     );
   }
 
   return (
     <div className={`p-5 sm:p-6 ${card}`}>
+      {creationUnavailableNotice && (
+        <div className="mb-5">{creationUnavailableNotice}</div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Calendar grid */}
         <div className="lg:col-span-2">
@@ -334,8 +388,14 @@ export default function CalendarView({
               </h3>
               <button
                 onClick={() => setCreateModalOpen(true)}
-                className="w-7 h-7 grid place-items-center rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] dark:bg-[var(--brand-primary-dark)] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white transition-colors"
-                title="Create event"
+                disabled={!canCreateEvents}
+                aria-label="Create event"
+                className="w-7 h-7 grid place-items-center rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] dark:bg-[var(--brand-primary-dark)] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                title={
+                  canCreateEvents
+                    ? "Create event"
+                    : "New event creation is unavailable"
+                }
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -388,12 +448,15 @@ export default function CalendarView({
         </div>
       </div>
 
-      <CreateEventModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        selectedDate={selectedDate}
-        onEventCreated={fetchEvents}
-      />
+      {canCreateEvents && (
+        <CreateEventModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          selectedDate={selectedDate}
+          onEventCreated={fetchEvents}
+          onCreationUnavailable={handleEventCreationUnavailable}
+        />
+      )}
 
       <EditEventModal
         open={!!editEvent}

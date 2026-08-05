@@ -57,9 +57,11 @@ export const calendarTools: Anthropic.Tool[] = [
 
 export function shouldIncludeCalendarTools(
   aiSettings: AISettings,
-  hasCalendarConnected: boolean
+  hasCalendarConnected: boolean,
+  bookingOperationallyAvailable: boolean = true
 ): boolean {
   return (
+    bookingOperationallyAvailable &&
     aiSettings.booking_enabled &&
     aiSettings.booking_mode === "schedule_direct" &&
     hasCalendarConnected

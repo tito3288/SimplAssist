@@ -425,7 +425,7 @@ describe("database adapter contracts", () => {
     expect(JSON.stringify(mocks.rpc.mock.calls[0][1])).not.toContain(VERIFIER);
   });
 
-  it("completes with the exact credential RPC contract and requires true", async () => {
+  it("completes with the exact credential RPC contract, cannot clear operational pauses, and requires true", async () => {
     mocks.rpcResults.complete_google_calendar_oauth_connection = {
       data: true,
       error: null,
@@ -455,6 +455,17 @@ describe("database adapter contracts", () => {
         p_google_email: "client@example.com",
         p_calendar_id: "primary",
       },
+    );
+    const completionPayload = mocks.rpc.mock.calls[0]?.[1];
+    expect(completionPayload).not.toHaveProperty(
+      "operations_suspended_at",
+    );
+    expect(completionPayload).not.toHaveProperty("bookings_paused_at");
+    expect(JSON.stringify(completionPayload)).not.toContain(
+      "operations_suspended_at",
+    );
+    expect(JSON.stringify(completionPayload)).not.toContain(
+      "bookings_paused_at",
     );
 
     mocks.rpcResults.complete_google_calendar_oauth_connection = {

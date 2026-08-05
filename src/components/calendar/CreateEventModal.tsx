@@ -10,6 +10,45 @@ interface CreateEventModalProps {
   onClose: () => void;
   selectedDate: Date;
   onEventCreated: () => void;
+  onCreationUnavailable: (state: EventCreationUnavailableState) => void;
+}
+
+export type EventCreationUnavailableState =
+  | "account_suspended"
+  | "bookings_paused"
+  | "state_unavailable";
+
+type CreateEventErrorPayload = {
+  error?: unknown;
+  reason?: unknown;
+  retryable?: unknown;
+};
+
+export function eventCreationStateFromApiFailure(
+  status: number,
+  payload: unknown
+): EventCreationUnavailableState | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as CreateEventErrorPayload;
+
+  if (
+    status === 403 &&
+    candidate.error === "booking_creation_unavailable" &&
+    (candidate.reason === "account_suspended" ||
+      candidate.reason === "bookings_paused")
+  ) {
+    return candidate.reason;
+  }
+
+  if (
+    status === 503 &&
+    candidate.error === "service_state_unavailable" &&
+    candidate.retryable === true
+  ) {
+    return "state_unavailable";
+  }
+
+  return null;
 }
 
 function formatDateDisplay(date: Date): string {
@@ -49,6 +88,7 @@ export default function CreateEventModal({
   onClose,
   selectedDate,
   onEventCreated,
+  onCreationUnavailable,
 }: CreateEventModalProps) {
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
@@ -110,14 +150,24 @@ export default function CreateEventModal({
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to create event");
+        const data: unknown = await res.json().catch(() => ({}));
+        const unavailableState = eventCreationStateFromApiFailure(
+          res.status,
+          data
+        );
+        if (unavailableState) {
+          onCreationUnavailable(unavailableState);
+          onClose();
+          return;
+        }
+        setError("We couldn't create this event. Please try again.");
+        return;
       }
 
       onEventCreated();
       onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create event");
+    } catch {
+      setError("We couldn't create this event. Please try again.");
     } finally {
       setSubmitting(false);
     }

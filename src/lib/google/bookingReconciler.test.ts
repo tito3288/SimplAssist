@@ -175,6 +175,37 @@ describe("reconcilePendingCalendarBookings", () => {
     });
   });
 
+  it("continues reconciliation for suspended and booking-paused businesses", async () => {
+    const paused = {
+      ...booking("paused"),
+      businesses: {
+        owner_id: "owner-paused",
+        deleted_at: null,
+        operations_suspended_at: "2026-08-01T14:59:00.000Z",
+        bookings_paused_at: "2026-08-01T14:58:00.000Z",
+      },
+    };
+    installQuery([paused]);
+    mocks.recover.mockResolvedValueOnce(true);
+
+    await expect(reconcilePendingCalendarBookings()).resolves.toEqual({
+      confirmed: 1,
+      notFound: 0,
+      failed: 0,
+    });
+
+    expect(mocks.claim).toHaveBeenCalledWith(paused);
+    expect(mocks.recover).toHaveBeenCalledWith(paused);
+    expect(mocks.is).not.toHaveBeenCalledWith(
+      "businesses.operations_suspended_at",
+      null
+    );
+    expect(mocks.is).not.toHaveBeenCalledWith(
+      "businesses.bookings_paused_at",
+      null
+    );
+  });
+
   it("throws a batch query failure without attempting row recovery", async () => {
     installQuery([], { message: "database unavailable" });
 

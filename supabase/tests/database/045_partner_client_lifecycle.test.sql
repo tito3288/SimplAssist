@@ -2172,6 +2172,14 @@ SELECT is(
   'a failed completion validation writes no Google credentials'
 );
 
+-- Operational controls are deliberately independent from Google OAuth. A
+-- suspended, booking-paused account may finish credential reconciliation, and
+-- the OAuth RPC must preserve both timestamps exactly.
+UPDATE public.businesses
+SET operations_suspended_at = '2048-04-05 12:00:00+00'::timestamptz,
+    bookings_paused_at = '2048-04-05 12:01:00+00'::timestamptz
+WHERE id = '10000000-0000-4000-a045-000000000001';
+
 SELECT is(
   public.complete_google_calendar_oauth_connection(
     (
@@ -2214,8 +2222,16 @@ SELECT ok(
     JOIN lifecycle_045_state AS state
       ON state.uuid_value = attempt.id
     WHERE state.name = 'oauth_success'
+  )
+  AND (
+    SELECT operations_suspended_at =
+             '2048-04-05 12:00:00+00'::timestamptz
+       AND bookings_paused_at =
+             '2048-04-05 12:01:00+00'::timestamptz
+    FROM public.businesses
+    WHERE id = '10000000-0000-4000-a045-000000000001'
   ),
-  'completion writes the token/settings and consumes the OAuth attempt'
+  'completion writes token/settings, consumes the attempt, and preserves operational controls'
 );
 
 SELECT throws_ok(

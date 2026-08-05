@@ -87,7 +87,8 @@ export function buildSystemPrompt(
   faqs: FAQ[],
   businessHours: BusinessHours[],
   calendarConnected: boolean = false,
-  channel: string = "sms"
+  channel: string = "sms",
+  bookingOperationallyAvailable: boolean = true
 ): string {
   const currentHours = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
@@ -185,7 +186,11 @@ export function buildSystemPrompt(
 
   sections.push("");
   sections.push("BOOKING:");
-  if (aiSettings.booking_enabled) {
+  if (!bookingOperationallyAvailable) {
+    sections.push(
+      "Booking is currently unavailable. Do not collect booking details, offer appointment times, check availability, or claim that an appointment can be scheduled. If a customer asks to book, let them know booking is currently unavailable."
+    );
+  } else if (aiSettings.booking_enabled) {
     if (aiSettings.booking_mode === "collect_info") {
       sections.push(
         "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
@@ -281,12 +286,18 @@ export function buildSystemPrompt(
   sections.push("- After your first exchange with the customer, naturally ask for their name. Example: 'Happy to help! What's your name so I can better assist you?'");
   sections.push("- Do NOT ask for name and email at the same time — it feels like a form.");
   sections.push("- Only ask for email when there's a clear reason:");
-  sections.push("  - Booking confirmation: 'Can I get your email to send you a confirmation?'");
+  if (bookingOperationallyAvailable) {
+    sections.push("  - Booking confirmation: 'Can I get your email to send you a confirmation?'");
+  }
   sections.push("  - Quote or estimate request: 'What's your email so I can send that over?'");
   sections.push("  - Follow-up requested: 'What's your email so we can follow up with more details?'");
   sections.push("- Never ask for email on the first or second message.");
   sections.push("- When the customer provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step.");
-  sections.push("- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow.");
+  sections.push(
+    bookingOperationallyAvailable
+      ? "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow."
+      : "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
+  );
   sections.push("- Once you have their name, use it naturally in the conversation.");
 
   sections.push("");

@@ -12,6 +12,10 @@ describe("shouldIncludeCalendarTools", () => {
     expect(shouldIncludeCalendarTools(directSettings, true)).toBe(true);
   });
 
+  it("removes direct-booking tools while booking is operationally unavailable", () => {
+    expect(shouldIncludeCalendarTools(directSettings, true, false)).toBe(false);
+  });
+
   it.each([
     [{ ...directSettings, booking_enabled: false }, true],
     [{ ...directSettings, booking_mode: "collect_info" }, true],

@@ -183,6 +183,48 @@ function expectedKnowledgeGapSection(channel: "sms" | "web_chat"): string {
   ].join("\n");
 }
 
+describe("buildSystemPrompt booking operational availability", () => {
+  it.each(["collect_info", "schedule_direct"] as const)(
+    "overrides saved %s booking behavior without mutating the settings",
+    (bookingMode) => {
+      const settings: AISettings = {
+        ...AI_SETTINGS,
+        booking_mode: bookingMode,
+        guardrails: [...AI_SETTINGS.guardrails],
+      };
+      const savedSettings = {
+        ...settings,
+        guardrails: [...settings.guardrails],
+      };
+
+      const prompt = buildSystemPrompt(
+        business({ phone_number: PHONE_NUMBER, email: EMAIL }),
+        settings,
+        SERVICES,
+        FAQS,
+        [],
+        true,
+        "sms",
+        false
+      );
+
+      expect(prompt).toContain(
+        "Booking is currently unavailable. Do not collect booking details, offer appointment times, check availability, or claim that an appointment can be scheduled."
+      );
+      expect(prompt).not.toContain(
+        "collect their name, preferred date/time, and service needed"
+      );
+      expect(prompt).not.toContain("Use the check_availability tool");
+      expect(prompt).not.toContain("Booking confirmation:");
+      expect(prompt).not.toContain("in the middle of a booking");
+      expect(prompt).toContain(
+        "When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
+      );
+      expect(settings).toEqual(savedSettings);
+    }
+  );
+});
+
 describe.each(CHANNEL_CASES)(
   "buildSystemPrompt knowledge-gap policy for $channel",
   ({ channel, ownChannelInstruction, otherChannelInstruction }) => {

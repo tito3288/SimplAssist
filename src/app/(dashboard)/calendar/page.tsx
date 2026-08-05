@@ -1,12 +1,20 @@
 import { redirect } from "next/navigation";
 import { ink, body } from "@/lib/theme-v2/theme";
-import CalendarView from "@/components/calendar/CalendarView";
+import CalendarView, {
+  type CalendarEventCreationState,
+} from "@/components/calendar/CalendarView";
 import GoogleCalendarConnect from "@/components/settings/GoogleCalendarConnect";
 import { LockedFeatureCard } from "@/components/entitlements/LockedFeatureCard";
 import { canUseFeature } from "@/lib/billing/entitlements";
 import { getDashboardEntitledContext } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
+import {
+  assertBookingOperationallyAllowed,
+  isBookingOperationalBlockedError,
+  isBookingOperationalStateError,
+} from "@/lib/google/bookingOperational.server";
+import { isOperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
 
 export default async function CalendarPage() {
   await requireWorkspacePageAccess();
@@ -60,6 +68,8 @@ export default async function CalendarPage() {
     );
   }
 
+  const eventCreationState = await resolveEventCreationState(business.id);
+
   return (
     <div className="space-y-6">
       <div>
@@ -71,7 +81,30 @@ export default async function CalendarPage() {
       <CalendarView
         isConnected={!!calendarToken}
         googleEmail={calendarToken?.google_email ?? null}
+        eventCreationState={eventCreationState}
       />
     </div>
   );
+}
+
+async function resolveEventCreationState(
+  businessId: string
+): Promise<CalendarEventCreationState> {
+  try {
+    await assertBookingOperationallyAllowed(businessId);
+    return "available";
+  } catch (error) {
+    if (isBookingOperationalBlockedError(error)) return error.reason;
+    if (
+      isOperationalControlsResolutionError(error) ||
+      isBookingOperationalStateError(error)
+    ) {
+      console.error(
+        "[calendar] Booking operational controls lookup failed:",
+        error
+      );
+      return "state_unavailable";
+    }
+    throw error;
+  }
 }

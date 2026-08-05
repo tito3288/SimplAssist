@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   eventsGet: vi.fn(),
   eventsList: vi.fn(),
   eventsInsert: vi.fn(),
+  assertBookingOperationallyAllowed: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -36,7 +37,20 @@ vi.mock("@/lib/supabase/admin", () => ({
     rpc: mocks.rpc,
   },
 }));
+vi.mock("./bookingOperational.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./bookingOperational.server")>();
+  return {
+    ...actual,
+    assertBookingOperationallyAllowed:
+      mocks.assertBookingOperationallyAllowed,
+  };
+});
 
+import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+import {
+  BookingOperationalBlockedError,
+} from "./bookingOperational.server";
 import {
   CalendarBookingInProgressError,
   claimCalendarBookingReconciliation,
@@ -175,6 +189,7 @@ beforeEach(() => {
     },
   });
   mocks.randomUUID.mockReturnValue(CURRENT_CLAIM);
+  mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
   mocks.eventsGet.mockRejectedValue({ response: { status: 404 } });
   mocks.eventsList.mockResolvedValue({ data: { items: [] } });
   mocks.eventsInsert.mockResolvedValue({ data: googleEvent() });
@@ -186,6 +201,48 @@ afterEach(() => {
 });
 
 describe("createBooking lifecycle", () => {
+  it.each([
+    [
+      "account suspension",
+      new BookingOperationalBlockedError(BUSINESS_ID, "account_suspended"),
+    ],
+    [
+      "booking pause",
+      new BookingOperationalBlockedError(BUSINESS_ID, "bookings_paused"),
+    ],
+  ])(
+    "blocks entry on %s before entitlement, token, reservation, or Google work",
+    async (_name, error) => {
+      mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(error);
+
+      await expect(book()).rejects.toBe(error);
+
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.eventsGet).not.toHaveBeenCalled();
+      expect(mocks.eventsList).not.toHaveBeenCalled();
+      expect(mocks.eventsInsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves entry resolver uncertainty before any booking side effect", async () => {
+    const error = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "database unavailable",
+    });
+    mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(error);
+
+    await expect(book()).rejects.toBe(error);
+
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
   it("reserves before Google, tags the event, and confirms the reservation", async () => {
     mocks.rpc
       .mockResolvedValueOnce({ data: bookingRow(), error: null })
@@ -264,9 +321,210 @@ describe("createBooking lifecycle", () => {
         p_claim_token: CURRENT_CLAIM,
       }
     );
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.assertBookingOperationallyAllowed.mock.invocationCallOrder[1],
+    ).toBeLessThan(mocks.eventsInsert.mock.invocationCallOrder[0]);
+  });
+
+  it("maps a reservation fence denial to the fresh known booking block", async () => {
+    const blocked = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(blocked);
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "calendar booking business is not active" },
+    });
+
+    await expect(book()).rejects.toBe(blocked);
+
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
+    expect(mocks.eventsGet).not.toHaveBeenCalled();
+    expect(mocks.eventsList).not.toHaveBeenCalled();
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
+  it("preserves resolver uncertainty while interpreting a reservation fence denial", async () => {
+    const uncertain = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "database unavailable",
+    });
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(uncertain);
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "calendar booking business is not active" },
+    });
+
+    await expect(book()).rejects.toBe(uncertain);
+
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
+  it("fails a claimed reservation before Google when booking pauses after recovery search", async () => {
+    const blocked = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(blocked);
+    mocks.rpc
+      .mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockResolvedValueOnce({
+        data: bookingRow({
+          operation_claim_token: null,
+          operation_claimed_at: null,
+          status: "failed",
+        }),
+        error: null,
+      });
+
+    await expect(book()).rejects.toBe(blocked);
+
+    expect(mocks.rpc).toHaveBeenNthCalledWith(2, "fail_calendar_booking", {
+      p_business_id: BUSINESS_ID,
+      p_booking_id: BOOKING_ID,
+      p_claim_token: CURRENT_CLAIM,
+      p_failure_reason:
+        "Booking was blocked before Google Calendar submission.",
+    });
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
+  it("leaves the claim pending for reconciliation when the final control read is indeterminate", async () => {
+    const uncertain = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "database unavailable",
+    });
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(uncertain);
+    mocks.rpc.mockResolvedValueOnce({ data: bookingRow(), error: null });
+
+    await expect(book()).rejects.toBe(uncertain);
+
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).not.toHaveBeenCalledWith(
+      "fail_calendar_booking",
+      expect.anything(),
+    );
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["database error", { data: null, error: { message: "database offline" } }],
+    ["malformed row", { data: { status: "failed" }, error: null }],
+    ["still-pending row", { data: bookingRow(), error: null }],
+    [
+      "failed row with a live claim",
+      { data: bookingRow({ status: "failed" }), error: null },
+    ],
+    [
+      "confirmed row without a provider ID",
+      {
+        data: bookingRow({
+          operation_claim_token: null,
+          operation_claimed_at: null,
+          status: "confirmed",
+        }),
+        error: null,
+      },
+    ],
+  ])(
+    "surfaces typed retryable state uncertainty when pause cleanup returns a %s",
+    async (_name, cleanupResult) => {
+      const blocked = new BookingOperationalBlockedError(
+        BUSINESS_ID,
+        "bookings_paused",
+      );
+      mocks.assertBookingOperationallyAllowed
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(blocked);
+      mocks.rpc
+        .mockResolvedValueOnce({ data: bookingRow(), error: null })
+        .mockResolvedValueOnce(cleanupResult);
+
+      await expect(book()).rejects.toMatchObject({
+        name: "BookingOperationalStateError",
+        code: "booking_cleanup_failed",
+        businessId: BUSINESS_ID,
+        retryable: true,
+      });
+
+      expect(mocks.eventsInsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it("surfaces typed retryable state uncertainty when pause cleanup throws", async () => {
+    const blocked = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    const cleanupError = new Error("connection dropped");
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(blocked);
+    mocks.rpc
+      .mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockRejectedValueOnce(cleanupError);
+
+    await expect(book()).rejects.toMatchObject({
+      name: "BookingOperationalStateError",
+      code: "booking_cleanup_failed",
+      businessId: BUSINESS_ID,
+      retryable: true,
+      cause: cleanupError,
+    });
+
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a concurrent confirmed result when confirmation wins the pause-cleanup race", async () => {
+    const blocked = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "account_suspended",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(blocked);
+    mocks.rpc
+      .mockResolvedValueOnce({ data: bookingRow(), error: null })
+      .mockResolvedValueOnce({
+        data: bookingRow({
+          google_event_id: "concurrent-event",
+          operation_claim_token: null,
+          operation_claimed_at: null,
+          status: "confirmed",
+        }),
+        error: null,
+      });
+
+    await expect(book()).resolves.toEqual({
+      eventId: "concurrent-event",
+      summary: "Estimate - Jane Customer",
+      startTime: STARTS_AT,
+      endTime: ENDS_AT,
+    });
+
+    expect(mocks.eventsInsert).not.toHaveBeenCalled();
   });
 
   it("short-circuits with stored event details when a duplicate tool call changes input", async () => {
+    const laterPause = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(laterPause);
     mocks.rpc.mockResolvedValueOnce({
       data: bookingRow({
         google_event_id: "existing-event",
@@ -298,6 +556,7 @@ describe("createBooking lifecycle", () => {
     expect(mocks.eventsList).not.toHaveBeenCalled();
     expect(mocks.eventsInsert).not.toHaveBeenCalled();
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(1);
   });
 
   it("refuses to create when pending source-message details change", async () => {
@@ -320,7 +579,14 @@ describe("createBooking lifecycle", () => {
     expect(mocks.eventsInsert).not.toHaveBeenCalled();
   });
 
-  it("recovers an existing private-ID event using the active reservation claim", async () => {
+  it("recovers existing provider evidence after an allowed entry without applying the new-insert pause gate", async () => {
+    const laterPause = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(laterPause);
     mocks.rpc
       .mockResolvedValueOnce({
         data: bookingRow({ operation_claim_token: OTHER_CLAIM }),
@@ -352,6 +618,7 @@ describe("createBooking lifecycle", () => {
       "confirm_calendar_booking",
       expect.objectContaining({ p_claim_token: OTHER_CLAIM })
     );
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(1);
   });
 
   it("recovers from the reservation's original calendar after selection changes", async () => {
@@ -476,6 +743,14 @@ describe("createBooking lifecycle", () => {
 
   it("recovers an ambiguous Google failure by deterministic event ID", async () => {
     const providerError = new Error("Google insert timed out");
+    const pauseAfterProviderSubmission = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused",
+    );
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(pauseAfterProviderSubmission);
     mocks.rpc
       .mockResolvedValueOnce({
         data: bookingRow(),
@@ -516,6 +791,7 @@ describe("createBooking lifecycle", () => {
       "fail_calendar_booking",
       expect.anything()
     );
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
   });
 
   it("leaves a successful Google insert pending so a retry can recover it", async () => {

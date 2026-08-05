@@ -3,6 +3,12 @@ import { getAuthenticatedClient, getCalendarService } from "@/lib/google/client"
 import { requireAuthenticatedFeature } from "@/lib/google/routeAccess";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import {
+  assertBookingOperationallyAllowed,
+  isBookingOperationalBlockedError,
+  isBookingOperationalStateError,
+} from "@/lib/google/bookingOperational.server";
+import { isOperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
 
 type LinkedCalendarBooking = {
   id: string;
@@ -183,6 +189,11 @@ export async function POST(request: NextRequest) {
     return workspaceChangedResponse();
   }
 
+  const entryOperationalResponse = await bookingCreationOperationalResponse(
+    access.businessId
+  );
+  if (entryOperationalResponse) return entryOperationalResponse;
+
   const { data: token, error: tokenError } = await access.supabase
     .from("google_calendar_tokens")
     .select("calendar_id")
@@ -215,6 +226,14 @@ export async function POST(request: NextRequest) {
 
     const calendar = getCalendarService(client);
     const calendarId = token.calendar_id || "primary";
+
+    // Re-read immediately before the provider mutation so a stale browser or a
+    // pause applied while Google authentication was resolving cannot create a
+    // new commitment.
+    const finalOperationalResponse = await bookingCreationOperationalResponse(
+      access.businessId
+    );
+    if (finalOperationalResponse) return finalOperationalResponse;
 
     const event = await calendar.events.insert({
       calendarId,
@@ -505,4 +524,33 @@ function workspaceChangedResponse(): NextResponse {
     { error: "workspace_access_unavailable", retryable: true },
     { status: 503 }
   );
+}
+
+async function bookingCreationOperationalResponse(
+  businessId: string
+): Promise<NextResponse | null> {
+  try {
+    await assertBookingOperationallyAllowed(businessId);
+    return null;
+  } catch (error) {
+    if (isBookingOperationalBlockedError(error)) {
+      return NextResponse.json(
+        {
+          error: "booking_creation_unavailable",
+          reason: error.reason,
+        },
+        { status: 403 }
+      );
+    }
+    if (
+      isOperationalControlsResolutionError(error) ||
+      isBookingOperationalStateError(error)
+    ) {
+      return NextResponse.json(
+        { error: "service_state_unavailable", retryable: true },
+        { status: 503 }
+      );
+    }
+    throw error;
+  }
 }

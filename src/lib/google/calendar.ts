@@ -7,6 +7,11 @@ import {
   canUseFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import {
+  assertBookingOperationallyAllowed,
+  BookingOperationalStateError,
+  isBookingOperationalBlockedError,
+} from "./bookingOperational.server";
 
 const SLOT_DURATION_MINUTES = 30;
 
@@ -128,6 +133,7 @@ export async function checkAvailability(
   date: string, // YYYY-MM-DD
   timezone: string
 ): Promise<string[]> {
+  await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
   if (!client) {
@@ -161,6 +167,7 @@ export async function checkAvailability(
 
   const hours = hoursData as BusinessHours | null;
   if (!hours || hours.is_closed) {
+    await assertBookingOperationallyAllowed(businessId);
     return [];
   }
 
@@ -174,6 +181,7 @@ export async function checkAvailability(
   const maxDate = new Date(`${normalizedDate}T12:00:00`);
   maxDate.setHours(closeH, closeM, 0, 0);
 
+  await assertBookingOperationallyAllowed(businessId);
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
       timeMin: minDate.toISOString(),
@@ -182,6 +190,7 @@ export async function checkAvailability(
       items: [{ id: calendarId }],
     },
   });
+  await assertBookingOperationallyAllowed(businessId);
 
   const busySlots =
     freeBusy.data.calendars?.[calendarId]?.busy || [];
@@ -232,6 +241,7 @@ export async function createBooking(
   timezone: string,
   linkage: BookingLinkage
 ): Promise<BookingResult> {
+  await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
   if (!client) {
@@ -279,8 +289,9 @@ export async function createBooking(
   const calendarId = reservation.google_calendar_id;
   const summary = reservation.event_summary;
 
-  // A confirmed reservation is the durable idempotency result. Returning it
-  // is safer than replaying a nondeterministic AI tool call with new details.
+  // Entry authorization applies to the invocation, but once that allowed
+  // invocation has reserved work, durable/provider evidence must converge even
+  // if a pause lands. A confirmed reservation is the idempotency result.
   if (reservation.status === "confirmed") {
     return bookingResultFromRow(reservation);
   }
@@ -304,6 +315,8 @@ export async function createBooking(
     reservation.id
   );
   if (recoveredEvent) {
+    // Recovery is confirmation work, not a new provider mutation, so it stays
+    // ungated after this invocation crossed its entry/reservation boundary.
     const recoveredEventId = requireGoogleEventId(
       recoveredEvent.id,
       reservation.id
@@ -359,6 +372,22 @@ export async function createBooking(
   // Add customer as attendee so Google sends them a calendar invite
   if (params.customerEmail) {
     requestBody.attendees = [{ email: params.customerEmail }];
+  }
+
+  try {
+    await assertBookingOperationallyAllowed(businessId);
+  } catch (error) {
+    if (!isBookingOperationalBlockedError(error)) throw error;
+
+    const stopped = await stopCalendarBookingBeforeProviderSubmission(
+      reservation,
+      claimToken,
+    );
+    if (stopped.status === "confirmed") {
+      assertBookingLinkage(stopped, businessId, linkage, reservation);
+      return bookingResultFromRow(stopped);
+    }
+    throw error;
   }
 
   let event;
@@ -487,9 +516,76 @@ async function reserveCalendarBooking(
     p_request_fingerprint: requestFingerprint,
   });
   if (error) {
+    await assertBookingOperationallyAllowed(businessId);
     throw new Error(`Could not reserve calendar booking: ${error.message}`);
   }
   return requireCalendarBookingRow(data, "reserve");
+}
+
+async function stopCalendarBookingBeforeProviderSubmission(
+  reservation: CalendarBookingRow,
+  claimToken: string,
+): Promise<CalendarBookingRow> {
+  let result: { data: unknown; error: { message?: unknown } | null };
+  try {
+    result = await supabaseAdmin.rpc("fail_calendar_booking", {
+      p_business_id: reservation.business_id,
+      p_booking_id: reservation.id,
+      p_claim_token: claimToken,
+      p_failure_reason:
+        "Booking was blocked before Google Calendar submission.",
+    });
+  } catch (error) {
+    throw bookingCleanupError(reservation, error);
+  }
+
+  if (result.error) {
+    throw bookingCleanupError(reservation, result.error);
+  }
+
+  let stopped: CalendarBookingRow;
+  try {
+    stopped = requireCalendarBookingRow(result.data, "fail");
+    assertBookingLinkage(
+      stopped,
+      reservation.business_id,
+      {
+        contactId: reservation.contact_id,
+        conversationId: reservation.conversation_id,
+        sourceMessageId: reservation.source_message_id,
+      },
+      reservation,
+    );
+  } catch (error) {
+    throw bookingCleanupError(reservation, error);
+  }
+
+  const failedCleanly =
+    stopped.status === "failed" &&
+    stopped.google_event_id === null &&
+    stopped.operation_claim_token === null &&
+    stopped.operation_claimed_at === null;
+  const concurrentlyConfirmed =
+    stopped.status === "confirmed" &&
+    Boolean(stopped.google_event_id) &&
+    stopped.operation_claim_token === null &&
+    stopped.operation_claimed_at === null;
+  if (!failedCleanly && !concurrentlyConfirmed) {
+    throw bookingCleanupError(reservation);
+  }
+  return stopped;
+}
+
+function bookingCleanupError(
+  reservation: CalendarBookingRow,
+  cause?: unknown,
+): BookingOperationalStateError {
+  return new BookingOperationalStateError({
+    businessId: reservation.business_id,
+    code: "booking_cleanup_failed",
+    message: `Could not safely stop calendar booking ${reservation.id} before provider submission.`,
+    cause,
+  });
 }
 
 async function confirmCalendarBooking(

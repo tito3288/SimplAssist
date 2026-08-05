@@ -17,6 +17,110 @@ describe("CalendarView Google OAuth availability", () => {
   });
 });
 
+describe("CalendarView event creation controls", () => {
+  const event = {
+    id: "event-1",
+    title: "Existing estimate",
+    start: new Date().toISOString(),
+    end: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    allDay: false,
+    description: "Already committed",
+  };
+
+  it("keeps event creation available by default, including demo callers", () => {
+    const html = renderToStaticMarkup(
+      <CalendarView
+        isConnected
+        googleEmail="owner@example.com"
+        demoEvents={[event]}
+      />
+    );
+
+    expect(html).toContain('aria-label="Create event"');
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*aria-label="Create event"/);
+    expect(html).toContain("Existing estimate");
+  });
+
+  it.each([
+    [
+      "account_suspended",
+      "New event creation is unavailable while your account is suspended.",
+    ],
+    ["bookings_paused", "New event creation is paused."],
+    [
+      "state_unavailable",
+      "New event creation is temporarily unavailable while we check booking status.",
+    ],
+  ] as const)(
+    "disables only new-event creation for %s and preserves existing events",
+    (eventCreationState, expectedCopy) => {
+      const html = renderToStaticMarkup(
+        <CalendarView
+          isConnected
+          googleEmail="owner@example.com"
+          eventCreationState={eventCreationState}
+          demoEvents={[event]}
+        />
+      );
+
+      expect(html).toContain(expectedCopy);
+      expect(html).toContain(
+        "Existing events can still be viewed, edited, or deleted."
+      );
+      expect(html).toContain("Existing estimate");
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Create event"/);
+    }
+  );
+
+  it.each([
+    [
+      "account_suspended",
+      "New event creation is unavailable while your account is suspended.",
+    ],
+    ["bookings_paused", "New event creation is paused."],
+    [
+      "state_unavailable",
+      "New event creation is temporarily unavailable while we check booking status.",
+    ],
+  ] as const)(
+    "renders %s context even when Google Calendar is disconnected",
+    (eventCreationState, expectedCopy) => {
+      const html = renderToStaticMarkup(
+        <CalendarView
+          isConnected={false}
+          googleEmail={null}
+          eventCreationState={eventCreationState}
+        />
+      );
+
+      expect(html).toContain(expectedCopy);
+      expect(html).toContain("Connect your Google Calendar");
+      expect(html).toContain(
+        "You can still connect or manage Google Calendar in Settings."
+      );
+      expect(html).not.toContain(
+        "Existing events can still be viewed, edited, or deleted."
+      );
+    }
+  );
+
+  it("does not apply the creation state to edit or delete controls", () => {
+    const source = readFileSync(
+      new URL("./CalendarView.tsx", import.meta.url),
+      "utf8"
+    );
+
+    expect(source.match(/disabled={!canCreateEvents}/g)).toHaveLength(1);
+    expect(source).toContain("<EditEventModal");
+    expect(source).toContain("Edit Event");
+    expect(source).toContain("Delete Event");
+    expect(source).toContain("setRuntimeEventCreationState(state)");
+    expect(source).toContain(
+      "onCreationUnavailable={handleEventCreationUnavailable}"
+    );
+  });
+});
+
 describe("Calendar Phase 2 branding", () => {
   it("uses runtime tokens for calendar accents and event surfaces", () => {
     const source = readFileSync(

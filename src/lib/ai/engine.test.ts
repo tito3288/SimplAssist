@@ -17,6 +17,31 @@ const mocks = vi.hoisted(() => ({
       this.businessId = args.businessId;
     }
   },
+  BookingOperationalBlockedError: class BookingOperationalBlockedError extends Error {
+    readonly businessId: string;
+    readonly reason: "account_suspended" | "bookings_paused";
+
+    constructor(
+      businessId: string,
+      reason: "account_suspended" | "bookings_paused"
+    ) {
+      super("Booking is currently unavailable.");
+      this.name = "BookingOperationalBlockedError";
+      this.businessId = businessId;
+      this.reason = reason;
+    }
+  },
+  BookingOperationalStateError: class BookingOperationalStateError extends Error {
+    readonly retryable = true;
+    readonly businessId: string;
+    readonly code = "booking_cleanup_failed";
+
+    constructor(args: { businessId: string; message: string }) {
+      super(args.message);
+      this.name = "BookingOperationalStateError";
+      this.businessId = args.businessId;
+    }
+  },
   anthropicCreate: vi.fn(),
   from: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
@@ -129,6 +154,14 @@ vi.mock("@/lib/google/calendar", () => ({
   checkAvailability: mocks.checkAvailability,
   createBooking: mocks.createBooking,
 }));
+vi.mock("@/lib/google/bookingOperational.server", () => ({
+  BookingOperationalBlockedError: mocks.BookingOperationalBlockedError,
+  BookingOperationalStateError: mocks.BookingOperationalStateError,
+  isBookingOperationalBlockedError: (error: unknown) =>
+    error instanceof mocks.BookingOperationalBlockedError,
+  isBookingOperationalStateError: (error: unknown) =>
+    error instanceof mocks.BookingOperationalStateError,
+}));
 
 import {
   AIProcessingBlockedError,
@@ -137,9 +170,15 @@ import {
   processIncomingMessageDetailed,
 } from "./engine";
 import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+import {
+  BookingOperationalBlockedError,
+  BookingOperationalStateError,
+} from "@/lib/google/bookingOperational.server";
 import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
+const BOOKING_UNAVAILABLE_TOOL_RESULT_FOR_TEST =
+  "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.";
 const CONTACT = {
   id: "00000000-0000-4000-8000-000000000002",
   business_id: BUSINESS_ID,
@@ -272,7 +311,11 @@ beforeEach(() => {
     { role: "user", content: "Can I book?" },
   ]);
   mocks.shouldIncludeCalendarTools.mockImplementation(
-    (_settings: unknown, hasCalendar: boolean) => hasCalendar
+    (
+      _settings: unknown,
+      hasCalendar: boolean,
+      bookingOperationallyAvailable: boolean = true
+    ) => hasCalendar && bookingOperationallyAvailable
   );
   mocks.anthropicCreate.mockResolvedValue({
     stop_reason: "end_turn",
@@ -593,6 +636,341 @@ describe("processIncomingMessage operational controls", () => {
     expect(mocks.checkAvailability).not.toHaveBeenCalled();
     expect(mocks.createBooking).not.toHaveBeenCalled();
     expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns one deterministic unavailable result when bookings pause after tool selection", async () => {
+    mocks.buildSystemPrompt.mockImplementation(
+      (...args: unknown[]) =>
+        args[7] === false
+          ? "BOOKING UNAVAILABLE PROMPT"
+          : "BOOKING AVAILABLE PROMPT"
+    );
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              customer_email: "pat@example.com",
+              service_name: "Estimate",
+              start_time: "2026-08-05T10:00:00-04:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booking is unavailable right now." }],
+      });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // first model request
+      .mockResolvedValueOnce(
+        operationalControls({
+          bookingsPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ) // selected calendar tool
+      .mockResolvedValueOnce(
+        operationalControls({
+          bookingsPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // follow-up model request
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Book that appointment.",
+        "sms"
+      )
+    ).resolves.toBe("Booking is unavailable right now.");
+
+    expect(mocks.checkAvailability).not.toHaveBeenCalled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        system: "BOOKING UNAVAILABLE PROMPT",
+        tools: expect.not.arrayContaining([
+          expect.objectContaining({ name: "check_availability" }),
+          expect.objectContaining({ name: "create_booking" }),
+        ]),
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                tool_use_id: "tool_1",
+                content:
+                  "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.",
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+  });
+
+  it("keeps repeated stale calendar tools unavailable across follow-up model iterations", async () => {
+    mocks.buildSystemPrompt.mockImplementation(
+      (...args: unknown[]) =>
+        args[7] === false
+          ? "BOOKING UNAVAILABLE PROMPT"
+          : "BOOKING AVAILABLE PROMPT"
+    );
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "check_availability",
+            input: { date: "2026-08-05" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_2",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-05T10:00:00-04:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booking is unavailable right now." }],
+      });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // first model request
+      .mockResolvedValue(
+        operationalControls({
+          bookingsPausedAt: "2026-08-04T12:00:00Z",
+        })
+      );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please book an estimate.",
+        "sms"
+      )
+    ).resolves.toBe("Booking is unavailable right now.");
+
+    expect(mocks.checkAvailability).not.toHaveBeenCalled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(3);
+    for (const callNumber of [2, 3]) {
+      expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+        callNumber,
+        expect.objectContaining({
+          system: "BOOKING UNAVAILABLE PROMPT",
+          tools: expect.arrayContaining([
+            expect.objectContaining({ name: "save_contact_name" }),
+            expect.objectContaining({ name: "save_contact_email" }),
+          ]),
+        })
+      );
+      const request = mocks.anthropicCreate.mock.calls[callNumber - 1]?.[0] as {
+        tools: Array<{ name: string }>;
+      };
+      expect(request.tools.map((tool) => tool.name)).not.toContain(
+        "check_availability"
+      );
+      expect(request.tools.map((tool) => tool.name)).not.toContain(
+        "create_booking"
+      );
+    }
+    expect(mocks.anthropicCreate.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                tool_use_id: "tool_1",
+                content: BOOKING_UNAVAILABLE_TOOL_RESULT_FOR_TEST,
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+    expect(mocks.anthropicCreate.mock.calls[2]?.[0]).toEqual(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                tool_use_id: "tool_2",
+                content: BOOKING_UNAVAILABLE_TOOL_RESULT_FOR_TEST,
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+  });
+
+  it("converts a helper booking-pause race into the deterministic unavailable tool result", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              customer_email: "pat@example.com",
+              service_name: "Estimate",
+              start_time: "2026-08-05T10:00:00-04:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booking is unavailable." }],
+      });
+    mocks.createBooking.mockRejectedValueOnce(
+      new BookingOperationalBlockedError(BUSINESS_ID, "bookings_paused")
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Can I book?",
+        "sms"
+      )
+    ).resolves.toBe("Booking is unavailable.");
+
+    expect(mocks.createBooking).toHaveBeenCalledOnce();
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                content:
+                  "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.",
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[calendar-tool] Error executing create_booking:",
+      expect.anything()
+    );
+  });
+
+  it("maps a helper suspension race to the typed account-suspended AI path", async () => {
+    const suspended = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "account_suspended"
+    );
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "check_availability",
+          input: { date: "2026-08-05" },
+        },
+      ],
+    });
+    mocks.checkAvailability.mockRejectedValueOnce(suspended);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Can I book?",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingBlockedError",
+      reason: "account_suspended",
+    });
+
+    expect(mocks.checkAvailability).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps retryable booking-state uncertainty to AIProcessingStateError", async () => {
+    const stateError = new BookingOperationalStateError({
+      businessId: BUSINESS_ID,
+      code: "booking_cleanup_failed",
+      message: "reservation cleanup could not be proven",
+    });
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "create_booking",
+          input: {
+            customer_name: "Pat",
+            service_name: "Estimate",
+            start_time: "2026-08-05T10:00:00-04:00",
+          },
+        },
+      ],
+    });
+    mocks.createBooking.mockRejectedValueOnce(stateError);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Book that appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      cause: stateError,
+    });
+
+    expect(mocks.createBooking).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[calendar-tool] Error executing create_booking:",
+      stateError
+    );
   });
 
   it.each([
@@ -1026,24 +1404,145 @@ describe("processIncomingMessage operational controls", () => {
     expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let a bookings-only pause block ordinary AI", async () => {
-    mocks.resolveBusinessOperationalControls.mockResolvedValue(
-      operationalControls({
-        bookingsPausedAt: "2026-08-04T12:00:00Z",
-      })
-    );
+  it.each(["schedule_direct", "collect_info"] as const)(
+    "keeps ordinary AI available but makes %s booking inert while bookings are paused",
+    async (bookingMode) => {
+      const settingsResult = tableResults.get("ai_settings") as {
+        data: { booking_enabled: boolean; booking_mode: string };
+      };
+      settingsResult.data.booking_mode = bookingMode;
+      const storedSettingsBefore = { ...settingsResult.data };
+
+      mocks.resolveBusinessOperationalControls.mockResolvedValue(
+        operationalControls({
+          bookingsPausedAt: "2026-08-04T12:00:00Z",
+        })
+      );
+
+      await expect(
+        processIncomingMessage(
+          BUSINESS_ID,
+          "+15745550100",
+          null,
+          "Hello",
+          "sms"
+        )
+      ).resolves.toBe("Absolutely.");
+
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.anthropicCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: expect.not.arrayContaining([
+            expect.objectContaining({ name: "check_availability" }),
+            expect.objectContaining({ name: "create_booking" }),
+          ]),
+        })
+      );
+      expect(mocks.shouldIncludeCalendarTools).toHaveBeenCalledWith(
+        expect.objectContaining({
+          booking_enabled: true,
+          booking_mode: bookingMode,
+        }),
+        true,
+        false
+      );
+      expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          booking_enabled: true,
+          booking_mode: bookingMode,
+        }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        true,
+        "sms",
+        false
+      );
+      expect(settingsResult.data).toEqual(storedSettingsBefore);
+    }
+  );
+
+  it("turns a suspension at the pre-model booking snapshot into a typed AI block", async () => {
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS)
+      .mockResolvedValueOnce(
+        operationalControls({
+          operationsSuspendedAt: "2026-08-04T12:00:00Z",
+        })
+      );
 
     await expect(
       processIncomingMessage(
         BUSINESS_ID,
         "+15745550100",
         null,
-        "Hello",
+        "Can I book?",
         "sms"
       )
-    ).resolves.toBe("Absolutely.");
+    ).rejects.toMatchObject({
+      name: "AIProcessingBlockedError",
+      reason: "account_suspended",
+    });
 
-    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+    expect(mocks.buildSystemPrompt).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("applies a booking pause that lands during history loading to the first model request", async () => {
+    const pendingHistory = deferred<Array<{ role: string; content: string }>>();
+    mocks.getConversationHistory.mockReturnValueOnce(pendingHistory.promise);
+    mocks.resolveBusinessOperationalControls.mockResolvedValueOnce(
+      ACTIVE_CONTROLS
+    ); // engine entry
+
+    const processing = processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Can I book?",
+      "sms"
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.getConversationHistory).toHaveBeenCalledOnce();
+    });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        bookingsPausedAt: "2026-08-04T12:00:00Z",
+      })
+    );
+    pendingHistory.resolve([{ role: "customer", content: "Can I book?" }]);
+
+    await expect(processing).resolves.toBe("Absolutely.");
+
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(5);
+    expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ booking_enabled: true }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      true,
+      "sms",
+      false
+    );
+    expect(mocks.anthropicCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: expect.not.arrayContaining([
+          expect.objectContaining({ name: "check_availability" }),
+          expect.objectContaining({ name: "create_booking" }),
+        ]),
+      })
+    );
+    expect(
+      mocks.getConversationHistory.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+    );
+    expect(
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.anthropicCreate.mock.invocationCallOrder[0]);
   });
 });
 
@@ -1164,7 +1663,8 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
       expect.anything(),
       expect.anything(),
       true,
-      "sms"
+      "sms",
+      true
     );
     expect(mocks.anthropicCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1196,7 +1696,8 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
       expect.anything(),
       expect.anything(),
       true,
-      "sms"
+      "sms",
+      true
     );
   });
 
@@ -1221,7 +1722,8 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
       expect.anything(),
       expect.anything(),
       false,
-      "sms"
+      "sms",
+      true
     );
     expect(mocks.anthropicCreate).toHaveBeenCalledWith(
       expect.objectContaining({

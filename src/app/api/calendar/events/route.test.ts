@@ -1,18 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  requireWorkspaceRouteAccess: vi.fn(),
-  requireAuthenticatedFeature: vi.fn(),
-  getAuthenticatedClient: vi.fn(),
-  getCalendarService: vi.fn(),
-  accessFrom: vi.fn(),
-  adminFrom: vi.fn(),
-  calendarList: vi.fn(),
-  calendarInsert: vi.fn(),
-  calendarPatch: vi.fn(),
-  calendarDelete: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class BookingOperationalBlockedError extends Error {
+    constructor(
+      readonly businessId: string,
+      readonly reason: "account_suspended" | "bookings_paused"
+    ) {
+      super(reason);
+      this.name = "BookingOperationalBlockedError";
+    }
+  }
+
+  class OperationalControlsResolutionError extends Error {
+    readonly retryable = true;
+
+    constructor(readonly businessId: string) {
+      super("private operational-state detail");
+      this.name = "OperationalControlsResolutionError";
+    }
+  }
+
+  class BookingOperationalStateError extends Error {
+    readonly retryable = true;
+
+    constructor(readonly businessId: string) {
+      super("private booking-state detail");
+      this.name = "BookingOperationalStateError";
+    }
+  }
+
+  return {
+    requireWorkspaceRouteAccess: vi.fn(),
+    requireAuthenticatedFeature: vi.fn(),
+    getAuthenticatedClient: vi.fn(),
+    getCalendarService: vi.fn(),
+    assertBookingOperationallyAllowed: vi.fn(),
+    accessFrom: vi.fn(),
+    adminFrom: vi.fn(),
+    calendarList: vi.fn(),
+    calendarInsert: vi.fn(),
+    calendarPatch: vi.fn(),
+    calendarDelete: vi.fn(),
+    BookingOperationalBlockedError,
+    BookingOperationalStateError,
+    OperationalControlsResolutionError,
+  };
+});
 
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
@@ -26,6 +60,21 @@ vi.mock("@/lib/google/client", () => ({
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.adminFrom },
+}));
+vi.mock("@/lib/google/bookingOperational.server", () => ({
+  assertBookingOperationallyAllowed:
+    mocks.assertBookingOperationallyAllowed,
+  BookingOperationalBlockedError: mocks.BookingOperationalBlockedError,
+  isBookingOperationalBlockedError: (error: unknown) =>
+    error instanceof mocks.BookingOperationalBlockedError,
+  isBookingOperationalStateError: (error: unknown) =>
+    error instanceof mocks.BookingOperationalStateError,
+}));
+vi.mock("@/lib/account/operationalControls.server", () => ({
+  OperationalControlsResolutionError:
+    mocks.OperationalControlsResolutionError,
+  isOperationalControlsResolutionError: (error: unknown) =>
+    error instanceof mocks.OperationalControlsResolutionError,
 }));
 
 import { DELETE, GET, PATCH, POST } from "./route";
@@ -224,6 +273,7 @@ beforeEach(() => {
   });
 
   mocks.getAuthenticatedClient.mockResolvedValue({ credentials: true });
+  mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
   mocks.getCalendarService.mockReturnValue({
     events: {
       list: mocks.calendarList,
@@ -268,6 +318,7 @@ describe("Calendar event entitlement boundary", () => {
 
       expect(response.status).toBe(status);
       expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+      expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
       expect(mocks.accessFrom).not.toHaveBeenCalled();
       expect(mocks.adminFrom).not.toHaveBeenCalled();
       expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
@@ -347,6 +398,7 @@ describe("Calendar event entitlement boundary", () => {
 
       expect(response.status).toBe(403);
       expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith("calendar");
+      expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
       expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
       expect(mocks.getCalendarService).not.toHaveBeenCalled();
     }
@@ -362,10 +414,166 @@ describe("Calendar event entitlement boundary", () => {
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ retryable: true });
       expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith("calendar");
+      expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
       expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
       expect(mocks.getCalendarService).not.toHaveBeenCalled();
     }
   );
+});
+
+describe("Calendar event operational controls", () => {
+  it("rejects a changed workspace before resolving operational state", async () => {
+    mocks.requireAuthenticatedFeature.mockResolvedValueOnce({
+      ok: true,
+      businessId: "00000000-0000-4000-8000-000000000099",
+      supabase: { from: mocks.accessFrom },
+    });
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "workspace_access_unavailable",
+      retryable: true,
+    });
+    expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
+    expect(mocks.accessFrom).not.toHaveBeenCalled();
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.calendarInsert).not.toHaveBeenCalled();
+  });
+
+  it.each(["account_suspended", "bookings_paused"] as const)(
+    "blocks POST at entry with the privacy-safe %s response",
+    async (reason) => {
+      mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(
+        new mocks.BookingOperationalBlockedError(BUSINESS_ID, reason)
+      );
+
+      const response = await POST(postRequest());
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "booking_creation_unavailable",
+        reason,
+      });
+      expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledOnce();
+      expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledWith(
+        BUSINESS_ID
+      );
+      expect(mocks.accessFrom).not.toHaveBeenCalled();
+      expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+      expect(mocks.getCalendarService).not.toHaveBeenCalled();
+      expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns a generic retryable 503 when the entry state is indeterminate", async () => {
+    mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(
+      new mocks.OperationalControlsResolutionError(BUSINESS_ID)
+    );
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_state_unavailable",
+      retryable: true,
+    });
+    expect(mocks.accessFrom).not.toHaveBeenCalled();
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.calendarInsert).not.toHaveBeenCalled();
+  });
+
+  it("keeps internal booking-state failures private and retryable", async () => {
+    mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(
+      new mocks.BookingOperationalStateError(BUSINESS_ID)
+    );
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_state_unavailable",
+      retryable: true,
+    });
+    expect(mocks.calendarInsert).not.toHaveBeenCalled();
+  });
+
+  it.each(["account_suspended", "bookings_paused"] as const)(
+    "blocks a stale POST at the final provider gate when %s lands after entry",
+    async (reason) => {
+      mocks.assertBookingOperationallyAllowed
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(
+          new mocks.BookingOperationalBlockedError(BUSINESS_ID, reason)
+        );
+
+      const response = await POST(postRequest());
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "booking_creation_unavailable",
+        reason,
+      });
+      expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
+      expect(mocks.getAuthenticatedClient).toHaveBeenCalledWith(BUSINESS_ID);
+      expect(mocks.getCalendarService).toHaveBeenCalledOnce();
+      expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    }
+  );
+
+  it("fails closed at the final provider gate when state becomes indeterminate", async () => {
+    mocks.assertBookingOperationallyAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new mocks.OperationalControlsResolutionError(BUSINESS_ID)
+      );
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_state_unavailable",
+      retryable: true,
+    });
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
+    expect(mocks.calendarInsert).not.toHaveBeenCalled();
+  });
+
+  it("checks entry and final state immediately around an allowed provider insert", async () => {
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.assertBookingOperationallyAllowed.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.accessFrom.mock.invocationCallOrder[0]);
+    expect(
+      mocks.assertBookingOperationallyAllowed.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.calendarInsert.mock.invocationCallOrder[0]);
+    expect(mocks.calendarInsert).toHaveBeenCalledOnce();
+  });
+
+  it("keeps GET, PATCH, and DELETE available while new bookings are blocked", async () => {
+    mocks.assertBookingOperationallyAllowed.mockRejectedValue(
+      new mocks.BookingOperationalBlockedError(
+        BUSINESS_ID,
+        "bookings_paused"
+      )
+    );
+
+    const getResponse = await operations[0].invoke();
+    const patchResponse = await PATCH(patchRequest());
+    const deleteResponse = await DELETE(deleteRequest());
+
+    expect(getResponse.status).toBe(200);
+    expect(patchResponse.status).toBe(200);
+    expect(deleteResponse.status).toBe(200);
+    expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
+    expect(mocks.calendarList).toHaveBeenCalledOnce();
+    expect(mocks.calendarPatch).toHaveBeenCalledOnce();
+    expect(mocks.calendarDelete).toHaveBeenCalledOnce();
+  });
 });
 
 describe("Calendar event booking synchronization", () => {

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getAuthenticatedClient: vi.fn(),
   getCalendarService: vi.fn(),
   from: vi.fn(),
+  assertBookingOperationallyAllowed: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -25,8 +26,18 @@ vi.mock("./client", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
+vi.mock("./bookingOperational.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./bookingOperational.server")>();
+  return {
+    ...actual,
+    assertBookingOperationallyAllowed:
+      mocks.assertBookingOperationallyAllowed,
+  };
+});
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
+import { BookingOperationalBlockedError } from "./bookingOperational.server";
 import {
   checkAvailability,
   createBooking,
@@ -47,9 +58,27 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.resolveBusinessEntitlements.mockResolvedValue(STARTER);
   mocks.canUseFeature.mockReturnValue(false);
+  mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
 });
 
 describe("direct booking entitlement boundary", () => {
+  it("blocks availability at the fresh operational boundary before entitlement or Google access", async () => {
+    const blocked = new BookingOperationalBlockedError(
+      BUSINESS_ID,
+      "bookings_paused"
+    );
+    mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(blocked);
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-07-20", "UTC")
+    ).rejects.toBe(blocked);
+
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.getCalendarService).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["availability", () => checkAvailability(BUSINESS_ID, "2026-07-20", "UTC")],
     [
@@ -78,6 +107,9 @@ describe("direct booking entitlement boundary", () => {
     expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
     expect(mocks.getCalendarService).not.toHaveBeenCalled();
     expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledWith(
+      BUSINESS_ID
+    );
   });
 
   it("preserves an indeterminate entitlement error for retry-safe callers", async () => {
@@ -91,6 +123,17 @@ describe("direct booking entitlement boundary", () => {
     await expect(
       checkAvailability(BUSINESS_ID, "2026-07-20", "UTC")
     ).rejects.toBe(error);
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+  });
+
+  it("preserves an indeterminate operational read before availability side effects", async () => {
+    const error = new Error("operational state unavailable");
+    mocks.assertBookingOperationallyAllowed.mockRejectedValueOnce(error);
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-07-20", "UTC")
+    ).rejects.toBe(error);
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
     expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
   });
 });

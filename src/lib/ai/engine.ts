@@ -26,6 +26,10 @@ import type { ParsedKnowledgeGapSignal } from "./knowledgeGapSignal";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
 import { calendarTools, shouldIncludeCalendarTools } from "./tools";
 import { checkAvailability, createBooking } from "@/lib/google/calendar";
+import {
+  isBookingOperationalBlockedError,
+  isBookingOperationalStateError,
+} from "@/lib/google/bookingOperational.server";
 import type {
   Business,
   AISettings,
@@ -40,6 +44,9 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 const FALLBACK_MESSAGE =
   "Thanks for reaching out! We're having a brief technical issue. Please try again in a moment or call us directly.";
+
+const BOOKING_UNAVAILABLE_TOOL_RESULT =
+  "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.";
 
 export type AIProcessingBlockedReason =
   | "feature_not_entitled"
@@ -76,6 +83,18 @@ export class AIProcessingStateError extends Error {
 }
 
 function rethrowTypedAIProcessingError(error: unknown): void {
+  if (isBookingOperationalBlockedError(error)) {
+    if (error.reason === "account_suspended") {
+      throw new AIProcessingBlockedError("account_suspended");
+    }
+    throw error;
+  }
+  if (isBookingOperationalStateError(error)) {
+    throw new AIProcessingStateError(
+      `Could not determine booking state for business ${error.businessId}.`,
+      { cause: error }
+    );
+  }
   if (
     error instanceof AIProcessingBlockedError ||
     error instanceof AIProcessingStateError ||
@@ -111,7 +130,7 @@ export interface ProcessIncomingMessageResult {
 async function assertAIProcessingOperationallyAllowed(
   businessId: string,
   channel: Channel
-): Promise<void> {
+) {
   let controls;
   try {
     controls = await resolveBusinessOperationalControls(businessId);
@@ -127,7 +146,7 @@ async function assertAIProcessingOperationallyAllowed(
     channel === "sms" ? ["texting", "ai_replies"] : ["ai_replies"]
   );
 
-  if (reason === null) return;
+  if (reason === null) return controls;
   if (reason === "bookings_paused") {
     throw new AIProcessingStateError(
       "AI operational access returned an unexpected booking-only block."
@@ -259,6 +278,18 @@ async function executeCalendarTool(
 
     return "Unknown tool.";
   } catch (error) {
+    if (isBookingOperationalBlockedError(error)) {
+      if (error.reason === "account_suspended") {
+        throw new AIProcessingBlockedError("account_suspended");
+      }
+      return BOOKING_UNAVAILABLE_TOOL_RESULT;
+    }
+    if (isBookingOperationalStateError(error)) {
+      throw new AIProcessingStateError(
+        `Could not determine booking state for business ${error.businessId}.`,
+        { cause: error }
+      );
+    }
     rethrowTypedAIProcessingError(error);
     console.error(`[calendar-tool] Error executing ${toolName}:`, error);
     return "Calendar is temporarily unavailable. Please collect the customer's booking details instead and let them know someone will confirm.";
@@ -466,31 +497,6 @@ export async function processIncomingMessageDetailed(
 
     const canBookDirectly = canUseFeature(entitlements, "direct_booking");
     const hasCalendar = canBookDirectly && !!calendarToken;
-    const useTools = shouldIncludeCalendarTools(
-      aiSettings as AISettings,
-      hasCalendar
-    );
-
-    // Stored settings survive downgrades, but features above the current plan
-    // are made inert at execution time. Growth may customize AI while only
-    // Full may inject advanced guardrails into the model prompt.
-    const effectiveAiSettings: AISettings = {
-      ...(aiSettings as AISettings),
-      guardrails: canUseFeature(entitlements, "advanced_guardrails")
-        ? (aiSettings as AISettings).guardrails
-        : [],
-    };
-
-    const systemPrompt = buildSystemPrompt(
-      business as Business,
-      effectiveAiSettings,
-      (services ?? []) as Service[],
-      (faqs ?? []) as FAQ[],
-      (businessHours ?? []) as BusinessHours[],
-      hasCalendar,
-      channel
-    );
-
     let history;
     try {
       history = await getConversationHistory(conversation.id);
@@ -501,27 +507,68 @@ export async function processIncomingMessageDetailed(
       );
     }
 
+    // This uncached read is the first-model execution fence. Everything from
+    // here through the Anthropic call is synchronous, so the same snapshot
+    // controls both whether AI may run and whether booking prompt/tools exist.
+    const modelOperationalControls =
+      await assertAIProcessingOperationallyAllowed(businessId, channel);
+    const bookingOperationallyAvailable =
+      modelOperationalControls.bookingsPausedAt === null;
+
+    // Stored settings survive downgrades and operational pauses. Effective
+    // prompt/tool behavior is derived from a copy and never mutates the row.
+    const effectiveAiSettings: AISettings = {
+      ...(aiSettings as AISettings),
+      guardrails: canUseFeature(entitlements, "advanced_guardrails")
+        ? (aiSettings as AISettings).guardrails
+        : [],
+    };
+
+    const buildModelSurface = (bookingAvailable: boolean) => {
+      const system = buildSystemPrompt(
+        business as Business,
+        effectiveAiSettings,
+        (services ?? []) as Service[],
+        (faqs ?? []) as FAQ[],
+        (businessHours ?? []) as BusinessHours[],
+        hasCalendar,
+        channel,
+        bookingAvailable
+      );
+      const requestTools: Anthropic.Tool[] = [...contactTools];
+      if (
+        shouldIncludeCalendarTools(
+          aiSettings as AISettings,
+          hasCalendar,
+          bookingAvailable
+        )
+      ) {
+        requestTools.push(...calendarTools);
+      }
+      return { system, tools: requestTools };
+    };
+
+    const initialModelSurface = buildModelSurface(
+      bookingOperationallyAvailable
+    );
+
     // The current customer message is already in history (either persisted
     // above or by a durable webhook caller), so do not append it a second time.
     const messages: Anthropic.MessageParam[] = buildConversationMessages(history);
 
-    // Build tools array — contact tools are always available, calendar tools are conditional
-    const tools: Anthropic.Tool[] = [...contactTools];
-    if (useTools) {
-      tools.push(...calendarTools);
-    }
-    const enabledToolNames = new Set(tools.map((tool) => tool.name));
+    let enabledToolNames = new Set(
+      initialModelSurface.tools.map((tool) => tool.name)
+    );
 
     // Build API params
-    const apiParams: Anthropic.MessageCreateParamsNonStreaming = {
+    let apiParams: Anthropic.MessageCreateParamsNonStreaming = {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
-      system: systemPrompt,
+      system: initialModelSurface.system,
       messages,
-      tools,
+      tools: initialModelSurface.tools,
     };
 
-    await assertAIProcessingOperationallyAllowed(businessId, channel);
     let response = await anthropic.messages.create(apiParams);
     let loopCount = 0;
     const maxLoops = 3;
@@ -545,21 +592,32 @@ export async function processIncomingMessageDetailed(
             toolUseBlock.name,
             toolUseBlock.input as Record<string, unknown>
           );
-        } else if (!enabledToolNames.has(toolUseBlock.name)) {
+        } else if (
+          toolUseBlock.name === "check_availability" ||
+          toolUseBlock.name === "create_booking"
+        ) {
+          const toolOperationalControls =
+            await assertAIProcessingOperationallyAllowed(businessId, channel);
+          if (toolOperationalControls.bookingsPausedAt !== null) {
+            toolResult = BOOKING_UNAVAILABLE_TOOL_RESULT;
+          } else if (!enabledToolNames.has(toolUseBlock.name)) {
+            toolResult =
+              "That tool is not enabled for this business. Do not perform the action.";
+          } else {
+            toolResult = await executeCalendarTool(
+              businessId,
+              toolUseBlock.name,
+              toolUseBlock.input as Record<string, unknown>,
+              (business as Business).timezone,
+              contactPhone,
+              contact.id,
+              conversation.id,
+              sourceMessageId
+            );
+          }
+        } else {
           toolResult =
             "That tool is not enabled for this business. Do not perform the action.";
-        } else {
-          await assertAIProcessingOperationallyAllowed(businessId, channel);
-          toolResult = await executeCalendarTool(
-            businessId,
-            toolUseBlock.name,
-            toolUseBlock.input as Record<string, unknown>,
-            (business as Business).timezone,
-            contactPhone,
-            contact.id,
-            conversation.id,
-            sourceMessageId
-          );
         }
         toolResults.push({
           type: "tool_result",
@@ -575,9 +633,23 @@ export async function processIncomingMessageDetailed(
         content: toolResults,
       });
 
-      // Update apiParams with the extended messages
-      apiParams.messages = messages;
-      await assertAIProcessingOperationallyAllowed(businessId, channel);
+      // The same fresh snapshot that gates each follow-up model call also
+      // rebuilds its booking prompt and tools. A pause that lands during a
+      // tool iteration therefore cannot leave calendar capabilities visible.
+      const followupOperationalControls =
+        await assertAIProcessingOperationallyAllowed(businessId, channel);
+      const followupModelSurface = buildModelSurface(
+        followupOperationalControls.bookingsPausedAt === null
+      );
+      enabledToolNames = new Set(
+        followupModelSurface.tools.map((tool) => tool.name)
+      );
+      apiParams = {
+        ...apiParams,
+        system: followupModelSurface.system,
+        messages,
+        tools: followupModelSurface.tools,
+      };
       response = await anthropic.messages.create(apiParams);
       loopCount++;
     }
