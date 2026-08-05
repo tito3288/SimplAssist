@@ -24,7 +24,7 @@ const USAGE_BLOCK_MESSAGES = {
   texting_paused: outboundSmsOperationalBlockMessage("texting_paused"),
   ai_replies_paused: outboundSmsOperationalBlockMessage("ai_replies_paused"),
   telnyx_submission_disabled:
-    "SMS sending is disabled for this account. Contact SimplAssist support if this looks wrong.",
+    "SMS sending is disabled for this account. Contact support if this looks wrong.",
   billing_required:
     "Choose an active plan before sending SMS.",
   canceled:

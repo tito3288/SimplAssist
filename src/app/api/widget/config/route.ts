@@ -162,24 +162,10 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
-    try {
-      const controls = await resolveBusinessOperationalControls(businessId);
-      if (resolveOperationalBlockReason(controls, ["ai_replies"]) !== null) {
-        return NextResponse.json(
-          { available: false },
-          { headers: corsHeaders }
-        );
-      }
-    } catch (error) {
-      if (error instanceof OperationalControlsResolutionError) {
-        console.error("Widget operational controls lookup error:", error);
-        return NextResponse.json(
-          { error: "Service temporarily unavailable", retryable: true },
-          { status: 503, headers: corsHeaders }
-        );
-      }
-      throw error;
-    }
+    const entryOperationalResponse = await widgetOperationalResponse(
+      businessId
+    );
+    if (entryOperationalResponse) return entryOperationalResponse;
 
     const { data: business, error: businessError } = await supabaseAdmin
       .from("businesses")
@@ -219,6 +205,14 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
+    // Attribution and business reads may be slow. Re-read immediately before
+    // exposing an available configuration so a pause applied during either
+    // await cannot leave a stale-enabled widget in an embed cache.
+    const finalOperationalResponse = await widgetOperationalResponse(
+      businessId
+    );
+    if (finalOperationalResponse) return finalOperationalResponse;
+
     return NextResponse.json(
       {
         available: true,
@@ -241,5 +235,25 @@ export async function GET(request: NextRequest) {
       { error: "Internal server error" },
       { status: 500, headers: corsHeaders }
     );
+  }
+}
+
+async function widgetOperationalResponse(
+  businessId: string
+): Promise<NextResponse | null> {
+  try {
+    const controls = await resolveBusinessOperationalControls(businessId);
+    return resolveOperationalBlockReason(controls, ["ai_replies"]) === null
+      ? null
+      : NextResponse.json({ available: false }, { headers: corsHeaders });
+  } catch (error) {
+    if (error instanceof OperationalControlsResolutionError) {
+      console.error("Widget operational controls lookup error:", error);
+      return NextResponse.json(
+        { error: "Service temporarily unavailable", retryable: true },
+        { status: 503, headers: corsHeaders }
+      );
+    }
+    throw error;
   }
 }

@@ -23,6 +23,7 @@ import {
   preflightOutboundSms as preflightOutboundSmsWithPurpose,
   recordInboundMessagingUsage,
   recordOutboundSmsUsage,
+  usageBlockMessage,
 } from "./usage";
 
 function preflightOutboundSms(
@@ -74,6 +75,17 @@ const defaultUsagePeriod = {
   warning_80_sent_at: null,
   hard_limit_reached_at: null,
 };
+
+describe("usageBlockMessage", () => {
+  it("keeps the disabled-SMS dashboard message product-neutral", () => {
+    const message = usageBlockMessage("telnyx_submission_disabled");
+
+    expect(message).toBe(
+      "SMS sending is disabled for this account. Contact support if this looks wrong.",
+    );
+    expect(message).not.toContain("SimplAssist");
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

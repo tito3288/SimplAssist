@@ -109,6 +109,14 @@ const ACTIVE_OPERATIONAL_CONTROLS = {
 
 type QueryResult = { data?: unknown; error?: unknown };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function queueDatabaseResults(...results: QueryResult[]) {
   const queue = [...results];
   mocks.from.mockImplementation(() => {
@@ -445,6 +453,91 @@ describe("public widget entitlement boundaries", () => {
       eq: ReturnType<typeof vi.fn>;
     };
     expect(configChain.eq).toHaveBeenCalledWith("is_active", true);
+  });
+
+  it("returns unavailable when AI pauses while config attribution is pending", async () => {
+    queueDatabaseResults(
+      {
+        data: {
+          id: "widget-1",
+          brand_color: "#123456",
+          position: "bottom_right",
+          welcome_message: "Welcome",
+          show_logo: false,
+          logo_url: null,
+          lead_capture_enabled: true,
+          lead_capture_timing: "start",
+          quick_replies: ["Pricing"],
+        },
+        error: null,
+      },
+      { data: { name: "Acme" }, error: null }
+    );
+    const attribution = deferred<{
+      poweredByName: string;
+      poweredByUrl: string;
+    }>();
+    mocks.resolveWidgetAttribution.mockReturnValue(attribution.promise);
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
+      .mockResolvedValueOnce({
+        ...ACTIVE_OPERATIONAL_CONTROLS,
+        aiRepliesPausedAt: PAUSED_AT,
+      });
+
+    const responsePromise = getConfig(configRequest());
+    await vi.waitFor(() =>
+      expect(mocks.resolveWidgetAttribution).toHaveBeenCalledOnce()
+    );
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(1);
+
+    attribution.resolve({
+      poweredByName: "Private attribution",
+      poweredByUrl: "https://private.example",
+    });
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false });
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed when the final config operational read is indeterminate", async () => {
+    queueDatabaseResults(
+      {
+        data: {
+          id: "widget-1",
+          brand_color: "#123456",
+          position: "bottom_right",
+          welcome_message: "Welcome",
+          show_logo: false,
+          logo_url: null,
+          lead_capture_enabled: true,
+          lead_capture_timing: "start",
+          quick_replies: [],
+        },
+        error: null,
+      },
+      { data: { name: "Acme" }, error: null }
+    );
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
+      .mockRejectedValueOnce(
+        new OperationalControlsResolutionError({
+          code: "business_lookup_failed",
+          businessId: BUSINESS_ID,
+          message: "private database detail",
+        })
+      );
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
   });
 
   it("returns the cleaned chat response while launching gap capture in the background", async () => {
@@ -934,10 +1027,12 @@ describe("widget attribution responses", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const payload = await response.json();
+    expect(payload).toMatchObject({
       poweredByName: "Alpha Dog Agency",
       poweredByUrl: "https://app.alphadogagency.ai",
     });
+    expect(JSON.stringify(payload)).not.toContain("SimplAssist");
     expect(mocks.resolveWidgetAttribution).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
       hostHeader: "simplassist.com",

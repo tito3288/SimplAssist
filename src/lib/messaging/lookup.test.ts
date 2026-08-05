@@ -47,9 +47,11 @@ function queueQueryResults(...results: QueryResult[]) {
 
 function phoneContext(options: {
   operationsSuspendedAt?: string | null;
+  aiRepliesPausedAt?: string | null;
   assignmentStatus?: "unassigned" | "pending" | "assigned" | "failed";
   assignedCampaignId?: string | null;
   textingPausedAt?: string | null;
+  bookingsPausedAt?: string | null;
 } = {}) {
   const assignmentStatus = options.assignmentStatus ?? "unassigned";
   return {
@@ -64,9 +66,11 @@ function phoneContext(options: {
     businesses: {
       id: "business-1",
       operations_suspended_at: options.operationsSuspendedAt ?? null,
-      // Deliberately present in the fixture to prove it is not consulted by
-      // the provisioning-only lazy-assignment gate.
+      // Deliberately present in the fixture to prove service controls are not
+      // carrier-readiness inputs.
+      ai_replies_paused_at: options.aiRepliesPausedAt ?? null,
       texting_paused_at: options.textingPausedAt ?? null,
+      bookings_paused_at: options.bookingsPausedAt ?? null,
       telnyx_messaging_profile_id: "profile-1",
       telnyx_campaign_id: "campaign-1",
       campaign_status: "approved",
@@ -163,6 +167,44 @@ describe("lazy campaign-assignment operational gate", () => {
       assignmentStatus: "assigned",
     });
   });
+
+  it.each([
+    [
+      "account suspension",
+      {
+        operationsSuspendedAt: "2026-08-04T12:00:00.000Z",
+      },
+    ],
+    [
+      "all independent service pauses",
+      {
+        aiRepliesPausedAt: "2026-08-04T12:01:00.000Z",
+        textingPausedAt: "2026-08-04T12:02:00.000Z",
+        bookingsPausedAt: "2026-08-04T12:03:00.000Z",
+      },
+    ],
+  ])(
+    "keeps carrier smsReady true under %s without passive provider work",
+    async (_label, operationalFields) => {
+      queueQueryResults({
+        data: phoneContext({
+          assignmentStatus: "assigned",
+          ...operationalFields,
+        }),
+        error: null,
+      });
+
+      await expect(
+        getSmsReadinessForBusiness("business-1")
+      ).resolves.toMatchObject({
+        smsReady: true,
+        blockReason: null,
+        assignmentStatus: "assigned",
+      });
+      expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+      expect(queryChains).toHaveLength(1);
+    }
+  );
 });
 
 describe("reduceSmsReadinessSnapshot", () => {

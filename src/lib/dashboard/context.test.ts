@@ -43,6 +43,10 @@ const BUSINESS = {
   id: "business-1",
   name: "Example Business",
   deleted_at: null,
+  operations_suspended_at: null,
+  ai_replies_paused_at: null,
+  texting_paused_at: null,
+  bookings_paused_at: null,
 };
 const ENTITLEMENTS = {
   businessId: BUSINESS.id,
@@ -125,6 +129,10 @@ describe("dashboard request context", () => {
     expect(mocks.eq).toHaveBeenCalledWith("owner_id", USER.id);
     const projection = mocks.select.mock.calls[0]?.[0] as string;
     expect(projection).toContain("website_url");
+    expect(projection).toContain("operations_suspended_at");
+    expect(projection).toContain("ai_replies_paused_at");
+    expect(projection).toContain("texting_paused_at");
+    expect(projection).toContain("bookings_paused_at");
     expect(projection).not.toContain("last_4_ssn");
     expect(projection).not.toContain("billing_admin_notes");
     expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledOnce();

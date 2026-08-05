@@ -28,6 +28,22 @@ export default async function BillingPage() {
   if (context.status !== "resolved") redirect("/onboarding");
 
   const { supabase, business } = context;
+  const suspensionBillingNotice =
+    business.operations_suspended_at !== null ? (
+      <section
+        className={`mt-6 rounded-2xl px-4 py-3 ${statusWarning}`}
+        aria-labelledby="billing-during-suspension"
+      >
+        <h2 id="billing-during-suspension" className="font-semibold">
+          Billing during suspension
+        </h2>
+        <p className="mt-1 text-sm">
+          {business.billing_mode === "stripe"
+            ? "Suspension does not pause your Stripe subscription; billing continues."
+            : "Billing remains managed by your partner; this suspension has not changed it."}
+        </p>
+      </section>
+    ) : null;
 
   if (business.billing_mode !== "stripe") {
     const partnerName = await resolveAssignedPartnerName(business.partner_id);
@@ -37,6 +53,7 @@ export default async function BillingPage() {
         <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">
           Billing
         </h1>
+        {suspensionBillingNotice}
         <div className={`mt-8 p-6 ${card}`}>
           <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">
             Partner-managed billing
@@ -82,6 +99,7 @@ export default async function BillingPage() {
           ? "Manage your subscription"
           : "Choose a plan to get started"}
       </p>
+      {suspensionBillingNotice}
 
       {hasActiveSubscription ? (
         <div className={`mt-8 p-6 ${card}`}>

@@ -21,7 +21,9 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: mocks.getRequestBrand,
 }));
 vi.mock("./billing-actions", () => ({
-  BillingActions: () => <div>Stripe billing action</div>,
+  BillingActions: ({ mode }: { mode: string }) => (
+    <div>Stripe billing action: {mode}</div>
+  ),
 }));
 vi.mock("@/lib/billing/partnerManagedBilling.server", () => ({
   resolveAssignedPartnerName: mocks.resolveAssignedPartnerName,
@@ -79,6 +81,7 @@ describe("BillingPage", () => {
         id: "business-1",
         partner_id: null,
         billing_mode: "stripe",
+        operations_suspended_at: null,
       },
     });
 
@@ -107,6 +110,7 @@ describe("BillingPage", () => {
         id: "business-1",
         partner_id: "partner-1",
         billing_mode: "stripe",
+        operations_suspended_at: null,
       },
     });
     mocks.getRequestBrand.mockResolvedValue({
@@ -121,6 +125,60 @@ describe("BillingPage", () => {
     expect(html).not.toContain("One local SimplAssist number");
     expect(html).toContain("$25");
     expect(html).toContain("Stripe billing action");
+    expect(html).not.toContain("Billing during suspension");
+    expect(html).not.toContain("billing continues");
+  });
+
+  it("shows Stripe billing truth during suspension without hiding subscription details or portal access", async () => {
+    mocks.from.mockImplementation((table: string) =>
+      queryThenable(
+        Promise.resolve(
+          table === "subscriptions"
+            ? {
+                data: {
+                  plan: "sms_and_chat",
+                  status: "active",
+                  current_period_end: "2026-09-01T12:00:00.000Z",
+                },
+              }
+            : {
+                data: {
+                  inbound_sms_parts: 12,
+                  outbound_sms_parts: 18,
+                  included_sms_parts: 1_500,
+                },
+              }
+        )
+      )
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: "partner-1",
+        billing_mode: "stripe",
+        operations_suspended_at: "2026-08-04T12:00:00.000Z",
+      },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage());
+
+    expect(html).toContain("Billing during suspension");
+    expect(html).toContain(
+      "Suspension does not pause your Stripe subscription; billing continues."
+    );
+    expect(html).toContain("Growth / SMS + Web Chat");
+    expect(html).toContain(">active<");
+    expect(html).toContain("Next billing date:");
+    expect(html).toContain("Stripe billing action: portal");
+    expect(html).toContain("SMS usage");
+    expect(html).toContain("30 / 1,500 parts");
+    expect(html).not.toContain(
+      "Billing remains managed by your partner; this suspension has not changed it."
+    );
+    expect(mocks.resolveAssignedPartnerName).not.toHaveBeenCalled();
   });
 
   it.each(["invoiced", "comped"] as const)(
@@ -135,6 +193,7 @@ describe("BillingPage", () => {
           id: "business-1",
           partner_id: "partner-1",
           billing_mode: billingMode,
+          operations_suspended_at: null,
         },
       });
 
@@ -149,7 +208,46 @@ describe("BillingPage", () => {
       expect(html).not.toContain("Recommended");
       expect(html).not.toContain("Manage your subscription");
       expect(html).not.toContain("SMS usage");
+      expect(html).not.toContain("Billing during suspension");
       expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["invoiced", "partner-1", "Alpha Dog Agency", "Billing is handled by Alpha Dog Agency."],
+    ["comped", null, null, "Billing is managed externally."],
+  ] as const)(
+    "shows partner billing truth during suspension and keeps the %s short-circuit",
+    async (billingMode, partnerId, partnerName, partnerMessage) => {
+      mocks.resolveAssignedPartnerName.mockResolvedValue(partnerName);
+      mocks.getDashboardBusinessContext.mockResolvedValue({
+        status: "resolved",
+        supabase: { from: mocks.from },
+        user: { id: "user-1" },
+        business: {
+          id: "business-1",
+          partner_id: partnerId,
+          billing_mode: billingMode,
+          operations_suspended_at: "2026-08-04T12:00:00.000Z",
+        },
+      });
+
+      const html = renderToStaticMarkup(await BillingPage());
+
+      expect(html).toContain("Billing during suspension");
+      expect(html).toContain(
+        "Billing remains managed by your partner; this suspension has not changed it."
+      );
+      expect(html).toContain("Partner-managed billing");
+      expect(html).toContain(partnerMessage);
+      expect(mocks.resolveAssignedPartnerName).toHaveBeenCalledWith(partnerId);
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+      expect(html).not.toContain("Stripe billing action");
+      expect(html).not.toContain("Manage your subscription");
+      expect(html).not.toContain("SMS usage");
+      expect(html).not.toContain("billing continues");
+      expect(html).not.toContain("SimplAssist");
     }
   );
 
@@ -164,6 +262,7 @@ describe("BillingPage", () => {
           id: "business-1",
           partner_id: partnerId,
           billing_mode: "invoiced",
+          operations_suspended_at: null,
         },
       });
 

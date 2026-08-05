@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
@@ -40,6 +41,10 @@ const BUSINESS = {
   id: "business-1",
   website_url: "https://example.com",
   deleted_at: null,
+  operations_suspended_at: null,
+  ai_replies_paused_at: null,
+  texting_paused_at: null,
+  bookings_paused_at: null,
 };
 const ENTITLEMENTS = {
   businessId: BUSINESS.id,
@@ -152,6 +157,55 @@ describe("DashboardLayout access gate", () => {
       DashboardLayout({ children: <div>Dashboard child</div> })
     ).rejects.toThrow("redirect:/onboarding");
     expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+  });
+
+  it("keeps a suspended, SMS-ready account on the dashboard and renders the notice before its children", async () => {
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: {},
+      user: { id: "user-1", email: "owner@example.com" },
+      business: {
+        ...BUSINESS,
+        operations_suspended_at: "2026-08-04T12:00:00.000Z",
+        texting_paused_at: "2026-08-04T12:01:00.000Z",
+      },
+    });
+
+    const layout = await DashboardLayout({
+      children: <div>Dashboard child</div>,
+    });
+    const html = renderToStaticMarkup(layout);
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledWith(BUSINESS.id);
+    expect(html).toContain("Account services are suspended");
+    expect(html).toContain(
+      "After reactivation, texting will remain paused",
+    );
+    expect(html.indexOf("Account services are suspended")).toBeLessThan(
+      html.indexOf("Dashboard child"),
+    );
+  });
+
+  it("renders independent pause state without changing the readiness decision", async () => {
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: {},
+      user: { id: "user-1", email: "owner@example.com" },
+      business: {
+        ...BUSINESS,
+        ai_replies_paused_at: "2026-08-04T12:00:00.000Z",
+      },
+    });
+
+    const layout = await DashboardLayout({
+      children: <div>Dashboard child</div>,
+    });
+    const html = renderToStaticMarkup(layout);
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(html).toContain("Some account services are paused");
+    expect(html).toContain("AI replies");
   });
 
   it("redirects deleted businesses before the readiness lookup", async () => {

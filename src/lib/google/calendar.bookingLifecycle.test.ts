@@ -309,6 +309,15 @@ describe("createBooking lifecycle", () => {
         }),
       })
     );
+    const insertedRequest = mocks.eventsInsert.mock.calls[0]?.[0] as
+      | { requestBody?: { description?: string } }
+      | undefined;
+    expect(insertedRequest?.requestBody?.description).toContain(
+      "Booked via AI assistant",
+    );
+    expect(insertedRequest?.requestBody?.description).not.toContain(
+      "SimplAssist",
+    );
     expect(mocks.rpc).toHaveBeenNthCalledWith(
       2,
       "confirm_calendar_booking",

@@ -74,6 +74,35 @@ describe("workspacePageRedirectTarget", () => {
   });
 
   it.each([
+    [
+      "account suspension",
+      { operations_suspended_at: "2026-08-04T12:00:00.000Z" },
+    ],
+    [
+      "independent service pauses",
+      {
+        ai_replies_paused_at: "2026-08-04T12:01:00.000Z",
+        texting_paused_at: "2026-08-04T12:02:00.000Z",
+        bookings_paused_at: "2026-08-04T12:03:00.000Z",
+      },
+    ],
+  ])(
+    "does not derive a workspace redirect from presentation-only %s metadata",
+    (_label, operationalFields) => {
+      // The resolver intentionally omits these fields. Injecting them here
+      // guards the redirect adapter itself against growing a second,
+      // operational authorization policy later.
+      const access = {
+        ...resolved,
+        business: { ...resolved.business, ...operationalFields },
+      } as WorkspaceAccess;
+
+      expect(workspacePageRedirectTarget(access)).toBeNull();
+      expect(workspaceAccessRouteResponse(access)).toBeNull();
+    },
+  );
+
+  it.each([
     { status: "business_not_found" },
     { status: "lookup_failed" },
     { status: "unknown_host" },

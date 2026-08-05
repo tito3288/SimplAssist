@@ -140,6 +140,80 @@ describe("getWorkspaceAccess", () => {
     ]);
   });
 
+  it.each([
+    [
+      "account suspension",
+      {
+        operations_suspended_at: "2026-08-04T12:00:00.000Z",
+        ai_replies_paused_at: null,
+        texting_paused_at: null,
+        bookings_paused_at: null,
+      },
+    ],
+    [
+      "independent service pauses",
+      {
+        operations_suspended_at: null,
+        ai_replies_paused_at: "2026-08-04T12:01:00.000Z",
+        texting_paused_at: "2026-08-04T12:02:00.000Z",
+        bookings_paused_at: "2026-08-04T12:03:00.000Z",
+      },
+    ],
+  ])(
+    "keeps %s outside the narrow WorkspaceAccess authorization decision",
+    async (_label, operationalFields) => {
+      // Supabase test doubles return the entire fixture even when a projection
+      // is requested. Extra display-only fields therefore prove both that the
+      // access parser ignores them and that the query contract remains narrow.
+      mocks.businessResult = {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "stripe",
+          ...operationalFields,
+        },
+        error: null,
+      };
+
+      await expect(getWorkspaceAccess()).resolves.toEqual({
+        status: "resolved",
+        user: { id: USER_ID, email: "owner@example.com" },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "stripe",
+        },
+        hostKind: "canonical",
+      });
+      expect(mocks.customerSelects).toEqual([
+        "id, partner_id, billing_mode",
+      ]);
+    },
+  );
+
+  it("keeps the wrong-host rejection authoritative for an operationally suspended business", async () => {
+    mocks.businessResult = {
+      data: {
+        id: BUSINESS_ID,
+        partner_id: PARTNER_A_ID,
+        billing_mode: "invoiced",
+        operations_suspended_at: "2026-08-04T12:00:00.000Z",
+        ai_replies_paused_at: "2026-08-04T12:01:00.000Z",
+        texting_paused_at: "2026-08-04T12:02:00.000Z",
+        bookings_paused_at: "2026-08-04T12:03:00.000Z",
+      },
+      error: null,
+    };
+    addPartner(partnerA());
+
+    await expect(getWorkspaceAccess()).resolves.toEqual({
+      status: "mismatch",
+      expectedOrigin: "https://partner-a.example",
+      expectedName: "Partner A",
+    });
+    expect(mocks.customerSelects).toEqual(["id, partner_id, billing_mode"]);
+  });
+
   it("uses the customer channel and returns unauthenticated without tenant reads", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
 

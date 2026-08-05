@@ -137,6 +137,47 @@ describe("operational API workspace gates", () => {
     expect(mocks.getOnboardingStateForOwner).not.toHaveBeenCalled();
   });
 
+  it("keeps mid-onboarding configuration reads available for an operationally suspended workspace", async () => {
+    const user = { id: "owner-1", email: "owner@example.test" };
+    const state = {
+      businessId: "business-1",
+      currentStep: "business_info",
+      dashboardReady: false,
+    };
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user,
+        business: {
+          id: "business-1",
+          partner_id: null,
+          billing_mode: "stripe",
+          operations_suspended_at: "2026-08-04T12:00:00.000Z",
+          ai_replies_paused_at: "2026-08-04T12:01:00.000Z",
+          texting_paused_at: "2026-08-04T12:02:00.000Z",
+          bookings_paused_at: "2026-08-04T12:03:00.000Z",
+        },
+        hostKind: "canonical",
+      },
+    });
+    mocks.createClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user }, error: null })),
+      },
+    });
+    mocks.getOnboardingStateForOwner.mockResolvedValue(state);
+
+    const response = await getOnboardingState();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ state });
+    expect(mocks.getOnboardingStateForOwner).toHaveBeenCalledWith(user.id);
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+  });
+
   it("gates registration submission before auth, launch, or state reads", async () => {
     const expected = deny(403);
 

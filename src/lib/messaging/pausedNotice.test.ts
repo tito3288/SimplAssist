@@ -70,7 +70,9 @@ describe("insertPausedSystemMessageIfNeeded operational notices", () => {
         content: expect.stringContaining("SMS sending is paused"),
         channel: "sms",
       });
-      expect(mocks.insert.mock.calls[0]?.[0]?.content).toContain(expectedCopy);
+      const content = mocks.insert.mock.calls[0]?.[0]?.content;
+      expect(content).toContain(expectedCopy);
+      expect(content).not.toContain("SimplAssist");
     },
   );
 

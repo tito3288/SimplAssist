@@ -8,6 +8,7 @@ import OnboardingSignOut from '@/components/onboarding/OnboardingSignOut';
 import { PRIVATE_ROUTE_METADATA } from '@/lib/seo/privateMetadata';
 import { getWorkspaceAccess } from '@/lib/customer/workspaceAccess.server';
 import { workspacePageRedirectTarget } from '@/lib/customer/workspaceRouteResponse.server';
+import { AccountServiceStatusBanner } from '@/components/account/AccountServiceStatusBanner';
 
 export const metadata = PRIVATE_ROUTE_METADATA;
 
@@ -34,7 +35,9 @@ export default async function OnboardingLayout({
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, deleted_at')
+    .select(
+      'id, deleted_at, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at'
+    )
     .eq('owner_id', user.id)
     .single();
 
@@ -93,6 +96,12 @@ export default async function OnboardingLayout({
           <OnboardingSignOut />
           <ThemeToggleV2 />
         </div>
+        <AccountServiceStatusBanner
+          operationsSuspendedAt={business?.operations_suspended_at ?? null}
+          aiRepliesPausedAt={business?.ai_replies_paused_at ?? null}
+          textingPausedAt={business?.texting_paused_at ?? null}
+          bookingsPausedAt={business?.bookings_paused_at ?? null}
+        />
         <div className={`p-6 sm:p-8 ${card}`}>{children}</div>
       </div>
     </div>

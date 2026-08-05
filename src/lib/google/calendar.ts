@@ -341,7 +341,7 @@ export async function createBooking(
     descriptionParts.push(`Phone: ${params.customerPhone}`);
   if (params.customerEmail)
     descriptionParts.push(`Email: ${params.customerEmail}`);
-  descriptionParts.push("Booked via SimplAssist AI");
+  descriptionParts.push("Booked via AI assistant");
 
   const requestBody: Record<string, unknown> = {
     id: googleEventIdForBooking(reservation.id),

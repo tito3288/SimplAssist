@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getUser: vi.fn(),
   from: vi.fn(),
+  select: vi.fn(),
+  eq: vi.fn(),
+  single: vi.fn(),
   getOnboardingStateForOwner: vi.fn(),
 }));
 
@@ -36,7 +39,15 @@ vi.mock("@/lib/theme-v2/ui", () => ({ ThemeToggleV2: () => null }));
 import OnboardingLayout from "./layout";
 
 const USER = { id: "user-1", email: "owner@example.com" };
-const BUSINESS = { id: "business-1", partner_id: null, deleted_at: null };
+const BUSINESS = {
+  id: "business-1",
+  partner_id: null,
+  deleted_at: null,
+  operations_suspended_at: null,
+  ai_replies_paused_at: null,
+  texting_paused_at: null,
+  bookings_paused_at: null,
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -56,13 +67,13 @@ beforeEach(() => {
   mocks.workspacePageRedirectTarget.mockReturnValue(null);
   mocks.getUser.mockResolvedValue({ data: { user: USER } });
   const businessQuery = {
-    select: vi.fn(),
-    eq: vi.fn(),
-    single: vi.fn(),
+    select: mocks.select,
+    eq: mocks.eq,
+    single: mocks.single,
   };
-  businessQuery.select.mockReturnValue(businessQuery);
-  businessQuery.eq.mockReturnValue(businessQuery);
-  businessQuery.single.mockResolvedValue({ data: BUSINESS, error: null });
+  mocks.select.mockReturnValue(businessQuery);
+  mocks.eq.mockReturnValue(businessQuery);
+  mocks.single.mockResolvedValue({ data: BUSINESS, error: null });
   mocks.from.mockReturnValue(businessQuery);
   mocks.createClient.mockResolvedValue({
     auth: { getUser: mocks.getUser },
@@ -83,6 +94,11 @@ describe("OnboardingLayout workspace access", () => {
     expect(mocks.getOnboardingStateForOwner).toHaveBeenCalledWith(USER.id);
     expect(html).toContain("Delete account");
     expect(html).toContain("Sign out");
+    const projection = mocks.select.mock.calls[0]?.[0] as string;
+    expect(projection).toContain("operations_suspended_at");
+    expect(projection).toContain("ai_replies_paused_at");
+    expect(projection).toContain("texting_paused_at");
+    expect(projection).toContain("bookings_paused_at");
   });
 
   it("renders deletion on an exact resolved partner workspace", async () => {
@@ -105,26 +121,51 @@ describe("OnboardingLayout workspace access", () => {
   });
 
   it("redirects a scheduled onboarding account before rendering controls", async () => {
-    const businessQuery = {
-      select: vi.fn(),
-      eq: vi.fn(),
-      single: vi.fn(),
-    };
-    businessQuery.select.mockReturnValue(businessQuery);
-    businessQuery.eq.mockReturnValue(businessQuery);
-    businessQuery.single.mockResolvedValue({
+    mocks.single.mockResolvedValue({
       data: {
         ...BUSINESS,
         deleted_at: "2026-08-03T16:00:00.000Z",
+        operations_suspended_at: "2026-08-03T15:00:00.000Z",
       },
       error: null,
     });
-    mocks.from.mockReturnValue(businessQuery);
 
     await expect(
       OnboardingLayout({ children: <main>Onboarding</main> }),
     ).rejects.toThrow("redirect:/account-deleted");
     expect(mocks.getOnboardingStateForOwner).not.toHaveBeenCalled();
+  });
+
+  it("keeps suspended mid-onboarding configuration accessible and places the notice above the card", async () => {
+    mocks.single.mockResolvedValue({
+      data: {
+        ...BUSINESS,
+        operations_suspended_at: "2026-08-04T12:00:00.000Z",
+        bookings_paused_at: "2026-08-04T12:01:00.000Z",
+      },
+      error: null,
+    });
+    mocks.getOnboardingStateForOwner.mockResolvedValue({
+      dashboardReady: false,
+    });
+
+    const layout = await OnboardingLayout({
+      children: <main>Business configuration</main>,
+    });
+    const html = renderToStaticMarkup(layout);
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(html).toContain("Delete account");
+    expect(html).toContain("Account services are suspended");
+    expect(html).toContain(
+      "After reactivation, bookings will remain paused",
+    );
+    expect(html.indexOf("Delete account")).toBeLessThan(
+      html.indexOf("Account services are suspended"),
+    );
+    expect(html.indexOf("Account services are suspended")).toBeLessThan(
+      html.indexOf("Business configuration"),
+    );
   });
 
   it("redirects unauthenticated users before onboarding reads", async () => {

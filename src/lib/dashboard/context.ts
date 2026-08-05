@@ -20,6 +20,10 @@ export type DashboardBusiness = Pick<
   | "call_forwarding_enabled"
   | "forward_to_number"
   | "call_forwarding_nudge_resolved_at"
+  | "operations_suspended_at"
+  | "ai_replies_paused_at"
+  | "texting_paused_at"
+  | "bookings_paused_at"
   | "brand_status"
   | "brand_status_updated_at"
   | "brand_rejection_reason"
@@ -82,6 +86,10 @@ const DASHBOARD_BUSINESS_SELECT = [
   "call_forwarding_enabled",
   "forward_to_number",
   "call_forwarding_nudge_resolved_at",
+  "operations_suspended_at",
+  "ai_replies_paused_at",
+  "texting_paused_at",
+  "bookings_paused_at",
   "brand_status",
   "brand_status_updated_at",
   "brand_rejection_reason",
