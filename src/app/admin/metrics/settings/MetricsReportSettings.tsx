@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT,
   adminMetricsReportConfigSchema,
@@ -75,6 +75,48 @@ const ERROR_MESSAGES: Record<string, string> = {
   save_failed: "The report configuration could not be saved.",
 };
 
+const TEST_SEND_ERROR_MESSAGES: Record<string, string> = {
+  config_not_found: "Save this report configuration before sending a test.",
+  invalid_request: "Enter a valid test recipient address.",
+  invalid_snapshot: "The test report snapshot could not be validated.",
+  preview_failed: "The previous month's report could not be prepared.",
+  test_send_failed: "The test report could not be sent.",
+};
+
+export type MetricsReportTestSendOutcome =
+  | "accepted"
+  | "failed"
+  | "needs_review";
+
+export type MetricsReportTestSendNotice = {
+  kind: "success" | "error" | "review";
+  message: string;
+};
+
+export function metricsReportTestSendNotice(
+  outcome: MetricsReportTestSendOutcome,
+): MetricsReportTestSendNotice {
+  if (outcome === "accepted") {
+    return {
+      kind: "success",
+      message:
+        "Resend accepted the test email. Acceptance does not confirm delivery.",
+    };
+  }
+  if (outcome === "failed") {
+    return {
+      kind: "error",
+      message:
+        "The test was not accepted. Check the report and sender configuration before retrying.",
+    };
+  }
+  return {
+    kind: "review",
+    message:
+      "Provider acceptance is unclear. Do not immediately resend; check Resend first.",
+  };
+}
+
 function canonicalRecipient(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -110,8 +152,7 @@ function editorFromScope(
     label: identity.label,
     partnerSlug: identity.partnerSlug,
     selectionMode: config?.selectionMode ?? "all",
-    reportingStartsOn:
-      config?.reportingStartsOn ?? defaultReportingStartsOn,
+    reportingStartsOn: config?.reportingStartsOn ?? defaultReportingStartsOn,
     enabled: config?.enabled ?? false,
     recipients: config?.recipients.map((recipient) => ({ ...recipient })) ?? [],
     selectedBusinessIds: [...(config?.selectedBusinessIds ?? [])],
@@ -152,9 +193,7 @@ export function createMetricsReportConfigEditors(
 export function staleSelectedBusinessIds(
   editor: MetricsReportConfigEditor,
 ): string[] {
-  const currentIds = new Set(
-    editor.businesses.map((business) => business.id),
-  );
+  const currentIds = new Set(editor.businesses.map((business) => business.id));
   return editor.selectedBusinessIds.filter(
     (businessId) => !currentIds.has(businessId),
   );
@@ -166,10 +205,7 @@ export function reduceMetricsReportConfigEditor(
 ): MetricsReportConfigEditor {
   switch (action.type) {
     case "add_recipient":
-      if (
-        editor.recipients.length >=
-        ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT
-      ) {
+      if (editor.recipients.length >= ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT) {
         return editor;
       }
       return {
@@ -241,14 +277,11 @@ export function metricsReportConfigValidationError(
     return "Choose a valid reporting start month.";
   }
 
-  if (
-    editor.recipients.length > ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT
-  ) {
+  if (editor.recipients.length > ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT) {
     return `Use no more than ${ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT} recipients.`;
   }
   if (
-    editor.selectedBusinessIds.length >
-    ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT
+    editor.selectedBusinessIds.length > ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT
   ) {
     return `Select no more than ${ADMIN_METRICS_REPORT_CONFIG_CHILD_LIMIT} businesses.`;
   }
@@ -257,9 +290,7 @@ export function metricsReportConfigValidationError(
     canonicalRecipient(recipient.email),
   );
   if (
-    canonicalEmails.some(
-      (email) => email.length > 254 || !EMAIL.test(email),
-    )
+    canonicalEmails.some((email) => email.length > 254 || !EMAIL.test(email))
   ) {
     return "Enter a valid email address for every recipient.";
   }
@@ -347,6 +378,44 @@ export async function requestMetricsReportConfigSave(
   return parsed.data;
 }
 
+export async function requestMetricsReportTestSend(
+  input: { configId: string; email: string },
+  fetcher: Fetcher = fetch,
+): Promise<MetricsReportTestSendOutcome> {
+  const response = await fetcher("/api/admin/metrics/reports/test-send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      configId: input.configId,
+      email: canonicalRecipient(input.email),
+    }),
+  });
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const code = readErrorCode(body);
+    throw new Error(
+      (code && TEST_SEND_ERROR_MESSAGES[code]) ??
+        "The test report could not be sent.",
+    );
+  }
+
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== 1 ||
+    !("outcome" in body) ||
+    (body.outcome !== "accepted" &&
+      body.outcome !== "failed" &&
+      body.outcome !== "needs_review")
+  ) {
+    throw new Error("The server returned an invalid test-send result.");
+  }
+
+  return body.outcome;
+}
+
 function mergeSavedConfig(
   editor: MetricsReportConfigEditor,
   saved: AdminMetricsReportConfig,
@@ -372,6 +441,25 @@ export function metricsReportEditorSaveLock(
   };
 }
 
+export type MetricsReportActivityMutex = {
+  tryClaim: (owner: string) => boolean;
+  release: (owner: string) => void;
+};
+
+export function createMetricsReportActivityMutex(): MetricsReportActivityMutex {
+  let activeOwner: string | null = null;
+  return {
+    tryClaim(owner) {
+      if (activeOwner !== null) return false;
+      activeOwner = owner;
+      return true;
+    },
+    release(owner) {
+      if (activeOwner === owner) activeOwner = null;
+    },
+  };
+}
+
 export function MetricsReportSettings({
   settings,
   defaultReportingStartsOn = currentUtcMonthStart(),
@@ -384,6 +472,14 @@ export function MetricsReportSettings({
     createMetricsReportConfigEditors(settings, defaultReportingStartsOn),
   );
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
+  const [testAddresses, setTestAddresses] = useState<Record<string, string>>(
+    {},
+  );
+  const [testResults, setTestResults] = useState<
+    Record<string, MetricsReportTestSendNotice | null>
+  >({});
+  const activityMutex = useRef(createMetricsReportActivityMutex());
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [notices, setNotices] = useState<Record<string, string | null>>({});
 
@@ -405,7 +501,13 @@ export function MetricsReportSettings({
   ) {
     event.preventDefault();
     const validationError = metricsReportConfigValidationError(editor);
-    if (validationError || savingKey !== null) {
+    const activityOwner = `save:${editor.key}`;
+    if (
+      validationError ||
+      savingKey !== null ||
+      testingKey !== null ||
+      !activityMutex.current.tryClaim(activityOwner)
+    ) {
       if (validationError) {
         setErrors((current) => ({
           ...current,
@@ -443,7 +545,58 @@ export function MetricsReportSettings({
             : "The report configuration could not be saved.",
       }));
     } finally {
+      activityMutex.current.release(activityOwner);
       setSavingKey(null);
+    }
+  }
+
+  async function sendTest(editor: MetricsReportConfigEditor) {
+    const email = canonicalRecipient(testAddresses[editor.key] ?? "");
+    if (editor.id === null || email.length > 254 || !EMAIL.test(email)) {
+      setTestResults((current) => ({
+        ...current,
+        [editor.key]: {
+          kind: "error",
+          message: "Enter a valid test recipient address.",
+        },
+      }));
+      return;
+    }
+
+    const activityOwner = `test:${editor.key}`;
+    if (
+      savingKey !== null ||
+      testingKey !== null ||
+      !activityMutex.current.tryClaim(activityOwner)
+    ) {
+      return;
+    }
+
+    setTestingKey(editor.key);
+    setTestResults((current) => ({ ...current, [editor.key]: null }));
+    try {
+      const outcome = await requestMetricsReportTestSend({
+        configId: editor.id,
+        email,
+      });
+      setTestResults((current) => ({
+        ...current,
+        [editor.key]: metricsReportTestSendNotice(outcome),
+      }));
+    } catch (error) {
+      setTestResults((current) => ({
+        ...current,
+        [editor.key]: {
+          kind: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "The test report could not be sent.",
+        },
+      }));
+    } finally {
+      activityMutex.current.release(activityOwner);
+      setTestingKey(null);
     }
   }
 
@@ -458,8 +611,18 @@ export function MetricsReportSettings({
       {editors.map((editor) => {
         const validationError = metricsReportConfigValidationError(editor);
         const staleIds = staleSelectedBusinessIds(editor);
-        const { interactionsDisabled, isSaving } =
-          metricsReportEditorSaveLock(savingKey, editor.key);
+        const { interactionsDisabled, isSaving } = metricsReportEditorSaveLock(
+          savingKey,
+          editor.key,
+        );
+        const allInteractionsDisabled =
+          interactionsDisabled || testingKey !== null;
+        const isTesting = testingKey === editor.key;
+        const testAddress = testAddresses[editor.key] ?? "";
+        const canonicalTestAddress = canonicalRecipient(testAddress);
+        const testAddressValid =
+          canonicalTestAddress.length <= 254 &&
+          EMAIL.test(canonicalTestAddress);
         return (
           <section key={editor.key} className={`p-5 sm:p-6 ${card}`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -492,7 +655,7 @@ export function MetricsReportSettings({
               <label className="flex items-center gap-2 text-sm font-medium">
                 <input
                   type="checkbox"
-                  disabled={interactionsDisabled}
+                  disabled={allInteractionsDisabled}
                   checked={editor.enabled}
                   onChange={(event) =>
                     dispatch(editor.key, {
@@ -511,7 +674,7 @@ export function MetricsReportSettings({
               className="mt-6 space-y-6"
             >
               <fieldset
-                disabled={interactionsDisabled}
+                disabled={allInteractionsDisabled}
                 className="space-y-6"
               >
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -604,7 +767,9 @@ export function MetricsReportSettings({
                     )}
 
                     {staleIds.length > 0 && (
-                      <div className={`space-y-2 rounded-xl p-3 ${statusDanger}`}>
+                      <div
+                        className={`space-y-2 rounded-xl p-3 ${statusDanger}`}
+                      >
                         <p className="text-sm font-medium">
                           These saved selections no longer belong to this brand.
                           Remove them before saving.
@@ -640,8 +805,9 @@ export function MetricsReportSettings({
                     <div>
                       <h3 className="text-sm font-semibold">Recipients</h3>
                       <p className={`mt-1 text-xs ${bodyFaint}`}>
-                        Admin and partner-staff addresses only. Recipient changes
-                        do not alter deliveries already frozen into a report.
+                        Admin and partner-staff addresses only. Recipient
+                        changes do not alter deliveries already frozen into a
+                        report.
                       </p>
                     </div>
                     <button
@@ -660,8 +826,11 @@ export function MetricsReportSettings({
                   </div>
 
                   {editor.recipients.length === 0 ? (
-                    <p className={`rounded-xl px-4 py-3 text-sm ${statusNeutral}`}>
-                      No recipients configured. This report must remain disabled.
+                    <p
+                      className={`rounded-xl px-4 py-3 text-sm ${statusNeutral}`}
+                    >
+                      No recipients configured. This report must remain
+                      disabled.
                     </p>
                   ) : (
                     <div className="space-y-2">
@@ -670,7 +839,10 @@ export function MetricsReportSettings({
                           key={`${editor.key}:recipient:${index}`}
                           className={`grid gap-3 p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center ${tile}`}
                         >
-                          <label className="sr-only" htmlFor={`${editor.key}-recipient-${index}`}>
+                          <label
+                            className="sr-only"
+                            htmlFor={`${editor.key}-recipient-${index}`}
+                          >
                             Recipient email
                           </label>
                           <input
@@ -723,21 +895,25 @@ export function MetricsReportSettings({
                 </div>
 
                 {(errors[editor.key] ?? validationError) && (
-                  <p className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`} role="alert">
+                  <p
+                    className={`rounded-xl px-4 py-3 text-sm ${statusDanger}`}
+                    role="alert"
+                  >
                     {errors[editor.key] ?? validationError}
                   </p>
                 )}
                 {notices[editor.key] && (
-                  <p className={`rounded-xl px-4 py-3 text-sm ${statusSuccess}`} role="status">
+                  <p
+                    className={`rounded-xl px-4 py-3 text-sm ${statusSuccess}`}
+                    role="status"
+                  >
                     {notices[editor.key]}
                   </p>
                 )}
 
                 <button
                   type="submit"
-                  disabled={
-                    interactionsDisabled || validationError !== null
-                  }
+                  disabled={allInteractionsDisabled || validationError !== null}
                   className={btnPrimaryCompact}
                 >
                   {isSaving
@@ -748,6 +924,69 @@ export function MetricsReportSettings({
                 </button>
               </fieldset>
             </form>
+
+            {editor.id && (
+              <div className={`mt-5 space-y-3 p-4 ${tile}`}>
+                <div>
+                  <h3 className="text-sm font-semibold">Send a test report</h3>
+                  <p className={`mt-1 text-xs ${bodyFaint}`}>
+                    Uses the last saved configuration and the previous completed
+                    UTC month. Disabled configurations can be tested. No report
+                    or delivery ledger row is created.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className={`min-w-0 flex-1 ${fieldLabel}`}>
+                    Test recipient
+                    <input
+                      type="email"
+                      value={testAddress}
+                      disabled={allInteractionsDisabled}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setTestAddresses((current) => ({
+                          ...current,
+                          [editor.key]: value,
+                        }));
+                        setTestResults((current) => ({
+                          ...current,
+                          [editor.key]: null,
+                        }));
+                      }}
+                      autoComplete="email"
+                      placeholder="admin@example.com"
+                      className={`mt-1.5 ${inputField}`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={allInteractionsDisabled || !testAddressValid}
+                    onClick={() => sendTest(editor)}
+                    className={btnSecondaryCompact}
+                  >
+                    {isTesting ? "Sending test..." : "Send test"}
+                  </button>
+                </div>
+                {testResults[editor.key] && (
+                  <p
+                    className={`rounded-xl px-4 py-3 text-sm ${
+                      testResults[editor.key]?.kind === "success"
+                        ? statusSuccess
+                        : testResults[editor.key]?.kind === "review"
+                          ? statusWarning
+                          : statusDanger
+                    }`}
+                    role={
+                      testResults[editor.key]?.kind === "success"
+                        ? "status"
+                        : "alert"
+                    }
+                  >
+                    {testResults[editor.key]?.message}
+                  </p>
+                )}
+              </div>
+            )}
           </section>
         );
       })}

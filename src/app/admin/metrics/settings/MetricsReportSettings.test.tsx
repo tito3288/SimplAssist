@@ -12,13 +12,16 @@ vi.mock("next/navigation", () => ({
 
 import {
   buildMetricsReportConfigSaveRequest,
+  createMetricsReportActivityMutex,
   createMetricsReportConfigEditors,
   currentUtcMonthStart,
   MetricsReportSettings,
   metricsReportEditorSaveLock,
   metricsReportConfigValidationError,
+  metricsReportTestSendNotice,
   reduceMetricsReportConfigEditor,
   requestMetricsReportConfigSave,
+  requestMetricsReportTestSend,
   staleSelectedBusinessIds,
 } from "./MetricsReportSettings";
 
@@ -51,9 +54,7 @@ function settings(
   return {
     direct: {
       config: null,
-      businesses: [
-        { id: DIRECT_BUSINESS_ID, name: "River City Dental" },
-      ],
+      businesses: [{ id: DIRECT_BUSINESS_ID, name: "River City Dental" }],
     },
     partners: [
       {
@@ -61,9 +62,7 @@ function settings(
         name: "Alpha Dog Agency",
         slug: "alpha-dog",
         config: null,
-        businesses: [
-          { id: PARTNER_BUSINESS_ID, name: "North Star Dental" },
-        ],
+        businesses: [{ id: PARTNER_BUSINESS_ID, name: "North Star Dental" }],
       },
     ],
     ...overrides,
@@ -103,9 +102,7 @@ describe("MetricsReportSettings", () => {
         settings={settings({
           direct: {
             config: savedDirect,
-            businesses: [
-              { id: DIRECT_BUSINESS_ID, name: "River City Dental" },
-            ],
+            businesses: [{ id: DIRECT_BUSINESS_ID, name: "River City Dental" }],
           },
         })}
       />,
@@ -117,7 +114,33 @@ describe("MetricsReportSettings", () => {
     expect(html).toContain('value="2026-06"');
     expect(html).toContain("Save report settings");
     expect(html).toContain("Snapshot rows use event-time brand attribution");
-    expect(html).toContain("Current assignment is checked only when this configuration is saved");
+    expect(html).toContain(
+      "Current assignment is checked only when this configuration is saved",
+    );
+    expect(html).toContain("Send a test report");
+    expect(html).toContain("Disabled configurations can be tested");
+    expect(html).toContain("No report or delivery ledger row is created");
+  });
+
+  it("offers test send only for persisted configurations", () => {
+    const unsavedHtml = renderToStaticMarkup(
+      <MetricsReportSettings settings={settings()} />,
+    );
+    expect(unsavedHtml).not.toContain("Send a test report");
+
+    const savedDisabledHtml = renderToStaticMarkup(
+      <MetricsReportSettings
+        settings={settings({
+          direct: {
+            config: config({ enabled: false }),
+            businesses: [],
+          },
+        })}
+      />,
+    );
+    expect(savedDisabledHtml.match(/Send a test report/g)).toHaveLength(1);
+    expect(savedDisabledHtml).toContain("previous completed UTC month");
+    expect(savedDisabledHtml).toContain("admin@example.com");
   });
 
   it("surfaces stale stored selections and prevents saving until removal", () => {
@@ -227,9 +250,7 @@ describe("MetricsReportSettings", () => {
             selectionMode: "selected",
             selectedBusinessIds: [DIRECT_BUSINESS_ID, STALE_BUSINESS_ID],
           }),
-          businesses: [
-            { id: DIRECT_BUSINESS_ID, name: "River City Dental" },
-          ],
+          businesses: [{ id: DIRECT_BUSINESS_ID, name: "River City Dental" }],
         },
       }),
       "2026-08-01",
@@ -244,10 +265,7 @@ describe("MetricsReportSettings", () => {
   });
 
   it("builds the complete normalized direct replacement without partnerId", () => {
-    let editor = createMetricsReportConfigEditors(
-      settings(),
-      "2026-08-01",
-    )[0]!;
+    let editor = createMetricsReportConfigEditors(settings(), "2026-08-01")[0]!;
     editor = {
       ...editor,
       recipients: [{ email: "  Bryan@Example.COM ", enabled: true }],
@@ -278,6 +296,36 @@ describe("MetricsReportSettings", () => {
     expect(metricsReportEditorSaveLock(null, "direct")).toEqual({
       interactionsDisabled: false,
       isSaving: false,
+    });
+  });
+
+  it("uses one synchronous mutex across save and test actions", () => {
+    const mutex = createMetricsReportActivityMutex();
+
+    expect(mutex.tryClaim("test:direct")).toBe(true);
+    expect(mutex.tryClaim("test:direct")).toBe(false);
+    expect(mutex.tryClaim(`save:partner:${PARTNER_ID}`)).toBe(false);
+    mutex.release("wrong-owner");
+    expect(mutex.tryClaim("save:direct")).toBe(false);
+    mutex.release("test:direct");
+    expect(mutex.tryClaim("save:direct")).toBe(true);
+  });
+
+  it("uses honest accepted, no-send, and ambiguity copy", () => {
+    expect(metricsReportTestSendNotice("accepted")).toEqual({
+      kind: "success",
+      message:
+        "Resend accepted the test email. Acceptance does not confirm delivery.",
+    });
+    expect(metricsReportTestSendNotice("failed")).toEqual({
+      kind: "error",
+      message:
+        "The test was not accepted. Check the report and sender configuration before retrying.",
+    });
+    expect(metricsReportTestSendNotice("needs_review")).toEqual({
+      kind: "review",
+      message:
+        "Provider acceptance is unclear. Do not immediately resend; check Resend first.",
     });
   });
 
@@ -373,14 +421,11 @@ describe("requestMetricsReportConfigSave", () => {
     await expect(
       requestMetricsReportConfigSave(request, fetcher),
     ).resolves.toEqual(saved);
-    expect(fetcher).toHaveBeenCalledWith(
-      "/api/admin/metrics/report-configs",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      },
-    );
+    expect(fetcher).toHaveBeenCalledWith("/api/admin/metrics/report-configs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
   });
 
   it("maps stable errors and rejects malformed success payloads", async () => {
@@ -407,6 +452,70 @@ describe("requestMetricsReportConfigSave", () => {
     await expect(
       requestMetricsReportConfigSave(request, malformed),
     ).rejects.toThrow("invalid report configuration");
+  });
+});
+
+describe("requestMetricsReportTestSend", () => {
+  it.each(["accepted", "failed", "needs_review"] as const)(
+    "posts one normalized recipient and strictly accepts %s",
+    async (outcome) => {
+      const fetcher = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ outcome }),
+      })) as unknown as typeof fetch;
+
+      await expect(
+        requestMetricsReportTestSend(
+          { configId: CONFIG_ID, email: "  Bryan@Example.COM " },
+          fetcher,
+        ),
+      ).resolves.toBe(outcome);
+      expect(fetcher).toHaveBeenCalledWith(
+        "/api/admin/metrics/reports/test-send",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            configId: CONFIG_ID,
+            email: "bryan@example.com",
+          }),
+        },
+      );
+    },
+  );
+
+  it("maps safe errors and rejects extra or missing response fields", async () => {
+    const rejected = vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: "invalid_snapshot" }),
+    })) as unknown as typeof fetch;
+    const extra = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ outcome: "accepted", providerMessageId: "secret" }),
+    })) as unknown as typeof fetch;
+    const missing = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({}),
+    })) as unknown as typeof fetch;
+
+    await expect(
+      requestMetricsReportTestSend(
+        { configId: CONFIG_ID, email: "test@example.com" },
+        rejected,
+      ),
+    ).rejects.toThrow("snapshot could not be validated");
+    await expect(
+      requestMetricsReportTestSend(
+        { configId: CONFIG_ID, email: "test@example.com" },
+        extra,
+      ),
+    ).rejects.toThrow("invalid test-send result");
+    await expect(
+      requestMetricsReportTestSend(
+        { configId: CONFIG_ID, email: "test@example.com" },
+        missing,
+      ),
+    ).rejects.toThrow("invalid test-send result");
   });
 });
 
