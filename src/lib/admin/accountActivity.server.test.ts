@@ -94,7 +94,13 @@ function validQueues() {
         { data: [], error: null },
       ],
     ],
-    ["admin_action_events", [{ data: [], error: null }]],
+    [
+      "admin_action_events",
+      [
+        { data: [], error: null },
+        { data: [], error: null },
+      ],
+    ],
     ["partner_client_provisioning_jobs", [{ data: null, error: null }]],
     ["a2p_risk_review_events", [{ data: [], error: null }]],
     ["telnyx_registration_events", [{ data: [], error: null }]],
@@ -114,6 +120,7 @@ function emptySnapshot(
     releaseScheduled: [],
     releaseCanceled: [],
     deletionAdminEvents: [],
+    operationalAdminEvents: [],
     provisioningAdminEvents: [],
     riskEvents: [],
     registrationEvents: [],
@@ -195,6 +202,83 @@ describe("normalizeAdminAccountActivity", () => {
     );
 
     expect(event.actor).toBeNull();
+  });
+
+  it("normalizes every operational action, service label, reason, and actor", () => {
+    const operationalAdminEvents = [
+      {
+        id: "41000000-0000-4000-a048-000000000010",
+        action: "account_operations_suspended" as const,
+        actor_admin_user_id: ADMIN_ID,
+        created_at: "2026-08-04T12:08:00.000Z",
+        reason: "Compliance review requested",
+        service: null,
+      },
+      {
+        id: "41000000-0000-4000-a048-000000000011",
+        action: "account_operations_reactivated" as const,
+        actor_admin_user_id: ADMIN_ID,
+        created_at: "2026-08-04T12:07:00.000Z",
+        reason: "Compliance review completed",
+        service: null,
+      },
+      ...(["ai_replies", "texting", "bookings"] as const).flatMap(
+        (service, index) => [
+          {
+            id: `41000000-0000-4000-a048-${String(20 + index * 2).padStart(12, "0")}`,
+            action: "account_service_paused" as const,
+            actor_admin_user_id: ADMIN_ID,
+            created_at: `2026-08-04T12:0${6 - index}:00.000Z`,
+            reason: "Administrative maintenance",
+            service,
+          },
+          {
+            id: `41000000-0000-4000-a048-${String(21 + index * 2).padStart(12, "0")}`,
+            action: "account_service_resumed" as const,
+            actor_admin_user_id: ADMIN_ID,
+            created_at: `2026-08-04T12:0${3 - index}:00.000Z`,
+            reason: null,
+            service,
+          },
+        ],
+      ),
+    ];
+
+    const events = normalizeAdminAccountActivity(
+      emptySnapshot({ operationalAdminEvents }),
+    );
+
+    expect(events.map((event) => event.title)).toEqual(
+      expect.arrayContaining([
+        "Account operations suspended",
+        "Account operations reactivated",
+        "AI replies paused",
+        "AI replies resumed",
+        "Texting paused",
+        "Texting resumed",
+        "Bookings paused",
+        "Bookings resumed",
+      ]),
+    );
+    expect(
+      events.find((event) => event.title === "AI replies resumed"),
+    ).toMatchObject({
+      category: "admin",
+      detail: null,
+      actor: ADMIN_ID,
+    });
+    expect(
+      events.find((event) => event.title === "Account operations suspended"),
+    ).toMatchObject({
+      detail: "Compliance review requested",
+      actor: ADMIN_ID,
+    });
+    expect(
+      events.find((event) => event.title === "Texting paused"),
+    ).toMatchObject({
+      detail: "Administrative maintenance",
+      actor: ADMIN_ID,
+    });
   });
 
   it("normalizes milestones, exact provisioning actions, rejections, and current Calendar creation", () => {
@@ -430,7 +514,7 @@ describe("loadAdminAccountActivity", () => {
   it("runs minimized per-account reads and returns an empty complete timeline", async () => {
     await expect(loadAdminAccountActivity(BUSINESS_ID)).resolves.toEqual([]);
 
-    expect(mocks.from).toHaveBeenCalledTimes(11);
+    expect(mocks.from).toHaveBeenCalledTimes(12);
     expect(mocks.from).toHaveBeenCalledWith("businesses");
     expect(mocks.from).toHaveBeenCalledWith(
       "telnyx_resource_release_reasons",
@@ -454,6 +538,30 @@ describe("loadAdminAccountActivity", () => {
     );
     expect(riskQuery.not).toHaveBeenCalledWith("created_at", "is", null);
 
+    const operationalQuery = mocks.queries.find(
+      (query) =>
+        query.table === "admin_action_events" &&
+        query.select.mock.calls[0]?.[0] ===
+          ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin,
+    )!;
+    expect(operationalQuery.eq).toHaveBeenCalledWith(
+      "business_id",
+      BUSINESS_ID,
+    );
+    expect(operationalQuery.in).toHaveBeenCalledWith("action", [
+      "account_operations_suspended",
+      "account_operations_reactivated",
+      "account_service_paused",
+      "account_service_resumed",
+    ]);
+    expect(operationalQuery.order).toHaveBeenCalledWith("created_at", {
+      ascending: false,
+    });
+    expect(operationalQuery.order).toHaveBeenCalledWith("id", {
+      ascending: true,
+    });
+    expect(operationalQuery.limit).toHaveBeenCalledWith(100);
+
     const rejectedQueries = mocks.queries.filter((query) =>
       ["rejected_brands", "rejected_campaigns"].includes(query.table),
     );
@@ -473,6 +581,7 @@ describe("loadAdminAccountActivity", () => {
       { data: { id: JOB_ID }, error: null },
     ]);
     mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
       { data: [], error: null },
       {
         data: [
@@ -495,9 +604,11 @@ describe("loadAdminAccountActivity", () => {
         title: "Provisioning issue dismissed",
       }),
     ]);
-    const jobActionQuery = mocks.queries.filter(
-      (query) => query.table === "admin_action_events",
-    )[1];
+    const jobActionQuery = mocks.queries.find(
+      (query) =>
+        query.table === "admin_action_events" &&
+        query.eq.mock.calls.some(([column]) => column === "provisioning_job_id"),
+    )!;
     expect(jobActionQuery.eq).toHaveBeenCalledWith(
       "provisioning_job_id",
       JOB_ID,
@@ -536,6 +647,138 @@ describe("loadAdminAccountActivity", () => {
     });
   });
 
+  it("loads operational actions through the minimized business query", async () => {
+    mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
+      {
+        data: [
+          {
+            id: "61000000-0000-4000-a048-000000000001",
+            action: "account_service_paused",
+            actor_admin_user_id: ADMIN_ID,
+            created_at: AT,
+            reason: "Administrative maintenance",
+            service: "texting",
+          },
+        ],
+        error: null,
+      },
+    ]);
+
+    await expect(loadAdminAccountActivity(BUSINESS_ID)).resolves.toEqual([
+      expect.objectContaining({
+        title: "Texting paused",
+        detail: "Administrative maintenance",
+        actor: ADMIN_ID,
+      }),
+    ]);
+  });
+
+  it("accepts operational reasons up to 500 Unicode code points", async () => {
+    const reason = "😀".repeat(500);
+    mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
+      {
+        data: [
+          {
+            id: "61000000-0000-4000-a048-000000000003",
+            action: "account_operations_suspended",
+            actor_admin_user_id: ADMIN_ID,
+            created_at: AT,
+            reason,
+            service: null,
+          },
+        ],
+        error: null,
+      },
+    ]);
+
+    await expect(loadAdminAccountActivity(BUSINESS_ID)).resolves.toEqual([
+      expect.objectContaining({
+        title: "Account operations suspended",
+        detail: reason,
+      }),
+    ]);
+  });
+
+  it("fails the entire timeline when the operational action read fails", async () => {
+    const failure = { code: "42501", message: "permission denied" };
+    mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
+      { data: null, error: failure },
+    ]);
+
+    await expect(loadAdminAccountActivity(BUSINESS_ID)).rejects.toMatchObject({
+      name: "AdminAccountActivityUnavailableError",
+      code: "query_failed",
+      source: "operational admin actions",
+      cause: failure,
+    });
+  });
+
+  it.each([
+    [
+      "account action without reason",
+      {
+        action: "account_operations_suspended",
+        reason: null,
+        service: null,
+      },
+    ],
+    [
+      "account action with service",
+      {
+        action: "account_operations_reactivated",
+        reason: "Review completed successfully",
+        service: "texting",
+      },
+    ],
+    [
+      "service action without service",
+      {
+        action: "account_service_paused",
+        reason: null,
+        service: null,
+      },
+    ],
+    [
+      "service action with short reason",
+      {
+        action: "account_service_resumed",
+        reason: "short",
+        service: "bookings",
+      },
+    ],
+    [
+      "service action with more than 500 Unicode code points",
+      {
+        action: "account_service_resumed",
+        reason: "😀".repeat(501),
+        service: "bookings",
+      },
+    ],
+  ])("rejects malformed operational audit shape: %s", async (_, overrides) => {
+    mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
+      {
+        data: [
+          {
+            id: "61000000-0000-4000-a048-000000000002",
+            actor_admin_user_id: ADMIN_ID,
+            created_at: AT,
+            ...overrides,
+          },
+        ],
+        error: null,
+      },
+    ]);
+
+    await expect(loadAdminAccountActivity(BUSINESS_ID)).rejects.toMatchObject({
+      code: "invalid_response",
+      source: "operational admin actions",
+    });
+  });
+
   it("fails the entire timeline on malformed source data", async () => {
     mocks.queues.set("telnyx_registration_events", [
       { data: null, error: null },
@@ -564,6 +807,7 @@ describe("loadAdminAccountActivity", () => {
     ]);
     mocks.queues.set("admin_action_events", [
       { data: [], error: null },
+      { data: [], error: null },
       { data: null, error: { message: "job audit unavailable" } },
     ]);
 
@@ -586,8 +830,16 @@ describe("loadAdminAccountActivity", () => {
       "reviewed_by:raw_payload->>reviewedBy",
     );
     expect(ACCOUNT_ACTIVITY_COLUMNS.calendar).toBe("created_at");
+    expect(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin).toBe(
+      "id, action, actor_admin_user_id, created_at, reason:summary->>reason, service:summary->>service",
+    );
 
-    const projections = Object.values(ACCOUNT_ACTIVITY_COLUMNS).join(" ");
+    const projectionsWithoutOperational = Object.entries(
+      ACCOUNT_ACTIVITY_COLUMNS,
+    )
+      .filter(([key]) => key !== "operationalAdmin")
+      .map(([, projection]) => projection)
+      .join(" ");
     for (const forbidden of [
       "access_token",
       "refresh_token",
@@ -601,8 +853,14 @@ describe("loadAdminAccountActivity", () => {
       "telnyx_campaign_id",
       "content",
     ]) {
-      expect(projections).not.toContain(forbidden);
+      expect(projectionsWithoutOperational).not.toContain(forbidden);
     }
-    expect(projections.match(/raw_payload/g)).toHaveLength(1);
+    expect(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin).not.toMatch(
+      /(?:^|,\s*)summary(?:,|$)/,
+    );
+    expect(
+      ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin.match(/summary->>/g),
+    ).toHaveLength(2);
+    expect(projectionsWithoutOperational.match(/raw_payload/g)).toHaveLength(1);
   });
 });

@@ -12,6 +12,8 @@ export const ACCOUNT_ACTIVITY_COLUMNS = {
   releaseCanceled: "id, canceled_at",
   deletionAdmin:
     "id, actor_admin_user_id, deletion_scheduled_for",
+  operationalAdmin:
+    "id, action, actor_admin_user_id, created_at, reason:summary->>reason, service:summary->>service",
   provisioningJob: "id",
   provisioningAdmin: "id, action, actor_admin_user_id, created_at",
   risk:
@@ -107,6 +109,46 @@ const deletionAdminRowSchema = z
     deletion_scheduled_for: timestampSchema,
   })
   .strict();
+const operationalReasonSchema = z
+  .string()
+  .refine((value) => {
+    const characterCount = Array.from(value).length;
+    return characterCount >= 8 && characterCount <= 500;
+  })
+  .refine((value) => value === value.trim())
+  .refine((value) => !/[\u0000-\u001f\u007f-\u009f]/.test(value));
+const operationalAdminRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    action: z.enum([
+      "account_operations_suspended",
+      "account_operations_reactivated",
+      "account_service_paused",
+      "account_service_resumed",
+    ]),
+    actor_admin_user_id: z.string().uuid(),
+    created_at: timestampSchema,
+    reason: operationalReasonSchema.nullable(),
+    service: z.enum(["ai_replies", "texting", "bookings"]).nullable(),
+  })
+  .strict()
+  .superRefine((row, context) => {
+    const isAccountAction =
+      row.action === "account_operations_suspended" ||
+      row.action === "account_operations_reactivated";
+    if (isAccountAction && (row.reason === null || row.service !== null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Account operational action summary is inconsistent",
+      });
+    }
+    if (!isAccountAction && row.service === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Service operational action summary is inconsistent",
+      });
+    }
+  });
 const provisioningJobSchema = z.object({ id: z.string().uuid() }).strict();
 const provisioningAdminRowSchema = z
   .object({
@@ -156,6 +198,7 @@ type MilestonesRow = z.infer<typeof milestonesSchema>;
 type ReleaseScheduledRow = z.infer<typeof releaseScheduledRowSchema>;
 type ReleaseCanceledRow = z.infer<typeof releaseCanceledRowSchema>;
 type DeletionAdminRow = z.infer<typeof deletionAdminRowSchema>;
+type OperationalAdminRow = z.infer<typeof operationalAdminRowSchema>;
 type ProvisioningAdminRow = z.infer<typeof provisioningAdminRowSchema>;
 type RiskRow = z.infer<typeof riskRowSchema>;
 type RegistrationRow = z.infer<typeof registrationRowSchema>;
@@ -169,6 +212,7 @@ export interface AdminAccountActivitySnapshot {
   releaseScheduled: ReleaseScheduledRow[];
   releaseCanceled: ReleaseCanceledRow[];
   deletionAdminEvents: DeletionAdminRow[];
+  operationalAdminEvents: OperationalAdminRow[];
   provisioningAdminEvents: ProvisioningAdminRow[];
   riskEvents: RiskRow[];
   registrationEvents: RegistrationRow[];
@@ -179,6 +223,19 @@ export interface AdminAccountActivitySnapshot {
 }
 
 type ReadResult = { data: unknown; error: unknown };
+
+const OPERATIONAL_ADMIN_ACTIONS = [
+  "account_operations_suspended",
+  "account_operations_reactivated",
+  "account_service_paused",
+  "account_service_resumed",
+] as const;
+
+const OPERATIONAL_SERVICE_LABELS = {
+  ai_replies: "AI replies",
+  texting: "Texting",
+  bookings: "Bookings",
+} as const;
 
 /**
  * Loads recorded account history through fixed, minimized service-role reads.
@@ -200,6 +257,7 @@ export async function loadAdminAccountActivity(
     releaseScheduledResult,
     releaseCanceledResult,
     deletionAdminResult,
+    operationalAdminResult,
     riskResult,
     registrationResult,
     brandLinkResult,
@@ -235,6 +293,14 @@ export async function loadAdminAccountActivity(
       .select(ACCOUNT_ACTIVITY_COLUMNS.deletionAdmin)
       .eq("business_id", businessId)
       .eq("action", "account_deletion_scheduled")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .limit(SOURCE_LIMIT),
+    supabaseAdmin
+      .from("admin_action_events")
+      .select(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin)
+      .eq("business_id", businessId)
+      .in("action", OPERATIONAL_ADMIN_ACTIONS)
       .order("created_at", { ascending: false })
       .order("id", { ascending: true })
       .limit(SOURCE_LIMIT),
@@ -308,6 +374,11 @@ export async function loadAdminAccountActivity(
     deletionAdminResult,
     deletionAdminRowSchema,
   );
+  const operationalAdminEvents = parseRows(
+    "operational admin actions",
+    operationalAdminResult,
+    operationalAdminRowSchema,
+  );
   const riskEvents = parseRows(
     "risk review activity",
     riskResult,
@@ -345,6 +416,7 @@ export async function loadAdminAccountActivity(
     releaseScheduled,
     releaseCanceled,
     deletionAdminEvents,
+    operationalAdminEvents,
     provisioningAdminEvents,
     riskEvents,
     registrationEvents,
@@ -459,6 +531,17 @@ export function normalizeAdminAccountActivity(
     });
   }
 
+  for (const event of snapshot.operationalAdminEvents) {
+    events.push({
+      id: `admin:${event.id}`,
+      category: "admin",
+      occurredAt: normalizeTimestamp(event.created_at),
+      title: operationalAdminTitle(event),
+      detail: event.reason,
+      actor: event.actor_admin_user_id,
+    });
+  }
+
   for (const event of snapshot.riskEvents) {
     if (!event.created_at) continue;
     const title = knownTitle(RISK_TITLES, event.event_type);
@@ -553,6 +636,21 @@ const RISK_TITLES: Readonly<Record<string, string>> = {
   review_email_sent: "A2P review notification sent",
   admin_approved: "A2P risk review approved",
 };
+
+function operationalAdminTitle(event: OperationalAdminRow): string {
+  if (event.action === "account_operations_suspended") {
+    return "Account operations suspended";
+  }
+  if (event.action === "account_operations_reactivated") {
+    return "Account operations reactivated";
+  }
+  if (event.service === null) {
+    throw new Error("Operational service action is missing its service");
+  }
+  return `${OPERATIONAL_SERVICE_LABELS[event.service]} ${
+    event.action === "account_service_paused" ? "paused" : "resumed"
+  }`;
+}
 
 const REGISTRATION_TITLES: Readonly<Record<string, string>> = {
   brand_submitted: "Brand submission attempt recorded",

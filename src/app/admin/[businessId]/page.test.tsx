@@ -70,6 +70,24 @@ vi.mock("../A2pApproveForm", () => ({
 vi.mock("../ExistingTelnyxBrandForm", () => ({
   ExistingTelnyxBrandForm: () => <div>EXISTING_TELNYX_FORM</div>,
 }));
+vi.mock("./AdminAccountServiceControls", () => ({
+  AdminAccountServiceControls: ({
+    billingMode,
+    initialControls,
+  }: {
+    billingMode: string;
+    initialControls: { operationsSuspendedAt: string | null };
+  }) => (
+    <div
+      data-billing-mode={billingMode}
+      data-operations-state={
+        initialControls.operationsSuspendedAt ? "suspended" : "active"
+      }
+    >
+      ADMIN_SERVICE_CONTROLS
+    </div>
+  ),
+}));
 
 import AdminBusinessPage from "./page";
 
@@ -277,10 +295,19 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).toContain("A2P_APPROVE_FORM");
     expect(html).toContain("EXISTING_TELNYX_FORM");
     expect(html).toContain("Account health");
+    expect(html).toContain("ADMIN_SERVICE_CONTROLS");
+    expect(html).toContain('data-billing-mode="stripe"');
+    expect(html).toContain('data-operations-state="active"');
     expect(html).toContain("Account activity");
     expect(html).toContain("Recorded activity only.");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Onboarding");
+    expect(html.indexOf("Account health")).toBeLessThan(
+      html.indexOf("ADMIN_SERVICE_CONTROLS"),
+    );
+    expect(html.indexOf("ADMIN_SERVICE_CONTROLS")).toBeLessThan(
+      html.indexOf("Account activity"),
+    );
   });
 
   it("renders a scheduled account read-only without operational queries or mutation forms", async () => {
@@ -320,6 +347,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("PARTNER_BILLING_FORM");
     expect(html).not.toContain("A2P_APPROVE_FORM");
     expect(html).not.toContain("EXISTING_TELNYX_FORM");
+    expect(html).not.toContain("ADMIN_SERVICE_CONTROLS");
   });
 
   it("fails closed to the fresh suspended preview when the first row read was active", async () => {
@@ -344,6 +372,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(mocks.getExistingBrand).not.toHaveBeenCalled();
     expect(html).not.toContain("ADMIN_FLAG_FORM");
     expect(html).not.toContain("PARTNER_BILLING_FORM");
+    expect(html).not.toContain("ADMIN_SERVICE_CONTROLS");
   });
 
   it("uses the fresh active preview when the first row read was scheduled", async () => {
@@ -366,6 +395,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("Deletion scheduled");
     expect(html).toContain("ADMIN_FLAG_FORM");
     expect(html).toContain("PARTNER_BILLING_FORM");
+    expect(html).toContain("ADMIN_SERVICE_CONTROLS");
     expect(html).toContain("Account health");
     expect(html).toContain("Onboarding");
   });
@@ -411,6 +441,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("PARTNER_BILLING_FORM");
     expect(html).not.toContain("A2P_APPROVE_FORM");
     expect(html).not.toContain("EXISTING_TELNYX_FORM");
+    expect(html).not.toContain("ADMIN_SERVICE_CONTROLS");
     expect(html).not.toContain("Account health");
     expect(html).toContain("Account activity");
     expect(html).toContain("Account deletion scheduled");
@@ -427,12 +458,48 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).toContain("Timeline unavailable");
     expect(html).toContain("No partial timeline is shown.");
     expect(html).toContain("Account health");
+    expect(html).toContain("ADMIN_SERVICE_CONTROLS");
     expect(html).toContain("ADMIN_FLAG_FORM");
     expect(log).toHaveBeenCalledWith(
       "[admin-account-activity] Timeline unavailable",
       expect.any(Error),
     );
     log.mockRestore();
+  });
+
+  it("keeps controls available for operationally suspended accounts and passes the stored billing mode", async () => {
+    mocks.results.set("businesses", {
+      data: storedBusiness({
+        billing_mode: "comped",
+        partner_id: null,
+      }),
+      error: null,
+    });
+    mocks.loadHealth.mockResolvedValue(
+      storedHealth({
+        operations: {
+          state: "suspended",
+          suspendedAt: "2026-08-04T12:00:00.000Z",
+          services: {
+            aiReplies: { state: "paused", pausedAt: null },
+            texting: { state: "paused", pausedAt: null },
+            bookings: { state: "paused", pausedAt: null },
+          },
+        },
+        billing: {
+          ...storedHealth().billing,
+          mode: "comped",
+        },
+      }),
+    );
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toContain("ADMIN_SERVICE_CONTROLS");
+    expect(html).toContain('data-operations-state="suspended"');
+    expect(html).toContain('data-billing-mode="comped"');
   });
 
   it("fails closed when the initial business read fails", async () => {

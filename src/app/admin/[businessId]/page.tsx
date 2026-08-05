@@ -29,6 +29,7 @@ import { card, statusDanger, statusWarning } from "@/lib/theme-v2/theme";
 import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
 import { AdminAccountActivityTimeline } from "./AdminAccountActivityTimeline";
 import { AdminAccountHealthCard } from "./AdminAccountHealthCard";
+import { AdminAccountServiceControls } from "./AdminAccountServiceControls";
 import type {
   BillingMode,
   PartnerDomainStatus,
@@ -238,6 +239,24 @@ export default async function AdminBusinessPage({
       <BackToAdmin />
       <BusinessHeading business={business} lifecycle={effectiveLifecycle} />
       <AdminAccountHealthCard health={effectiveHealth} />
+      <AdminAccountServiceControls
+        key={[
+          effectiveHealth.operations.suspendedAt ?? "active",
+          effectiveHealth.operations.services.aiReplies.pausedAt ?? "active",
+          effectiveHealth.operations.services.texting.pausedAt ?? "active",
+          effectiveHealth.operations.services.bookings.pausedAt ?? "active",
+        ].join(":")}
+        businessId={business.id}
+        billingMode={effectiveHealth.billing.mode}
+        initialControls={{
+          operationsSuspendedAt: effectiveHealth.operations.suspendedAt,
+          aiRepliesPausedAt:
+            effectiveHealth.operations.services.aiReplies.pausedAt,
+          textingPausedAt: effectiveHealth.operations.services.texting.pausedAt,
+          bookingsPausedAt:
+            effectiveHealth.operations.services.bookings.pausedAt,
+        }}
+      />
       <AdminAccountActivityTimeline {...activity} />
 
       <section className="grid gap-4 md:grid-cols-2">
