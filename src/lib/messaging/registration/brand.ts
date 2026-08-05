@@ -351,31 +351,36 @@ export async function registerBrand(businessId: string): Promise<void> {
       : buildBusinessLandingUrl(business.slug);
 
   try {
-    const response = await telnyx.messaging10dlc.brand.create({
-      country: "US",
-      displayName: business.name,
-      companyName: business.legal_business_name,
-      email: business.authorized_rep_email,
-      entityType,
-      vertical,
-      // ISV/SaaS flag — corresponds to the Telnyx dashboard checkbox
-      // "Yes, I am creating a brand on behalf of another organization".
-      // SimplAssist is always the registering ISV when this code path runs;
-      // each customer brand belongs to a separate end-business (Mike's Roofing,
-      // etc.), so the flag is unconditionally true.
-      isReseller: true,
-      ein: einDigits,
-      firstName,
-      lastName,
-      phone,
-      street: business.address ?? undefined,
-      city: business.city ?? undefined,
-      state: stateCode,
-      postalCode: business.zip ?? undefined,
-      website: resolvedWebsite,
-      webhookURL,
-      webhookFailoverURL: webhookURL,
-    });
+    const response = await telnyx.messaging10dlc.brand.create(
+      {
+        country: "US",
+        displayName: business.name,
+        companyName: business.legal_business_name,
+        email: business.authorized_rep_email,
+        entityType,
+        vertical,
+        // ISV/SaaS flag — corresponds to the Telnyx dashboard checkbox
+        // "Yes, I am creating a brand on behalf of another organization".
+        // SimplAssist is always the registering ISV when this code path runs;
+        // each customer brand belongs to a separate end-business (Mike's Roofing,
+        // etc.), so the flag is unconditionally true.
+        isReseller: true,
+        ein: einDigits,
+        firstName,
+        lastName,
+        phone,
+        street: business.address ?? undefined,
+        city: business.city ?? undefined,
+        state: stateCode,
+        postalCode: business.zip ?? undefined,
+        website: resolvedWebsite,
+        webhookURL,
+        webhookFailoverURL: webhookURL,
+      },
+      // This POST can incur real Telnyx/TCR charges. Do not let the SDK
+      // replay an ambiguous success; provider reconciliation remains parked.
+      { maxRetries: 0 },
+    );
 
     const brandId = response.brandId;
     if (!brandId) {

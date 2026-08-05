@@ -96,6 +96,7 @@ function health(
     },
     billing: {
       mode: "stripe",
+      subscriptionPresent: true,
       plan: "sms_only",
       status: "active",
       source: "subscription",
@@ -182,6 +183,11 @@ describe("AdminPage account lifecycle and health rendering", () => {
           deleted_at: "2026-08-04T12:00:00.000Z",
           deletion_scheduled_for: "2026-10-03T12:00:00.000Z",
         }),
+        subscription: {
+          business_id: SCHEDULED_ID,
+          plan: "sms_only",
+          status: "active",
+        },
         health: health(SCHEDULED_ID, "pending_deletion"),
       }),
       record({
@@ -220,6 +226,11 @@ describe("AdminPage account lifecycle and health rendering", () => {
     mocks.loadHealthList.mockResolvedValue([
       record({
         business: business(ACTIVE_ID, "Suspended Dental"),
+        subscription: {
+          business_id: ACTIVE_ID,
+          plan: "sms_only",
+          status: "active",
+        },
         health: health(ACTIVE_ID, "live", {
           operations: {
             state: "suspended",
@@ -297,6 +308,7 @@ describe("AdminPage billing presentation", () => {
           health: health(ACTIVE_ID, "live", {
             billing: {
               mode: billingMode,
+              subscriptionPresent: false,
               plan: partnerPlan,
               status: "partner_billing",
               source: "partner_billing",
@@ -326,6 +338,18 @@ describe("AdminPage billing presentation", () => {
           billing_mode: "invoiced",
           partner_plan: null,
           partner: null,
+        }),
+        health: health(ACTIVE_ID, "live", {
+          billing: {
+            mode: "invoiced",
+            subscriptionPresent: false,
+            plan: null,
+            status: null,
+            source: null,
+            state: "unknown",
+            pastDue: false,
+            cancelAtPeriodEnd: false,
+          },
         }),
       }),
     ]);

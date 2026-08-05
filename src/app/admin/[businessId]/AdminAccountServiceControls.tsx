@@ -207,7 +207,7 @@ export function AdminAccountServiceControls({
           const independentlyPaused = pausedAt !== null;
           const effectiveNote =
             accountSuspended && !independentlyPaused
-              ? " Independently active; effectively paused by account suspension."
+              ? " Effectively paused by account suspension."
               : "";
 
           return (

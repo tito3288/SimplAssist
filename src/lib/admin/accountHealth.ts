@@ -66,6 +66,7 @@ export interface AdminAccountHealthInput {
   onboardingCompletedAt: string | null;
   onboardingStep: OnboardingStep;
   billingMode: BillingMode;
+  subscriptionPresent: boolean;
   entitlements: AdminEntitlementSnapshot | null;
   activePhoneCount: number;
   anyActivePhoneAssignmentFailed: boolean;
@@ -128,6 +129,7 @@ export interface AdminAccountHealth {
   };
   billing: {
     mode: BillingMode;
+    subscriptionPresent: boolean;
     plan: SubscriptionPlan | null;
     status: AdminEntitlementStatus | null;
     source: AdminEntitlementSnapshot["source"] | null;
@@ -279,6 +281,7 @@ export function normalizeAdminAccountHealth(
     },
     billing: {
       mode: input.billingMode,
+      subscriptionPresent: input.subscriptionPresent,
       plan: entitlements?.plan ?? null,
       status: entitlements?.status ?? null,
       source: entitlements?.source ?? null,

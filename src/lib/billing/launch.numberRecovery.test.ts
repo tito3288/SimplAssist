@@ -203,6 +203,47 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it("returns neutral copy when registration is administratively disabled", async () => {
+    queueResults({
+      data: { ...LAUNCH_BUSINESS, telnyx_submission_disabled: true },
+      error: null,
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "submission_disabled",
+      message:
+        "SMS registration is disabled for this account. Contact support if this looks wrong.",
+    });
+    expect(mocks.markRegistrationFailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "SMS registration is disabled for this account. Contact support if this looks wrong."
+    );
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+  });
+
+  it("returns neutral copy when no business number has been selected", async () => {
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: null, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "missing_phone_number",
+      message: "Choose your business number before submitting SMS registration.",
+    });
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+  });
+
   it("returns a typed suspension before billing, claims, or provider work", async () => {
     queueResults({ data: LAUNCH_BUSINESS, error: null });
     mocks.resolveBusinessOperationalControls.mockResolvedValue({

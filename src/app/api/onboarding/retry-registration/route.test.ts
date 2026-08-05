@@ -28,6 +28,34 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 import { POST } from "./route";
 
 const BUSINESS_ID = "0b7f6f3e-8b1a-4a6c-9a56-0d6d6f6a1c2e";
+const STATE = { currentStep: "carrier_review" };
+const NEUTRAL_LAUNCH_ERRORS = [
+  [
+    "submission_disabled",
+    "registration_failed",
+    "SMS registration is disabled for this account. Contact support if this looks wrong.",
+  ],
+  [
+    "existing_brand_review_required",
+    "existing_brand_review_required",
+    "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support.",
+  ],
+  [
+    "linked_brand_needs_support",
+    "linked_brand_needs_support",
+    "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.",
+  ],
+  [
+    "failed",
+    "registration_failed",
+    "We could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.",
+  ],
+  [
+    "missing_phone_number",
+    "missing_phone_number",
+    "Choose your business number before submitting SMS registration.",
+  ],
+] as const;
 
 function business(overrides: Record<string, unknown> = {}) {
   return {
@@ -73,9 +101,7 @@ beforeEach(() => {
     error: null,
   });
   mocks.attemptPaidLaunch.mockResolvedValue({ status: "submitted" });
-  mocks.getOnboardingStateForBusinessId.mockResolvedValue({
-    currentStep: "carrier_review",
-  });
+  mocks.getOnboardingStateForBusinessId.mockResolvedValue(STATE);
 });
 
 describe("POST /api/onboarding/retry-registration rejection guard", () => {
@@ -139,6 +165,21 @@ describe("POST /api/onboarding/retry-registration rejection guard", () => {
       "onboarding_retry"
     );
   });
+
+  it.each(NEUTRAL_LAUNCH_ERRORS)(
+    "returns raw neutral %s launch copy without a product name",
+    async (status, code, message) => {
+      queueResults({ data: business(), error: null });
+      mocks.attemptPaidLaunch.mockResolvedValue({ status, message });
+
+      const response = await POST(request());
+      const text = await response.text();
+
+      expect(response.status).toBe(400);
+      expect(JSON.parse(text)).toEqual({ error: message, code, state: STATE });
+      expect(text).not.toContain("SimplAssist");
+    }
+  );
 
   it("still requires completed brand verification info first", async () => {
     queueResults({

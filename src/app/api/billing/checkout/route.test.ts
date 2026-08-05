@@ -67,6 +67,29 @@ const BUSINESS = {
   billing_exempt: true,
 };
 
+const NEUTRAL_LAUNCH_ERRORS = [
+  [
+    "submission_disabled",
+    "SMS registration is disabled for this account. Contact support if this looks wrong.",
+  ],
+  [
+    "existing_brand_review_required",
+    "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support.",
+  ],
+  [
+    "linked_brand_needs_support",
+    "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.",
+  ],
+  [
+    "failed",
+    "We could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.",
+  ],
+  [
+    "missing_phone_number",
+    "Choose your business number before submitting SMS registration.",
+  ],
+] as const;
+
 function queueResults(...results: unknown[]) {
   const queue = [...results];
   mocks.from.mockImplementation(() => {
@@ -324,6 +347,29 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     expect(await response.json()).toMatchObject({ success: true });
   });
 
+  it.each(NEUTRAL_LAUNCH_ERRORS)(
+    "returns raw neutral %s launch copy without a product name",
+    async (status, message) => {
+      queueResults(
+        { data: BUSINESS, error: null },
+        { data: null, error: null },
+      );
+      mocks.attemptPaidLaunch.mockResolvedValue({ status, message });
+
+      const response = await POST(request());
+      const text = await response.text();
+
+      expect(response.status).toBe(400);
+      expect(JSON.parse(text)).toEqual({
+        error: message,
+        code: status,
+        state: { step: "complete" },
+      });
+      expect(text).not.toContain("SimplAssist");
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["pending_admin", "blocked"])(
     "blocks checkout while an existing-brand link is %s",
     async (status) => {
@@ -334,12 +380,16 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
       });
 
       const response = await POST(request());
+      const text = await response.text();
 
       expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
+      expect(JSON.parse(text)).toEqual({
         code: "existing_brand_review_required",
-        error: expect.stringContaining("before checkout can continue"),
+        error:
+          "Your existing Telnyx brand link needs review before checkout can continue. Contact support.",
+        state: { step: "complete" },
       });
+      expect(text).not.toContain("SimplAssist");
       expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
       expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
       expect(mocks.from).toHaveBeenCalledTimes(1);

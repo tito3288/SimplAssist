@@ -135,6 +135,7 @@ describe("loadAdminAccountHealthList", () => {
           },
         },
         lifecycle: { state: "live" },
+        billing: { subscriptionPresent: true },
         phone: { state: "ready", smsReady: true },
         ai: { state: "active" },
         booking: { state: "operational" },
@@ -219,6 +220,68 @@ describe("loadAdminAccountHealthList", () => {
       pastDue: true,
     });
     expect(record.health?.ai.state).toBe("active");
+  });
+
+  it("derives an absent subscription fact from the existing nullable plan column", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        rpcRow({
+          onboarding_completed_at: null,
+          onboarding_step: "business_info",
+          subscription_plan: null,
+          subscription_status: null,
+          subscription_cancel_at_period_end: null,
+          effective_plan: null,
+        }),
+      ],
+      error: null,
+    });
+
+    const [record] = await loadAdminAccountHealthList();
+
+    expect(record.subscription).toBeUndefined();
+    expect(record.health?.lifecycle.state).toBe("onboarding");
+    expect(record.health?.billing).toEqual({
+      mode: "stripe",
+      subscriptionPresent: false,
+      plan: null,
+      status: null,
+      source: null,
+      state: "unknown",
+      pastDue: false,
+      cancelAtPeriodEnd: false,
+    });
+  });
+
+  it("keeps partner billing active without inventing a Stripe subscription", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        rpcRow({
+          partner_id: "20000000-0000-4000-a045-000000000001",
+          partner_name: "Partner Health",
+          partner_slug: "partner-health",
+          billing_mode: "invoiced",
+          partner_plan: "sms_and_chat",
+          subscription_plan: null,
+          subscription_status: null,
+          subscription_cancel_at_period_end: null,
+          effective_plan: "sms_and_chat",
+        }),
+      ],
+      error: null,
+    });
+
+    const [record] = await loadAdminAccountHealthList();
+
+    expect(record.subscription).toBeUndefined();
+    expect(record.health?.billing).toMatchObject({
+      mode: "invoiced",
+      subscriptionPresent: false,
+      plan: "sms_and_chat",
+      status: "partner_billing",
+      source: "partner_billing",
+      state: "active",
+    });
   });
 
   it("treats legacy nullable AI booking fields as disabled configuration", async () => {

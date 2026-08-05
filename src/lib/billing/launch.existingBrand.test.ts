@@ -244,13 +244,14 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "stripe_finalize");
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: "existing_brand_review_required",
-      message: expect.stringContaining("needs SimplAssist review"),
+      message:
+        "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support.",
     });
     expect(mocks.markFailed).toHaveBeenCalledWith(
       BUSINESS_ID,
-      expect.stringContaining("needs SimplAssist review")
+      "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support."
     );
     expectNoProviderMutation();
   });
@@ -266,9 +267,10 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: "failed",
-      message: expect.stringContaining("try again shortly"),
+      message:
+        "We could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.",
     });
     expectNoProviderMutation();
   });
@@ -285,9 +287,10 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: "linked_brand_needs_support",
-      message: expect.stringContaining("existing Telnyx resources were not replaced"),
+      message:
+        "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.",
     });
     expectNoProviderMutation();
   });

@@ -108,6 +108,9 @@ function lifecyclePresentation(health: AdminAccountHealth): {
 }
 
 function billingLabel(health: AdminAccountHealth): string {
+  if (isBillingNotStarted(health)) {
+    return "Billing: not started · no subscription";
+  }
   const plan = health.billing.plan
     ? humanize(health.billing.plan)
     : "unresolved plan";
@@ -119,9 +122,22 @@ function billingLabel(health: AdminAccountHealth): string {
 }
 
 function billingTone(health: AdminAccountHealth): AdminHealthTone {
+  if (isBillingNotStarted(health)) return "neutral";
   if (health.billing.state === "unknown") return "danger";
   if (health.billing.state === "inactive") return "danger";
   return "success";
+}
+
+function isBillingNotStarted(health: AdminAccountHealth): boolean {
+  return (
+    health.lifecycle.state === "onboarding" &&
+    health.billing.mode === "stripe" &&
+    health.billing.subscriptionPresent === false &&
+    health.billing.plan === null &&
+    health.billing.status === null &&
+    health.billing.source === null &&
+    health.billing.state === "unknown"
+  );
 }
 
 function phonePresentation(health: AdminAccountHealth): {

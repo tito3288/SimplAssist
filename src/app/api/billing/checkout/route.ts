@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Your existing Telnyx brand link needs SimplAssist review before checkout can continue. Contact SimplAssist Support.",
+            "Your existing Telnyx brand link needs review before checkout can continue. Contact support.",
           code: "existing_brand_review_required",
           state,
         },

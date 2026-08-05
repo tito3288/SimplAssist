@@ -208,6 +208,7 @@ function storedHealth(
     },
     billing: {
       mode: "stripe",
+      subscriptionPresent: true,
       plan: "sms_and_chat",
       status: "active",
       source: "subscription",
@@ -673,7 +674,8 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     mocks.results.set("businesses", {
       data: storedBusiness({
         billing_mode: "comped",
-        partner_id: null,
+        partner_id: "20000000-0000-4000-a045-000000000001",
+        partner_plan: "sms_and_chat",
       }),
       error: null,
     });
@@ -689,8 +691,14 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
           },
         },
         billing: {
-          ...storedHealth().billing,
           mode: "comped",
+          subscriptionPresent: false,
+          plan: "sms_and_chat",
+          status: "partner_billing",
+          source: "partner_billing",
+          state: "active",
+          pastDue: false,
+          cancelAtPeriodEnd: false,
         },
       }),
     );

@@ -518,6 +518,7 @@ function normalizeHealth(row: AdminBusinessHealthRpcRow): AdminAccountHealth {
     onboardingCompletedAt: row.onboarding_completed_at,
     onboardingStep: row.onboarding_step as OnboardingStep,
     billingMode: row.billing_mode,
+    subscriptionPresent: row.subscription_plan !== null,
     entitlements,
     activePhoneCount: row.active_phone_count,
     anyActivePhoneAssignmentFailed: row.active_phone_assignment_failed,

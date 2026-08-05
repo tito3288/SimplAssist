@@ -63,7 +63,7 @@ const BILLING_REQUIRED_MESSAGE =
   "Finish checkout before submitting SMS registration.";
 
 const SUBMISSION_DISABLED_MESSAGE =
-  "SMS registration is disabled for this account. Contact SimplAssist support if this looks wrong.";
+  "SMS registration is disabled for this account. Contact support if this looks wrong.";
 
 const OPERATIONS_SUSPENDED_MESSAGE =
   "Account operations are suspended. Reactivate the account before SMS registration can continue.";
@@ -72,13 +72,13 @@ const NO_EIN_HELD_MESSAGE =
   "Add your EIN before SMS registration can continue.";
 
 const EXISTING_BRAND_REVIEW_REQUIRED_MESSAGE =
-  "Your existing Telnyx brand link needs SimplAssist review before SMS registration can continue. Contact SimplAssist Support.";
+  "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support.";
 
 const LINKED_BRAND_NEEDS_SUPPORT_MESSAGE =
-  "Your linked Telnyx brand needs SimplAssist Support before SMS registration can continue. Its existing Telnyx resources were not replaced.";
+  "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.";
 
 const EXISTING_BRAND_RETRY_MESSAGE =
-  "SimplAssist could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.";
+  "We could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.";
 
 export const SERVICES_FAQS_REQUIRED_MESSAGE =
   "Add at least 3 distinct services and 3 answered FAQs so your AI has enough accurate information to help customers.";
@@ -194,7 +194,7 @@ export async function attemptPaidLaunch(
   if (!activeNumber && !business.pending_phone_number) {
     return {
       status: "missing_phone_number",
-      message: "Choose your SimplAssist number before submitting SMS registration.",
+      message: "Choose your business number before submitting SMS registration.",
     };
   }
 

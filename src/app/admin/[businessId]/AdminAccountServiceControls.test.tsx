@@ -116,9 +116,12 @@ describe("AdminAccountServiceControls", () => {
     );
     expect(
       html.match(
-        /Independently active; effectively paused by account suspension\./g,
+        /Independently active\. Effectively paused by account suspension\./g,
       ),
     ).toHaveLength(2);
+    expect(html).not.toContain(
+      "Independently active. Independently active;",
+    );
     expect(html).toContain("Pause texting");
     expect(html).toContain("Pause bookings");
   });

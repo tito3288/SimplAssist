@@ -21,6 +21,7 @@ function input(
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
+    subscriptionPresent: true,
     entitlements: {
       plan: "full",
       status: "active",

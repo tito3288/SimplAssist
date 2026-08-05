@@ -21,6 +21,7 @@ function healthInput(
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
+    subscriptionPresent: true,
     entitlements: {
       plan: "sms_and_chat",
       status: "active",
@@ -66,6 +67,14 @@ function render(overrides: Partial<AdminAccountHealthInput> = {}): string {
   );
 }
 
+function billingChipClass(html: string, label: string): string {
+  const match = html.match(
+    new RegExp(`<span class="([^"]*)">${label}</span>`),
+  );
+  expect(match).not.toBeNull();
+  return match?.[1] ?? "";
+}
+
 describe("AdminAccountHealthChips", () => {
   it("covers operational billing, lifecycle, channels, registration, and activity", () => {
     const html = render();
@@ -98,6 +107,97 @@ describe("AdminAccountHealthChips", () => {
     expect(html).toContain("Billing: sms and chat · past due");
     expect(html).toContain("Past due");
     expect(html).toContain("AI: active (SMS + web chat)");
+  });
+
+  it("uses the exact neutral no-subscription label only during Stripe onboarding", () => {
+    const label = "Billing: not started · no subscription";
+    const html = render({
+      onboardingCompletedAt: null,
+      onboardingStep: "business_info",
+      subscriptionPresent: false,
+      entitlements: null,
+    });
+
+    expect(html).toContain(label);
+    const classes = billingChipClass(html, label);
+    expect(classes).toContain("text-stone-600");
+    expect(classes).not.toContain("text-red-700");
+  });
+
+  it.each([
+    [
+      "launched without a subscription",
+      {
+        subscriptionPresent: false,
+        entitlements: null,
+      },
+    ],
+    [
+      "onboarding with a present but unresolved subscription",
+      {
+        onboardingCompletedAt: null,
+        onboardingStep: "business_info" as const,
+        subscriptionPresent: true,
+        entitlements: null,
+      },
+    ],
+    [
+      "pending deletion that began before checkout",
+      {
+        deletedAt: "2026-08-04T12:00:00.000Z",
+        deletionScheduledFor: "2026-10-03T12:00:00.000Z",
+        onboardingCompletedAt: null,
+        onboardingStep: "business_info" as const,
+        subscriptionPresent: false,
+        entitlements: null,
+      },
+    ],
+  ])("keeps %s on the existing danger presentation", (_name, overrides) => {
+    const label = "Billing: unresolved plan · unknown";
+    const html = render(overrides);
+
+    expect(html).toContain(label);
+    expect(html).not.toContain("Billing: not started · no subscription");
+    const classes = billingChipClass(html, label);
+    expect(classes).toContain("text-red-700");
+    expect(classes).not.toContain("text-stone-600");
+  });
+
+  it("does not treat unresolved partner billing as Stripe billing that has not started", () => {
+    const label = "Billing: unresolved plan · invoiced";
+    const html = render({
+      onboardingCompletedAt: null,
+      onboardingStep: "business_info",
+      billingMode: "invoiced",
+      subscriptionPresent: false,
+      entitlements: null,
+    });
+
+    expect(html).toContain(label);
+    expect(html).not.toContain("Billing: not started · no subscription");
+    expect(billingChipClass(html, label)).toContain("text-red-700");
+  });
+
+  it.each([
+    ["invoiced" as const, "Billing: sms and chat · invoiced"],
+    ["comped" as const, "Billing: sms and chat · comped"],
+  ])("preserves %s partner billing", (billingMode, label) => {
+    const html = render({
+      onboardingCompletedAt: null,
+      billingMode,
+      subscriptionPresent: false,
+      entitlements: {
+        plan: "sms_and_chat",
+        status: "partner_billing",
+        source: "partner_billing",
+        active: true,
+        cancelAtPeriodEnd: false,
+      },
+    });
+
+    expect(html).toContain(label);
+    expect(html).not.toContain("Billing: not started · no subscription");
+    expect(billingChipClass(html, label)).toContain("text-green-700");
   });
 
   it("orders account and stored pause chips before live technical health without duplicating effective pauses", () => {

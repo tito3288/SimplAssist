@@ -117,8 +117,10 @@ export function inferRejectionStep(
  * option; a brand rejection re-files the brand AND rebuilds its campaign,
  * so it carries the same campaign charges on top of the brand fee). The
  * recovery paths are Fix & resubmit (edit, then resubmit through the normal
- * flow once something actually changed) and support. Retry stays only for
- * technical failures, where nothing was rejected and nothing is recreated.
+ * flow once something actually changed) and support.
+ * Technical retry is safe only when the failed path proves no charged resource
+ * was created. A brand-create timeout has an ambiguous provider outcome and
+ * must be reconciled before another create.
  * Shared by the step-9 panel and the retry-registration API guard.
  */
 export function isRejectionRetryBlocked(

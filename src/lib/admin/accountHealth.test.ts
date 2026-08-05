@@ -23,6 +23,7 @@ function input(
     onboardingCompletedAt: "2026-07-01T12:00:00.000Z",
     onboardingStep: "complete",
     billingMode: "stripe",
+    subscriptionPresent: true,
     entitlements: {
       plan: "full",
       status: "active",
@@ -79,7 +80,11 @@ describe("normalizeAdminAccountHealth", () => {
         onboardingStep: "complete",
         onboardingStepLabel: "Complete",
       },
-      billing: { state: "active", pastDue: false },
+      billing: {
+        state: "active",
+        subscriptionPresent: true,
+        pastDue: false,
+      },
       phone: { state: "ready", smsReady: true, activeCount: 1 },
       registration: { state: "approved" },
       calendar: { connected: true },
@@ -406,12 +411,68 @@ describe("normalizeAdminAccountHealth", () => {
     ).toBe("disabled");
   });
 
+  it("retains subscription presence independently from entitlement resolution", () => {
+    const notStarted = normalizeAdminAccountHealth(
+      input({
+        onboardingCompletedAt: null,
+        onboardingStep: "business_info",
+        subscriptionPresent: false,
+        entitlements: null,
+      }),
+    );
+    expect(notStarted.lifecycle.state).toBe("onboarding");
+    expect(notStarted.billing).toEqual({
+      mode: "stripe",
+      subscriptionPresent: false,
+      plan: null,
+      status: null,
+      source: null,
+      state: "unknown",
+      pastDue: false,
+      cancelAtPeriodEnd: false,
+    });
+
+    const presentButUnresolved = normalizeAdminAccountHealth(
+      input({ subscriptionPresent: true, entitlements: null }),
+    );
+    expect(presentButUnresolved.billing).toMatchObject({
+      subscriptionPresent: true,
+      plan: null,
+      status: null,
+      source: null,
+      state: "unknown",
+    });
+
+    const partnerManaged = normalizeAdminAccountHealth(
+      input({
+        billingMode: "invoiced",
+        subscriptionPresent: false,
+        entitlements: {
+          plan: "sms_and_chat",
+          status: "partner_billing",
+          source: "partner_billing",
+          active: true,
+          cancelAtPeriodEnd: false,
+        },
+      }),
+    );
+    expect(partnerManaged.billing).toMatchObject({
+      mode: "invoiced",
+      subscriptionPresent: false,
+      plan: "sms_and_chat",
+      status: "partner_billing",
+      source: "partner_billing",
+      state: "active",
+    });
+  });
+
   it("fails closed on unresolved billing and malformed activity timestamps", () => {
     const health = normalizeAdminAccountHealth(
       input({ entitlements: null, lastActivityAt: "not-a-date" }),
     );
     expect(health.billing).toMatchObject({
       state: "unknown",
+      subscriptionPresent: true,
       plan: null,
       status: null,
     });

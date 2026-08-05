@@ -56,6 +56,29 @@ const SESSION = {
   metadata: { business_id: BUSINESS.id },
 };
 
+const NEUTRAL_LAUNCH_ERRORS = [
+  [
+    "submission_disabled",
+    "SMS registration is disabled for this account. Contact support if this looks wrong.",
+  ],
+  [
+    "existing_brand_review_required",
+    "Your existing Telnyx brand link needs review before SMS registration can continue. Contact support.",
+  ],
+  [
+    "linked_brand_needs_support",
+    "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.",
+  ],
+  [
+    "failed",
+    "We could not recheck your existing Telnyx brand right now. No new Telnyx resources were created; please try again shortly.",
+  ],
+  [
+    "missing_phone_number",
+    "Choose your business number before submitting SMS registration.",
+  ],
+] as const;
+
 function queueBusinessResults(...results: unknown[]) {
   const queue = [...results];
   mocks.from.mockImplementation(() => {
@@ -236,6 +259,28 @@ describe("POST /api/billing/finalize billing authority", () => {
       BUSINESS.id
     );
   });
+
+  it.each(NEUTRAL_LAUNCH_ERRORS)(
+    "returns raw neutral %s launch copy without a product name",
+    async (status, message) => {
+      queueBusinessResults(
+        { data: BUSINESS, error: null },
+        { data: BUSINESS, error: null }
+      );
+      mocks.attemptPaidLaunch.mockResolvedValue({ status, message });
+
+      const response = await POST(request());
+      const text = await response.text();
+
+      expect(response.status).toBe(400);
+      expect(JSON.parse(text)).toEqual({
+        error: message,
+        code: status,
+        state: { currentStep: "carrier_review" },
+      });
+      expect(text).not.toContain("SimplAssist");
+    }
+  );
 
   it("does not launch when the guarded database sync rejects a final assignment race", async () => {
     queueBusinessResults(
