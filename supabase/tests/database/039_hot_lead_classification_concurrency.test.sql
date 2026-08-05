@@ -104,6 +104,24 @@ BEGIN
     BEGIN
       PERFORM extensions.dblink_exec(
         'test_039_lead_setup',
+        $metric_cleanup_sql$
+          DO $metric_cleanup$
+          BEGIN
+            EXECUTE
+              'ALTER TABLE public.business_metric_events ' ||
+              'DISABLE TRIGGER reject_business_metric_events_mutation';
+            DELETE FROM public.business_metric_events
+            WHERE business_id =
+              '10000000-0000-4000-a039-000000000091';
+            EXECUTE
+              'ALTER TABLE public.business_metric_events ' ||
+              'ENABLE TRIGGER reject_business_metric_events_mutation';
+          END;
+          $metric_cleanup$;
+        $metric_cleanup_sql$
+      );
+      PERFORM extensions.dblink_exec(
+        'test_039_lead_setup',
         $cleanup_sql$
           DELETE FROM auth.users
           WHERE id = '00000000-0000-4000-a039-000000000091'
