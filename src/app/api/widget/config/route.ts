@@ -10,6 +10,11 @@ import {
   BusinessPartnerResolutionError,
   resolveWidgetAttribution,
 } from "@/lib/branding/businessPartner.server";
+import {
+  OperationalControlsResolutionError,
+  resolveBusinessOperationalControls,
+  resolveOperationalBlockReason,
+} from "@/lib/account/operationalControls.server";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const widgetConfigMutationSchema = z
@@ -149,6 +154,25 @@ export async function GET(request: NextRequest) {
       }
     } catch (error) {
       if (error instanceof EntitlementResolutionError) {
+        return NextResponse.json(
+          { error: "Service temporarily unavailable", retryable: true },
+          { status: 503, headers: corsHeaders }
+        );
+      }
+      throw error;
+    }
+
+    try {
+      const controls = await resolveBusinessOperationalControls(businessId);
+      if (resolveOperationalBlockReason(controls, ["ai_replies"]) !== null) {
+        return NextResponse.json(
+          { available: false },
+          { headers: corsHeaders }
+        );
+      }
+    } catch (error) {
+      if (error instanceof OperationalControlsResolutionError) {
+        console.error("Widget operational controls lookup error:", error);
         return NextResponse.json(
           { error: "Service temporarily unavailable", retryable: true },
           { status: 503, headers: corsHeaders }

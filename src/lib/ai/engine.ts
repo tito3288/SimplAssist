@@ -1,4 +1,9 @@
 import { anthropic } from "@/lib/anthropic/client";
+import {
+  isOperationalControlsResolutionError,
+  resolveBusinessOperationalControls,
+  resolveOperationalBlockReason,
+} from "@/lib/account/operationalControls.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   canUseFeature,
@@ -36,15 +41,29 @@ import type Anthropic from "@anthropic-ai/sdk";
 const FALLBACK_MESSAGE =
   "Thanks for reaching out! We're having a brief technical issue. Please try again in a moment or call us directly.";
 
+export type AIProcessingBlockedReason =
+  | "feature_not_entitled"
+  | "conversation_in_manual_mode"
+  | "account_suspended"
+  | "ai_replies_paused"
+  | "texting_paused";
+
+const AI_PROCESSING_BLOCKED_MESSAGES: Record<
+  AIProcessingBlockedReason,
+  string
+> = {
+  feature_not_entitled:
+    "AI processing is not included in this business's current plan.",
+  conversation_in_manual_mode:
+    "AI processing is disabled while this conversation is in Human mode.",
+  account_suspended: "AI processing is unavailable for this account.",
+  ai_replies_paused: "AI replies are currently paused for this account.",
+  texting_paused: "AI SMS replies are currently paused for this account.",
+};
+
 export class AIProcessingBlockedError extends Error {
-  constructor(
-    readonly reason: "feature_not_entitled" | "conversation_in_manual_mode"
-  ) {
-    super(
-      reason === "feature_not_entitled"
-        ? "AI processing is not included in this business's current plan."
-        : "AI processing is disabled while this conversation is in Human mode."
-    );
+  constructor(readonly reason: AIProcessingBlockedReason) {
+    super(AI_PROCESSING_BLOCKED_MESSAGES[reason]);
     this.name = "AIProcessingBlockedError";
   }
 }
@@ -53,6 +72,16 @@ export class AIProcessingStateError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "AIProcessingStateError";
+  }
+}
+
+function rethrowTypedAIProcessingError(error: unknown): void {
+  if (
+    error instanceof AIProcessingBlockedError ||
+    error instanceof AIProcessingStateError ||
+    isOperationalControlsResolutionError(error)
+  ) {
+    throw error;
   }
 }
 
@@ -71,6 +100,40 @@ export interface ProcessIncomingMessageResult {
   knowledgeGapDetected: boolean;
   conversationId: string | null;
   sourceMessageId: string | null;
+}
+
+/**
+ * Reads operational controls at an AI execution boundary. SMS generation
+ * requires both texting and AI replies, while web chat requires only AI. The
+ * resolver is intentionally uncached; uncertainty propagates as its retryable
+ * typed error instead of becoming an allow decision or a fallback reply.
+ */
+async function assertAIProcessingOperationallyAllowed(
+  businessId: string,
+  channel: Channel
+): Promise<void> {
+  let controls;
+  try {
+    controls = await resolveBusinessOperationalControls(businessId);
+  } catch (error) {
+    if (isOperationalControlsResolutionError(error)) throw error;
+    throw new AIProcessingStateError(
+      `Could not determine operational controls for business ${businessId}.`,
+      { cause: error }
+    );
+  }
+  const reason = resolveOperationalBlockReason(
+    controls,
+    channel === "sms" ? ["texting", "ai_replies"] : ["ai_replies"]
+  );
+
+  if (reason === null) return;
+  if (reason === "bookings_paused") {
+    throw new AIProcessingStateError(
+      "AI operational access returned an unexpected booking-only block."
+    );
+  }
+  throw new AIProcessingBlockedError(reason);
 }
 
 function scoreMessage(message: string): number {
@@ -133,6 +196,7 @@ async function executeContactTool(
     }
     return "Unknown tool.";
   } catch (error) {
+    rethrowTypedAIProcessingError(error);
     console.error(`[contact-tool] Error executing ${toolName}:`, error);
     return "Contact info saved.";
   }
@@ -195,6 +259,7 @@ async function executeCalendarTool(
 
     return "Unknown tool.";
   } catch (error) {
+    rethrowTypedAIProcessingError(error);
     console.error(`[calendar-tool] Error executing ${toolName}:`, error);
     return "Calendar is temporarily unavailable. Please collect the customer's booking details instead and let them know someone will confirm.";
   }
@@ -232,6 +297,8 @@ export async function processIncomingMessageDetailed(
   options: ProcessIncomingMessageOptions = {}
 ): Promise<ProcessIncomingMessageResult> {
   try {
+    await assertAIProcessingOperationallyAllowed(businessId, channel);
+
     // Resolve at the execution boundary even when an upstream webhook already
     // checked the plan. This closes the downgrade/cancel race before any
     // Anthropic request and avoids trusting a stale long-lived decision.
@@ -454,6 +521,7 @@ export async function processIncomingMessageDetailed(
       tools,
     };
 
+    await assertAIProcessingOperationallyAllowed(businessId, channel);
     let response = await anthropic.messages.create(apiParams);
     let loopCount = 0;
     const maxLoops = 3;
@@ -471,6 +539,7 @@ export async function processIncomingMessageDetailed(
       for (const toolUseBlock of toolUseBlocks) {
         let toolResult: string;
         if (toolUseBlock.name === "save_contact_name" || toolUseBlock.name === "save_contact_email") {
+          await assertAIProcessingOperationallyAllowed(businessId, channel);
           toolResult = await executeContactTool(
             contact.id,
             toolUseBlock.name,
@@ -480,6 +549,7 @@ export async function processIncomingMessageDetailed(
           toolResult =
             "That tool is not enabled for this business. Do not perform the action.";
         } else {
+          await assertAIProcessingOperationallyAllowed(businessId, channel);
           toolResult = await executeCalendarTool(
             businessId,
             toolUseBlock.name,
@@ -507,6 +577,7 @@ export async function processIncomingMessageDetailed(
 
       // Update apiParams with the extended messages
       apiParams.messages = messages;
+      await assertAIProcessingOperationallyAllowed(businessId, channel);
       response = await anthropic.messages.create(apiParams);
       loopCount++;
     }
@@ -529,6 +600,7 @@ export async function processIncomingMessageDetailed(
     const responseText = parsedResponse.text || FALLBACK_MESSAGE;
 
     if (options.persistAssistant !== false) {
+      await assertAIProcessingOperationallyAllowed(businessId, channel);
       try {
         await addMessage(
           conversation.id,
@@ -547,9 +619,11 @@ export async function processIncomingMessageDetailed(
 
     const leadScoreIncrease = scoreMessage(message);
     if (leadScoreIncrease > 0) {
+      await assertAIProcessingOperationallyAllowed(businessId, channel);
       await incrementLeadScore(contact.id, leadScoreIncrease);
     }
 
+    await assertAIProcessingOperationallyAllowed(businessId, channel);
     return {
       text: responseText,
       knowledgeGapDetected: parsedResponse.knowledgeGapDetected,
@@ -560,11 +634,13 @@ export async function processIncomingMessageDetailed(
     if (
       error instanceof AIProcessingBlockedError ||
       error instanceof AIProcessingStateError ||
-      error instanceof EntitlementResolutionError
+      error instanceof EntitlementResolutionError ||
+      isOperationalControlsResolutionError(error)
     ) {
       throw error;
     }
     console.error("Error processing incoming message:", error);
+    await assertAIProcessingOperationallyAllowed(businessId, channel);
     return {
       text: FALLBACK_MESSAGE,
       knowledgeGapDetected: false,

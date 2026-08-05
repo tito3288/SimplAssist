@@ -11,6 +11,11 @@ import {
   EntitlementResolutionError,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import {
+  OperationalControlsResolutionError,
+  resolveBusinessOperationalControls,
+  resolveOperationalBlockReason,
+} from "@/lib/account/operationalControls.server";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +79,11 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    const entryOperationalResponse = await enforceWidgetOperationalState(
+      businessId
+    );
+    if (entryOperationalResponse) return entryOperationalResponse;
+
     let result: Awaited<ReturnType<typeof processIncomingMessageDetailed>>;
     try {
       result = await processIncomingMessageDetailed(
@@ -89,12 +99,12 @@ export async function POST(request: NextRequest) {
       // failure occurs after this route's initial authorization decision.
       if (
         error instanceof AIProcessingBlockedError &&
-        error.reason === "feature_not_entitled"
+        isWidgetUnavailableBlockReason(error.reason)
       ) {
-        return NextResponse.json(
-          { available: false, response: null },
-          { headers: corsHeaders }
-        );
+        return unavailableChatResponse();
+      }
+      if (error instanceof OperationalControlsResolutionError) {
+        return retryableChatUnavailableResponse();
       }
       if (
         error instanceof EntitlementResolutionError ||
@@ -107,6 +117,13 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
+
+    // Repeat the uncached read before response-side effects to close the gap
+    // between the AI engine's final return and knowledge-gap capture.
+    const finalOperationalResponse = await enforceWidgetOperationalState(
+      businessId
+    );
+    if (finalOperationalResponse) return finalOperationalResponse;
 
     if (result.knowledgeGapDetected && result.sourceMessageId) {
       const sourceMessageId = result.sourceMessageId;
@@ -134,4 +151,43 @@ export async function POST(request: NextRequest) {
       { status: 500, headers: corsHeaders }
     );
   }
+}
+
+async function enforceWidgetOperationalState(
+  businessId: string
+): Promise<NextResponse | null> {
+  try {
+    const controls = await resolveBusinessOperationalControls(businessId);
+    return resolveOperationalBlockReason(controls, ["ai_replies"]) === null
+      ? null
+      : unavailableChatResponse();
+  } catch (error) {
+    if (error instanceof OperationalControlsResolutionError) {
+      console.error("Widget chat operational controls lookup error:", error);
+      return retryableChatUnavailableResponse();
+    }
+    throw error;
+  }
+}
+
+function isWidgetUnavailableBlockReason(reason: string): boolean {
+  return (
+    reason === "feature_not_entitled" ||
+    reason === "account_suspended" ||
+    reason === "ai_replies_paused"
+  );
+}
+
+function unavailableChatResponse(): NextResponse {
+  return NextResponse.json(
+    { available: false, response: null },
+    { headers: corsHeaders }
+  );
+}
+
+function retryableChatUnavailableResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "Service temporarily unavailable", retryable: true },
+    { status: 503, headers: corsHeaders }
+  );
 }

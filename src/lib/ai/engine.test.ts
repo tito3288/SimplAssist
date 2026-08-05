@@ -1,8 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  OperationalControlsResolutionError: class OperationalControlsResolutionError extends Error {
+    readonly retryable = true;
+    readonly code: string;
+    readonly businessId: string;
+
+    constructor(args: {
+      code: string;
+      businessId: string;
+      message: string;
+    }) {
+      super(args.message);
+      this.name = "OperationalControlsResolutionError";
+      this.code = args.code;
+      this.businessId = args.businessId;
+    }
+  },
   anthropicCreate: vi.fn(),
   from: vi.fn(),
+  resolveBusinessOperationalControls: vi.fn(),
   resolveBusinessEntitlements: vi.fn(),
   canUseFeature: vi.fn(),
   findOrCreateContact: vi.fn(),
@@ -23,6 +40,36 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/anthropic/client", () => ({
   anthropic: { messages: { create: mocks.anthropicCreate } },
+}));
+vi.mock("@/lib/account/operationalControls.server", () => ({
+  OperationalControlsResolutionError:
+    mocks.OperationalControlsResolutionError,
+  resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
+  resolveOperationalBlockReason: (
+    controls: {
+      operationsSuspendedAt: string | null;
+      aiRepliesPausedAt: string | null;
+      textingPausedAt: string | null;
+      bookingsPausedAt: string | null;
+    },
+    requiredServices: string[] = []
+  ) => {
+    if (controls.operationsSuspendedAt !== null) return "account_suspended";
+    for (const service of requiredServices) {
+      if (service === "ai_replies" && controls.aiRepliesPausedAt !== null) {
+        return "ai_replies_paused";
+      }
+      if (service === "texting" && controls.textingPausedAt !== null) {
+        return "texting_paused";
+      }
+      if (service === "bookings" && controls.bookingsPausedAt !== null) {
+        return "bookings_paused";
+      }
+    }
+    return null;
+  },
+  isOperationalControlsResolutionError: (error: unknown) =>
+    error instanceof mocks.OperationalControlsResolutionError,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
@@ -84,10 +131,12 @@ vi.mock("@/lib/google/calendar", () => ({
 }));
 
 import {
+  AIProcessingBlockedError,
   AIProcessingStateError,
   processIncomingMessage,
   processIncomingMessageDetailed,
 } from "./engine";
+import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
 import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
@@ -114,6 +163,34 @@ const GROWTH = {
 };
 const STARTER = { ...GROWTH, plan: "sms_only" };
 const FULL = { ...GROWTH, plan: "full" };
+const ACTIVE_CONTROLS = {
+  businessId: BUSINESS_ID,
+  operationsSuspendedAt: null,
+  aiRepliesPausedAt: null,
+  textingPausedAt: null,
+  bookingsPausedAt: null,
+};
+
+function operationalControls(
+  overrides: Partial<{
+    operationsSuspendedAt: string | null;
+    aiRepliesPausedAt: string | null;
+    textingPausedAt: string | null;
+    bookingsPausedAt: string | null;
+  }> = {}
+) {
+  return { ...ACTIVE_CONTROLS, ...overrides };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 const tableResults = new Map<string, unknown>();
 
@@ -166,6 +243,7 @@ beforeEach(() => {
   });
 
   mocks.resolveBusinessEntitlements.mockResolvedValue(GROWTH);
+  mocks.resolveBusinessOperationalControls.mockResolvedValue(ACTIVE_CONTROLS);
   mocks.canUseFeature.mockImplementation(
     (entitlements: { active: boolean; plan: string }, feature: string) => {
       if (!entitlements.active) return false;
@@ -208,6 +286,765 @@ beforeEach(() => {
   });
   mocks.incrementLeadScore.mockResolvedValue(undefined);
   setAiData();
+});
+
+describe("processIncomingMessage operational controls", () => {
+  it.each([
+    ["account_suspended", { operationsSuspendedAt: "2026-08-04T12:00:00Z" }],
+    ["ai_replies_paused", { aiRepliesPausedAt: "2026-08-04T12:00:00Z" }],
+    ["texting_paused", { textingPausedAt: "2026-08-04T12:00:00Z" }],
+  ] as const)(
+    "throws the typed %s entry block before contact, persistence, or Anthropic",
+    async (reason, controls) => {
+      mocks.resolveBusinessOperationalControls.mockResolvedValue(
+        operationalControls(controls)
+      );
+
+      const promise = processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "What is the price?",
+        "sms"
+      );
+
+      await expect(promise).rejects.toMatchObject({
+        name: "AIProcessingBlockedError",
+        reason,
+      });
+      await expect(promise).rejects.toBeInstanceOf(AIProcessingBlockedError);
+      expect(mocks.findOrCreateContact).not.toHaveBeenCalled();
+      expect(mocks.getOrCreateConversation).not.toHaveBeenCalled();
+      expect(mocks.addMessage).not.toHaveBeenCalled();
+      expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+      expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+    }
+  );
+
+  it("uses suspension, then texting, then AI precedence for SMS", async () => {
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        operationsSuspendedAt: "2026-08-04T12:00:00Z",
+        textingPausedAt: "2026-08-04T12:01:00Z",
+        aiRepliesPausedAt: "2026-08-04T12:02:00Z",
+      })
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "account_suspended" });
+
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        textingPausedAt: "2026-08-04T12:01:00Z",
+        aiRepliesPausedAt: "2026-08-04T12:02:00Z",
+      })
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "texting_paused" });
+  });
+
+  it("blocks every post-Anthropic side effect when AI pauses while the request is pending", async () => {
+    const pendingAnthropic = deferred<{
+      stop_reason: "tool_use";
+      content: Array<{
+        type: "tool_use";
+        id: string;
+        name: string;
+        input: { name: string };
+      }>;
+    }>();
+    mocks.anthropicCreate.mockReturnValueOnce(pendingAnthropic.promise);
+
+    const processing = processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "My name is Pat and I need a price.",
+      "sms"
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+      })
+    );
+    pendingAnthropic.resolve({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "save_contact_name",
+          input: { name: "Pat" },
+        },
+      ],
+    });
+
+    await expect(processing).rejects.toMatchObject({
+      reason: "ai_replies_paused",
+    });
+    expect(mocks.updateContactName).not.toHaveBeenCalled();
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+    expect(mocks.checkAvailability).not.toHaveBeenCalled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledWith(
+      CONVERSATION.id,
+      BUSINESS_ID,
+      "customer",
+      "My name is Pat and I need a price.",
+      "sms"
+    );
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks a pause that lands before a pending Anthropic failure instead of returning fallback text", async () => {
+    const pendingAnthropic = deferred<never>();
+    const anthropicError = new Error("Anthropic unavailable");
+    mocks.anthropicCreate.mockReturnValueOnce(pendingAnthropic.promise);
+
+    const processing = processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "What is the price?",
+      "sms"
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+      })
+    );
+    pendingAnthropic.reject(anthropicError);
+
+    await expect(processing).rejects.toMatchObject({
+      name: "AIProcessingBlockedError",
+      reason: "ai_replies_paused",
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "Error processing incoming message:",
+      anthropicError
+    );
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.updateContactName).not.toHaveBeenCalled();
+    expect(mocks.checkAvailability).not.toHaveBeenCalled();
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("rethrows indeterminate state at the fallback boundary after a pending Anthropic failure", async () => {
+    const pendingAnthropic = deferred<never>();
+    const anthropicError = new Error("Anthropic unavailable");
+    const resolutionError = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "operational state unavailable",
+    });
+    mocks.anthropicCreate.mockReturnValueOnce(pendingAnthropic.promise);
+
+    const processing = processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "What is the price?",
+      "sms"
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    });
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(resolutionError);
+    pendingAnthropic.reject(anthropicError);
+
+    await expect(processing).rejects.toBe(resolutionError);
+    expect(console.error).toHaveBeenCalledWith(
+      "Error processing incoming message:",
+      anthropicError
+    );
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic fallback only when the fresh fallback-boundary check is active", async () => {
+    const anthropicError = new Error("Anthropic unavailable");
+    mocks.anthropicCreate.mockRejectedValueOnce(anthropicError);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "What is the price?",
+        "sms"
+      )
+    ).resolves.toContain("We're having a brief technical issue.");
+
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(3);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "Error processing incoming message:",
+      anthropicError
+    );
+  });
+
+  it("freshly checks each contact tool execution in a multi-tool response", async () => {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "save_contact_name",
+          input: { name: "Pat" },
+        },
+        {
+          type: "tool_use",
+          id: "tool_2",
+          name: "save_contact_email",
+          input: { email: "pat@example.com" },
+        },
+      ],
+    });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // first Anthropic request
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // first contact tool
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // second contact tool
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "I'm Pat; use pat@example.com.",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.updateContactName).toHaveBeenCalledWith(CONTACT.id, "Pat");
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("freshly checks a calendar tool before any calendar mutation", async () => {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "create_booking",
+          input: {
+            customer_name: "Pat",
+            service_name: "Estimate",
+            start_time: "2026-08-05T10:00:00-04:00",
+          },
+        },
+      ],
+    });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // Anthropic request
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // calendar tool
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Book that appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.checkAvailability).not.toHaveBeenCalled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "AIProcessingBlockedError",
+      () => new AIProcessingBlockedError("ai_replies_paused"),
+    ],
+    [
+      "AIProcessingStateError",
+      () => new AIProcessingStateError("contact state unavailable"),
+    ],
+    [
+      "OperationalControlsResolutionError",
+      () =>
+        new OperationalControlsResolutionError({
+          code: "business_lookup_failed",
+          businessId: BUSINESS_ID,
+          message: "operational state unavailable",
+        }),
+    ],
+  ])(
+    "rethrows %s from a contact mutation without continuing the model loop",
+    async (_label, createError) => {
+      const typedError = createError();
+      mocks.anthropicCreate.mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "save_contact_name",
+            input: { name: "Pat" },
+          },
+        ],
+      });
+      mocks.updateContactName.mockRejectedValueOnce(typedError);
+
+      await expect(
+        processIncomingMessage(
+          BUSINESS_ID,
+          "+15745550100",
+          null,
+          "I'm Pat and need a price.",
+          "sms"
+        )
+      ).rejects.toBe(typedError);
+
+      expect(mocks.updateContactName).toHaveBeenCalledOnce();
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+      expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+      expect(mocks.parseKnowledgeGapSignal).not.toHaveBeenCalled();
+      expect(console.error).not.toHaveBeenCalledWith(
+        "[contact-tool] Error executing save_contact_name:",
+        typedError
+      );
+    }
+  );
+
+  it.each([
+    [
+      "AIProcessingBlockedError",
+      () => new AIProcessingBlockedError("account_suspended"),
+    ],
+    [
+      "OperationalControlsResolutionError",
+      () =>
+        new OperationalControlsResolutionError({
+          code: "business_lookup_failed",
+          businessId: BUSINESS_ID,
+          message: "operational state unavailable",
+        }),
+    ],
+  ])(
+    "rethrows %s from a calendar helper without continuing the model loop",
+    async (_label, createError) => {
+      const typedError = createError();
+      mocks.anthropicCreate.mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "check_availability",
+            input: { date: "2026-08-05" },
+          },
+        ],
+      });
+      mocks.checkAvailability.mockRejectedValueOnce(typedError);
+
+      await expect(
+        processIncomingMessage(
+          BUSINESS_ID,
+          "+15745550100",
+          null,
+          "Can I book and get a price?",
+          "sms"
+        )
+      ).rejects.toBe(typedError);
+
+      expect(mocks.checkAvailability).toHaveBeenCalledOnce();
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+      expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+      expect(mocks.parseKnowledgeGapSignal).not.toHaveBeenCalled();
+      expect(console.error).not.toHaveBeenCalledWith(
+        "[calendar-tool] Error executing check_availability:",
+        typedError
+      );
+    }
+  );
+
+  it("retains friendly contact-tool fallback text for an ordinary mutation failure", async () => {
+    const contactError = new Error("contact provider unavailable");
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "save_contact_name",
+            input: { name: "Pat" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Thanks, Pat." }],
+      });
+    mocks.updateContactName.mockRejectedValueOnce(contactError);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "I'm Pat.",
+        "sms"
+      )
+    ).resolves.toBe("Thanks, Pat.");
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({ content: "Contact info saved." }),
+            ],
+          }),
+        ]),
+      })
+    );
+    expect(mocks.addMessage).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      "[contact-tool] Error executing save_contact_name:",
+      contactError
+    );
+  });
+
+  it("retains friendly calendar fallback text for an ordinary provider failure", async () => {
+    const calendarError = new Error("calendar provider unavailable");
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "check_availability",
+            input: { date: "2026-08-05" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "I can collect your details." }],
+      });
+    mocks.checkAvailability.mockRejectedValueOnce(calendarError);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Can I book?",
+        "sms"
+      )
+    ).resolves.toBe("I can collect your details.");
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                content:
+                  "Calendar is temporarily unavailable. Please collect the customer's booking details instead and let them know someone will confirm.",
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+    expect(mocks.addMessage).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      "[calendar-tool] Error executing check_availability:",
+      calendarError
+    );
+  });
+
+  it("freshly checks before every Anthropic request in the tool loop", async () => {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "save_contact_name",
+          input: { name: "Pat" },
+        },
+      ],
+    });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // first Anthropic request
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // contact tool
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // second Anthropic request
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "I'm Pat.",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.updateContactName).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks immediately before assistant persistence", async () => {
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // Anthropic request
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // assistant persistence
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("checks immediately before lead-score mutation", async () => {
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // Anthropic request
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // lead-score mutation
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "What is the price?",
+        "sms",
+        null,
+        { persistAssistant: false }
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks again before returning a generated response", async () => {
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // Anthropic request
+      .mockResolvedValueOnce(
+        operationalControls({
+          aiRepliesPausedAt: "2026-08-04T12:00:00Z",
+        })
+      ); // final return
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms",
+        null,
+        { persistAssistant: false }
+      )
+    ).rejects.toMatchObject({ reason: "ai_replies_paused" });
+
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("rethrows resolver uncertainty at engine entry without creating a fallback", async () => {
+    const resolutionError = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "operational state unavailable",
+    });
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(resolutionError);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toBe(resolutionError);
+
+    expect(mocks.findOrCreateContact).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the operational resolver throws an untyped error", async () => {
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new Error("unexpected resolver failure")
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toBeInstanceOf(AIProcessingStateError);
+
+    expect(mocks.findOrCreateContact).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("rethrows resolver uncertainty after generation without persisting or returning fallback text", async () => {
+    const resolutionError = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "operational state unavailable",
+    });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // engine entry
+      .mockResolvedValueOnce(ACTIVE_CONTROLS) // Anthropic request
+      .mockRejectedValueOnce(resolutionError); // assistant persistence
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toBe(resolutionError);
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+  });
+
+  it("blocks texting-paused SMS while allowing web chat", async () => {
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        textingPausedAt: "2026-08-04T12:00:00Z",
+      })
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).rejects.toMatchObject({ reason: "texting_paused" });
+
+    mocks.getOrCreateConversation.mockResolvedValue({
+      ...CONVERSATION,
+      channel: "web_chat",
+    });
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        null,
+        "pat@example.com",
+        "Hello",
+        "web_chat",
+        "session-1"
+      )
+    ).resolves.toBe("Absolutely.");
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a bookings-only pause block ordinary AI", async () => {
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({
+        bookingsPausedAt: "2026-08-04T12:00:00Z",
+      })
+    );
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms"
+      )
+    ).resolves.toBe("Absolutely.");
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+  });
 });
 
 describe("processIncomingMessage entitlement and takeover defenses", () => {
@@ -545,27 +1382,22 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
     );
   });
 
-  it("refuses an unlinked direct booking when a caller suppresses persistence", async () => {
-    mocks.anthropicCreate
-      .mockResolvedValueOnce({
-        stop_reason: "tool_use",
-        content: [
-          {
-            type: "tool_use",
-            id: "tool_1",
-            name: "create_booking",
-            input: {
-              customer_name: "Pat",
-              service_name: "Estimate",
-              start_time: "2026-08-01T10:00:00",
-            },
+  it("surfaces unlinked direct booking state instead of feeding it back to Anthropic", async () => {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool_1",
+          name: "create_booking",
+          input: {
+            customer_name: "Pat",
+            service_name: "Estimate",
+            start_time: "2026-08-01T10:00:00",
           },
-        ],
-      })
-      .mockResolvedValueOnce({
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "I could not book that." }],
-      });
+        },
+      ],
+    });
 
     await expect(
       processIncomingMessage(
@@ -582,9 +1414,12 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
           conversation: CONVERSATION as never,
         }
       )
-    ).resolves.toBe("I could not book that.");
+    ).rejects.toBeInstanceOf(AIProcessingStateError);
 
     expect(mocks.createBooking).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
   });
 });
 

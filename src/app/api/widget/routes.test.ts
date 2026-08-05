@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   class AIProcessingBlockedError extends Error {
     constructor(
-      readonly reason: "feature_not_entitled" | "conversation_in_manual_mode"
+      readonly reason:
+        | "feature_not_entitled"
+        | "conversation_in_manual_mode"
+        | "account_suspended"
+        | "ai_replies_paused"
+        | "texting_paused"
     ) {
       super(reason);
     }
@@ -20,6 +25,7 @@ const mocks = vi.hoisted(() => {
     processIncomingMessageDetailed: vi.fn(),
     recordKnowledgeGap: vi.fn(),
     resolveWidgetAttribution: vi.fn(),
+    resolveBusinessOperationalControls: vi.fn(),
     AIProcessingBlockedError,
     AIProcessingStateError,
     BusinessPartnerResolutionError,
@@ -61,14 +67,30 @@ vi.mock("@/lib/branding/businessPartner.server", () => ({
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
+vi.mock(
+  "@/lib/account/operationalControls.server",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/lib/account/operationalControls.server")
+      >();
+    return {
+      ...actual,
+      resolveBusinessOperationalControls:
+        mocks.resolveBusinessOperationalControls,
+    };
+  }
+);
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
+import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
 import { POST as postChat } from "./chat/route";
 import { GET as getConfig, PATCH as patchConfig } from "./config/route";
 import { POST as postEnd } from "./end/route";
 import { GET as getPreviewConfig } from "./preview-config/route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
+const PAUSED_AT = "2026-08-04T12:00:00.000Z";
 const ENTITLEMENTS = {
   businessId: BUSINESS_ID,
   plan: "sms_and_chat",
@@ -76,6 +98,13 @@ const ENTITLEMENTS = {
   source: "subscription",
   active: true,
   cancelAtPeriodEnd: false,
+} as const;
+const ACTIVE_OPERATIONAL_CONTROLS = {
+  businessId: BUSINESS_ID,
+  operationsSuspendedAt: null,
+  aiRepliesPausedAt: null,
+  textingPausedAt: null,
+  bookingsPausedAt: null,
 } as const;
 
 type QueryResult = { data?: unknown; error?: unknown };
@@ -155,6 +184,9 @@ beforeEach(() => {
   setServerBusinessResult({ data: { id: BUSINESS_ID }, error: null });
   mocks.resolveBusinessEntitlements.mockResolvedValue(ENTITLEMENTS);
   mocks.canUseFeature.mockReturnValue(true);
+  mocks.resolveBusinessOperationalControls.mockResolvedValue(
+    ACTIVE_OPERATIONAL_CONTROLS
+  );
   mocks.processIncomingMessageDetailed.mockResolvedValue({
     text: "How can I help?",
     knowledgeGapDetected: false,
@@ -253,6 +285,7 @@ describe("authenticated widget configuration mutations", () => {
     };
     expect(updateChain.update).toHaveBeenCalledWith(WIDGET_CONFIG_PATCH);
     expect(updateChain.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
   });
 
   it("returns retryable 503 when the admin configuration update fails", async () => {
@@ -297,6 +330,85 @@ describe("public widget entitlement boundaries", () => {
       error: "Service temporarily unavailable",
       retryable: true,
     });
+  });
+
+  it.each([
+    ["account suspension", { operationsSuspendedAt: PAUSED_AT }],
+    ["AI pause", { aiRepliesPausedAt: PAUSED_AT }],
+  ])(
+    "returns the privacy-safe unavailable config for %s",
+    async (_label, pausedState) => {
+      queueDatabaseResults(
+        { data: { id: "widget-1" }, error: null },
+        { data: { name: "Acme" }, error: null }
+      );
+      mocks.resolveBusinessOperationalControls.mockResolvedValue({
+        ...ACTIVE_OPERATIONAL_CONTROLS,
+        ...pausedState,
+      });
+
+      const response = await getConfig(configRequest());
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ available: false });
+      expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledWith(
+        BUSINESS_ID
+      );
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+      expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["texting pause", { textingPausedAt: PAUSED_AT }],
+    ["bookings pause", { bookingsPausedAt: PAUSED_AT }],
+  ])("keeps public config available during a %s", async (_label, pausedState) => {
+    queueDatabaseResults(
+      {
+        data: {
+          id: "widget-1",
+          brand_color: "#123456",
+          position: "bottom_right",
+          welcome_message: "Welcome",
+          show_logo: false,
+          logo_url: null,
+          lead_capture_enabled: true,
+          lead_capture_timing: "start",
+          quick_replies: [],
+        },
+        error: null,
+      },
+      { data: { name: "Acme" }, error: null }
+    );
+    mocks.resolveBusinessOperationalControls.mockResolvedValue({
+      ...ACTIVE_OPERATIONAL_CONTROLS,
+      ...pausedState,
+    });
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ available: true });
+  });
+
+  it("returns a generic retryable response when config operational state is indeterminate", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new OperationalControlsResolutionError({
+        code: "business_lookup_failed",
+        businessId: BUSINESS_ID,
+        message: "private database detail",
+      })
+    );
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
   });
 
   it("returns configuration only after an active widget and entitlement pass", async () => {
@@ -424,6 +536,161 @@ describe("public widget entitlement boundaries", () => {
     );
   });
 
+  it.each([
+    ["account suspension", { operationsSuspendedAt: PAUSED_AT }],
+    ["AI pause", { aiRepliesPausedAt: PAUSED_AT }],
+  ])(
+    "skips AI and returns privacy-safe unavailable chat for %s",
+    async (_label, pausedState) => {
+      queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+      mocks.resolveBusinessOperationalControls.mockResolvedValue({
+        ...ACTIVE_OPERATIONAL_CONTROLS,
+        ...pausedState,
+      });
+
+      const response = await postChat(
+        postRequest("chat", {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-1",
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        available: false,
+        response: null,
+      });
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["texting pause", { textingPausedAt: PAUSED_AT }],
+    ["bookings pause", { bookingsPausedAt: PAUSED_AT }],
+  ])("keeps web chat available during a %s", async (_label, pausedState) => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue({
+      ...ACTIVE_OPERATIONAL_CONTROLS,
+      ...pausedState,
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "How can I help?",
+    });
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
+  });
+
+  it("suppresses the response and gap dispatch when AI pauses after generation", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
+      .mockResolvedValueOnce({
+        ...ACTIVE_OPERATIONAL_CONTROLS,
+        aiRepliesPausedAt: PAUSED_AT,
+      });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Private generated response",
+      knowledgeGapDetected: true,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Do you offer free trials?",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      available: false,
+      response: null,
+    });
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
+    expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the post-generation operational read is indeterminate", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
+      .mockRejectedValueOnce(
+        new OperationalControlsResolutionError({
+          code: "business_lookup_failed",
+          businessId: BUSINESS_ID,
+          message: "private database detail",
+        })
+      );
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Private generated response",
+      knowledgeGapDetected: true,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Do you offer free trials?",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+    );
+    expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before AI when the initial operational read is indeterminate", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new OperationalControlsResolutionError({
+        code: "business_lookup_failed",
+        businessId: BUSINESS_ID,
+        message: "private database detail",
+      })
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
   it("skips AI and acknowledges chat when the plan is not entitled", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.canUseFeature.mockReturnValue(false);
@@ -493,6 +760,55 @@ describe("public widget entitlement boundaries", () => {
     });
   });
 
+  it.each(["account_suspended", "ai_replies_paused"] as const)(
+    "does not expose the engine's %s block",
+    async (reason) => {
+      queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+      mocks.processIncomingMessageDetailed.mockRejectedValue(
+        new mocks.AIProcessingBlockedError(reason)
+      );
+
+      const response = await postChat(
+        postRequest("chat", {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-1",
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        available: false,
+        response: null,
+      });
+    }
+  );
+
+  it("returns retryable 503 for an indeterminate engine operational read", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
+      new OperationalControlsResolutionError({
+        code: "business_lookup_failed",
+        businessId: BUSINESS_ID,
+        message: "private database detail",
+      })
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Service temporarily unavailable",
+      retryable: true,
+    });
+  });
+
   it("returns retryable 503 when AI context persistence or lookup is uncertain", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockRejectedValue(
@@ -557,6 +873,32 @@ describe("public widget entitlement boundaries", () => {
     });
     // The sole database call is the required read-only widget availability lookup.
     expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps end-session cleanup available without operational checks", async () => {
+    queueDatabaseResults(
+      { data: { id: "widget-1" }, error: null },
+      { data: { id: "contact-1" }, error: null },
+      { data: { id: "conversation-1" }, error: null },
+      { data: null, error: null }
+    );
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new Error("operational controls must not gate cleanup")
+    );
+
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      available: true,
+    });
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
   });
 });
 
@@ -761,5 +1103,6 @@ describe("owner-only widget preview", () => {
       eq: ReturnType<typeof vi.fn>;
     };
     expect(previewChain.eq).not.toHaveBeenCalledWith("is_active", true);
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
   });
 });

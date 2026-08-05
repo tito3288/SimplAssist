@@ -17,7 +17,10 @@ import {
   releaseMessagingWebhookClaim,
 } from "@/lib/messaging/idempotency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { processIncomingMessageDetailed } from "@/lib/ai/engine";
+import {
+  AIProcessingBlockedError,
+  processIncomingMessageDetailed,
+} from "@/lib/ai/engine";
 import { recordKnowledgeGap } from "@/lib/ai/knowledgeGaps";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import {
@@ -305,7 +308,7 @@ export async function POST(request: NextRequest) {
 async function sendFallbackReply(
   context: PersistedInboundContext
 ): Promise<void> {
-  if (!(await canStillSendAutomatedReply(context))) return;
+  if (!(await canStillSendAutomatedReply(context, "mms_fallback"))) return;
 
   const fallbackReply = context.appendAiOptOut
     ? `${MMS_FALLBACK_MESSAGE}\n\nReply STOP to opt out.`
@@ -354,10 +357,7 @@ async function sendFallbackReply(
   }
 
   // Human takeover or a downgrade may have happened while preflight ran.
-  if (!(await canStillSendAutomatedReply(context))) return;
-  if (!(await canSendOutboundSmsOperationally(context, "mms_fallback"))) {
-    return;
-  }
+  if (!(await canStillSendAutomatedReply(context, "mms_fallback"))) return;
 
   const result = await telnyx.messages.send({
     from: context.to,
@@ -414,21 +414,38 @@ async function processAndReply(
   console.log(
     `[messaging:webhook] Generating AI reply (appendOptOut=${context.appendAiOptOut})`
   );
-  const aiResult = await processIncomingMessageDetailed(
-    context.businessId,
-    context.from,
-    null,
-    context.text,
-    "sms",
-    null,
-    {
-      persistCustomer: false,
-      persistAssistant: false,
-      sourceMessageId: context.sourceMessageId,
-      contact: context.contact,
-      conversation: context.conversation,
-    }
-  );
+  let aiResult;
+  try {
+    aiResult = await processIncomingMessageDetailed(
+      context.businessId,
+      context.from,
+      null,
+      context.text,
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: context.sourceMessageId,
+        contact: context.contact,
+        conversation: context.conversation,
+      }
+    );
+  } catch (error) {
+    if (!isOperationalAiProcessingBlock(error)) throw error;
+
+    console.warn(
+      `[messaging:webhook] AI reply suppressed by AI engine operational control: reason=${error.reason} for business ${context.businessId}`
+    );
+    await insertPausedSystemMessageIfNeeded({
+      conversationId: context.conversation.id,
+      businessId: context.businessId,
+      channel: "sms",
+      context: "ai_reply",
+      reason: error.reason,
+    });
+    return;
+  }
 
   const { data: aiSettings, error: settingsError } = await supabaseAdmin
     .from("ai_settings")
@@ -450,7 +467,7 @@ async function processAndReply(
   // Re-read both billing and takeover state immediately before billing/send.
   // This prevents a delayed AI response from racing a downgrade or a human
   // agent who took control while Anthropic was working.
-  if (!(await canStillSendAutomatedReply(context))) return;
+  if (!(await canStillSendAutomatedReply(context, "ai_reply"))) return;
 
   const finalReply = context.appendAiOptOut
     ? `${aiResult.text}\n\nReply STOP to opt out.`
@@ -474,8 +491,7 @@ async function processAndReply(
     return;
   }
 
-  if (!(await canStillSendAutomatedReply(context))) return;
-  if (!(await canSendOutboundSmsOperationally(context, "ai_reply"))) return;
+  if (!(await canStillSendAutomatedReply(context, "ai_reply"))) return;
 
   const result = await telnyx.messages.send({
     from: context.to,
@@ -541,15 +557,40 @@ async function canStillSendAutomatedReply(
   context: Pick<
     PersistedInboundContext,
     "businessId" | "conversation"
-  >
+  >,
+  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">
 ): Promise<boolean> {
   const [entitlements, conversation] = await Promise.all([
     resolveBusinessEntitlements(context.businessId),
     getConversationAiState(context.conversation.id),
   ]);
+  if (
+    !canUseFeature(entitlements, "ai_sms_conversations") ||
+    !isAiHandlingActive(conversation)
+  ) {
+    return false;
+  }
+
+  // Keep the uncached operational resolver as the final await in this
+  // decision. On the pre-send call, this preserves Diff 3A's narrowest
+  // possible state-read-to-Telnyx race window. Resolver uncertainty throws so
+  // the background path fails closed rather than treating it as allowed.
+  return canSendOutboundSmsOperationally(context, purpose);
+}
+
+function isOperationalAiProcessingBlock(
+  error: unknown
+): error is AIProcessingBlockedError & {
+  reason: Extract<
+    PausedReason,
+    "account_suspended" | "texting_paused" | "ai_replies_paused"
+  >;
+} {
   return (
-    canUseFeature(entitlements, "ai_sms_conversations") &&
-    isAiHandlingActive(conversation)
+    error instanceof AIProcessingBlockedError &&
+    (error.reason === "account_suspended" ||
+      error.reason === "texting_paused" ||
+      error.reason === "ai_replies_paused")
   );
 }
 
