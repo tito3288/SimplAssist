@@ -853,6 +853,7 @@ SELECT is(
         '10000000-0000-4000-a045-000000000091',
         'Lifecycle Concurrency 045',
         false,
+        'Concurrent admin deletion request',
         '90000000-0000-4000-a045-000000000092'
       )::text AS payload
     $admin_schedule$

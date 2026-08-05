@@ -379,6 +379,7 @@ SELECT lives_ok(
         'business_name', 'Lifecycle Fixture',
         'billing_mode', 'invoiced',
         'partner_slug', 'lifecycle-partner',
+        'reason', 'Legacy lifecycle test deletion',
         'resource_counts', jsonb_build_object(
           'auth_users', 1,
           'provisioning_jobs', 1,
@@ -391,7 +392,7 @@ SELECT lives_ok(
       )
     )
   $$,
-  'the exact PII-lean deletion summary whitelist is accepted'
+  'the exact PII-lean deletion summary and bounded reason whitelist is accepted'
 );
 
 SELECT throws_ok(
@@ -412,6 +413,7 @@ SELECT throws_ok(
         'business_name', 'Lifecycle Fixture',
         'billing_mode', 'stripe',
         'partner_slug', NULL,
+        'reason', 'Lifecycle fixture deletion',
         'resource_counts', jsonb_build_object(
           'auth_users', 1,
           'provisioning_jobs', 0,
@@ -448,6 +450,7 @@ SELECT throws_ok(
         'business_name', 'Lifecycle Fixture',
         'billing_mode', 'comped',
         'partner_slug', 'lifecycle-partner',
+        'reason', 'Lifecycle fixture deletion',
         'resource_counts', jsonb_build_object(
           'auth_users', 1,
           'provisioning_jobs', 1,
@@ -483,6 +486,7 @@ SELECT throws_ok(
         'business_name', 'Lifecycle Fixture',
         'billing_mode', 'stripe',
         'partner_slug', NULL,
+        'reason', 'Lifecycle fixture deletion',
         'resource_counts', jsonb_build_object(
           'auth_users', 1,
           'provisioning_jobs', 0,
@@ -903,7 +907,7 @@ SELECT is(
       'public.dismiss_partner_client_provisioning_job(uuid,uuid,timestamptz)'::regprocedure,
       'public.restore_partner_client_provisioning_job(uuid,uuid)'::regprocedure,
       'public.get_account_deletion_preview(uuid)'::regprocedure,
-      'public.schedule_admin_account_deletion(uuid,text,boolean,uuid)'::regprocedure,
+      'public.schedule_admin_account_deletion(uuid,text,boolean,text,uuid)'::regprocedure,
       'public.purge_expired_google_calendar_oauth_attempts(timestamptz)'::regprocedure,
       'public.create_google_calendar_oauth_attempt(text,text,uuid,uuid,uuid,text,timestamptz)'::regprocedure,
       'public.stage_google_calendar_oauth_handoff(text,text,text,text,timestamptz)'::regprocedure,
@@ -945,7 +949,7 @@ SELECT ok(
       'public.account_deletion_preview_json(uuid)'::regprocedure,
       'public.account_deletion_audit_summary_json(uuid)'::regprocedure,
       'public.get_account_deletion_preview(uuid)'::regprocedure,
-      'public.schedule_admin_account_deletion(uuid,text,boolean,uuid)'::regprocedure,
+      'public.schedule_admin_account_deletion(uuid,text,boolean,text,uuid)'::regprocedure,
       'public.purge_expired_google_calendar_oauth_attempts(timestamptz)'::regprocedure,
       'public.create_google_calendar_oauth_attempt(text,text,uuid,uuid,uuid,text,timestamptz)'::regprocedure,
       'public.stage_google_calendar_oauth_handoff(text,text,text,text,timestamptz)'::regprocedure,
@@ -1018,7 +1022,7 @@ SELECT ok(
       'public.account_deletion_preview_json(uuid)'::regprocedure,
       'public.account_deletion_audit_summary_json(uuid)'::regprocedure,
       'public.get_account_deletion_preview(uuid)'::regprocedure,
-      'public.schedule_admin_account_deletion(uuid,text,boolean,uuid)'::regprocedure,
+      'public.schedule_admin_account_deletion(uuid,text,boolean,text,uuid)'::regprocedure,
       'public.purge_expired_google_calendar_oauth_attempts(timestamptz)'::regprocedure,
       'public.create_google_calendar_oauth_attempt(text,text,uuid,uuid,uuid,text,timestamptz)'::regprocedure,
       'public.stage_google_calendar_oauth_handoff(text,text,text,text,timestamptz)'::regprocedure,
@@ -2704,6 +2708,7 @@ SELECT throws_ok(
       '10000000-0000-4000-a045-000000000002',
       'stripe deletion 045',
       true,
+      'Operator requested deletion',
       '90000000-0000-4000-a045-000000000010'
     )
   $$,
@@ -2718,6 +2723,7 @@ SELECT throws_ok(
       '10000000-0000-4000-a045-000000000002',
       'Stripe Deletion 045',
       false,
+      'Operator requested deletion',
       '90000000-0000-4000-a045-000000000010'
     )
   $$,
@@ -2731,6 +2737,7 @@ SELECT public.schedule_admin_account_deletion(
   '10000000-0000-4000-a045-000000000002',
   'Stripe Deletion 045',
   true,
+  'Partner offboarding requested',
   '90000000-0000-4000-a045-000000000010'
 ) AS payload;
 
@@ -2755,6 +2762,7 @@ SELECT ok(
         '90000000-0000-4000-a045-000000000010'
       AND summary ->> 'business_name' = 'Stripe Deletion 045'
       AND summary ->> 'billing_mode' = 'stripe'
+      AND summary ->> 'reason' = 'Partner offboarding requested'
   ),
   'authorized admin scheduling queues the original Stripe pause and appends its constrained audit event'
 );
@@ -2787,6 +2795,7 @@ SELECT ok(
         '10000000-0000-4000-a045-000000000002',
         'Stripe Deletion 045',
         true,
+        'Duplicate deletion reason ignored',
         '90000000-0000-4000-a045-000000000010'
       ) AS payload
     ) AS scheduled_again
@@ -2805,6 +2814,7 @@ SELECT public.schedule_admin_account_deletion(
   '10000000-0000-4000-a045-000000000003',
   repeat('N', 9000),
   false,
+  'Oversized-name fixture deletion',
   '90000000-0000-4000-a045-000000000010'
 ) AS payload;
 

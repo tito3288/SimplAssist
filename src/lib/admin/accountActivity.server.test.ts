@@ -162,6 +162,7 @@ describe("normalizeAdminAccountActivity", () => {
             id: "41000000-0000-4000-a048-000000000001",
             actor_admin_user_id: ADMIN_ID,
             deletion_scheduled_for: "2026-10-01T12:00:00.000Z",
+            reason: "Customer requested administrative closure",
           },
         ],
       }),
@@ -176,6 +177,8 @@ describe("normalizeAdminAccountActivity", () => {
       expect.objectContaining({
         id: `lifecycle:${releaseId}:scheduled`,
         title: "Account deletion scheduled",
+        detail:
+          "Reason: Customer requested administrative closure · Terminal cleanup target: 2026-10-01T12:00:00.000Z",
         actor: ADMIN_ID,
       }),
     ]);
@@ -196,6 +199,7 @@ describe("normalizeAdminAccountActivity", () => {
             id: "41000000-0000-4000-a048-000000000002",
             actor_admin_user_id: ADMIN_ID,
             deletion_scheduled_for: "2026-10-02T12:00:00.000Z",
+            reason: null,
           },
         ],
       }),
@@ -220,6 +224,14 @@ describe("normalizeAdminAccountActivity", () => {
         actor_admin_user_id: ADMIN_ID,
         created_at: "2026-08-04T12:07:00.000Z",
         reason: "Compliance review completed",
+        service: null,
+      },
+      {
+        id: "41000000-0000-4000-a048-000000000012",
+        action: "phone_assignment_recheck_requested" as const,
+        actor_admin_user_id: ADMIN_ID,
+        created_at: "2026-08-04T12:06:30.000Z",
+        reason: null,
         service: null,
       },
       ...(["ai_replies", "texting", "bookings"] as const).flatMap(
@@ -252,6 +264,7 @@ describe("normalizeAdminAccountActivity", () => {
       expect.arrayContaining([
         "Account operations suspended",
         "Account operations reactivated",
+        "Phone assignment recheck requested",
         "AI replies paused",
         "AI replies resumed",
         "Texting paused",
@@ -553,6 +566,7 @@ describe("loadAdminAccountActivity", () => {
       "account_operations_reactivated",
       "account_service_paused",
       "account_service_resumed",
+      "phone_assignment_recheck_requested",
     ]);
     expect(operationalQuery.order).toHaveBeenCalledWith("created_at", {
       ascending: false,
@@ -674,6 +688,33 @@ describe("loadAdminAccountActivity", () => {
     ]);
   });
 
+  it("loads an actor-only assignment recheck request", async () => {
+    mocks.queues.set("admin_action_events", [
+      { data: [], error: null },
+      {
+        data: [
+          {
+            id: "61000000-0000-4000-a048-000000000004",
+            action: "phone_assignment_recheck_requested",
+            actor_admin_user_id: ADMIN_ID,
+            created_at: AT,
+            reason: null,
+            service: null,
+          },
+        ],
+        error: null,
+      },
+    ]);
+
+    await expect(loadAdminAccountActivity(BUSINESS_ID)).resolves.toEqual([
+      expect.objectContaining({
+        title: "Phone assignment recheck requested",
+        detail: null,
+        actor: ADMIN_ID,
+      }),
+    ]);
+  });
+
   it("accepts operational reasons up to 500 Unicode code points", async () => {
     const reason = "😀".repeat(500);
     mocks.queues.set("admin_action_events", [
@@ -757,6 +798,22 @@ describe("loadAdminAccountActivity", () => {
         service: "bookings",
       },
     ],
+    [
+      "assignment recheck with reason",
+      {
+        action: "phone_assignment_recheck_requested",
+        reason: "Unexpected admin reason",
+        service: null,
+      },
+    ],
+    [
+      "assignment recheck with service",
+      {
+        action: "phone_assignment_recheck_requested",
+        reason: null,
+        service: "texting",
+      },
+    ],
   ])("rejects malformed operational audit shape: %s", async (_, overrides) => {
     mocks.queues.set("admin_action_events", [
       { data: [], error: null },
@@ -830,14 +887,19 @@ describe("loadAdminAccountActivity", () => {
       "reviewed_by:raw_payload->>reviewedBy",
     );
     expect(ACCOUNT_ACTIVITY_COLUMNS.calendar).toBe("created_at");
+    expect(ACCOUNT_ACTIVITY_COLUMNS.deletionAdmin).toBe(
+      "id, actor_admin_user_id, deletion_scheduled_for, reason:summary->>reason",
+    );
     expect(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin).toBe(
       "id, action, actor_admin_user_id, created_at, reason:summary->>reason, service:summary->>service",
     );
 
-    const projectionsWithoutOperational = Object.entries(
+    const projectionsWithoutAdminSummaries = Object.entries(
       ACCOUNT_ACTIVITY_COLUMNS,
     )
-      .filter(([key]) => key !== "operationalAdmin")
+      .filter(
+        ([key]) => key !== "operationalAdmin" && key !== "deletionAdmin",
+      )
       .map(([, projection]) => projection)
       .join(" ");
     for (const forbidden of [
@@ -853,14 +915,19 @@ describe("loadAdminAccountActivity", () => {
       "telnyx_campaign_id",
       "content",
     ]) {
-      expect(projectionsWithoutOperational).not.toContain(forbidden);
+      expect(projectionsWithoutAdminSummaries).not.toContain(forbidden);
     }
+    expect(ACCOUNT_ACTIVITY_COLUMNS.deletionAdmin).not.toMatch(
+      /(?:^|,\s*)summary(?:,|$)/,
+    );
     expect(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin).not.toMatch(
       /(?:^|,\s*)summary(?:,|$)/,
     );
     expect(
       ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin.match(/summary->>/g),
     ).toHaveLength(2);
-    expect(projectionsWithoutOperational.match(/raw_payload/g)).toHaveLength(1);
+    expect(
+      projectionsWithoutAdminSummaries.match(/raw_payload/g),
+    ).toHaveLength(1);
   });
 });

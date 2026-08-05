@@ -11,7 +11,7 @@ export const ACCOUNT_ACTIVITY_COLUMNS = {
   releaseScheduled: "id, triggered_at, release_at",
   releaseCanceled: "id, canceled_at",
   deletionAdmin:
-    "id, actor_admin_user_id, deletion_scheduled_for",
+    "id, actor_admin_user_id, deletion_scheduled_for, reason:summary->>reason",
   operationalAdmin:
     "id, action, actor_admin_user_id, created_at, reason:summary->>reason, service:summary->>service",
   provisioningJob: "id",
@@ -81,6 +81,14 @@ const safeActorSchema = z
   .min(1)
   .max(254)
   .refine((value) => !/[\u0000-\u001f\u007f]/.test(value));
+const adminReasonSchema = z
+  .string()
+  .refine((value) => {
+    const characterCount = Array.from(value).length;
+    return characterCount >= 8 && characterCount <= 500;
+  })
+  .refine((value) => value === value.trim())
+  .refine((value) => !/[\u0000-\u001f\u007f-\u009f]/.test(value));
 
 const milestonesSchema = z
   .object({
@@ -107,16 +115,9 @@ const deletionAdminRowSchema = z
     id: z.string().uuid(),
     actor_admin_user_id: z.string().uuid(),
     deletion_scheduled_for: timestampSchema,
+    reason: adminReasonSchema.nullable(),
   })
   .strict();
-const operationalReasonSchema = z
-  .string()
-  .refine((value) => {
-    const characterCount = Array.from(value).length;
-    return characterCount >= 8 && characterCount <= 500;
-  })
-  .refine((value) => value === value.trim())
-  .refine((value) => !/[\u0000-\u001f\u007f-\u009f]/.test(value));
 const operationalAdminRowSchema = z
   .object({
     id: z.string().uuid(),
@@ -125,14 +126,24 @@ const operationalAdminRowSchema = z
       "account_operations_reactivated",
       "account_service_paused",
       "account_service_resumed",
+      "phone_assignment_recheck_requested",
     ]),
     actor_admin_user_id: z.string().uuid(),
     created_at: timestampSchema,
-    reason: operationalReasonSchema.nullable(),
+    reason: adminReasonSchema.nullable(),
     service: z.enum(["ai_replies", "texting", "bookings"]).nullable(),
   })
   .strict()
   .superRefine((row, context) => {
+    if (row.action === "phone_assignment_recheck_requested") {
+      if (row.reason !== null || row.service !== null) {
+        context.addIssue({
+          code: "custom",
+          message: "Assignment recheck audit summary is inconsistent",
+        });
+      }
+      return;
+    }
     const isAccountAction =
       row.action === "account_operations_suspended" ||
       row.action === "account_operations_reactivated";
@@ -229,6 +240,7 @@ const OPERATIONAL_ADMIN_ACTIONS = [
   "account_operations_reactivated",
   "account_service_paused",
   "account_service_resumed",
+  "phone_assignment_recheck_requested",
 ] as const;
 
 const OPERATIONAL_SERVICE_LABELS = {
@@ -464,25 +476,34 @@ export function normalizeAdminAccountActivity(
   snapshot: AdminAccountActivitySnapshot,
 ): AdminAccountActivityEvent[] {
   const events: AdminAccountActivityEvent[] = [];
-  const deletionActors = new Map<string, string>();
+  const deletionAudits = new Map<
+    string,
+    { actor: string; reason: string | null }
+  >();
   for (const event of snapshot.deletionAdminEvents) {
     const scheduledFor = normalizeTimestamp(event.deletion_scheduled_for);
     // The source read is newest-first. Preserve the newest exact match if a
     // historical duplicate exists instead of letting an older row replace it.
-    if (!deletionActors.has(scheduledFor)) {
-      deletionActors.set(scheduledFor, event.actor_admin_user_id);
+    if (!deletionAudits.has(scheduledFor)) {
+      deletionAudits.set(scheduledFor, {
+        actor: event.actor_admin_user_id,
+        reason: event.reason,
+      });
     }
   }
 
   for (const reason of snapshot.releaseScheduled) {
     const releaseAt = normalizeTimestamp(reason.release_at);
+    const deletionAudit = deletionAudits.get(releaseAt);
     events.push({
       id: `lifecycle:${reason.id}:scheduled`,
       category: "lifecycle",
       occurredAt: normalizeTimestamp(reason.triggered_at),
       title: "Account deletion scheduled",
-      detail: `Terminal cleanup target: ${releaseAt}`,
-      actor: deletionActors.get(releaseAt) ?? null,
+      detail: deletionAudit?.reason
+        ? `Reason: ${deletionAudit.reason} · Terminal cleanup target: ${releaseAt}`
+        : `Terminal cleanup target: ${releaseAt}`,
+      actor: deletionAudit?.actor ?? null,
     });
   }
 
@@ -638,6 +659,9 @@ const RISK_TITLES: Readonly<Record<string, string>> = {
 };
 
 function operationalAdminTitle(event: OperationalAdminRow): string {
+  if (event.action === "phone_assignment_recheck_requested") {
+    return "Phone assignment recheck requested";
+  }
   if (event.action === "account_operations_suspended") {
     return "Account operations suspended";
   }

@@ -9,6 +9,7 @@ import {
   adminAccountDeletionRunSchema,
   type AdminAccountDeletionPreview,
 } from "@/lib/account/adminDeletion.shared";
+import { adminServiceControlReasonSchema } from "@/lib/admin/accountServiceControls.shared";
 import { body, bodyFaint, statusDanger } from "@/lib/theme-v2/theme";
 
 export function AdminAccountDeletionPanel({
@@ -20,6 +21,7 @@ export function AdminAccountDeletionPanel({
   const [preview, setPreview] = useState(initialPreview);
   const [open, setOpen] = useState(false);
   const [confirmationName, setConfirmationName] = useState("");
+  const [reason, setReason] = useState("");
   const [acknowledgeLiveResources, setAcknowledgeLiveResources] =
     useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +31,20 @@ export function AdminAccountDeletionPanel({
     preview.provisioningOperationState === "active" ||
     preview.provisioningOperationState === "unknown";
   const confirmationMatches = confirmationName === preview.businessName;
+  const reasonValid = adminServiceControlReasonSchema.safeParse(reason).success;
+
+  function clearModalInputs() {
+    setConfirmationName("");
+    setReason("");
+    setAcknowledgeLiveResources(false);
+  }
+
+  function closeModal() {
+    if (submitting) return;
+    setOpen(false);
+    clearModalInputs();
+    setMessage(null);
+  }
 
   async function submit() {
     setSubmitting(true);
@@ -43,6 +59,7 @@ export function AdminAccountDeletionPanel({
           body: JSON.stringify({
             confirmationName,
             acknowledgeLiveResources,
+            reason,
           }),
         },
       );
@@ -60,8 +77,7 @@ export function AdminAccountDeletionPanel({
 
         setPreview(result.data.preview);
         setOpen(false);
-        setConfirmationName("");
-        setAcknowledgeLiveResources(false);
+        clearModalInputs();
         setMessage(
           result.data.adminEventCreated
             ? "Deletion scheduled and recorded in the admin audit."
@@ -155,11 +171,9 @@ export function AdminAccountDeletionPanel({
 
       <Modal
         open={open}
-        onClose={() => {
-          if (!submitting) setOpen(false);
-        }}
+        onClose={closeModal}
         title="Schedule account deletion"
-        description="Review the locked account state and confirm the exact business name."
+        description="Review the locked account state, record an admin reason, and confirm the exact business name."
       >
         <div className="space-y-5">
           <div className={`rounded-xl p-4 ${statusDanger}`}>
@@ -230,6 +244,33 @@ export function AdminAccountDeletionPanel({
           ) : null}
 
           <div>
+            <label
+              htmlFor="admin-deletion-reason"
+              className={`mb-2 block text-sm font-medium ${body}`}
+            >
+              Reason for scheduling deletion (admin audit only)
+            </label>
+            <textarea
+              id="admin-deletion-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              required
+              rows={4}
+              aria-describedby="admin-deletion-reason-help"
+              aria-invalid={reason.length > 0 && !reasonValid}
+              className="w-full resize-y rounded-lg border border-[#e3dacc] bg-white px-3 py-2 text-sm text-stone-900 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#f5f5f5]"
+            />
+            <p
+              id="admin-deletion-reason-help"
+              className={`mt-1 text-xs ${bodyFaint}`}
+            >
+              Required: 8–500 characters in a single paragraph. Do not include
+              customer contact details, message content, or provider data in
+              this durable admin reason.
+            </p>
+          </div>
+
+          <div>
             <label className={`mb-2 block text-sm font-medium ${body}`}>
               Type the exact business name{" "}
               {JSON.stringify(preview.businessName)}
@@ -251,7 +292,7 @@ export function AdminAccountDeletionPanel({
               variant="secondary"
               className="flex-1"
               disabled={submitting}
-              onClick={() => setOpen(false)}
+              onClick={closeModal}
             >
               Cancel
             </Button>
@@ -263,6 +304,7 @@ export function AdminAccountDeletionPanel({
               disabled={
                 operationBlocked ||
                 !confirmationMatches ||
+                !reasonValid ||
                 (preview.requiresLiveAcknowledgement &&
                   !acknowledgeLiveResources)
               }

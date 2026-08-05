@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
 
-const adminServiceControlReasonSchema = z
+export const adminServiceControlReasonSchema = z
   .string()
   .refine(
     (value) => !CONTROL_CHARACTER.test(value),

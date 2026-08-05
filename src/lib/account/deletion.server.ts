@@ -171,12 +171,14 @@ export async function scheduleAdminAccountDeletion({
   businessId,
   confirmationName,
   acknowledgeLiveResources,
+  reason,
   actorAdminUserId,
   dependencies,
 }: {
   businessId: string;
   confirmationName: string;
   acknowledgeLiveResources: boolean;
+  reason: string;
   actorAdminUserId: string;
   dependencies?: AccountDeletionServiceDependencies;
 }): Promise<AdminAccountDeletionRun> {
@@ -186,6 +188,7 @@ export async function scheduleAdminAccountDeletion({
       p_business_id: businessId,
       p_confirmation_name: confirmationName,
       p_acknowledge_live_resources: acknowledgeLiveResources,
+      p_reason: reason,
       p_actor_admin_user_id: actorAdminUserId,
     },
   );

@@ -3,6 +3,7 @@ import {
   adminAccountServiceControlRequestSchema,
   adminAccountServiceControlResponseSchema,
   adminOperationalControlSnapshotSchema,
+  adminServiceControlReasonSchema,
 } from "./accountServiceControls.shared";
 
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000001";
@@ -15,6 +16,32 @@ const ACTIVE_CONTROLS = {
   textingPausedAt: null,
   bookingsPausedAt: null,
 };
+
+describe("adminServiceControlReasonSchema", () => {
+  it("exports the canonical trimmed admin-reason contract for reuse", () => {
+    expect(adminServiceControlReasonSchema.parse(`  ${VALID_REASON}  `)).toBe(
+      VALID_REASON,
+    );
+  });
+
+  it("retains the Unicode-aware bounds and control-character rejection", () => {
+    expect(adminServiceControlReasonSchema.safeParse("12345678").success).toBe(
+      true,
+    );
+    expect(
+      adminServiceControlReasonSchema.safeParse("😀".repeat(500)).success,
+    ).toBe(true);
+    expect(adminServiceControlReasonSchema.safeParse("1234567").success).toBe(
+      false,
+    );
+    expect(
+      adminServiceControlReasonSchema.safeParse("😀".repeat(501)).success,
+    ).toBe(false);
+    expect(
+      adminServiceControlReasonSchema.safeParse(`${VALID_REASON}\nmore`).success,
+    ).toBe(false);
+  });
+});
 
 describe("adminAccountServiceControlRequestSchema", () => {
   it.each(["suspend", "reactivate"] as const)(

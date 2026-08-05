@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { adminServiceControlReasonSchema } from "@/lib/admin/accountServiceControls.shared";
 
 const timestampSchema = z
   .string()
@@ -13,6 +14,7 @@ export const adminAccountDeletionRequestSchema = z
     // compares this byte-for-byte with the current locked database name.
     confirmationName: z.string(),
     acknowledgeLiveResources: z.boolean(),
+    reason: adminServiceControlReasonSchema,
   })
   .strict();
 

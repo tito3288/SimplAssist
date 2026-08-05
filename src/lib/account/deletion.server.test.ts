@@ -32,6 +32,7 @@ import {
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const PARTNER_ID = "00000000-0000-4000-8000-000000000002";
 const OWNER_ID = "00000000-0000-4000-8000-000000000003";
+const DELETION_REASON = "Duplicate test account requested by operations";
 
 function scheduledAction(
   status: "pending" | "applied" | "blocked" = "pending",
@@ -313,6 +314,7 @@ describe("account deletion service", () => {
       businessId: BUSINESS_ID,
       confirmationName: "  Exact Legacy Name  ",
       acknowledgeLiveResources: false,
+      reason: DELETION_REASON,
       actorAdminUserId: OWNER_ID,
       dependencies: { reconcileStripeAction: reconcile },
     });
@@ -322,6 +324,7 @@ describe("account deletion service", () => {
       p_business_id: BUSINESS_ID,
       p_confirmation_name: "  Exact Legacy Name  ",
       p_acknowledge_live_resources: false,
+      p_reason: DELETION_REASON,
       p_actor_admin_user_id: OWNER_ID,
     });
     expect(reconcile).not.toHaveBeenCalled();
@@ -329,6 +332,35 @@ describe("account deletion service", () => {
     expect(result.preview.businessName).toBe("  Exact Legacy Name  ");
     expect(JSON.stringify(result)).not.toContain("must be discarded");
     expect(JSON.stringify(result)).not.toContain("owner@example.test");
+  });
+
+  it("keeps an already-admin-scheduled result audit-free and does not expose the submitted reason", async () => {
+    const reconcile = vi.fn();
+    mocks.rpc.mockResolvedValue({
+      data: adminRun({
+        scheduled: { ...scheduledAction(), stripe_action: null },
+        preview: suspendedPreview(),
+        admin_event_created: false,
+        previously_scheduled_by_admin: true,
+      }),
+      error: null,
+    });
+
+    const result = await scheduleAdminAccountDeletion({
+      businessId: BUSINESS_ID,
+      confirmationName: "Alpha Dental",
+      acknowledgeLiveResources: false,
+      reason: DELETION_REASON,
+      actorAdminUserId: OWNER_ID,
+      dependencies: { reconcileStripeAction: reconcile },
+    });
+
+    expect(result).toMatchObject({
+      adminEventCreated: false,
+      previouslyScheduledByAdmin: true,
+    });
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(DELETION_REASON);
   });
 
   it("reconciles one exact pending Stripe generation and strips raw Stripe fields", async () => {
@@ -344,6 +376,7 @@ describe("account deletion service", () => {
       businessId: BUSINESS_ID,
       confirmationName: "Alpha Dental",
       acknowledgeLiveResources: true,
+      reason: DELETION_REASON,
       actorAdminUserId: OWNER_ID,
       dependencies: { reconcileStripeAction: reconcile },
     });
@@ -410,6 +443,7 @@ describe("account deletion service", () => {
         businessId: BUSINESS_ID,
         confirmationName: "Alpha Dental",
         acknowledgeLiveResources: false,
+        reason: DELETION_REASON,
         actorAdminUserId: OWNER_ID,
         dependencies: { reconcileStripeAction: reconcile },
       }),
@@ -443,6 +477,7 @@ describe("account deletion service", () => {
           businessId: BUSINESS_ID,
           confirmationName: "Alpha Dental",
           acknowledgeLiveResources: false,
+          reason: DELETION_REASON,
           actorAdminUserId: OWNER_ID,
         }),
       ).rejects.toMatchObject({ code, status });

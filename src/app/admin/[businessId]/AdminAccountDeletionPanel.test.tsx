@@ -44,6 +44,7 @@ import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
 const BUSINESS_ID = "10000000-0000-4000-a045-000000000001";
 const PARTNER_ID = "20000000-0000-4000-a045-000000000001";
 const SCHEDULED_FOR = "2026-10-03T12:00:00.000Z";
+const DELETION_REASON = "Duplicate test account requested by operations";
 
 function preview(
   overrides: Partial<AccountDeletionPreview> = {},
@@ -173,6 +174,7 @@ describe("AdminAccountDeletionPanel", () => {
       const parsed = adminAccountDeletionRequestSchema.parse({
         confirmationName,
         acknowledgeLiveResources: false,
+        reason: DELETION_REASON,
       });
       expect(parsed.confirmationName).toBe(confirmationName);
     }
@@ -186,7 +188,43 @@ describe("AdminAccountDeletionPanel", () => {
     expect(panelSource).not.toMatch(/confirmationName\.(?:trim|toLowerCase)/);
   });
 
-  it("sends only the exact confirmation and acknowledgement fields", () => {
+  it("requires the shared trimmed admin reason and renders a required audit-only textarea", () => {
+    expect(
+      adminAccountDeletionRequestSchema.parse({
+        confirmationName: "Alpha Dental",
+        acknowledgeLiveResources: false,
+        reason: `  ${DELETION_REASON}  `,
+      }).reason,
+    ).toBe(DELETION_REASON);
+    expect(
+      adminAccountDeletionRequestSchema.safeParse({
+        confirmationName: "Alpha Dental",
+        acknowledgeLiveResources: false,
+      }).success,
+    ).toBe(false);
+    expect(
+      adminAccountDeletionRequestSchema.safeParse({
+        confirmationName: "Alpha Dental",
+        acknowledgeLiveResources: false,
+        reason: "short",
+      }).success,
+    ).toBe(false);
+
+    const html = renderPanel(preview());
+    expect(html).toContain(
+      "Reason for scheduling deletion (admin audit only)",
+    );
+    expect(html).toMatch(
+      /<textarea(?=[^>]*id="admin-deletion-reason")(?=[^>]*required="")[^>]*>/,
+    );
+    expect(html).toContain("Required: 8–500 characters");
+    expect(html).toContain("Do not include");
+    expect(html).toContain("customer contact details");
+    expect(html).toContain("provider data");
+    expect(source()).toContain("!reasonValid");
+  });
+
+  it("sends only the exact confirmation, acknowledgement, and reason fields", () => {
     const panelSource = source();
     const body = panelSource.match(
       /body:\s*JSON\.stringify\(\{([\s\S]*?)\}\),/,
@@ -194,7 +232,7 @@ describe("AdminAccountDeletionPanel", () => {
 
     expect(body).toBeDefined();
     expect(body?.replace(/\s/g, "")).toBe(
-      "confirmationName,acknowledgeLiveResources,",
+      "confirmationName,acknowledgeLiveResources,reason,",
     );
     expect(body).not.toMatch(
       /preview|summary|businessId|email|messageContent|phoneNumber|stripeCustomer|telnyx/i,
@@ -231,6 +269,9 @@ describe("AdminAccountDeletionPanel", () => {
       "adminAccountDeletionRunSchema.safeParse(payload)",
     );
     expect(panelSource).toContain("setPreview(result.data.preview)");
+    expect(panelSource).toMatch(
+      /setPreview\(result\.data\.preview\);[\s\S]*setOpen\(false\);[\s\S]*clearModalInputs\(\);/,
+    );
     expect(panelSource).toContain("router.refresh()");
   });
 
@@ -255,7 +296,26 @@ describe("AdminAccountDeletionPanel", () => {
     expect(panelSource).toMatch(
       /if \([\s\S]*refreshed\.success[\s\S]*\) \{[\s\S]*setPreview\(refreshed\.data\);[\s\S]*setAcknowledgeLiveResources\(false\);/,
     );
+    const refreshBranch = panelSource.match(
+      /if \(isRecord\(payload\) && payload\.error === "live_ack_required"\)([\s\S]*?)if \(isRecord\(payload\) && payload\.error === "confirmation_mismatch"\)/,
+    )?.[1];
+    expect(refreshBranch).toBeDefined();
+    expect(refreshBranch).not.toContain("setReason");
+    expect(refreshBranch).not.toContain("clearModalInputs");
     expect(panelSource).toContain("Live resources changed.");
+  });
+
+  it("clears modal inputs, including the reason, on close", () => {
+    const panelSource = source();
+
+    expect(panelSource).toMatch(
+      /function clearModalInputs\(\) \{[\s\S]*setConfirmationName\(""\);[\s\S]*setReason\(""\);[\s\S]*setAcknowledgeLiveResources\(false\);[\s\S]*\}/,
+    );
+    expect(panelSource).toMatch(
+      /function closeModal\(\) \{[\s\S]*setOpen\(false\);[\s\S]*clearModalInputs\(\);[\s\S]*\}/,
+    );
+    expect(panelSource).toContain("onClose={closeModal}");
+    expect(panelSource).toContain("onClick={closeModal}");
   });
 
   it("does not render or accept audit, customer PII, or provider fields", () => {

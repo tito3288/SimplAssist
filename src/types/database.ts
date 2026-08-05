@@ -90,6 +90,7 @@ export type AdminActionEventAction =
   | "account_operations_reactivated"
   | "account_service_paused"
   | "account_service_resumed"
+  | "phone_assignment_recheck_requested"
   | "provisioning_job_dismissed"
   | "provisioning_job_restored";
 

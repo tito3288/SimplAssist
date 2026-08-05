@@ -36,6 +36,7 @@ const PARTNER_ID = "20000000-0000-4000-a000-000000000001";
 const ADMIN_ID = "50000000-0000-4000-a000-000000000001";
 const DELETED_AT = "2026-08-04T12:00:00.000Z";
 const DELETION_SCHEDULED_FOR = "2026-10-03T12:00:00.000Z";
+const DELETION_REASON = "Duplicate test account requested by operations";
 
 const SUSPENDED_PREVIEW: AccountDeletionPreview = {
   businessId: BUSINESS_ID,
@@ -70,6 +71,7 @@ function makeRequest(
   body: unknown = {
     confirmationName: "Alpha Dental",
     acknowledgeLiveResources: false,
+    reason: DELETION_REASON,
   },
   options: {
     host?: string | null;
@@ -339,11 +341,27 @@ describe("POST /api/admin/businesses/[businessId]/schedule-deletion", () => {
     { confirmationName: "Alpha Dental" },
     {
       confirmationName: "Alpha Dental",
+      acknowledgeLiveResources: false,
+    },
+    {
+      confirmationName: "Alpha Dental",
       acknowledgeLiveResources: "false",
+      reason: DELETION_REASON,
     },
     {
       confirmationName: "Alpha Dental",
       acknowledgeLiveResources: false,
+      reason: "short",
+    },
+    {
+      confirmationName: "Alpha Dental",
+      acknowledgeLiveResources: false,
+      reason: `${DELETION_REASON}\nmore`,
+    },
+    {
+      confirmationName: "Alpha Dental",
+      acknowledgeLiveResources: false,
+      reason: DELETION_REASON,
       summary: { customer_email: "client@example.com" },
     },
   ])("rejects a malformed or extra-key body: %j", async (body) => {
@@ -355,11 +373,12 @@ describe("POST /api/admin/businesses/[businessId]/schedule-deletion", () => {
     expectPrivateNoStore(response);
   });
 
-  it("passes the confirmation name byte-for-byte and returns only the safe service shape", async () => {
+  it("passes the confirmation name byte-for-byte, trims the reason, and returns only the safe service shape", async () => {
     const response = await POST(
       makeRequest({
         confirmationName: " Alpha Dental ",
         acknowledgeLiveResources: true,
+        reason: `  ${DELETION_REASON}  `,
       }),
       routeParams(),
     );
@@ -368,6 +387,7 @@ describe("POST /api/admin/businesses/[businessId]/schedule-deletion", () => {
       businessId: BUSINESS_ID,
       confirmationName: " Alpha Dental ",
       acknowledgeLiveResources: true,
+      reason: DELETION_REASON,
       actorAdminUserId: ADMIN_ID,
     });
     expect(response.status).toBe(200);
@@ -381,6 +401,7 @@ describe("POST /api/admin/businesses/[businessId]/schedule-deletion", () => {
     expect(serialized).not.toContain("stripe_subscription_id");
     expect(serialized).not.toContain("provider_id");
     expect(serialized).not.toContain("token");
+    expect(serialized).not.toContain(DELETION_REASON);
     expectPrivateNoStore(response);
   });
 

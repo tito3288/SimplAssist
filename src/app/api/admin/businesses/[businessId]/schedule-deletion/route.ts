@@ -40,6 +40,7 @@ export async function POST(
       businessId: businessId.data,
       confirmationName: input.data.confirmationName,
       acknowledgeLiveResources: input.data.acknowledgeLiveResources,
+      reason: input.data.reason,
       actorAdminUserId: authorization.admin.id,
     });
     return adminMutationJson(result);
