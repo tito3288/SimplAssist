@@ -45,6 +45,8 @@ import {
   recordOutboundSmsUsage,
   type UsageBlockReason,
 } from "@/lib/billing/usage";
+import { buildAiConversationSourceKey } from "@/lib/metrics/sourceKeys.server";
+import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
 
 const MMS_FALLBACK_MESSAGE =
   "I can't process images yet — please describe what you need in text and I'll help.";
@@ -500,6 +502,25 @@ async function processAndReply(
     messaging_profile_id: sendContext.messagingProfileId,
     type: "SMS",
   });
+  const occurredAt = new Date();
+  try {
+    recordBusinessMetricEventBestEffort({
+      businessId: context.businessId,
+      metricKey: "ai_conversation_engaged",
+      quantity: 1,
+      occurredAt,
+      sourceKey: buildAiConversationSourceKey(
+        context.conversation.id,
+        occurredAt
+      ),
+      origin: null,
+    });
+  } catch {
+    console.error("[messaging:webhook] Metric recording failed:", {
+      businessId: context.businessId,
+      metricKey: "ai_conversation_engaged",
+    });
+  }
   await addMessage(
     context.conversation.id,
     context.businessId,

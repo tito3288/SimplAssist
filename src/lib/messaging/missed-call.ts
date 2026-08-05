@@ -23,10 +23,13 @@ import {
   canUseFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import { buildMissedCallSourceKey } from "@/lib/metrics/sourceKeys.server";
+import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
 
 export async function sendMissedCallSMS(
   callerPhone: string,
-  businessId: string
+  businessId: string,
+  callSessionOrControlId: string
 ): Promise<void> {
   // PERMANENT conditions return without throwing — a webhook retry can
   // never fix them, and throwing would 500-loop the caller's event across
@@ -206,6 +209,26 @@ export async function sendMissedCallSMS(
       messaging_profile_id: sendContext.messagingProfileId,
       type: "SMS",
     });
+
+    const occurredAt = new Date();
+    try {
+      recordBusinessMetricEventBestEffort({
+        businessId,
+        metricKey: "missed_call_caught",
+        quantity: 1,
+        occurredAt,
+        sourceKey: buildMissedCallSourceKey(
+          businessId,
+          callSessionOrControlId
+        ),
+        origin: null,
+      });
+    } catch {
+      console.error("[metrics] Metric dispatch failed:", {
+        businessId,
+        metricKey: "missed_call_caught",
+      });
+    }
 
     console.log(
       `[missed-call] SMS sent to ${callerPhone} for business ${businessId} (lang=${language}, telnyxId=${result.data?.id})`

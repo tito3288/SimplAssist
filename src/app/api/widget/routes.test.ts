@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => {
     canUseFeature: vi.fn(),
     processIncomingMessageDetailed: vi.fn(),
     recordKnowledgeGap: vi.fn(),
+    buildAiConversationSourceKey: vi.fn(),
+    buildWebChatSessionSourceKey: vi.fn(),
+    recordBusinessMetricEventBestEffort: vi.fn(),
     resolveWidgetAttribution: vi.fn(),
     resolveBusinessOperationalControls: vi.fn(),
     AIProcessingBlockedError,
@@ -60,6 +63,14 @@ vi.mock("@/lib/ai/engine", () => ({
 vi.mock("@/lib/ai/knowledgeGaps", () => ({
   recordKnowledgeGap: mocks.recordKnowledgeGap,
 }));
+vi.mock("@/lib/metrics/sourceKeys.server", () => ({
+  buildAiConversationSourceKey: mocks.buildAiConversationSourceKey,
+  buildWebChatSessionSourceKey: mocks.buildWebChatSessionSourceKey,
+}));
+vi.mock("@/lib/metrics/recording.server", () => ({
+  recordBusinessMetricEventBestEffort:
+    mocks.recordBusinessMetricEventBestEffort,
+}));
 vi.mock("@/lib/branding/businessPartner.server", () => ({
   resolveWidgetAttribution: mocks.resolveWidgetAttribution,
   BusinessPartnerResolutionError: mocks.BusinessPartnerResolutionError,
@@ -91,6 +102,9 @@ import { GET as getPreviewConfig } from "./preview-config/route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const PAUSED_AT = "2026-08-04T12:00:00.000Z";
+const WEB_CHAT_SOURCE_KEY = `web-chat-session:${"a".repeat(64)}`;
+const AI_CONVERSATION_SOURCE_KEY =
+  "ai-conversation:00000000-0000-4000-8000-000000000010:2026-08";
 const ENTITLEMENTS = {
   businessId: BUSINESS_ID,
   plan: "sms_and_chat",
@@ -202,6 +216,11 @@ beforeEach(() => {
     sourceMessageId: "customer-message-1",
   });
   mocks.recordKnowledgeGap.mockResolvedValue(undefined);
+  mocks.buildWebChatSessionSourceKey.mockReturnValue(WEB_CHAT_SOURCE_KEY);
+  mocks.buildAiConversationSourceKey.mockReturnValue(
+    AI_CONVERSATION_SOURCE_KEY
+  );
+  mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
   mocks.resolveWidgetAttribution.mockResolvedValue({
     poweredByName: "SimplAssist",
     poweredByUrl: "https://simplassist.com",
@@ -572,6 +591,158 @@ describe("public widget entitlement boundaries", () => {
     expect(
       mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
     ).toBeLessThan(mocks.recordKnowledgeGap.mock.invocationCallOrder[0]);
+    expect(mocks.buildWebChatSessionSourceKey).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "session-1"
+    );
+    expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledTimes(1);
+    const [, metricOccurredAt] = mocks.buildAiConversationSourceKey.mock
+      .calls[0] as [string, Date];
+    expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledWith(
+      "conversation-1",
+      metricOccurredAt
+    );
+    expect(mocks.recordBusinessMetricEventBestEffort.mock.calls).toEqual([
+      [
+        {
+          businessId: BUSINESS_ID,
+          metricKey: "web_chat_session_engaged",
+          quantity: 1,
+          occurredAt: metricOccurredAt,
+          sourceKey: WEB_CHAT_SOURCE_KEY,
+          origin: null,
+        },
+      ],
+      [
+        {
+          businessId: BUSINESS_ID,
+          metricKey: "ai_conversation_engaged",
+          quantity: 1,
+          occurredAt: metricOccurredAt,
+          sourceKey: AI_CONVERSATION_SOURCE_KEY,
+          origin: null,
+        },
+      ],
+    ]);
+    expect(
+      JSON.stringify(mocks.recordBusinessMetricEventBestEffort.mock.calls)
+    ).not.toContain("session-1");
+  });
+
+  it.each([0, 1])(
+    "keeps the widget response successful when metric dispatch %i throws",
+    async (failedCallIndex) => {
+      queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+      let callIndex = 0;
+      mocks.recordBusinessMetricEventBestEffort.mockImplementation(() => {
+        if (callIndex++ === failedCallIndex) {
+          throw new Error("private metric failure");
+        }
+      });
+
+      const response = await postChat(
+        postRequest("chat", {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-private",
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        available: true,
+        response: "How can I help?",
+        sessionId: "session-private",
+      });
+      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
+      expect(console.error).toHaveBeenCalledWith(
+        "[widget:chat] Metric recording failed:",
+        {
+          businessId: BUSINESS_ID,
+          metricKey:
+            failedCallIndex === 0
+              ? "web_chat_session_engaged"
+              : "ai_conversation_engaged",
+        }
+      );
+    }
+  );
+
+  it("does not wait for unresolved metric work before returning the widget response", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.recordBusinessMetricEventBestEffort.mockReturnValue(
+      new Promise(() => undefined)
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "How can I help?",
+    });
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fabricate metrics for an engine fallback without a conversation ID", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Please try again later.",
+      knowledgeGapDetected: false,
+      conversationId: null,
+      sourceMessageId: null,
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "Please try again later.",
+    });
+    expect(mocks.buildWebChatSessionSourceKey).not.toHaveBeenCalled();
+    expect(mocks.buildAiConversationSourceKey).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("reuses conflict-stable widget and conversation source keys on route retries", async () => {
+    queueDatabaseResults(
+      { data: { id: "widget-1" }, error: null },
+      { data: { id: "widget-1" }, error: null }
+    );
+    const requestBody = {
+      businessId: BUSINESS_ID,
+      message: "Hello",
+      sessionId: "session-1",
+    };
+
+    const firstResponse = await postChat(postRequest("chat", requestBody));
+    const secondResponse = await postChat(postRequest("chat", requestBody));
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(
+      mocks.recordBusinessMetricEventBestEffort.mock.calls.map(
+        ([input]) => input.sourceKey
+      )
+    ).toEqual([
+      WEB_CHAT_SOURCE_KEY,
+      AI_CONVERSATION_SOURCE_KEY,
+      WEB_CHAT_SOURCE_KEY,
+      AI_CONVERSATION_SOURCE_KEY,
+    ]);
   });
 
   it("does not capture a widget response without a gap signal", async () => {
@@ -655,6 +826,7 @@ describe("public widget entitlement boundaries", () => {
         response: null,
       });
       expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
     }
   );
 
@@ -715,6 +887,7 @@ describe("public widget entitlement boundaries", () => {
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledTimes(1);
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("fails closed when the post-generation operational read is indeterminate", async () => {
@@ -756,6 +929,7 @@ describe("public widget entitlement boundaries", () => {
       mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
     );
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("fails closed before AI when the initial operational read is indeterminate", async () => {
@@ -782,6 +956,7 @@ describe("public widget entitlement boundaries", () => {
       retryable: true,
     });
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("skips AI and acknowledges chat when the plan is not entitled", async () => {

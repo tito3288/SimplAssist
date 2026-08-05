@@ -1031,7 +1031,11 @@ async function handleRecordingSaved(payload: Record<string, unknown>) {
   );
   // Awaited so a send failure propagates: the dispatcher releases the event
   // claim and 500s, and Telnyx's redelivered recording event re-attempts.
-  await sendMissedCallSMS(state.from, state.businessId);
+  await sendMissedCallSMS(
+    state.from,
+    state.businessId,
+    voicemailMetricSourceId(payload, state.callControlId)
+  );
 }
 
 async function handleRecordingError(payload: Record<string, unknown>) {
@@ -1050,7 +1054,21 @@ async function handleRecordingError(payload: Record<string, unknown>) {
     `[messaging:voice] Triggering missed-call SMS despite recording error`
   );
   // Awaited so a send failure propagates (release + 500 + Telnyx retry).
-  await sendMissedCallSMS(state.from, state.businessId);
+  await sendMissedCallSMS(
+    state.from,
+    state.businessId,
+    voicemailMetricSourceId(payload, state.callControlId)
+  );
+}
+
+function voicemailMetricSourceId(
+  payload: Record<string, unknown>,
+  fallbackCallControlId: string
+): string {
+  const callSessionId = payload.call_session_id;
+  return typeof callSessionId === "string" && callSessionId.trim()
+    ? callSessionId
+    : fallbackCallControlId;
 }
 
 async function createForwardingAttempt(args: {
@@ -1429,7 +1447,11 @@ async function triggerForwardingFallback(args: {
     `[messaging:voice] forwarding fallback attempt=${attempt.id} status=${args.status} reason=${args.reason}; sending missed-call SMS`
   );
   try {
-    await sendMissedCallSMS(attempt.caller_phone, attempt.business_id);
+    await sendMissedCallSMS(
+      attempt.caller_phone,
+      attempt.business_id,
+      attempt.call_session_id
+    );
   } catch (err) {
     // Record the failure AND re-open the fallback claim: handleCallHangup
     // short-circuits on fallback_triggered_at, so without clearing it the

@@ -9,6 +9,8 @@ import {
   isBookingOperationalStateError,
 } from "@/lib/google/bookingOperational.server";
 import { isOperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+import { buildDashboardBookingSourceKey } from "@/lib/metrics/sourceKeys.server";
+import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
 
 type LinkedCalendarBooking = {
   id: string;
@@ -245,6 +247,35 @@ export async function POST(request: NextRequest) {
         reminders: { useDefault: true },
       },
     });
+
+    const providerEventId = event.data.id?.trim();
+    if (providerEventId) {
+      const occurredAt = new Date();
+      try {
+        recordBusinessMetricEventBestEffort({
+          businessId: access.businessId,
+          metricKey: "booking_confirmed",
+          quantity: 1,
+          occurredAt,
+          sourceKey: buildDashboardBookingSourceKey(
+            access.businessId,
+            calendarId,
+            providerEventId
+          ),
+          origin: "dashboard",
+        });
+      } catch {
+        console.error("[metrics] Metric dispatch failed:", {
+          businessId: access.businessId,
+          metricKey: "booking_confirmed",
+        });
+      }
+    } else {
+      console.warn("[metrics] Metric dispatch skipped:", {
+        businessId: access.businessId,
+        metricKey: "booking_confirmed",
+      });
+    }
 
     return NextResponse.json({
       event: {

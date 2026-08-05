@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => {
     calendarInsert: vi.fn(),
     calendarPatch: vi.fn(),
     calendarDelete: vi.fn(),
+    buildDashboardBookingSourceKey: vi.fn(),
+    recordBusinessMetricEventBestEffort: vi.fn(),
     BookingOperationalBlockedError,
     BookingOperationalStateError,
     OperationalControlsResolutionError,
@@ -76,12 +78,21 @@ vi.mock("@/lib/account/operationalControls.server", () => ({
   isOperationalControlsResolutionError: (error: unknown) =>
     error instanceof mocks.OperationalControlsResolutionError,
 }));
+vi.mock("@/lib/metrics/sourceKeys.server", () => ({
+  buildDashboardBookingSourceKey:
+    mocks.buildDashboardBookingSourceKey,
+}));
+vi.mock("@/lib/metrics/recording.server", () => ({
+  recordBusinessMetricEventBestEffort:
+    mocks.recordBusinessMetricEventBestEffort,
+}));
 
 import { DELETE, GET, PATCH, POST } from "./route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const START_TIME = "2026-07-20T13:00:00.000Z";
 const END_TIME = "2026-07-20T14:00:00.000Z";
+const DASHBOARD_BOOKING_SOURCE_KEY = `dashboard-booking:${"a".repeat(64)}`;
 
 type BookingUpdateResult = {
   data: unknown;
@@ -301,6 +312,10 @@ beforeEach(() => {
     },
   });
   mocks.calendarDelete.mockResolvedValue({ data: {} });
+  mocks.buildDashboardBookingSourceKey.mockReturnValue(
+    DASHBOARD_BOOKING_SOURCE_KEY
+  );
+  mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
   mocks.adminFrom.mockReturnValue(bookingLookupChain());
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -440,6 +455,7 @@ describe("Calendar event operational controls", () => {
     expect(mocks.accessFrom).not.toHaveBeenCalled();
     expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
     expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it.each(["account_suspended", "bookings_paused"] as const)(
@@ -464,6 +480,7 @@ describe("Calendar event operational controls", () => {
       expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
       expect(mocks.getCalendarService).not.toHaveBeenCalled();
       expect(mocks.calendarInsert).not.toHaveBeenCalled();
+      expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
     }
   );
 
@@ -482,6 +499,7 @@ describe("Calendar event operational controls", () => {
     expect(mocks.accessFrom).not.toHaveBeenCalled();
     expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
     expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("keeps internal booking-state failures private and retryable", async () => {
@@ -497,6 +515,7 @@ describe("Calendar event operational controls", () => {
       retryable: true,
     });
     expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it.each(["account_suspended", "bookings_paused"] as const)(
@@ -519,6 +538,7 @@ describe("Calendar event operational controls", () => {
       expect(mocks.getAuthenticatedClient).toHaveBeenCalledWith(BUSINESS_ID);
       expect(mocks.getCalendarService).toHaveBeenCalledOnce();
       expect(mocks.calendarInsert).not.toHaveBeenCalled();
+      expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
     }
   );
 
@@ -538,6 +558,7 @@ describe("Calendar event operational controls", () => {
     });
     expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledTimes(2);
     expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("checks entry and final state immediately around an allowed provider insert", async () => {
@@ -552,6 +573,97 @@ describe("Calendar event operational controls", () => {
       mocks.assertBookingOperationallyAllowed.mock.invocationCallOrder[1]
     ).toBeLessThan(mocks.calendarInsert.mock.invocationCallOrder[0]);
     expect(mocks.calendarInsert).toHaveBeenCalledOnce();
+    expect(mocks.buildDashboardBookingSourceKey).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "primary",
+      "event-1"
+    );
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      metricKey: "booking_confirmed",
+      quantity: 1,
+      occurredAt: expect.any(Date),
+      sourceKey: DASHBOARD_BOOKING_SOURCE_KEY,
+      origin: "dashboard",
+    });
+    expect(
+      mocks.calendarInsert.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("keeps an accepted Google booking successful when metric dispatch throws", async () => {
+    mocks.recordBusinessMetricEventBestEffort.mockImplementationOnce(() => {
+      throw new Error("private metric failure");
+    });
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      event: { id: "event-1", title: "Estimate" },
+    });
+    expect(mocks.calendarInsert).toHaveBeenCalledOnce();
+    expect(console.error).toHaveBeenCalledWith(
+      "[metrics] Metric dispatch failed:",
+      {
+        businessId: BUSINESS_ID,
+        metricKey: "booking_confirmed",
+      }
+    );
+  });
+
+  it("does not record when Google rejects the booking", async () => {
+    mocks.calendarInsert.mockRejectedValueOnce(new Error("provider rejected"));
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(500);
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("skips recording when Google accepts without a provider event ID", async () => {
+    mocks.calendarInsert.mockResolvedValueOnce({
+      data: {
+        id: null,
+        summary: "Estimate",
+        start: { dateTime: START_TIME },
+        end: { dateTime: END_TIME },
+      },
+    });
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildDashboardBookingSourceKey).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(
+      "[metrics] Metric dispatch skipped:",
+      {
+        businessId: BUSINESS_ID,
+        metricKey: "booking_confirmed",
+      }
+    );
+  });
+
+  it("reuses the source key when one accepted provider event is handled twice", async () => {
+    // The repeated provider ID models duplicate handling of the same accepted
+    // Google event. A different provider ID is a distinct accepted booking.
+    const firstResponse = await POST(postRequest());
+    const secondResponse = await POST(postRequest());
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(mocks.buildDashboardBookingSourceKey.mock.calls).toEqual([
+      [BUSINESS_ID, "primary", "event-1"],
+      [BUSINESS_ID, "primary", "event-1"],
+    ]);
+    expect(
+      mocks.recordBusinessMetricEventBestEffort.mock.calls.map(
+        ([input]) => input.sourceKey
+      )
+    ).toEqual([DASHBOARD_BOOKING_SOURCE_KEY, DASHBOARD_BOOKING_SOURCE_KEY]);
   });
 
   it("keeps GET, PATCH, and DELETE available while new bookings are blocked", async () => {

@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   recordInboundMessagingUsage: vi.fn(),
   preflightOutboundSms: vi.fn(),
   recordOutboundSmsUsage: vi.fn(),
+  buildAiConversationSourceKey: vi.fn(),
+  recordBusinessMetricEventBestEffort: vi.fn(),
 }));
 
 vi.mock("@/lib/messaging/client", () => ({
@@ -98,6 +100,13 @@ vi.mock("@/lib/billing/usage", () => ({
   recordInboundMessagingUsage: mocks.recordInboundMessagingUsage,
   preflightOutboundSms: mocks.preflightOutboundSms,
   recordOutboundSmsUsage: mocks.recordOutboundSmsUsage,
+}));
+vi.mock("@/lib/metrics/sourceKeys.server", () => ({
+  buildAiConversationSourceKey: mocks.buildAiConversationSourceKey,
+}));
+vi.mock("@/lib/metrics/recording.server", () => ({
+  recordBusinessMetricEventBestEffort:
+    mocks.recordBusinessMetricEventBestEffort,
 }));
 
 import { POST as messagingWebhook } from "./route";
@@ -243,6 +252,10 @@ beforeEach(() => {
   mocks.send.mockResolvedValue({ data: { id: "telnyx_message_1" } });
   mocks.addMessage.mockResolvedValue({ id: "assistant_message_1" });
   mocks.recordOutboundSmsUsage.mockResolvedValue(undefined);
+  mocks.buildAiConversationSourceKey.mockReturnValue(
+    `ai-conversation:${ACTIVE_CONVERSATION.id}:2026-08`
+  );
+  mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
   queueTable(
     "phone_numbers",
     { data: { business_id: BUSINESS_ID }, error: null }
@@ -567,6 +580,9 @@ describe("POST /api/messaging/webhook", () => {
     expect(response.status).toBe(200);
 
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1)
+    );
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
       BUSINESS_ID,
       "+15745550100",
@@ -615,7 +631,57 @@ describe("POST /api/messaging/webhook", () => {
     expect(
       mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[2]
     ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
+    expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledTimes(1);
+    const [metricConversationId, metricOccurredAt] =
+      mocks.buildAiConversationSourceKey.mock.calls[0] as [string, Date];
+    expect(metricConversationId).toBe(ACTIVE_CONVERSATION.id);
+    expect(metricOccurredAt).toBeInstanceOf(Date);
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      metricKey: "ai_conversation_engaged",
+      quantity: 1,
+      occurredAt: metricOccurredAt,
+      sourceKey: `ai-conversation:${ACTIVE_CONVERSATION.id}:2026-08`,
+      origin: null,
+    });
+    expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted AI SMS successful when metric recording throws", async () => {
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+    mocks.recordBusinessMetricEventBestEffort.mockImplementation(() => {
+      throw new Error("metric unavailable");
+    });
+
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() =>
+      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledTimes(1)
+    );
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      "[messaging:webhook] Metric recording failed:",
+      {
+        businessId: BUSINESS_ID,
+        metricKey: "ai_conversation_engaged",
+      }
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[messaging:webhook] AI reply processing failed:",
+      expect.anything()
+    );
   });
 
   it("captures a signaled first-reply gap only after send and persistence, including opt-out copy", async () => {
@@ -728,6 +794,7 @@ describe("POST /api/messaging/webhook", () => {
     );
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not capture a signaled gap when assistant transcript persistence fails", async () => {
@@ -754,6 +821,7 @@ describe("POST /api/messaging/webhook", () => {
       )
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
   });
 
@@ -997,6 +1065,7 @@ describe("POST /api/messaging/webhook", () => {
       expect.objectContaining({ text: expected })
     );
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not repeat opt-out copy on later automated MMS fallbacks", async () => {
@@ -1083,6 +1152,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("fails closed when the final AI operational read is indeterminate after preflight", async () => {

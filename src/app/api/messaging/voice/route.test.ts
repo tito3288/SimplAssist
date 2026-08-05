@@ -851,6 +851,7 @@ describe("POST /api/messaging/voice", () => {
         "call.recording.saved",
         {
           client_state: recordingState,
+          call_session_id: "sess_voicemail",
           recording_urls: { mp3: "https://example.test/recording.mp3" },
         },
         "evt_voice_chain_recording"
@@ -862,7 +863,8 @@ describe("POST /api/messaging/voice", () => {
     expect(recordingResponse.status).toBe(200);
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
-      ATTEMPT.business_id
+      ATTEMPT.business_id,
+      "sess_voicemail"
     );
   });
 
@@ -2083,7 +2085,8 @@ describe("POST /api/messaging/voice", () => {
     expect(response.status).toBe(200);
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
-      ATTEMPT.business_id
+      ATTEMPT.business_id,
+      ATTEMPT.call_session_id
     );
     expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
@@ -2149,9 +2152,33 @@ describe("POST /api/messaging/voice", () => {
     const response = await voiceWebhook(request());
 
     expect(response.status).toBe(500);
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      "cc_inbound"
+    );
     expect(mocks.releaseProcessedEvent).toHaveBeenCalledWith(
       "evt_voice_call_recording_saved"
     );
+  });
+
+  it("passes the provider session ID through the recording-error SMS path", async () => {
+    mocks.unwrap.mockResolvedValue(
+      voiceEvent("call.recording.error", {
+        client_state: RECORDING_STATE,
+        call_session_id: "sess_recording_error",
+      })
+    );
+
+    const response = await voiceWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      "sess_recording_error"
+    );
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
   });
 
   it("keeps the log-and-ack swallow for real-time call-control failures", async () => {

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   resolveOutboundSmsOperationalAccess: vi.fn(),
   preflightOutboundSms: vi.fn(),
   recordOutboundSmsUsage: vi.fn(),
+  buildMissedCallSourceKey: vi.fn(),
+  recordBusinessMetricEventBestEffort: vi.fn(),
 }));
 
 vi.mock("./client", () => ({
@@ -54,12 +56,21 @@ vi.mock("@/lib/billing/usage", () => ({
   preflightOutboundSms: mocks.preflightOutboundSms,
   recordOutboundSmsUsage: mocks.recordOutboundSmsUsage,
 }));
+vi.mock("@/lib/metrics/sourceKeys.server", () => ({
+  buildMissedCallSourceKey: mocks.buildMissedCallSourceKey,
+}));
+vi.mock("@/lib/metrics/recording.server", () => ({
+  recordBusinessMetricEventBestEffort:
+    mocks.recordBusinessMetricEventBestEffort,
+}));
 
 import { sendMissedCallSMS } from "./missed-call";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const CALLER = "+15745550100";
 const BUSINESS_NUMBER = "+15745550200";
+const CALL_SESSION_ID = "call-session-private-1";
+const MISSED_CALL_SOURCE_KEY = `missed-call:${"a".repeat(64)}`;
 const STARTER = {
   businessId: BUSINESS_ID,
   plan: "sms_only",
@@ -130,6 +141,8 @@ beforeEach(() => {
   mocks.send.mockResolvedValue({ data: { id: "telnyx_message_1" } });
   mocks.addMessage.mockResolvedValue({ id: "message_1" });
   mocks.recordOutboundSmsUsage.mockResolvedValue(undefined);
+  mocks.buildMissedCallSourceKey.mockReturnValue(MISSED_CALL_SOURCE_KEY);
+  mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
 });
 
 describe("sendMissedCallSMS", () => {
@@ -149,7 +162,7 @@ describe("sendMissedCallSMS", () => {
   ])("sends the exact static %s template without Anthropic", async (language, expected) => {
     setRows(language);
 
-    await sendMissedCallSMS(CALLER, BUSINESS_ID);
+    await sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID);
 
     expect(mocks.send).toHaveBeenCalledWith({
       from: BUSINESS_NUMBER,
@@ -199,6 +212,26 @@ describe("sendMissedCallSMS", () => {
       idempotencyKey: "outbound:missed_call:telnyx_message_1",
       metadata: { to: CALLER, from: BUSINESS_NUMBER },
     });
+    expect(mocks.buildMissedCallSourceKey).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      CALL_SESSION_ID
+    );
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      metricKey: "missed_call_caught",
+      quantity: 1,
+      occurredAt: expect.any(Date),
+      sourceKey: MISSED_CALL_SOURCE_KEY,
+      origin: null,
+    });
+    expect(
+      mocks.send.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
 
     const telnyxBody = mocks.send.mock.calls[0]?.[0]?.text;
     const preflightBody = mocks.preflightOutboundSms.mock.calls[0]?.[0]?.text;
@@ -214,15 +247,51 @@ describe("sendMissedCallSMS", () => {
     expect(mocks.anthropicCreate).not.toHaveBeenCalled();
   });
 
+  it("keeps an accepted SMS successful when metric dispatch throws", async () => {
+    setRows("en");
+    mocks.recordBusinessMetricEventBestEffort.mockImplementationOnce(() => {
+      throw new Error("private metric failure");
+    });
+
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+    ).resolves.toBeUndefined();
+
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(mocks.addMessage).toHaveBeenCalledOnce();
+    expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce();
+    expect(console.error).toHaveBeenCalledWith(
+      "[metrics] Metric dispatch failed:",
+      {
+        businessId: BUSINESS_ID,
+        metricKey: "missed_call_caught",
+      }
+    );
+  });
+
+  it("does not record when Telnyx rejects the missed-call SMS", async () => {
+    setRows("en");
+    mocks.send.mockRejectedValueOnce(new Error("provider rejected"));
+
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+    ).rejects.toThrow("provider rejected");
+
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+  });
+
   it("treats a canceled subscription as a known no-send decision", async () => {
     mocks.canUseFeature.mockReturnValue(false);
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
     ).resolves.toBeUndefined();
 
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("rethrows indeterminate entitlement failures for the voice webhook retry path", async () => {
@@ -230,10 +299,13 @@ describe("sendMissedCallSMS", () => {
       new Error("subscription lookup failed")
     );
 
-    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID)).rejects.toThrow(
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+    ).rejects.toThrow(
       "subscription lookup failed"
     );
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("rethrows a transient language-setting read error instead of silently defaulting", async () => {
@@ -243,10 +315,13 @@ describe("sendMissedCallSMS", () => {
       error: { message: "connection reset" },
     });
 
-    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID)).rejects.toThrow(
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+    ).rejects.toThrow(
       "AI language setting read failed"
     );
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("treats a known operational block at preflight as a successful no-op", async () => {
@@ -259,7 +334,7 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
     ).resolves.toBeUndefined();
 
     expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
@@ -273,6 +348,7 @@ describe("sendMissedCallSMS", () => {
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("treats a texting pause at the final gate as a successful no-op", async () => {
@@ -283,7 +359,7 @@ describe("sendMissedCallSMS", () => {
     });
 
     await expect(
-      sendMissedCallSMS(CALLER, BUSINESS_ID)
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
     ).resolves.toBeUndefined();
 
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith(
@@ -303,6 +379,7 @@ describe("sendMissedCallSMS", () => {
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
   it("rethrows indeterminate final operational state for voice webhook retry", async () => {
@@ -311,11 +388,14 @@ describe("sendMissedCallSMS", () => {
       new Error("operational state unavailable")
     );
 
-    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID)).rejects.toThrow(
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID, CALL_SESSION_ID)
+    ).rejects.toThrow(
       "operational state unavailable"
     );
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 });

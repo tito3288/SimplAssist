@@ -16,6 +16,11 @@ import {
   resolveBusinessOperationalControls,
   resolveOperationalBlockReason,
 } from "@/lib/account/operationalControls.server";
+import {
+  buildAiConversationSourceKey,
+  buildWebChatSessionSourceKey,
+} from "@/lib/metrics/sourceKeys.server";
+import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,6 +129,44 @@ export async function POST(request: NextRequest) {
       businessId
     );
     if (finalOperationalResponse) return finalOperationalResponse;
+
+    if (result.conversationId) {
+      const occurredAt = new Date();
+      try {
+        recordBusinessMetricEventBestEffort({
+          businessId,
+          metricKey: "web_chat_session_engaged",
+          quantity: 1,
+          occurredAt,
+          sourceKey: buildWebChatSessionSourceKey(businessId, sessionId),
+          origin: null,
+        });
+      } catch {
+        console.error("[widget:chat] Metric recording failed:", {
+          businessId,
+          metricKey: "web_chat_session_engaged",
+        });
+      }
+
+      try {
+        recordBusinessMetricEventBestEffort({
+          businessId,
+          metricKey: "ai_conversation_engaged",
+          quantity: 1,
+          occurredAt,
+          sourceKey: buildAiConversationSourceKey(
+            result.conversationId,
+            occurredAt
+          ),
+          origin: null,
+        });
+      } catch {
+        console.error("[widget:chat] Metric recording failed:", {
+          businessId,
+          metricKey: "ai_conversation_engaged",
+        });
+      }
+    }
 
     if (result.knowledgeGapDetected && result.sourceMessageId) {
       const sourceMessageId = result.sourceMessageId;
