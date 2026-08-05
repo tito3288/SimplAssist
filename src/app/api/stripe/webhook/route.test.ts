@@ -186,6 +186,42 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
+  it("keeps Checkout synchronization ahead of a suspended provisioning no-op", async () => {
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_test_suspended_operations",
+    });
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "operations_suspended",
+      message: "Account operations are suspended.",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ received: true });
+    expect(mocks.syncCheckoutSession).toHaveBeenCalledOnce();
+    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "stripe_webhook"
+    );
+    expect(
+      mocks.syncCheckoutSession.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.attemptPaidLaunch.mock.invocationCallOrder[0]);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed_at: expect.any(String),
+        processing_error: null,
+      })
+    );
+  });
+
   it("processes a 100%-off checkout ($0 invoice, no payment_intent) like any other", async () => {
     // A fully-discounted promotion code completes checkout with
     // payment_status "no_payment_required" and no payment_intent at all.

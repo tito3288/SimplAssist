@@ -11,6 +11,11 @@ import {
   recordOutboundSmsUsage,
 } from "@/lib/billing/usage";
 import {
+  outboundSmsOperationalBlockMessage,
+  resolveOutboundSmsOperationalAccess,
+} from "@/lib/messaging/outboundSmsOperational.server";
+import { isOperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+import {
   decideFeatureAccess,
   isEntitlementResolutionError,
   resolveBusinessEntitlements,
@@ -136,10 +141,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const usage = await preflightOutboundSms({ businessId, text: message });
+    let usage: Awaited<ReturnType<typeof preflightOutboundSms>>;
+    try {
+      usage = await preflightOutboundSms({
+        businessId,
+        text: message,
+        purpose: "manual_dashboard_send",
+      });
+    } catch (error) {
+      if (isOperationalControlsResolutionError(error)) {
+        console.error(
+          "[messaging/send] Preflight operational-control lookup failed:",
+          error
+        );
+        return serviceStateUnavailableResponse();
+      }
+      throw error;
+    }
     if (!usage.allowed) {
       return NextResponse.json(
         { error: usage.reason, message: usage.message },
+        { status: 403 }
+      );
+    }
+
+    let operationalAccess: Awaited<
+      ReturnType<typeof resolveOutboundSmsOperationalAccess>
+    >;
+    try {
+      operationalAccess = await resolveOutboundSmsOperationalAccess(
+        businessId,
+        "manual_dashboard_send"
+      );
+    } catch (error) {
+      if (isOperationalControlsResolutionError(error)) {
+        console.error(
+          "[messaging/send] Final operational-control lookup failed:",
+          error
+        );
+        return serviceStateUnavailableResponse();
+      }
+      throw error;
+    }
+    if (!operationalAccess.allowed) {
+      return NextResponse.json(
+        {
+          error: operationalAccess.reason,
+          message: outboundSmsOperationalBlockMessage(
+            operationalAccess.reason
+          ),
+        },
         { status: 403 }
       );
     }
@@ -152,16 +203,25 @@ export async function POST(request: NextRequest) {
       type: "SMS",
     });
 
-    await recordOutboundSmsUsage({
-      businessId,
-      text: message,
-      source: "manual_dashboard_send",
-      providerMessageId: result.data?.id ?? null,
-      idempotencyKey: result.data?.id
-        ? `outbound:manual:${result.data.id}`
-        : undefined,
-      metadata: { to, from: phoneNumberRow.phone_number },
-    });
+    try {
+      await recordOutboundSmsUsage({
+        businessId,
+        text: message,
+        source: "manual_dashboard_send",
+        providerMessageId: result.data?.id ?? null,
+        idempotencyKey: result.data?.id
+          ? `outbound:manual:${result.data.id}`
+          : undefined,
+        metadata: { to, from: phoneNumberRow.phone_number },
+      });
+    } catch (error) {
+      // Telnyx has already accepted this message. Returning a retryable error
+      // would invite the dashboard client to send the same SMS twice.
+      console.error(
+        "[messaging/send] SMS sent but outbound usage persistence failed:",
+        error
+      );
+    }
 
     return NextResponse.json({ success: true, id: result.data?.id });
   } catch (error) {
@@ -171,4 +231,11 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function serviceStateUnavailableResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "service_state_unavailable", retryable: true },
+    { status: 503 }
+  );
 }

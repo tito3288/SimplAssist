@@ -17,6 +17,7 @@ import {
   canUseFeature,
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
+import { resolveBusinessOperationalControls } from "@/lib/account/operationalControls.server";
 import type { Language } from "@/types/database";
 
 // Telnyx Voice API delivers all call lifecycle events to the same URL.
@@ -59,6 +60,9 @@ const DURABLE_EVENT_TYPES = new Set([
 type ForwardingRole = "inbound" | "forward_target";
 type ForwardingTerminalStatus = "abandoned" | "fallback_triggered" | "error";
 type VoicePhase = "pre_voicemail_ringback" | "voicemail_greeting";
+type OperationalForwardingStopReason =
+  | "account_suspended_before_bridge"
+  | "operational_state_unavailable_before_bridge";
 
 interface VoiceState {
   callControlId: string;
@@ -88,7 +92,12 @@ interface ForwardingAttempt {
   forward_to_number: string;
   status: string;
   fallback_triggered_at: string | null;
+  error_message: string | null;
 }
+
+type OperationalForwardingEndResult =
+  | { outcome: "operationally_ended"; attempt: ForwardingAttempt }
+  | { outcome: "competing_terminal"; attempt: ForwardingAttempt };
 
 function encodeState(state: VoiceState): string {
   return Buffer.from(JSON.stringify(state)).toString("base64");
@@ -547,7 +556,7 @@ async function startCallForwarding(
     return;
   }
 
-  const attempt = await createForwardingAttempt({
+  const createdAttempt = await createForwardingAttempt({
     businessId: state.businessId,
     inboundCallControlId: state.callControlId,
     inboundCallLegId,
@@ -555,6 +564,66 @@ async function startCallForwarding(
     callerPhone: state.from,
     forwardToNumber,
   });
+  const attempt = createdAttempt.attempt;
+
+  if (!createdAttempt.created) {
+    if (isOperationallyStoppedForwardingAttempt(attempt)) {
+      if (attempt.outbound_call_control_id) {
+        await hangupOwnerLegForOperationalCleanup(
+          attempt.outbound_call_control_id,
+          "forward target from prior operational-state retry"
+        );
+      }
+      console.log(
+        `[messaging:voice] forwarding attempt=${attempt.id} was operationally stopped; preserving voicemail-only outcome on redelivery`
+      );
+      await startVoicemailRingback(state);
+      return;
+    } else if (attempt.status !== "dialing") {
+      console.log(
+        `[messaging:voice] forwarding attempt=${attempt.id} is already status=${attempt.status}; skipping redelivery`
+      );
+      return;
+    } else if (attempt.outbound_call_control_id) {
+      const transition = await markForwardingEndedForOperationalStop(
+        attempt.id,
+        "operational_state_unavailable_before_bridge"
+      );
+      if (transition.outcome === "operationally_ended") {
+        await hangupOwnerLegForOperationalCleanup(
+          attempt.outbound_call_control_id,
+          "forward target recovered from an unmarked retry"
+        );
+      }
+      throw new RetryableWebhookError(
+        `[messaging:voice] Recovered an in-flight forwarding attempt=${attempt.id}; retry after owner cleanup`
+      );
+    }
+  }
+
+  let suspendedBeforeDial: boolean;
+  try {
+    suspendedBeforeDial = await isBusinessOperationsSuspended(state.businessId);
+  } catch (error) {
+    await markForwardingEndedForOperationalStop(
+      attempt.id,
+      "operational_state_unavailable_before_bridge"
+    );
+    throw error;
+  }
+
+  if (suspendedBeforeDial) {
+    console.log(
+      `[messaging:voice] operations suspended before owner dial attempt=${attempt.id}; using voicemail instead of forwarding`
+    );
+    const transition = await markForwardingEndedForOperationalStop(
+      attempt.id,
+      "account_suspended_before_bridge"
+    );
+    if (transition.outcome === "competing_terminal") return;
+    await startVoicemailRingback(state);
+    return;
+  }
 
   let outboundCallControlId: string | null = null;
 
@@ -596,6 +665,112 @@ async function startCallForwarding(
       return;
     }
 
+  } catch (err) {
+    console.error(
+      `[messaging:voice] forwarding attempt=${attempt.id} failed before owner leg was ready:`,
+      err
+    );
+    await triggerForwardingFallback({
+      attemptId: attempt.id,
+      status: "error",
+      reason: err instanceof Error ? err.message : "forwarding dial error",
+      hangupInbound: true,
+      hangupOutbound: true,
+      outboundCallControlId,
+    });
+    return;
+  }
+
+  let suspendedBeforeBridge: boolean;
+  try {
+    suspendedBeforeBridge = await isBusinessOperationsSuspended(
+      state.businessId
+    );
+  } catch (error) {
+    const transition = await markForwardingEndedForOperationalStop(
+      attempt.id,
+      "operational_state_unavailable_before_bridge"
+    );
+    if (transition.outcome === "operationally_ended") {
+      await hangupOwnerLegForOperationalCleanup(
+        outboundCallControlId,
+        "forward target after operational-state failure"
+      );
+    }
+    throw error;
+  }
+
+  if (suspendedBeforeBridge) {
+    console.log(
+      `[messaging:voice] operations suspended after owner dial attempt=${attempt.id}; canceling owner leg and continuing voicemail`
+    );
+    const transition = await markForwardingEndedForOperationalStop(
+      attempt.id,
+      "account_suspended_before_bridge"
+    );
+    if (transition.outcome === "competing_terminal") return;
+    // Persist the terminal marker before cleanup. Retryable cleanup failures
+    // release the event; redelivery retries this owner leg and then continues
+    // voicemail without reopening or dialing a second owner leg.
+    await hangupOwnerLegForOperationalCleanup(
+      outboundCallControlId,
+      "forward target after operations suspension"
+    );
+    await startVoicemailRingback(state);
+    return;
+  }
+
+  let finalAttempt: ForwardingAttempt;
+  try {
+    finalAttempt = await getForwardingAttemptByIdStrict(attempt.id);
+  } catch (error) {
+    const transition = await markForwardingEndedForOperationalStop(
+      attempt.id,
+      "operational_state_unavailable_before_bridge"
+    );
+    if (transition.outcome === "operationally_ended") {
+      await hangupOwnerLegForOperationalCleanup(
+        outboundCallControlId,
+        "forward target after final attempt-state failure"
+      );
+    }
+    throw error;
+  }
+
+  if (isOperationallyStoppedForwardingAttempt(finalAttempt)) {
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} was operationally stopped by a concurrent delivery; preserving voicemail`
+    );
+    await hangupOwnerLegForOperationalCleanup(
+      outboundCallControlId,
+      "forward target after concurrent operational stop"
+    );
+    await startVoicemailRingback(state);
+    return;
+  }
+
+  if (hasForwardingFallbackWon(finalAttempt)) {
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} became terminal before bridge status=${finalAttempt.status}; canceling owner leg`
+    );
+    await bestEffortHangup(
+      outboundCallControlId,
+      "forward target after terminal attempt-state fence"
+    );
+    return;
+  }
+
+  if (finalAttempt.status !== "dialing" && finalAttempt.status !== "connected") {
+    await hangupOwnerLegForOperationalCleanup(
+      outboundCallControlId,
+      "forward target after unexpected final attempt state"
+    );
+    throw new RetryableWebhookError(
+      `[messaging:voice] forwarding attempt=${attempt.id} has unexpected pre-bridge status=${finalAttempt.status}`
+    );
+  }
+
+  try {
     const inboundBridgeState = encodeState({
       ...state,
       forwardingRole: "inbound",
@@ -617,11 +792,25 @@ async function startCallForwarding(
     await triggerForwardingFallback({
       attemptId: attempt.id,
       status: "error",
-      reason: err instanceof Error ? err.message : "forwarding dial/bridge error",
+      reason: err instanceof Error ? err.message : "forwarding bridge error",
       hangupInbound: true,
       hangupOutbound: true,
       outboundCallControlId,
     });
+  }
+}
+
+async function isBusinessOperationsSuspended(
+  businessId: string
+): Promise<boolean> {
+  try {
+    const controls = await resolveBusinessOperationalControls(businessId);
+    return controls.operationsSuspendedAt !== null;
+  } catch (error) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] Failed to resolve operational controls for business ${businessId}`,
+      { cause: error }
+    );
   }
 }
 
@@ -656,14 +845,6 @@ async function handleCallHangup(payload: Record<string, unknown>) {
     (payload.cause as string | undefined) ??
     "unknown";
 
-  if (attempt.status === "connected") {
-    await markForwardingEnded(attempt.id);
-    console.log(
-      `[messaging:voice] forwarding attempt=${attempt.id} connected call ended cause=${cause}`
-    );
-    return;
-  }
-
   if (attempt.status === "ended") {
     console.log(
       `[messaging:voice] forwarding attempt=${attempt.id} already ended; ignoring additional hangup cause=${cause}`
@@ -678,14 +859,22 @@ async function handleCallHangup(payload: Record<string, unknown>) {
     return;
   }
 
-  const isInboundHangup =
-    callControlId === attempt.inbound_call_control_id ||
-    (state?.forwardingRole === "inbound" &&
-      state.forwardingAttemptId === attempt.id);
-  const isOutboundHangup =
-    callControlId === attempt.outbound_call_control_id ||
-    (state?.forwardingRole === "forward_target" &&
-      state.forwardingAttemptId === attempt.id);
+  const isInboundHangup = callControlId
+    ? callControlId === attempt.inbound_call_control_id
+    : state?.forwardingRole === "inbound" &&
+      state.forwardingAttemptId === attempt.id;
+  const isOutboundHangup = callControlId
+    ? callControlId === attempt.outbound_call_control_id
+    : state?.forwardingRole === "forward_target" &&
+      state.forwardingAttemptId === attempt.id;
+
+  if (attempt.status === "connected" && !isOutboundHangup) {
+    await markForwardingEnded(attempt.id);
+    console.log(
+      `[messaging:voice] forwarding attempt=${attempt.id} connected call ended cause=${cause}`
+    );
+    return;
+  }
 
   if (isInboundHangup) {
     console.log(
@@ -702,6 +891,32 @@ async function handleCallHangup(payload: Record<string, unknown>) {
   }
 
   if (isOutboundHangup) {
+    const operationsSuspended = await isBusinessOperationsSuspended(
+      attempt.business_id
+    );
+    if (operationsSuspended) {
+      console.log(
+        `[messaging:voice] owner leg ended while operations are suspended attempt=${attempt.id}; preserving inbound voicemail`
+      );
+      const transition = await markForwardingEndedForOperationalStop(
+        attempt.id,
+        "account_suspended_before_bridge"
+      );
+      if (transition.outcome === "competing_terminal") return;
+      await startVoicemailRingback(
+        voiceStateForForwardingVoicemail(state, attempt)
+      );
+      return;
+    }
+
+    if (attempt.status === "connected") {
+      await markForwardingEnded(attempt.id);
+      console.log(
+        `[messaging:voice] forwarding attempt=${attempt.id} connected owner leg ended cause=${cause}`
+      );
+      return;
+    }
+
     console.log(
       `[messaging:voice] owner leg ended before bridge attempt=${attempt.id} cause=${cause}; triggering missed-call fallback`
     );
@@ -718,6 +933,29 @@ async function handleCallHangup(payload: Record<string, unknown>) {
   console.log(
     `[messaging:voice] forwarding attempt=${attempt.id} hangup did not match known leg cause=${cause}`
   );
+}
+
+function voiceStateForForwardingVoicemail(
+  state: VoiceState | null,
+  attempt: ForwardingAttempt
+): VoiceState {
+  const matchingState =
+    state?.businessId === attempt.business_id &&
+    state.callControlId === attempt.inbound_call_control_id
+      ? state
+      : null;
+
+  return {
+    ...(matchingState ?? {}),
+    callControlId: attempt.inbound_call_control_id,
+    businessId: attempt.business_id,
+    from: attempt.caller_phone,
+    businessName: matchingState?.businessName ?? "us",
+    forwardingRole: undefined,
+    forwardingAttemptId: undefined,
+    outboundCallControlId: undefined,
+    voicePhase: undefined,
+  };
 }
 
 async function handleSpeakEnded(payload: Record<string, unknown>) {
@@ -822,7 +1060,7 @@ async function createForwardingAttempt(args: {
   callSessionId: string;
   callerPhone: string;
   forwardToNumber: string;
-}): Promise<ForwardingAttempt> {
+}): Promise<{ attempt: ForwardingAttempt; created: boolean }> {
   const { data, error } = await supabaseAdmin
     .from("call_forwarding_attempts")
     .insert({
@@ -845,20 +1083,21 @@ async function createForwardingAttempt(args: {
     .single();
 
   if (error?.code === "23505") {
-    const existing = await getForwardingAttemptByColumn(
+    const existing = await getForwardingAttemptByColumnStrict(
       "call_session_id",
       args.callSessionId
     );
-    if (existing) return existing;
+    return { attempt: existing, created: false };
   }
 
   if (error || !data) {
-    throw new Error(
-      `[messaging:voice] failed to create forwarding attempt: ${error?.message ?? "no row returned"}`
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to create forwarding attempt: ${error?.message ?? "no row returned"}`,
+      { cause: error ?? undefined }
     );
   }
 
-  return data as ForwardingAttempt;
+  return { attempt: data as ForwardingAttempt, created: true };
 }
 
 async function updateForwardingAttemptOutbound(
@@ -956,6 +1195,26 @@ async function getForwardingAttemptByColumn(
   return (data as ForwardingAttempt | null) ?? null;
 }
 
+async function getForwardingAttemptByColumnStrict(
+  column: "call_session_id",
+  value: string
+): Promise<ForwardingAttempt> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .select(forwardingAttemptSelect)
+    .eq(column, value)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to recover existing forwarding attempt ${column}=${value}`,
+      { cause: error ?? undefined }
+    );
+  }
+
+  return data as ForwardingAttempt;
+}
+
 async function markForwardingConnected(
   attemptId: string,
   source: string
@@ -1013,6 +1272,101 @@ async function markForwardingEnded(attemptId: string): Promise<void> {
   }
 }
 
+function isOperationallyStoppedForwardingAttempt(
+  attempt: ForwardingAttempt
+): attempt is ForwardingAttempt & { error_message: OperationalForwardingStopReason } {
+  return (
+    attempt.status === "ended" &&
+    (attempt.error_message === "account_suspended_before_bridge" ||
+      attempt.error_message === "operational_state_unavailable_before_bridge")
+  );
+}
+
+function hasForwardingFallbackWon(attempt: ForwardingAttempt): boolean {
+  return (
+    attempt.fallback_triggered_at !== null ||
+    attempt.status === "fallback_triggered" ||
+    attempt.status === "abandoned" ||
+    attempt.status === "error" ||
+    attempt.status === "ended"
+  );
+}
+
+async function markForwardingEndedForOperationalStop(
+  attemptId: string,
+  reason: OperationalForwardingStopReason
+): Promise<OperationalForwardingEndResult> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .update({
+      status: "ended",
+      ended_at: new Date().toISOString(),
+      error_message: reason,
+    })
+    .eq("id", attemptId)
+    .in("status", ["dialing", "connected"])
+    .is("fallback_triggered_at", null)
+    .select(forwardingAttemptSelect)
+    .maybeSingle();
+
+  if (error) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to end operationally blocked forwarding attempt=${attemptId}: ${error.message}`,
+      { cause: error }
+    );
+  }
+
+  if (data) {
+    return {
+      outcome: "operationally_ended",
+      attempt: data as ForwardingAttempt,
+    };
+  }
+
+  const latest = await getForwardingAttemptByIdStrict(attemptId);
+  if (isOperationallyStoppedForwardingAttempt(latest)) {
+    return { outcome: "operationally_ended", attempt: latest };
+  }
+  if (
+    latest.fallback_triggered_at ||
+    latest.status === "fallback_triggered" ||
+    latest.status === "abandoned" ||
+    latest.status === "error" ||
+    latest.status === "ended"
+  ) {
+    console.log(
+      `[messaging:voice] operational stop lost to terminal attempt=${attemptId} status=${latest.status}`
+    );
+    return { outcome: "competing_terminal", attempt: latest };
+  }
+
+  // The update explicitly accepts both dialing and connected. Seeing either
+  // after a zero-row result means a concurrent transition escaped the CAS; do
+  // not bridge, hang up, or acknowledge without a retryable re-evaluation.
+  throw new RetryableWebhookError(
+    `[messaging:voice] operational stop did not claim live forwarding attempt=${attemptId} status=${latest.status}`
+  );
+}
+
+async function getForwardingAttemptByIdStrict(
+  attemptId: string
+): Promise<ForwardingAttempt> {
+  const { data, error } = await supabaseAdmin
+    .from("call_forwarding_attempts")
+    .select(forwardingAttemptSelect)
+    .eq("id", attemptId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new RetryableWebhookError(
+      `[messaging:voice] failed to confirm forwarding attempt=${attemptId} after operational transition`,
+      { cause: error ?? undefined }
+    );
+  }
+
+  return data as ForwardingAttempt;
+}
+
 async function triggerForwardingFallback(args: {
   attemptId: string;
   status: ForwardingTerminalStatus;
@@ -1037,7 +1391,7 @@ async function triggerForwardingFallback(args: {
     .update(updateData)
     .eq("id", args.attemptId)
     .is("fallback_triggered_at", null)
-    .neq("status", "connected")
+    .in("status", ["dialing", "error"])
     .select(forwardingAttemptSelect)
     .maybeSingle();
 
@@ -1081,7 +1435,7 @@ async function triggerForwardingFallback(args: {
     // short-circuits on fallback_triggered_at, so without clearing it the
     // redelivered hangup would ack without re-attempting the SMS. Status
     // 'error' + error_message record what happened; the retry re-enters
-    // this claim (fallback_triggered_at null, status ≠ connected) and
+    // this claim (fallback_triggered_at null, status='error') and
     // re-sends. Lost-ack caveat: if the SMS actually sent but our client
     // saw an error, the retry double-texts — annoying, and strictly better
     // than a caller who never hears back. Thrown as RetryableWebhookError:
@@ -1140,5 +1494,26 @@ async function bestEffortHangup(
   }
 }
 
+async function hangupOwnerLegForOperationalCleanup(
+  callControlId: string,
+  label: string
+): Promise<void> {
+  try {
+    await telnyx.calls.actions.hangup(callControlId, {});
+  } catch (error) {
+    const status = voiceCommandHttpStatus(error);
+    if (status === 404 || status === 410 || status === 422) {
+      console.log(
+        `[messaging:voice] owner-leg cleanup already terminal for ${label} status=${status}`
+      );
+      return;
+    }
+    throw new RetryableWebhookError(
+      `[messaging:voice] owner-leg cleanup failed for ${label}`,
+      { cause: error }
+    );
+  }
+}
+
 const forwardingAttemptSelect =
-  "id, business_id, inbound_call_control_id, outbound_call_control_id, call_session_id, caller_phone, forward_to_number, status, fallback_triggered_at";
+  "id, business_id, inbound_call_control_id, outbound_call_control_id, call_session_id, caller_phone, forward_to_number, status, fallback_triggered_at, error_message";

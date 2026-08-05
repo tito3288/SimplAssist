@@ -72,6 +72,7 @@ type BusinessState = {
   id: string;
   updated_at: string;
   deleted_at: string | null;
+  operations_suspended_at: string | null;
   telnyx_unique_claims_released_at: string | null;
   active_telnyx_release_run_id: string | null;
   telnyx_resource_state: string;
@@ -121,6 +122,7 @@ function safeBusiness(overrides: Partial<BusinessState> = {}): BusinessState {
     id: BUSINESS_ID,
     updated_at: "2026-07-28T10:00:00.000Z",
     deleted_at: null,
+    operations_suspended_at: null,
     telnyx_unique_claims_released_at: null,
     active_telnyx_release_run_id: null,
     telnyx_resource_state: "active",
@@ -460,6 +462,10 @@ describe("ensureCampaignAssignmentForBusiness safety gates", () => {
     ["missing messaging profile", { telnyx_messaging_profile_id: "   " }],
     ["deleted business", { deleted_at: "2026-07-28T09:00:00.000Z" }],
     [
+      "operationally suspended business",
+      { operations_suspended_at: "2026-07-28T09:00:00.000Z" },
+    ],
+    [
       "released uniqueness claims",
       { telnyx_unique_claims_released_at: "2026-07-28T09:00:00.000Z" },
     ],
@@ -481,11 +487,17 @@ describe("ensureCampaignAssignmentForBusiness safety gates", () => {
 
       await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true });
 
+      expect(businessQueries()[0]?.selection).toContain(
+        "operations_suspended_at"
+      );
       expect(phoneQueries()).toHaveLength(0);
       expect(mocks.retrieveAssignment).not.toHaveBeenCalled();
       expect(mocks.retrieveTaskStatus).not.toHaveBeenCalled();
       expect(mocks.createAssignment).not.toHaveBeenCalled();
       expect(mocks.bulkAssignProfile).not.toHaveBeenCalled();
+      expect(
+        businessQueries().filter((query) => query.operation === "update")
+      ).toHaveLength(0);
     }
   );
 });
@@ -546,6 +558,11 @@ describe("per-number assignment intent claim", () => {
           column: "telnyx_brand_id",
           value: BRAND_ID,
         },
+        {
+          kind: "is",
+          column: "operations_suspended_at",
+          value: null,
+        },
       ])
     );
     expect(timeline.indexOf("business_claim")).toBeLessThan(
@@ -601,6 +618,11 @@ describe("per-number assignment intent claim", () => {
           kind: "eq",
           column: "telnyx_messaging_profile_id",
           value: PROFILE_ID,
+        },
+        {
+          kind: "is",
+          column: "operations_suspended_at",
+          value: null,
         },
       ])
     );
@@ -1000,6 +1022,27 @@ describe("per-number assignment intent claim", () => {
     mocks.retrieveAssignment.mockImplementationOnce(async () => {
       timeline.push("provider_inspect");
       business.campaign_status = "rejected";
+      business.updated_at = "2026-07-28T10:30:01.000Z";
+      return {
+        phoneNumber: PHONE_NUMBER,
+        campaignId: CAMPAIGN_ID,
+        assignmentStatus: "ASSIGNED",
+      };
+    });
+
+    await ensureCampaignAssignmentForBusiness(BUSINESS_ID, { force: true });
+
+    expect(mocks.retrieveAssignment).toHaveBeenCalledOnce();
+    expect(mocks.createAssignment).not.toHaveBeenCalled();
+    expect(mocks.bulkAssignProfile).not.toHaveBeenCalled();
+    expect(phoneRows[0]).toEqual(originalPhone);
+  });
+
+  it("releases the intent when suspension lands during assignment inspection", async () => {
+    const originalPhone = { ...phoneRows[0] };
+    mocks.retrieveAssignment.mockImplementationOnce(async () => {
+      timeline.push("provider_inspect");
+      business.operations_suspended_at = "2026-07-28T10:30:01.000Z";
       business.updated_at = "2026-07-28T10:30:01.000Z";
       return {
         phoneNumber: PHONE_NUMBER,

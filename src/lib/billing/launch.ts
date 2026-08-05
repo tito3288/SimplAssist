@@ -1,5 +1,8 @@
 import "server-only";
 
+import {
+  resolveBusinessOperationalControls,
+} from "@/lib/account/operationalControls.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   attachOwnedNumberToCustomerProfile,
@@ -62,6 +65,9 @@ const BILLING_REQUIRED_MESSAGE =
 const SUBMISSION_DISABLED_MESSAGE =
   "SMS registration is disabled for this account. Contact SimplAssist support if this looks wrong.";
 
+const OPERATIONS_SUSPENDED_MESSAGE =
+  "Account operations are suspended. Reactivate the account before SMS registration can continue.";
+
 const NO_EIN_HELD_MESSAGE =
   "Add your EIN before SMS registration can continue.";
 
@@ -89,6 +95,7 @@ export type LaunchResult =
         | "risk_review_required"
         | "existing_brand_review_required"
         | "linked_brand_needs_support"
+        | "operations_suspended"
         | "submission_disabled"
         | "missing_phone_number"
         | "number_unavailable"
@@ -135,6 +142,19 @@ export async function attemptPaidLaunch(
   const business = await readLaunchBusiness(businessId);
   if (!business) {
     return { status: "failed", message: "Business not found." };
+  }
+
+  // Operational suspension is independent of registration and billing state.
+  // Read it uncached before any risk claim or Telnyx work; resolution failures
+  // deliberately propagate so callers retry rather than provisioning from an
+  // indeterminate state. Individual service pauses do not block provisioning.
+  const operationalControls =
+    await resolveBusinessOperationalControls(businessId);
+  if (operationalControls.operationsSuspendedAt !== null) {
+    return {
+      status: "operations_suspended",
+      message: OPERATIONS_SUSPENDED_MESSAGE,
+    };
   }
 
   if (shouldEnforceInitialContentQuality(business)) {

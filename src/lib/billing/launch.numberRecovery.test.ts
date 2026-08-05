@@ -21,11 +21,15 @@ const mocks = vi.hoisted(() => ({
   getActiveSmsNumber: vi.fn(),
   verifyPublishedCompliancePage: vi.fn(),
   getBusinessContentQuality: vi.fn(),
+  resolveBusinessOperationalControls: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
+}));
+vi.mock("@/lib/account/operationalControls.server", () => ({
+  resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
 }));
 vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
   getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
@@ -159,6 +163,13 @@ beforeEach(() => {
     message: null,
   });
   mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
+  mocks.resolveBusinessOperationalControls.mockResolvedValue({
+    businessId: BUSINESS_ID,
+    operationsSuspendedAt: null,
+    aiRepliesPausedAt: null,
+    textingPausedAt: null,
+    bookingsPausedAt: null,
+  });
   mocks.claimRegistrationAttempt.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",
@@ -192,6 +203,79 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it("returns a typed suspension before billing, claims, or provider work", async () => {
+    queueResults({ data: LAUNCH_BUSINESS, error: null });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      operationsSuspendedAt: "2026-07-28T10:00:00.000Z",
+      aiRepliesPausedAt: null,
+      textingPausedAt: null,
+      bookingsPausedAt: null,
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "operations_suspended",
+      message:
+        "Account operations are suspended. Reactivate the account before SMS registration can continue.",
+    });
+    expect(chains).toHaveLength(1);
+    expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.prepareExistingTelnyxBrandLinkForLaunch).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+    expect(mocks.createVoiceApplication).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before billing or provider work when suspension state is indeterminate", async () => {
+    queueResults({ data: LAUNCH_BUSINESS, error: null });
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new Error("operational state unavailable")
+    );
+
+    await expect(
+      attemptPaidLaunch(BUSINESS_ID, "onboarding_retry")
+    ).rejects.toThrow("operational state unavailable");
+
+    expect(chains).toHaveLength(1);
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
+  it("keeps provisioning available when only texting is paused", async () => {
+    mocks.resolveBusinessOperationalControls.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      operationsSuspendedAt: null,
+      aiRepliesPausedAt: null,
+      textingPausedAt: "2026-07-28T10:00:00.000Z",
+      bookingsPausedAt: null,
+    });
+    queueHappyPathThrough(
+      { data: null, error: null },
+      { error: null },
+      { error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("submitted");
+    expect(mocks.registerBrand).toHaveBeenCalledOnce();
+    expect(mocks.createMessagingProfile).toHaveBeenCalledOnce();
+    expect(mocks.createVoiceApplication).toHaveBeenCalledOnce();
+    expect(mocks.purchaseNumber).toHaveBeenCalledOnce();
+    expect(mocks.registerCampaign).toHaveBeenCalledOnce();
+    expect(mocks.ensureCampaignAssignmentForBusiness).toHaveBeenCalledOnce();
+  });
+
   it("stops a deficient initial launch before billing, risk, claims, or provider work", async () => {
     queueResults({ data: LAUNCH_BUSINESS, error: null });
     mocks.getBusinessContentQuality.mockResolvedValue({

@@ -1,5 +1,14 @@
 import "server-only";
 
+import {
+  OperationalControlsResolutionError,
+  resolveBusinessOperationalControlsFromSnapshot,
+} from "@/lib/account/operationalControls.server";
+import {
+  decideOutboundSmsOperationalAccess,
+  outboundSmsOperationalBlockMessage,
+  type OutboundSmsPurpose,
+} from "@/lib/messaging/outboundSmsOperational.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { isSubscriptionPlan } from "./features";
@@ -11,6 +20,9 @@ import type {
 } from "@/types/database";
 
 const USAGE_BLOCK_MESSAGES = {
+  account_suspended: outboundSmsOperationalBlockMessage("account_suspended"),
+  texting_paused: outboundSmsOperationalBlockMessage("texting_paused"),
+  ai_replies_paused: outboundSmsOperationalBlockMessage("ai_replies_paused"),
   telnyx_submission_disabled:
     "SMS sending is disabled for this account. Contact SimplAssist support if this looks wrong.",
   billing_required:
@@ -40,6 +52,10 @@ export type UsagePreflight =
 
 interface BusinessBillingRow {
   id: string;
+  operations_suspended_at: unknown;
+  ai_replies_paused_at: unknown;
+  texting_paused_at: unknown;
+  bookings_paused_at: unknown;
   billing_mode: unknown;
   partner_plan: unknown;
   billing_pilot: boolean;
@@ -84,9 +100,20 @@ interface UsageContext {
 export async function preflightOutboundSms(args: {
   businessId: string;
   text: string;
+  purpose: OutboundSmsPurpose;
 }): Promise<UsagePreflight> {
   const smsParts = countSmsParts(args.text);
   const context = await resolveUsageContext(args.businessId);
+
+  const operationalAccess = decideOutboundSmsOperationalAccess(
+    resolveBusinessOperationalControlsFromSnapshot(args.businessId, {
+      business: context.business,
+    }),
+    args.purpose,
+  );
+  if (!operationalAccess.allowed) {
+    return blocked(operationalAccess.reason, smsParts);
+  }
 
   if (context.business.telnyx_submission_disabled) {
     return blocked("telnyx_submission_disabled", smsParts);
@@ -214,7 +241,7 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
     supabaseAdmin
       .from("businesses")
       .select(
-        "id, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
+        "id, operations_suspended_at, ai_replies_paused_at, texting_paused_at, bookings_paused_at, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in"
       )
       .eq("id", businessId)
       .single<BusinessBillingRow>(),
@@ -226,9 +253,12 @@ async function resolveUsageContext(businessId: string): Promise<UsageContext> {
   ]);
 
   if (businessError || !business) {
-    throw new Error(
-      `[billing:usage] Failed to read business ${businessId}: ${businessError?.message ?? "not found"}`
-    );
+    throw new OperationalControlsResolutionError({
+      code: businessError ? "business_lookup_failed" : "business_not_found",
+      businessId,
+      message: `[billing:usage] Failed to read business ${businessId}: ${businessError?.message ?? "not found"}`,
+      cause: businessError ?? undefined,
+    });
   }
 
   if (subscriptionError) {

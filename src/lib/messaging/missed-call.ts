@@ -1,7 +1,14 @@
 import { telnyx } from "./client";
 import { getOutboundSendContext } from "./lookup";
 import { isE164PhoneNumber } from "@/lib/phone/e164";
-import { insertPausedSystemMessageIfNeeded } from "./pausedNotice";
+import {
+  insertPausedSystemMessageIfNeeded,
+  type PausedReason,
+} from "./pausedNotice";
+import {
+  isOutboundSmsOperationalBlockReason,
+  resolveOutboundSmsOperationalAccess,
+} from "./outboundSmsOperational.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import { getOrCreateConversation, addMessage } from "@/lib/ai/conversations";
@@ -155,7 +162,11 @@ export async function sendMissedCallSMS(
       return;
     }
 
-    const usage = await preflightOutboundSms({ businessId, text: smsBody });
+    const usage = await preflightOutboundSms({
+      businessId,
+      text: smsBody,
+      purpose: "missed_call",
+    });
     if (!usage.allowed) {
       console.warn(
         `[missed-call] send blocked by usage gate: reason=${usage.reason} for business ${businessId}`
@@ -166,6 +177,24 @@ export async function sendMissedCallSMS(
         channel: "sms",
         context: "missed_call",
         reason: usageToPausedReason(usage.reason),
+      });
+      return;
+    }
+
+    const operationalAccess = await resolveOutboundSmsOperationalAccess(
+      businessId,
+      "missed_call"
+    );
+    if (!operationalAccess.allowed) {
+      console.warn(
+        `[missed-call] send blocked by operational controls: reason=${operationalAccess.reason} for business ${businessId}`
+      );
+      await insertPausedSystemMessageIfNeeded({
+        conversationId: conversation.id,
+        businessId,
+        channel: "sms",
+        context: "missed_call",
+        reason: operationalAccess.reason,
       });
       return;
     }
@@ -224,7 +253,8 @@ function toPausedReason(
 
 function usageToPausedReason(
   reason: UsageBlockReason
-): "usage_limit_reached" | "billing_paused" | "submission_disabled" {
+): PausedReason {
+  if (isOutboundSmsOperationalBlockReason(reason)) return reason;
   if (reason === "usage_limit_reached") return "usage_limit_reached";
   if (reason === "telnyx_submission_disabled") return "submission_disabled";
   return "billing_paused";

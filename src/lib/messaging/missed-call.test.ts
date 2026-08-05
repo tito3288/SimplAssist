@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getOrCreateConversation: vi.fn(),
   addMessage: vi.fn(),
   insertPausedSystemMessageIfNeeded: vi.fn(),
+  resolveOutboundSmsOperationalAccess: vi.fn(),
   preflightOutboundSms: vi.fn(),
   recordOutboundSmsUsage: vi.fn(),
 }));
@@ -40,6 +41,14 @@ vi.mock("@/lib/ai/conversations", () => ({
 }));
 vi.mock("./pausedNotice", () => ({
   insertPausedSystemMessageIfNeeded: mocks.insertPausedSystemMessageIfNeeded,
+}));
+vi.mock("./outboundSmsOperational.server", () => ({
+  resolveOutboundSmsOperationalAccess:
+    mocks.resolveOutboundSmsOperationalAccess,
+  isOutboundSmsOperationalBlockReason: (reason: string) =>
+    ["account_suspended", "texting_paused", "ai_replies_paused"].includes(
+      reason
+    ),
 }));
 vi.mock("@/lib/billing/usage", () => ({
   preflightOutboundSms: mocks.preflightOutboundSms,
@@ -115,6 +124,9 @@ beforeEach(() => {
   mocks.findOrCreateContact.mockResolvedValue({ id: "contact_1" });
   mocks.getOrCreateConversation.mockResolvedValue({ id: "conversation_1" });
   mocks.preflightOutboundSms.mockResolvedValue({ allowed: true });
+  mocks.resolveOutboundSmsOperationalAccess.mockResolvedValue({
+    allowed: true,
+  });
   mocks.send.mockResolvedValue({ data: { id: "telnyx_message_1" } });
   mocks.addMessage.mockResolvedValue({ id: "message_1" });
   mocks.recordOutboundSmsUsage.mockResolvedValue(undefined);
@@ -149,7 +161,20 @@ describe("sendMissedCallSMS", () => {
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
       text: expected,
+      purpose: "missed_call",
     });
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "missed_call"
+    );
+    expect(
+      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
     expect(mocks.getOrCreateConversation).toHaveBeenCalledWith(
       BUSINESS_ID,
       "contact_1",
@@ -222,5 +247,75 @@ describe("sendMissedCallSMS", () => {
       "AI language setting read failed"
     );
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("treats a known operational block at preflight as a successful no-op", async () => {
+    setRows("en");
+    mocks.preflightOutboundSms.mockResolvedValue({
+      allowed: false,
+      reason: "account_suspended",
+      message: "Account operations are suspended.",
+      smsParts: 1,
+    });
+
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID)
+    ).resolves.toBeUndefined();
+
+    expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+      conversationId: "conversation_1",
+      businessId: BUSINESS_ID,
+      channel: "sms",
+      context: "missed_call",
+      reason: "account_suspended",
+    });
+    expect(mocks.resolveOutboundSmsOperationalAccess).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+  });
+
+  it("treats a texting pause at the final gate as a successful no-op", async () => {
+    setRows("en");
+    mocks.resolveOutboundSmsOperationalAccess.mockResolvedValue({
+      allowed: false,
+      reason: "texting_paused",
+    });
+
+    await expect(
+      sendMissedCallSMS(CALLER, BUSINESS_ID)
+    ).resolves.toBeUndefined();
+
+    expect(mocks.preflightOutboundSms).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "missed_call" })
+    );
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "missed_call"
+    );
+    expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+      conversationId: "conversation_1",
+      businessId: BUSINESS_ID,
+      channel: "sms",
+      context: "missed_call",
+      reason: "texting_paused",
+    });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+  });
+
+  it("rethrows indeterminate final operational state for voice webhook retry", async () => {
+    setRows("en");
+    mocks.resolveOutboundSmsOperationalAccess.mockRejectedValue(
+      new Error("operational state unavailable")
+    );
+
+    await expect(sendMissedCallSMS(CALLER, BUSINESS_ID)).rejects.toThrow(
+      "operational state unavailable"
+    );
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
   });
 });

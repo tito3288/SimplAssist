@@ -62,12 +62,16 @@ const mocks = vi.hoisted(() => {
     getActiveSmsNumber: vi.fn(),
     verifyPublishedCompliancePage: vi.fn(),
     getBusinessContentQuality: vi.fn(),
+    resolveBusinessOperationalControls: vi.fn(),
   };
 });
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
+}));
+vi.mock("@/lib/account/operationalControls.server", () => ({
+  resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
 }));
 vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
   getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
@@ -185,6 +189,13 @@ beforeEach(() => {
     message: null,
   });
   mocks.getBusinessContentQuality.mockResolvedValue({ ready: true });
+  mocks.resolveBusinessOperationalControls.mockResolvedValue({
+    businessId: BUSINESS_ID,
+    operationsSuspendedAt: null,
+    aiRepliesPausedAt: null,
+    textingPausedAt: null,
+    bookingsPausedAt: null,
+  });
   mocks.claim.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   processIncomingMessageDetailed: vi.fn(),
   recordKnowledgeGap: vi.fn(),
   getOutboundSendContext: vi.fn(),
+  resolveOutboundSmsOperationalAccess: vi.fn(),
   insertPausedSystemMessageIfNeeded: vi.fn(),
   recordInboundMessagingUsage: vi.fn(),
   preflightOutboundSms: vi.fn(),
@@ -65,6 +66,14 @@ vi.mock("@/lib/ai/knowledgeGaps", () => ({
 vi.mock("@/lib/messaging/lookup", () => ({
   getOutboundSendContext: mocks.getOutboundSendContext,
 }));
+vi.mock("@/lib/messaging/outboundSmsOperational.server", () => ({
+  resolveOutboundSmsOperationalAccess:
+    mocks.resolveOutboundSmsOperationalAccess,
+  isOutboundSmsOperationalBlockReason: (reason: string) =>
+    ["account_suspended", "texting_paused", "ai_replies_paused"].includes(
+      reason
+    ),
+}));
 vi.mock("@/lib/messaging/pausedNotice", () => ({
   insertPausedSystemMessageIfNeeded: mocks.insertPausedSystemMessageIfNeeded,
 }));
@@ -107,6 +116,8 @@ const CANCELED_ENTITLEMENTS = {
   status: "canceled",
   active: false,
 };
+const MMS_FALLBACK_WITHOUT_OPT_OUT =
+  "I can't process images yet — please describe what you need in text and I'll help.";
 
 const tableQueues = new Map<string, unknown[]>();
 
@@ -198,6 +209,9 @@ beforeEach(() => {
     campaignStatus: "approved",
     assignmentStatus: "assigned",
     messagingProfileId: "profile_1",
+  });
+  mocks.resolveOutboundSmsOperationalAccess.mockResolvedValue({
+    allowed: true,
   });
   mocks.processIncomingMessageDetailed.mockResolvedValue({
     text: "Yes, we can help.",
@@ -379,6 +393,20 @@ describe("POST /api/messaging/webhook", () => {
         text: "Yes, we can help.",
       })
     );
+    expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      text: "Yes, we can help.",
+      purpose: "ai_reply",
+    });
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+    );
+    expect(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
   });
 
@@ -622,6 +650,92 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "account suspension",
+      "account_suspended",
+      inboundEvent(),
+      "ai_reply",
+    ],
+    [
+      "texting pause",
+      "texting_paused",
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] }),
+      "mms_fallback",
+    ],
+    ["AI pause", "ai_replies_paused", inboundEvent(), "ai_reply"],
+  ] as const)(
+    "persists inbound activity, records one internal notice, and completes the claim during %s",
+    async (_, reason, event, purpose) => {
+      mocks.unwrap.mockResolvedValue(event);
+      mocks.resolveOutboundSmsOperationalAccess.mockResolvedValue({
+        allowed: false,
+        reason,
+      });
+
+      const response = await messagingWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.recordInboundMessagingUsage).toHaveBeenCalledOnce();
+      expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
+      expect(
+        mocks.recordInboundMessagingUsage.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+      );
+      expect(
+        mocks.addInboundMessageOnce.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[0]
+      );
+      expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        purpose
+      );
+      expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+        conversationId: ACTIVE_CONVERSATION.id,
+        businessId: BUSINESS_ID,
+        channel: "sms",
+        context: purpose,
+        reason,
+      });
+      expect(
+        mocks.insertPausedSystemMessageIfNeeded.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        mocks.completeMessagingWebhookEvent.mock.invocationCallOrder[0]
+      );
+      expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
+        "telnyx:message.received:evt_inbound_1",
+        "claim-token-1"
+      );
+      expect(mocks.releaseMessagingWebhookClaim).not.toHaveBeenCalled();
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.getOutboundSendContext).not.toHaveBeenCalled();
+      expect(mocks.preflightOutboundSms).not.toHaveBeenCalled();
+      expect(mocks.send).not.toHaveBeenCalled();
+      expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    }
+  );
+
+  it("releases the claim only after preserving inbound activity when operational state is indeterminate", async () => {
+    mocks.resolveOutboundSmsOperationalAccess.mockRejectedValue(
+      new Error("operational state unavailable")
+    );
+
+    const response = await messagingWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.recordInboundMessagingUsage).toHaveBeenCalledOnce();
+    expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
+    expect(mocks.completeMessagingWebhookEvent).not.toHaveBeenCalled();
+    expect(mocks.releaseMessagingWebhookClaim).toHaveBeenCalledWith(
+      "telnyx:message.received:evt_inbound_1",
+      "claim-token-1"
+    );
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
   it("adds opt-out copy to the first automated MMS fallback", async () => {
     mocks.unwrap.mockResolvedValue(
       inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
@@ -637,7 +751,17 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
       text: expected,
+      purpose: "mms_fallback",
     });
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.preflightOutboundSms.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+    );
+    expect(
+      mocks.resolveOutboundSmsOperationalAccess.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
     expect(mocks.send).toHaveBeenCalledWith(
       expect.objectContaining({ text: expected })
     );
@@ -666,6 +790,129 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.send).toHaveBeenCalledWith(
       expect.objectContaining({ text: "I can't process images yet — please describe what you need in text and I'll help." })
     );
+  });
+
+  it("blocks MMS at the final gate when texting pauses after preflight", async () => {
+    mocks.unwrap.mockResolvedValue(
+      inboundEvent({ text: "", media: [{ content_type: "image/jpeg" }] })
+    );
+    mocks.resolveOutboundSmsOperationalAccess
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({
+        allowed: false,
+        reason: "texting_paused",
+      });
+
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() =>
+      expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+        conversationId: ACTIVE_CONVERSATION.id,
+        businessId: BUSINESS_ID,
+        channel: "sms",
+        context: "mms_fallback",
+        reason: "texting_paused",
+      })
+    );
+    expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      text: MMS_FALLBACK_WITHOUT_OPT_OUT,
+      purpose: "mms_fallback",
+    });
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+  });
+
+  it("blocks an AI reply at the final gate when AI pauses after preflight", async () => {
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+    mocks.resolveOutboundSmsOperationalAccess
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({
+        allowed: false,
+        reason: "ai_replies_paused",
+      });
+
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() =>
+      expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+        conversationId: ACTIVE_CONVERSATION.id,
+        businessId: BUSINESS_ID,
+        channel: "sms",
+        context: "ai_reply",
+        reason: "ai_replies_paused",
+      })
+    );
+    expect(mocks.preflightOutboundSms).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      text: "Yes, we can help.",
+      purpose: "ai_reply",
+    });
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
+    expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a suppressed inbound after reactivation and processes only a newly delivered event", async () => {
+    mocks.claimMessagingWebhookEvent
+      .mockResolvedValueOnce({
+        outcome: "claimed",
+        claimToken: "claim-token-paused",
+      })
+      .mockResolvedValueOnce({ outcome: "completed", claimToken: null })
+      .mockResolvedValueOnce({
+        outcome: "claimed",
+        claimToken: "claim-token-new",
+      });
+    mocks.resolveOutboundSmsOperationalAccess
+      .mockResolvedValueOnce({
+        allowed: false,
+        reason: "account_suspended",
+      })
+      .mockResolvedValue({ allowed: true });
+
+    const suppressed = await messagingWebhook(request());
+    expect(suppressed.status).toBe(200);
+    expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
+      "telnyx:message.received:evt_inbound_1",
+      "claim-token-paused"
+    );
+
+    const duplicateAfterReactivation = await messagingWebhook(request());
+    expect(duplicateAfterReactivation.status).toBe(200);
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.addInboundMessageOnce).toHaveBeenCalledTimes(1);
+    expect(mocks.send).not.toHaveBeenCalled();
+
+    mocks.unwrap.mockResolvedValue(inboundEvent({ id: "evt_inbound_new" }));
+    queueTable("phone_numbers", {
+      data: { business_id: BUSINESS_ID },
+      error: null,
+    });
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+
+    const newlyDelivered = await messagingWebhook(request());
+    expect(newlyDelivered.status).toBe(200);
+
+    await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledOnce());
+    expect(mocks.addInboundMessageOnce).toHaveBeenCalledTimes(2);
+    expect(mocks.completeMessagingWebhookEvent).toHaveBeenCalledWith(
+      "telnyx:message.received:evt_inbound_new",
+      "claim-token-new"
+    );
+    expect(mocks.resolveOutboundSmsOperationalAccess).toHaveBeenCalledTimes(3);
   });
 
   it("releases the claim and returns 500 when entitlement state is indeterminate", async () => {

@@ -39,6 +39,7 @@ export interface OutboundSendContext extends SmsReadiness {
 
 interface BusinessContextRow {
   id: string;
+  operations_suspended_at: string | null;
   telnyx_messaging_profile_id: string | null;
   telnyx_campaign_id: string | null;
   campaign_status: RegistrationStatus | null;
@@ -55,7 +56,7 @@ interface PhoneContextRow {
 }
 
 const PHONE_CONTEXT_SELECT =
-  "id, business_id, phone_number, telnyx_campaign_assignment_status, telnyx_campaign_assignment_campaign_id, telnyx_campaign_assignment_failure_reason, businesses!inner(id, telnyx_messaging_profile_id, telnyx_campaign_id, campaign_status)";
+  "id, business_id, phone_number, telnyx_campaign_assignment_status, telnyx_campaign_assignment_campaign_id, telnyx_campaign_assignment_failure_reason, businesses!inner(id, operations_suspended_at, telnyx_messaging_profile_id, telnyx_campaign_id, campaign_status)";
 
 export async function getOutboundSendContext(
   fromPhoneNumber: string
@@ -106,6 +107,7 @@ async function getSmsReadinessForBusinessInternal(
   let readiness = reduceSmsReadinessSnapshot(snapshot);
   if (
     allowAssignmentRefresh &&
+    canRunLazyAssignmentRefresh(row) &&
     shouldLazyRefreshAssignmentForReadiness(readiness, snapshot)
   ) {
     await runLazyAssignmentRefresh(businessId, "dashboard_lazy_refresh");
@@ -196,7 +198,9 @@ async function readBusinessContext(
 ): Promise<BusinessContextRow | null> {
   const { data, error } = await supabaseAdmin
     .from("businesses")
-    .select("id, telnyx_messaging_profile_id, telnyx_campaign_id, campaign_status")
+    .select(
+      "id, operations_suspended_at, telnyx_messaging_profile_id, telnyx_campaign_id, campaign_status"
+    )
     .eq("id", businessId)
     .maybeSingle();
 
@@ -315,10 +319,20 @@ function shouldLazyRefreshAssignment(
   context: OutboundSendContext,
   row: PhoneContextRow
 ): boolean {
-  return shouldLazyRefreshAssignmentForReadiness(
-    context,
-    smsReadinessSnapshotFromPhoneContext(row)
+  return (
+    canRunLazyAssignmentRefresh(row) &&
+    shouldLazyRefreshAssignmentForReadiness(
+      context,
+      smsReadinessSnapshotFromPhoneContext(row)
+    )
   );
+}
+
+function canRunLazyAssignmentRefresh(row: PhoneContextRow): boolean {
+  // Keep suspension out of the readiness reducer: smsReady describes carrier
+  // configuration, while this condition only prevents a passive read from
+  // mutating Telnyx. Missing/malformed joined state also fails closed here.
+  return unwrapBusiness(row.businesses)?.operations_suspended_at === null;
 }
 
 function shouldLazyRefreshAssignmentForReadiness(

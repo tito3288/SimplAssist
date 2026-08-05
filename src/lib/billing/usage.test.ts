@@ -20,15 +20,35 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import {
-  preflightOutboundSms,
+  preflightOutboundSms as preflightOutboundSmsWithPurpose,
   recordInboundMessagingUsage,
+  recordOutboundSmsUsage,
 } from "./usage";
+
+function preflightOutboundSms(
+  args: Omit<
+    Parameters<typeof preflightOutboundSmsWithPurpose>[0],
+    "purpose"
+  > &
+    Partial<
+      Pick<Parameters<typeof preflightOutboundSmsWithPurpose>[0], "purpose">
+    >,
+) {
+  return preflightOutboundSmsWithPurpose({
+    purpose: "manual_dashboard_send",
+    ...args,
+  });
+}
 
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000032";
 const PERIOD_ID = "20000000-0000-4000-a000-000000000032";
 
 const defaultBusiness = {
   id: BUSINESS_ID,
+  operations_suspended_at: null,
+  ai_replies_paused_at: null,
+  texting_paused_at: null,
+  bookings_paused_at: null,
   billing_mode: "stripe",
   partner_plan: null,
   billing_pilot: false,
@@ -98,6 +118,108 @@ beforeEach(() => {
 });
 
 describe("preflightOutboundSms", () => {
+  it("blocks suspension before billing-period writes and gives it precedence", async () => {
+    setBusiness({
+      operations_suspended_at: "2026-08-04T12:00:00.000Z",
+      texting_paused_at: "2026-08-04T12:01:00.000Z",
+      ai_replies_paused_at: "2026-08-04T12:02:00.000Z",
+    });
+
+    await expect(
+      preflightOutboundSms({
+        businessId: BUSINESS_ID,
+        text: "Hello",
+        purpose: "ai_reply",
+      }),
+    ).resolves.toMatchObject({
+      allowed: false,
+      reason: "account_suspended",
+    });
+    expect(mocks.writes).toEqual([]);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "manual_dashboard_send",
+    "missed_call",
+    "ai_reply",
+    "mms_fallback",
+  ] as const)("blocks texting for %s", async (purpose) => {
+    setBusiness({ texting_paused_at: "2026-08-04T12:00:00.000Z" });
+
+    await expect(
+      preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello", purpose }),
+    ).resolves.toMatchObject({ allowed: false, reason: "texting_paused" });
+  });
+
+  it.each(["ai_reply", "mms_fallback"] as const)(
+    "blocks an AI pause for %s",
+    async (purpose) => {
+      setBusiness({ ai_replies_paused_at: "2026-08-04T12:00:00.000Z" });
+
+      await expect(
+        preflightOutboundSms({
+          businessId: BUSINESS_ID,
+          text: "Hello",
+          purpose,
+        }),
+      ).resolves.toMatchObject({
+        allowed: false,
+        reason: "ai_replies_paused",
+      });
+    },
+  );
+
+  it.each(["manual_dashboard_send", "missed_call"] as const)(
+    "does not apply an AI pause to %s",
+    async (purpose) => {
+      setBusiness({ ai_replies_paused_at: "2026-08-04T12:00:00.000Z" });
+
+      await expect(
+        preflightOutboundSms({
+          businessId: BUSINESS_ID,
+          text: "Hello",
+          purpose,
+        }),
+      ).resolves.toMatchObject({ allowed: true });
+    },
+  );
+
+  it("fails closed when the operational timestamps are malformed", async () => {
+    setBusiness({ operations_suspended_at: "not-a-timestamp" });
+
+    await expect(
+      preflightOutboundSms({
+        businessId: BUSINESS_ID,
+        text: "Hello",
+        purpose: "manual_dashboard_send",
+      }),
+    ).rejects.toMatchObject({
+      name: "OperationalControlsResolutionError",
+      code: "malformed_business",
+      retryable: true,
+    });
+  });
+
+  it("types a business lookup failure as retryable operational uncertainty", async () => {
+    mocks.results.set("businesses", {
+      data: null,
+      error: { message: "temporary business lookup failure" },
+    });
+
+    await expect(
+      preflightOutboundSms({
+        businessId: BUSINESS_ID,
+        text: "Hello",
+        purpose: "manual_dashboard_send",
+      }),
+    ).rejects.toMatchObject({
+      name: "OperationalControlsResolutionError",
+      code: "business_lookup_failed",
+      retryable: true,
+    });
+  });
+
   it("keeps outbound SMS available during Stripe past_due recovery", async () => {
     setSubscription({ status: "past_due" });
 
@@ -470,6 +592,24 @@ describe("preflightOutboundSms", () => {
 });
 
 describe("recordInboundMessagingUsage", () => {
+  it("continues inbound accounting while operations and texting are paused", async () => {
+    setBusiness({
+      operations_suspended_at: "2026-08-04T12:00:00.000Z",
+      texting_paused_at: "2026-08-04T12:01:00.000Z",
+    });
+
+    await expect(
+      recordInboundMessagingUsage({
+        businessId: BUSINESS_ID,
+        text: "Stored inbound",
+        mediaCount: 0,
+        source: "telnyx_webhook",
+        providerEventId: "telnyx:paused-inbound",
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+
   it("records the ledger event and counter through one atomic RPC", async () => {
     await recordInboundMessagingUsage({
       businessId: BUSINESS_ID,
@@ -526,6 +666,26 @@ describe("recordInboundMessagingUsage", () => {
         providerEventId: "telnyx:event-32",
       })
     ).rejects.toThrow("invalid response");
+  });
+});
+
+describe("recordOutboundSmsUsage", () => {
+  it("meters provider-accepted work even when a pause lands after sending", async () => {
+    setBusiness({
+      operations_suspended_at: "2026-08-04T12:00:00.000Z",
+      texting_paused_at: "2026-08-04T12:01:00.000Z",
+      ai_replies_paused_at: "2026-08-04T12:02:00.000Z",
+    });
+
+    await expect(
+      recordOutboundSmsUsage({
+        businessId: BUSINESS_ID,
+        text: "Already accepted",
+        source: "manual_dashboard",
+        providerMessageId: "provider-message-48",
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.rpc).toHaveBeenCalledOnce();
   });
 });
 

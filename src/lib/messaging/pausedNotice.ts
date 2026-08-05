@@ -16,7 +16,13 @@ export type PausedContext = "missed_call" | "ai_reply" | "mms_fallback";
 export type PausedReason = Extract<
   SmsBlockReason,
   "campaign_not_approved" | "assignment_pending" | "assignment_failed"
-> | "usage_limit_reached" | "billing_paused" | "submission_disabled";
+> |
+  "usage_limit_reached" |
+  "billing_paused" |
+  "submission_disabled" |
+  "account_suspended" |
+  "texting_paused" |
+  "ai_replies_paused";
 
 const DEDUPE_WINDOW_MINUTES = 30;
 
@@ -90,6 +96,12 @@ export async function insertPausedSystemMessageIfNeeded(args: {
 function pausedCopy(context: PausedContext, reason: PausedReason): string {
   const prefix = CONTEXT_PREFIX[context];
   switch (reason) {
+    case "account_suspended":
+      return `${prefix} - ${PAUSED_MARKER} because account operations are suspended.`;
+    case "texting_paused":
+      return `${prefix} - ${PAUSED_MARKER} because texting is paused for this account.`;
+    case "ai_replies_paused":
+      return `${prefix} - ${PAUSED_MARKER} because AI replies are paused for this account.`;
     case "assignment_pending":
       return `${prefix} - ${PAUSED_MARKER} while Telnyx links this phone number to the approved SMS campaign.`;
     case "assignment_failed":

@@ -10,12 +10,13 @@ const ASSIGNMENT_INTENT_LEASE_MS = 60_000;
 const ASSIGNMENT_PROVIDER_TIMEOUT_MS = 10_000;
 const DIFFERENT_CAMPAIGN_MARKER = "different campaign";
 const ASSIGNMENT_BUSINESS_SELECT =
-  "id, updated_at, deleted_at, telnyx_unique_claims_released_at, active_telnyx_release_run_id, telnyx_resource_state, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, telnyx_messaging_profile_id, brand_status, campaign_status, telnyx_campaign_assignment_claim_token, telnyx_campaign_assignment_claimed_at, telnyx_campaign_assignment_claim_campaign_id, telnyx_campaign_assignment_claim_profile_id";
+  "id, updated_at, deleted_at, operations_suspended_at, telnyx_unique_claims_released_at, active_telnyx_release_run_id, telnyx_resource_state, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, telnyx_messaging_profile_id, brand_status, campaign_status, telnyx_campaign_assignment_claim_token, telnyx_campaign_assignment_claimed_at, telnyx_campaign_assignment_claim_campaign_id, telnyx_campaign_assignment_claim_profile_id";
 
 interface AssignmentBusinessRow {
   id: string;
   updated_at: string;
   deleted_at: string | null;
+  operations_suspended_at: string | null;
   telnyx_unique_claims_released_at: string | null;
   active_telnyx_release_run_id: string | null;
   telnyx_resource_state: string;
@@ -183,6 +184,7 @@ function isAssignmentBusinessSafe(
     Boolean(business.telnyx_campaign_id?.trim()) &&
     Boolean(business.telnyx_messaging_profile_id?.trim()) &&
     !business.deleted_at &&
+    !business.operations_suspended_at &&
     !business.telnyx_unique_claims_released_at &&
     !business.active_telnyx_release_run_id &&
     !business.telnyx_submission_disabled &&
@@ -637,6 +639,7 @@ async function claimBusinessProfileAssignment(
     .eq("brand_status", "approved")
     .eq("telnyx_submission_disabled", false)
     .is("deleted_at", null)
+    .is("operations_suspended_at", null)
     .is("telnyx_unique_claims_released_at", null)
     .is("active_telnyx_release_run_id", null)
     .eq("telnyx_resource_state", business.telnyx_resource_state)
@@ -704,6 +707,7 @@ async function renewBusinessProfileAssignmentClaim(
     .eq("brand_status", "approved")
     .eq("telnyx_submission_disabled", false)
     .is("deleted_at", null)
+    .is("operations_suspended_at", null)
     .is("telnyx_unique_claims_released_at", null)
     .is("active_telnyx_release_run_id", null)
     .eq("telnyx_resource_state", business.telnyx_resource_state)

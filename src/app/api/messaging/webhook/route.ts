@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
 import { getOutboundSendContext } from "@/lib/messaging/lookup";
-import { insertPausedSystemMessageIfNeeded } from "@/lib/messaging/pausedNotice";
+import {
+  insertPausedSystemMessageIfNeeded,
+  type PausedReason,
+} from "@/lib/messaging/pausedNotice";
+import {
+  isOutboundSmsOperationalBlockReason,
+  resolveOutboundSmsOperationalAccess,
+  type OutboundSmsPurpose,
+} from "@/lib/messaging/outboundSmsOperational.server";
 import {
   claimMessagingWebhookEvent,
   completeMessagingWebhookEvent,
@@ -210,6 +218,26 @@ export async function POST(request: NextRequest) {
       eventKey
     );
 
+    const automatedReplyPurpose: Extract<
+      OutboundSmsPurpose,
+      "ai_reply" | "mms_fallback"
+    > =
+      mediaCount > 0 && text.trim().length < 5
+        ? "mms_fallback"
+        : "ai_reply";
+    if (
+      !(await canSendOutboundSmsOperationally(
+        { businessId, conversation },
+        automatedReplyPurpose
+      ))
+    ) {
+      // The inbound usage + transcript are durable, and a known pause cannot
+      // be healed by provider redelivery. Complete the claim so reactivation
+      // applies only to newly delivered inbound events.
+      await completeMessagingWebhookEvent(eventKey, ownedClaimToken);
+      return new NextResponse("OK", { status: 200 });
+    }
+
     if (!canUseAi) {
       console.log(
         `[messaging:webhook] Inbound message saved; AI SMS is not entitled for business ${businessId}`
@@ -303,6 +331,7 @@ async function sendFallbackReply(
   const usage = await preflightOutboundSms({
     businessId: context.businessId,
     text: fallbackReply,
+    purpose: "mms_fallback",
   });
   if (!usage.allowed) {
     console.warn(
@@ -326,6 +355,9 @@ async function sendFallbackReply(
 
   // Human takeover or a downgrade may have happened while preflight ran.
   if (!(await canStillSendAutomatedReply(context))) return;
+  if (!(await canSendOutboundSmsOperationally(context, "mms_fallback"))) {
+    return;
+  }
 
   const result = await telnyx.messages.send({
     from: context.to,
@@ -426,6 +458,7 @@ async function processAndReply(
   const usage = await preflightOutboundSms({
     businessId: context.businessId,
     text: finalReply,
+    purpose: "ai_reply",
   });
   if (!usage.allowed) {
     console.warn(
@@ -442,6 +475,7 @@ async function processAndReply(
   }
 
   if (!(await canStillSendAutomatedReply(context))) return;
+  if (!(await canSendOutboundSmsOperationally(context, "ai_reply"))) return;
 
   const result = await telnyx.messages.send({
     from: context.to,
@@ -519,6 +553,29 @@ async function canStillSendAutomatedReply(
   );
 }
 
+async function canSendOutboundSmsOperationally(
+  context: Pick<PersistedInboundContext, "businessId" | "conversation">,
+  purpose: Extract<OutboundSmsPurpose, "ai_reply" | "mms_fallback">
+): Promise<boolean> {
+  const access = await resolveOutboundSmsOperationalAccess(
+    context.businessId,
+    purpose
+  );
+  if (access.allowed) return true;
+
+  console.warn(
+    `[messaging:webhook] ${purpose} blocked by operational controls: reason=${access.reason} for business ${context.businessId}`
+  );
+  await insertPausedSystemMessageIfNeeded({
+    conversationId: context.conversation.id,
+    businessId: context.businessId,
+    channel: "sms",
+    context: purpose,
+    reason: access.reason,
+  });
+  return false;
+}
+
 function messageEventKey(eventId: string | undefined, rawBody: string): string {
   const stableId =
     eventId?.trim() || createHash("sha256").update(rawBody).digest("hex");
@@ -552,7 +609,8 @@ function toPausedReason(
 
 function usageToPausedReason(
   reason: UsageBlockReason
-): "usage_limit_reached" | "billing_paused" | "submission_disabled" {
+): PausedReason {
+  if (isOutboundSmsOperationalBlockReason(reason)) return reason;
   if (reason === "usage_limit_reached") return "usage_limit_reached";
   if (reason === "telnyx_submission_disabled") {
     return "submission_disabled";
