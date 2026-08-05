@@ -46,20 +46,25 @@ vi.mock("./AdminMetricsReport", () => ({
 import AdminMetricsPage from "./page";
 
 const PARTNER_ID = "9c3c5b98-bda7-48ea-a972-22c1ab4d2f71";
+const BUSINESS_ID = "10000000-0000-4000-a050-000000000001";
 
-function report(partnerOptions: unknown[] = []) {
+function report(
+  partnerOptions: unknown[] = [],
+  businessOptions: unknown[] = [],
+) {
   return {
     period: {
       month: "2026-07",
       start: "2026-07-01T00:00:00+00:00",
       end_exclusive: "2026-08-01T00:00:00+00:00",
     },
-    scope: { kind: "all", partner_id: null },
+    scope: { kind: "all", partner_id: null, business_id: null },
     definitions: [],
     totals: {},
     brand_totals: [],
     businesses: [],
     partner_options: partnerOptions,
+    business_options: businessOptions,
   };
 }
 
@@ -73,15 +78,39 @@ describe("AdminMetricsPage", () => {
   it.each([
     [
       { month: "2026-07", scope: "all" },
-      { month: "2026-07", scope: "all", partnerId: null },
+      {
+        month: "2026-07",
+        scope: "all",
+        partnerId: null,
+        businessId: null,
+      },
     ],
     [
       { month: "2026-07", scope: "direct", partner: "" },
-      { month: "2026-07", scope: "direct", partnerId: null },
+      {
+        month: "2026-07",
+        scope: "direct",
+        partnerId: null,
+        businessId: null,
+      },
     ],
     [
       { month: "2026-07", scope: "partner", partner: PARTNER_ID },
-      { month: "2026-07", scope: "partner", partnerId: PARTNER_ID },
+      {
+        month: "2026-07",
+        scope: "partner",
+        partnerId: PARTNER_ID,
+        businessId: null,
+      },
+    ],
+    [
+      { month: "2026-07", scope: "all", business: BUSINESS_ID.toUpperCase() },
+      {
+        month: "2026-07",
+        scope: "all",
+        partnerId: null,
+        businessId: BUSINESS_ID,
+      },
     ],
   ] as const)("authenticates before loading normalized filters %#", async (
     searchParams,
@@ -103,15 +132,23 @@ describe("AdminMetricsPage", () => {
     expect(html).toContain("Report state: ready");
   });
 
-  it("passes aggregate partner options to the native filters", async () => {
-    const options = [
+  it("passes aggregate partner and business options to the native filters", async () => {
+    const partnerOptions = [
       {
         partner_id: PARTNER_ID,
         partner_name: "Agency One",
         partner_slug: "agency-one",
       },
     ];
-    mocks.loadMetrics.mockResolvedValue(report(options));
+    const businessOptions = [
+      {
+        business_id: BUSINESS_ID,
+        business_name: "River City Dental",
+      },
+    ];
+    mocks.loadMetrics.mockResolvedValue(
+      report(partnerOptions, businessOptions),
+    );
 
     renderToStaticMarkup(
       await AdminMetricsPage({
@@ -128,8 +165,10 @@ describe("AdminMetricsPage", () => {
         month: "2026-07",
         scope: "partner",
         partnerId: PARTNER_ID,
+        businessId: null,
       },
-      partners: options,
+      partners: partnerOptions,
+      businesses: businessOptions,
     });
   });
 
@@ -153,7 +192,7 @@ describe("AdminMetricsPage", () => {
       result: { state: code },
     });
     expect(mocks.renderFilters).toHaveBeenCalledWith(
-      expect.objectContaining({ partners: [] }),
+      expect.objectContaining({ partners: [], businesses: [] }),
     );
   });
 

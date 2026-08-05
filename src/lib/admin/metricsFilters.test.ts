@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseAdminMetricsFilters } from "./metricsFilters";
 
 const PARTNER_ID = "9C3C5B98-BDA7-48EA-A972-22C1AB4D2F71";
+const BUSINESS_ID = "8A3F19E2-707B-41B8-B637-E5CB92538604";
 const NOW = new Date("2026-08-05T17:30:00.000Z");
 
 describe("parseAdminMetricsFilters", () => {
@@ -10,11 +11,13 @@ describe("parseAdminMetricsFilters", () => {
       month: "2026-08",
       scope: "all",
       partnerId: null,
+      businessId: null,
     });
     expect(parseAdminMetricsFilters({}, NOW)).toEqual({
       month: "2026-08",
       scope: "all",
       partnerId: null,
+      businessId: null,
     });
   });
 
@@ -32,13 +35,23 @@ describe("parseAdminMetricsFilters", () => {
     (scope) => {
       expect(
         parseAdminMetricsFilters({ month: "2026-07", scope }, NOW),
-      ).toEqual({ month: "2026-07", scope, partnerId: null });
+      ).toEqual({
+        month: "2026-07",
+        scope,
+        partnerId: null,
+        businessId: null,
+      });
       expect(
         parseAdminMetricsFilters(
-          { month: "2026-07", scope, partner: "" },
+          { month: "2026-07", scope, partner: "", business: "" },
           NOW,
         ),
-      ).toEqual({ month: "2026-07", scope, partnerId: null });
+      ).toEqual({
+        month: "2026-07",
+        scope,
+        partnerId: null,
+        businessId: null,
+      });
     },
   );
 
@@ -52,8 +65,31 @@ describe("parseAdminMetricsFilters", () => {
       month: "2026-07",
       scope: "partner",
       partnerId: PARTNER_ID.toLowerCase(),
+      businessId: null,
     });
   });
+
+  it.each([
+    [{}, "all", null],
+    [{ scope: "all" }, "all", null],
+    [{ scope: "direct" }, "direct", null],
+    [{ scope: "partner", partner: PARTNER_ID }, "partner", PARTNER_ID],
+  ] as const)(
+    "combines a canonical business UUID with scope tuple %#",
+    (tuple, scope, partnerId) => {
+      expect(
+        parseAdminMetricsFilters(
+          { month: "2026-07", ...tuple, business: BUSINESS_ID },
+          NOW,
+        ),
+      ).toEqual({
+        month: "2026-07",
+        scope,
+        partnerId: partnerId?.toLowerCase() ?? null,
+        businessId: BUSINESS_ID.toLowerCase(),
+      });
+    },
+  );
 
   it.each([
     { scope: "partner" },
@@ -66,9 +102,88 @@ describe("parseAdminMetricsFilters", () => {
     { scope: "partner", partner: [PARTNER_ID] },
   ])("normalizes malformed scope tuple %# atomically to all", (tuple) => {
     expect(
-      parseAdminMetricsFilters({ month: "2026-07", ...tuple }, NOW),
-    ).toEqual({ month: "2026-07", scope: "all", partnerId: null });
+      parseAdminMetricsFilters(
+        { month: "2026-07", business: BUSINESS_ID, ...tuple },
+        NOW,
+      ),
+    ).toEqual({
+      month: "2026-07",
+      scope: "all",
+      partnerId: null,
+      businessId: null,
+    });
   });
+
+  it.each([
+    { partner: PARTNER_ID },
+    { partner: [PARTNER_ID] },
+    { partner: [PARTNER_ID, PARTNER_ID] },
+  ])(
+    "clears a valid business when a partner value has no scope %#",
+    (tuple) => {
+      expect(
+        parseAdminMetricsFilters(
+          { month: "2026-07", business: BUSINESS_ID, ...tuple },
+          NOW,
+        ),
+      ).toEqual({
+        month: "2026-07",
+        scope: "all",
+        partnerId: null,
+        businessId: null,
+      });
+    },
+  );
+
+  it.each([
+    "not-a-uuid",
+    ` ${BUSINESS_ID}`,
+    `${BUSINESS_ID} `,
+    BUSINESS_ID.slice(0, -1),
+  ])("normalizes malformed business %s atomically to all", (business) => {
+    expect(
+      parseAdminMetricsFilters(
+        {
+          month: "2026-07",
+          scope: "partner",
+          partner: PARTNER_ID,
+          business,
+        },
+        NOW,
+      ),
+    ).toEqual({
+      month: "2026-07",
+      scope: "all",
+      partnerId: null,
+      businessId: null,
+    });
+  });
+
+  it.each([
+    { business: [BUSINESS_ID] },
+    { business: [BUSINESS_ID, BUSINESS_ID] },
+    { business: [""] },
+  ])(
+    "rejects repeated business tuple %# instead of selecting one",
+    ({ business }) => {
+      expect(
+        parseAdminMetricsFilters(
+          {
+            month: "2026-07",
+            scope: "partner",
+            partner: PARTNER_ID,
+            business,
+          },
+          NOW,
+        ),
+      ).toEqual({
+        month: "2026-07",
+        scope: "all",
+        partnerId: null,
+        businessId: null,
+      });
+    },
+  );
 
   it.each([
     "2026-00",
@@ -78,19 +193,36 @@ describe("parseAdminMetricsFilters", () => {
     "2026-01-01",
     " 2026-01",
     "2026-01 ",
-  ])("defaults malformed month %s while preserving a valid scope", (month) => {
-    expect(
-      parseAdminMetricsFilters({ month, scope: "direct" }, NOW),
-    ).toEqual({ month: "2026-08", scope: "direct", partnerId: null });
-  });
-
-  it("defaults repeated month values instead of selecting one", () => {
+  ])("defaults malformed month %s while preserving valid filters", (month) => {
     expect(
       parseAdminMetricsFilters(
-        { month: ["2026-07", "2026-08"], scope: "all" },
+        { month, scope: "direct", business: BUSINESS_ID },
         NOW,
       ),
-    ).toEqual({ month: "2026-08", scope: "all", partnerId: null });
+    ).toEqual({
+      month: "2026-08",
+      scope: "direct",
+      partnerId: null,
+      businessId: BUSINESS_ID.toLowerCase(),
+    });
+  });
+
+  it("defaults repeated month values without resetting valid filters", () => {
+    expect(
+      parseAdminMetricsFilters(
+        {
+          month: ["2026-07", "2026-08"],
+          scope: "all",
+          business: BUSINESS_ID,
+        },
+        NOW,
+      ),
+    ).toEqual({
+      month: "2026-08",
+      scope: "all",
+      partnerId: null,
+      businessId: BUSINESS_ID.toLowerCase(),
+    });
   });
 
   it("does not trim or partially accept a partner UUID", () => {
@@ -100,10 +232,16 @@ describe("parseAdminMetricsFilters", () => {
           month: "2026-07",
           scope: "partner",
           partner: ` ${PARTNER_ID}`,
+          business: BUSINESS_ID,
         },
         NOW,
       ),
-    ).toEqual({ month: "2026-07", scope: "all", partnerId: null });
+    ).toEqual({
+      month: "2026-07",
+      scope: "all",
+      partnerId: null,
+      businessId: null,
+    });
   });
 
   it("rejects an invalid internal default clock", () => {

@@ -6,14 +6,14 @@ import {
   BUSINESS_METRIC_BOOKING_COUNT_KEYS_V1,
   BUSINESS_METRIC_KEYS_V1,
   type AdminMonthlyBusinessMetricBrandV1,
-  type AdminMonthlyBusinessMetricsResponseV1,
+  type AdminMonthlyBusinessMetricsResponseV2,
   type BusinessMetricCountsV1,
   type BusinessMetricKeyV1,
 } from "@/lib/metrics/contract";
 import type { AdminMetricsFilters } from "./metricsFilters";
 
 export const ADMIN_MONTHLY_BUSINESS_METRICS_RPC =
-  "list_admin_monthly_business_metrics_v1";
+  "list_admin_monthly_business_metrics_v2";
 
 export type AdminMetricsReadErrorCode =
   | "query_failed"
@@ -108,6 +108,13 @@ const partnerOptionSchema = z
   })
   .strict();
 
+const businessOptionSchema = z
+  .object({
+    business_id: z.string().uuid(),
+    business_name: nonBlankStringSchema,
+  })
+  .strict();
+
 const responseSchema = z
   .object({
     period: z
@@ -121,6 +128,7 @@ const responseSchema = z
       .object({
         kind: z.enum(ADMIN_MONTHLY_METRIC_SCOPE_KINDS_V1),
         partner_id: z.string().uuid().nullable(),
+        business_id: z.string().uuid().nullable(),
       })
       .strict(),
     definitions: z.array(definitionSchema),
@@ -128,6 +136,7 @@ const responseSchema = z
     brand_totals: z.array(brandSchema),
     businesses: z.array(businessSchema),
     partner_options: z.array(partnerOptionSchema),
+    business_options: z.array(businessOptionSchema),
   })
   .strict();
 
@@ -163,7 +172,7 @@ interface RpcResult {
  */
 export async function loadAdminMonthlyBusinessMetrics(
   filters: AdminMetricsFilters,
-): Promise<AdminMonthlyBusinessMetricsResponseV1> {
+): Promise<AdminMonthlyBusinessMetricsResponseV2> {
   let result: RpcResult;
   try {
     const { supabaseAdmin } = await import("@/lib/supabase/admin");
@@ -171,6 +180,7 @@ export async function loadAdminMonthlyBusinessMetrics(
       p_month: `${filters.month}-01`,
       p_scope_kind: filters.scope,
       p_partner_id: filters.partnerId,
+      p_business_id: filters.businessId,
     });
   } catch (cause) {
     throw new AdminMetricsReadError(
@@ -197,13 +207,13 @@ export async function loadAdminMonthlyBusinessMetrics(
     );
   }
 
-  const response: AdminMonthlyBusinessMetricsResponseV1 = parsed.data;
+  const response: AdminMonthlyBusinessMetricsResponseV2 = parsed.data;
   validateResponseConsistency(response, filters);
   return response;
 }
 
 function validateResponseConsistency(
-  response: AdminMonthlyBusinessMetricsResponseV1,
+  response: AdminMonthlyBusinessMetricsResponseV2,
   filters: AdminMetricsFilters,
 ): void {
   validatePeriod(response, filters.month);
@@ -217,6 +227,7 @@ function validateResponseConsistency(
   const businessNames = new Map<string, string>();
   const businessSegments = new Set<string>();
   const partnerOptions = new Set<string>();
+  const businessOptions = new Set<string>();
   const brandRows = new Map<string, AdminMonthlyBusinessMetricBrandV1>();
   const businessTotals = emptyCounts();
   const totalsByBrand = new Map<string, BusinessMetricCountsV1>();
@@ -237,6 +248,15 @@ function validateResponseConsistency(
     );
   }
 
+  for (const option of response.business_options) {
+    const businessId = canonicalUuid(option.business_id);
+    if (businessOptions.has(businessId)) {
+      inconsistent("Admin metrics returned a duplicate business option.");
+    }
+    businessOptions.add(businessId);
+    registerBusinessName(businessNames, businessId, option.business_name);
+  }
+
   for (const row of response.businesses) {
     validateCounts(row.counts, `business ${row.business_id}`);
     validateScopeAttribution(
@@ -251,6 +271,15 @@ function validateResponseConsistency(
     );
 
     const businessId = canonicalUuid(row.business_id);
+    if (
+      filters.businessId !== null &&
+      businessId !== canonicalUuid(filters.businessId)
+    ) {
+      inconsistent("Admin metric business row leaked outside business scope.");
+    }
+    if (!businessOptions.has(businessId)) {
+      inconsistent("Admin metric business row is missing from business options.");
+    }
     const partnerId = nullableCanonicalUuid(row.partner_id_at_event);
     const segmentKey = `${businessId}|${brandKey(partnerId)}`;
     if (businessSegments.has(segmentKey)) {
@@ -258,11 +287,7 @@ function validateResponseConsistency(
     }
     businessSegments.add(segmentKey);
 
-    const priorBusinessName = businessNames.get(businessId);
-    if (priorBusinessName !== undefined && priorBusinessName !== row.business_name) {
-      inconsistent("Admin metric business display facts disagree.");
-    }
-    businessNames.set(businessId, row.business_name);
+    registerBusinessName(businessNames, businessId, row.business_name);
 
     if (partnerId !== null) {
       registerPartnerFacts(
@@ -332,7 +357,7 @@ function validateResponseConsistency(
 }
 
 function validatePeriod(
-  response: AdminMonthlyBusinessMetricsResponseV1,
+  response: AdminMonthlyBusinessMetricsResponseV2,
   requestedMonth: string,
 ): void {
   const expectedStart = new Date(`${requestedMonth}-01T00:00:00.000Z`);
@@ -352,20 +377,22 @@ function validatePeriod(
 }
 
 function validateScope(
-  response: AdminMonthlyBusinessMetricsResponseV1,
+  response: AdminMonthlyBusinessMetricsResponseV2,
   filters: AdminMetricsFilters,
 ): void {
   if (
     response.scope.kind !== filters.scope ||
     nullableCanonicalUuid(response.scope.partner_id) !==
-      nullableCanonicalUuid(filters.partnerId)
+      nullableCanonicalUuid(filters.partnerId) ||
+    nullableCanonicalUuid(response.scope.business_id) !==
+      nullableCanonicalUuid(filters.businessId)
   ) {
     inconsistent("Admin metric scope metadata disagrees with the request.");
   }
 }
 
 function validateDefinitions(
-  response: AdminMonthlyBusinessMetricsResponseV1,
+  response: AdminMonthlyBusinessMetricsResponseV2,
 ): void {
   const seen = new Set<BusinessMetricKeyV1>();
   for (const definition of response.definitions) {
@@ -387,6 +414,18 @@ function validateDefinitions(
   ) {
     inconsistent("Admin metrics returned an incomplete v1 definition set.");
   }
+}
+
+function registerBusinessName(
+  namesByBusiness: Map<string, string>,
+  businessId: string,
+  businessName: string,
+): void {
+  const existing = namesByBusiness.get(businessId);
+  if (existing !== undefined && existing !== businessName) {
+    inconsistent("Admin metric business display facts disagree.");
+  }
+  namesByBusiness.set(businessId, businessName);
 }
 
 function validateCounts(counts: BusinessMetricCountsV1, context: string): void {

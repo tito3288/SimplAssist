@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BUSINESS_METRIC_KEYS_V1,
   type AdminMonthlyBusinessMetricRowV1,
-  type AdminMonthlyBusinessMetricsResponseV1,
+  type AdminMonthlyBusinessMetricsResponseV2,
   type BusinessMetricCountsV1,
   type BusinessMetricKeyV1,
 } from "@/lib/metrics/contract";
@@ -27,22 +27,34 @@ const PARTNER_A = "10000000-0000-4000-a050-000000000001";
 const PARTNER_B = "10000000-0000-4000-a050-000000000002";
 const BUSINESS_A = "20000000-0000-4000-a050-000000000001";
 const BUSINESS_B = "20000000-0000-4000-a050-000000000002";
+const BUSINESS_C = "20000000-0000-4000-a050-000000000003";
 const AVAILABLE_SINCE = "2026-08-05T16:30:00+00:00";
 
 const ALL_FILTERS: AdminMetricsFilters = {
   month: "2026-08",
   scope: "all",
   partnerId: null,
+  businessId: null,
 };
 const DIRECT_FILTERS: AdminMetricsFilters = {
   month: "2026-08",
   scope: "direct",
   partnerId: null,
+  businessId: null,
 };
 const PARTNER_FILTERS: AdminMetricsFilters = {
   month: "2026-08",
   scope: "partner",
   partnerId: PARTNER_A,
+  businessId: null,
+};
+const ALL_BUSINESS_A_FILTERS: AdminMetricsFilters = {
+  ...ALL_FILTERS,
+  businessId: BUSINESS_A,
+};
+const PARTNER_BUSINESS_B_FILTERS: AdminMetricsFilters = {
+  ...PARTNER_FILTERS,
+  businessId: BUSINESS_B,
 };
 
 const BACKFILL_SUPPORT = {
@@ -119,7 +131,7 @@ function addCounts(
 function validPayload(
   filters: AdminMetricsFilters,
   businesses: AdminMonthlyBusinessMetricRowV1[] = [],
-): AdminMonthlyBusinessMetricsResponseV1 {
+): AdminMonthlyBusinessMetricsResponseV2 {
   const totals = counts();
   const totalsByPartner = new Map<string, BusinessMetricCountsV1>();
   for (const business of businesses) {
@@ -139,6 +151,7 @@ function validPayload(
     scope: {
       kind: filters.scope,
       partner_id: filters.partnerId,
+      business_id: filters.businessId,
     },
     definitions: BUSINESS_METRIC_KEYS_V1.map((metricKey) => ({
       metric_key: metricKey,
@@ -167,6 +180,16 @@ function validPayload(
         partner_id: PARTNER_B,
         partner_name: null,
         partner_slug: null,
+      },
+    ],
+    business_options: [
+      {
+        business_id: BUSINESS_A,
+        business_name: "River City Dental",
+      },
+      {
+        business_id: BUSINESS_B,
+        business_name: "Lakeview Dental",
       },
     ],
   };
@@ -220,12 +243,20 @@ beforeEach(() => {
 
 describe("loadAdminMonthlyBusinessMetrics", () => {
   it.each([
-    [ALL_FILTERS, "2026-08-01", "all", null],
-    [DIRECT_FILTERS, "2026-08-01", "direct", null],
-    [PARTNER_FILTERS, "2026-08-01", "partner", PARTNER_A],
+    [ALL_FILTERS, "2026-08-01", "all", null, null],
+    [DIRECT_FILTERS, "2026-08-01", "direct", null, null],
+    [PARTNER_FILTERS, "2026-08-01", "partner", PARTNER_A, null],
+    [ALL_BUSINESS_A_FILTERS, "2026-08-01", "all", null, BUSINESS_A],
+    [
+      PARTNER_BUSINESS_B_FILTERS,
+      "2026-08-01",
+      "partner",
+      PARTNER_A,
+      BUSINESS_B,
+    ],
   ] as const)(
     "uses the exact content-free RPC arguments for %#",
-    async (filters, month, scope, partnerId) => {
+    async (filters, month, scope, partnerId, businessId) => {
       const payload = validPayload(filters);
       mocks.rpc.mockResolvedValue({ data: payload, error: null });
 
@@ -240,6 +271,7 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
           p_month: month,
           p_scope_kind: scope,
           p_partner_id: partnerId,
+          p_business_id: businessId,
         },
       );
       expect(JSON.stringify(mocks.rpc.mock.calls[0]?.[1])).not.toMatch(
@@ -273,6 +305,45 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
       PARTNER_A,
       PARTNER_B,
     ]);
+    expect(result.business_options.map((option) => option.business_id)).toEqual([
+      BUSINESS_A,
+      BUSINESS_B,
+    ]);
+  });
+
+  it("accepts an empty selected business while retaining broad scoped options", async () => {
+    const payload = validPayload(ALL_BUSINESS_A_FILTERS);
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    const result = await loadAdminMonthlyBusinessMetrics(
+      ALL_BUSINESS_A_FILTERS,
+    );
+
+    expect(result.scope.business_id).toBe(BUSINESS_A);
+    expect(result.businesses).toEqual([]);
+    expect(result.brand_totals).toEqual([]);
+    expect(Object.values(result.totals).every((value) => value === 0)).toBe(
+      true,
+    );
+    expect(result.business_options).toHaveLength(2);
+  });
+
+  it("accepts an unavailable selected UUID with no rows for UUID-safe UI fallback", async () => {
+    const filters: AdminMetricsFilters = {
+      ...DIRECT_FILTERS,
+      businessId: BUSINESS_C,
+    };
+    const payload = validPayload(filters);
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(loadAdminMonthlyBusinessMetrics(filters)).resolves.toEqual(
+      payload,
+    );
+    expect(
+      payload.business_options.some(
+        (option) => option.business_id === BUSINESS_C,
+      ),
+    ).toBe(false);
   });
 
   it("classifies a returned RPC error as query_failed without fabricating zeros", async () => {
@@ -333,11 +404,52 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
     ["partner option message", (payload: Record<string, unknown>) => {
       mutableObject(mutableArray(payload.partner_options)[0]).message = "private";
     }],
+    ["business option phone", (payload: Record<string, unknown>) => {
+      mutableObject(mutableArray(payload.business_options)[0]).phone =
+        "+15551234567";
+    }],
   ] as const)("rejects unexpected %s fields", async (_label, mutate) => {
     const payload = clone(
       validPayload(ALL_FILTERS, [allScopeRows()[0], allScopeRows()[1]]),
     ) as unknown as Record<string, unknown>;
     mutate(payload);
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_FILTERS),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it.each([
+    ["scope business echo", (payload: Record<string, unknown>) => {
+      delete mutableObject(payload.scope).business_id;
+    }],
+    ["business options", (payload: Record<string, unknown>) => {
+      delete payload.business_options;
+    }],
+  ] as const)("rejects a missing required v2 %s", async (_label, mutate) => {
+    const payload = clone(validPayload(ALL_FILTERS)) as unknown as Record<
+      string,
+      unknown
+    >;
+    mutate(payload);
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_FILTERS),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it.each([
+    ["malformed UUID", "not-a-uuid"],
+    ["blank name", ""],
+  ] as const)("rejects a business option with %s", async (kind, value) => {
+    const payload = validPayload(ALL_FILTERS);
+    if (kind === "malformed UUID") {
+      payload.business_options[0].business_id = value;
+    } else {
+      payload.business_options[0].business_name = value;
+    }
     mocks.rpc.mockResolvedValue({ data: payload, error: null });
 
     await expect(
@@ -438,6 +550,52 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
     ).rejects.toMatchObject({ code: "inconsistent_response" });
   });
 
+  it("rejects business scope metadata that does not echo the request", async () => {
+    const payload = validPayload(ALL_BUSINESS_A_FILTERS);
+    payload.scope.business_id = BUSINESS_B;
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_BUSINESS_A_FILTERS),
+    ).rejects.toMatchObject({ code: "inconsistent_response" });
+  });
+
+  it("rejects a different business row from a selected-business response", async () => {
+    const payload = validPayload(ALL_BUSINESS_A_FILTERS, [
+      row({
+        businessId: BUSINESS_B,
+        businessName: "Lakeview Dental",
+        partnerId: PARTNER_A,
+        counts: counts({ contact_created: 1 }),
+      }),
+    ]);
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_BUSINESS_A_FILTERS),
+    ).rejects.toMatchObject({ code: "inconsistent_response" });
+  });
+
+  it("accepts one selected business split across event-time brands", async () => {
+    const payload = validPayload(
+      ALL_BUSINESS_A_FILTERS,
+      allScopeRows().slice(0, 2),
+    );
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    const result = await loadAdminMonthlyBusinessMetrics(
+      ALL_BUSINESS_A_FILTERS,
+    );
+
+    expect(result.businesses).toHaveLength(2);
+    expect(
+      result.businesses.every((business) => business.business_id === BUSINESS_A),
+    ).toBe(true);
+    expect(result.brand_totals).toHaveLength(2);
+    expect(result.totals.missed_call_caught).toBe(2);
+    expect(result.totals.sms_message_outbound).toBe(3);
+  });
+
   it.each([
     [
       PARTNER_FILTERS,
@@ -517,6 +675,41 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
     },
   );
 
+  it("rejects duplicate business options by canonical UUID", async () => {
+    const payload = validPayload(ALL_FILTERS);
+    payload.business_options.push({
+      ...clone(payload.business_options[0]),
+      business_id: payload.business_options[0].business_id.toUpperCase(),
+    });
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_FILTERS),
+    ).rejects.toMatchObject({ code: "inconsistent_response" });
+  });
+
+  it("rejects business display facts that disagree between options and rows", async () => {
+    const payload = validPayload(ALL_FILTERS, [allScopeRows()[0]]);
+    payload.business_options[0].business_name = "Different Business";
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_FILTERS),
+    ).rejects.toMatchObject({ code: "inconsistent_response" });
+  });
+
+  it("rejects a returned business that is absent from business options", async () => {
+    const payload = validPayload(ALL_FILTERS, [allScopeRows()[0]]);
+    payload.business_options = payload.business_options.filter(
+      (option) => option.business_id !== BUSINESS_A,
+    );
+    mocks.rpc.mockResolvedValue({ data: payload, error: null });
+
+    await expect(
+      loadAdminMonthlyBusinessMetrics(ALL_FILTERS),
+    ).rejects.toMatchObject({ code: "inconsistent_response" });
+  });
+
   it.each(["overall", "brand", "missing brand"])(
     "rejects %s totals that disagree with business rows",
     async (kind) => {
@@ -579,17 +772,17 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
   });
 
   it.each([
-    ["partial partner display", (payload: AdminMonthlyBusinessMetricsResponseV1) => {
+    ["partial partner display", (payload: AdminMonthlyBusinessMetricsResponseV2) => {
       payload.partner_options[0].partner_slug = null;
     }],
-    ["conflicting partner display", (payload: AdminMonthlyBusinessMetricsResponseV1) => {
+    ["conflicting partner display", (payload: AdminMonthlyBusinessMetricsResponseV2) => {
       payload.partner_options[0].partner_name = "Different Agency";
     }],
-    ["direct partner display", (payload: AdminMonthlyBusinessMetricsResponseV1) => {
+    ["direct partner display", (payload: AdminMonthlyBusinessMetricsResponseV2) => {
       payload.businesses[0].partner_name = "Impossible Agency";
       payload.businesses[0].partner_slug = "impossible";
     }],
-    ["conflicting business name", (payload: AdminMonthlyBusinessMetricsResponseV1) => {
+    ["conflicting business name", (payload: AdminMonthlyBusinessMetricsResponseV2) => {
       payload.businesses[1].business_name = "Different Business";
     }],
   ] as const)("rejects %s facts", async (_label, mutate) => {
@@ -607,6 +800,7 @@ describe("loadAdminMonthlyBusinessMetrics", () => {
       month: "2026-08",
       scope: "partner",
       partnerId: PARTNER_B,
+      businessId: null,
     };
     const payload = validPayload(deletedPartnerFilters, [
       row({

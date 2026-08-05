@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BUSINESS_METRIC_KEYS_V1,
-  type AdminMonthlyBusinessMetricsResponseV1,
+  type AdminMonthlyBusinessMetricsResponseV2,
   type BusinessMetricCountsV1,
 } from "@/lib/metrics/contract";
 import {
@@ -12,6 +12,7 @@ import {
 } from "./AdminMetricsReport";
 
 const BUSINESS_ID = "10000000-0000-4000-a050-000000000001";
+const MISSING_BUSINESS_ID = "10000000-0000-4000-a050-000000000099";
 const PARTNER_ID = "20000000-0000-4000-a050-000000000001";
 
 function counts(overrides: Partial<BusinessMetricCountsV1> = {}) {
@@ -35,8 +36,8 @@ function counts(overrides: Partial<BusinessMetricCountsV1> = {}) {
 }
 
 function report(
-  overrides: Partial<AdminMonthlyBusinessMetricsResponseV1> = {},
-): AdminMonthlyBusinessMetricsResponseV1 {
+  overrides: Partial<AdminMonthlyBusinessMetricsResponseV2> = {},
+): AdminMonthlyBusinessMetricsResponseV2 {
   const totalCounts = counts({
     missed_call_caught: 1,
     ai_conversation_engaged: 2,
@@ -59,7 +60,7 @@ function report(
       start: "2026-08-01T00:00:00+00:00",
       end_exclusive: "2026-09-01T00:00:00+00:00",
     },
-    scope: { kind: "all", partner_id: null },
+    scope: { kind: "all", partner_id: null, business_id: null },
     definitions: BUSINESS_METRIC_KEYS_V1.map((metric_key) => ({
       metric_key,
       definition_version: 1,
@@ -126,6 +127,12 @@ function report(
         partner_id: PARTNER_ID,
         partner_name: "Alpha Agency",
         partner_slug: "alpha-agency",
+      },
+    ],
+    business_options: [
+      {
+        business_id: BUSINESS_ID,
+        business_name: "River City Dental",
       },
     ],
     ...overrides,
@@ -233,6 +240,70 @@ describe("AdminMetricsReport", () => {
     expect(html).not.toContain("Metrics query unavailable");
   });
 
+  it("prepends the selected business name to the scope header", () => {
+    const filtered = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+    });
+    const html = renderToStaticMarkup(
+      <AdminMetricsReport result={{ state: "ready", report: filtered }} />,
+    );
+
+    expect(html).toContain(
+      "River City Dental · All brands · UTC range 2026-08-01T00:00:00+00:00",
+    );
+  });
+
+  it("uses the selected UUID when the business is absent from response options", () => {
+    const filtered = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: MISSING_BUSINESS_ID,
+      },
+      business_options: [],
+    });
+    const html = renderToStaticMarkup(
+      <AdminMetricsReport result={{ state: "ready", report: filtered }} />,
+    );
+
+    expect(html).toContain(
+      `Selected business (${MISSING_BUSINESS_ID}) · All brands · UTC range`,
+    );
+  });
+
+  it("keeps the selected zero-event business visible for an empty month", () => {
+    const emptyReport = report({
+      scope: {
+        kind: "direct",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+      totals: counts(),
+      brand_totals: [],
+      businesses: [],
+    });
+    const html = renderToStaticMarkup(
+      <AdminMetricsReport
+        result={{ state: "ready", report: emptyReport }}
+      />,
+    );
+
+    expect(html).toContain(
+      "River City Dental · SimplAssist direct · UTC range",
+    );
+    expect(html).toContain(
+      "No metric events were recorded for this UTC month and scope.",
+    );
+    expect(html).not.toContain('aria-label="Monthly brand metric totals"');
+    expect(html).not.toContain(
+      'aria-label="Monthly event-time business metric rows"',
+    );
+  });
+
   it.each([
     ["query_failed", "Metrics query unavailable", "could not be completed"],
     [
@@ -271,7 +342,7 @@ describe("AdminMetricsReport", () => {
       content: "private message body",
       metadata: { phone: "+15551234567" },
       provider_payload: "private provider payload",
-    } as AdminMonthlyBusinessMetricsResponseV1;
+    } as AdminMonthlyBusinessMetricsResponseV2;
 
     const html = renderToStaticMarkup(
       <AdminMetricsReport
@@ -287,7 +358,11 @@ describe("AdminMetricsReport", () => {
   it("labels a deleted historical partner without inventing its name", () => {
     const historicalId = "20000000-0000-4000-a050-000000000099";
     const scoped = report({
-      scope: { kind: "partner", partner_id: historicalId },
+      scope: {
+        kind: "partner",
+        partner_id: historicalId,
+        business_id: null,
+      },
       partner_options: [
         {
           partner_id: historicalId,

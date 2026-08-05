@@ -3,7 +3,7 @@ import {
   BUSINESS_METRIC_LABELS_V1,
   type AdminMonthlyBusinessMetricBrandV1,
   type AdminMonthlyBusinessMetricRowV1,
-  type AdminMonthlyBusinessMetricsResponseV1,
+  type AdminMonthlyBusinessMetricsResponseV2,
   type BusinessMetricCountKeyV1,
   type BusinessMetricCountsV1,
   type BusinessMetricDefinitionResponseV1,
@@ -24,7 +24,7 @@ export type AdminMetricsReportErrorState =
 export type AdminMetricsReportState =
   | {
       state: "ready";
-      report: AdminMonthlyBusinessMetricsResponseV1;
+      report: AdminMonthlyBusinessMetricsResponseV2;
     }
   | { state: AdminMetricsReportErrorState };
 
@@ -118,7 +118,7 @@ export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
             {formatMonth(report.period.month)} totals
           </h2>
           <p className={`mt-1 text-sm ${bodyFaint}`}>
-            {`${scopeLabel(report)} · UTC range ${report.period.start} to ${report.period.end_exclusive} (exclusive)`}
+            {`${reportScopeLabel(report)} · UTC range ${report.period.start} to ${report.period.end_exclusive} (exclusive)`}
           </p>
         </div>
 
@@ -333,7 +333,20 @@ function MetricDefinitions({
   );
 }
 
-function scopeLabel(report: AdminMonthlyBusinessMetricsResponseV1): string {
+function reportScopeLabel(
+  report: AdminMonthlyBusinessMetricsResponseV2,
+): string {
+  const brandScope = scopeLabel(report);
+  if (report.scope.business_id === null) return brandScope;
+
+  const businessId = report.scope.business_id.toLowerCase();
+  const option = report.business_options.find(
+    (business) => business.business_id.toLowerCase() === businessId,
+  );
+  return `${option?.business_name ?? selectedBusinessLabel(businessId)} · ${brandScope}`;
+}
+
+function scopeLabel(report: AdminMonthlyBusinessMetricsResponseV2): string {
   if (report.scope.kind === "all") return "All brands";
   if (report.scope.kind === "direct") return "SimplAssist direct";
 
@@ -345,6 +358,10 @@ function scopeLabel(report: AdminMonthlyBusinessMetricsResponseV1): string {
     option?.partner_name ?? null,
     option?.partner_slug ?? null,
   );
+}
+
+function selectedBusinessLabel(businessId: string): string {
+  return `Selected business (${businessId})`;
 }
 
 function brandLabel(

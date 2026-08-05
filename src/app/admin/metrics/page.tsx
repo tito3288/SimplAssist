@@ -37,6 +37,8 @@ export default async function AdminMetricsPage({
 
   const partnerOptions =
     reportState.state === "ready" ? reportState.report.partner_options : [];
+  const businessOptions =
+    reportState.state === "ready" ? reportState.report.business_options : [];
 
   return (
     <main className="space-y-8">
@@ -51,6 +53,7 @@ export default async function AdminMetricsPage({
       <AdminMetricsFilters
         filters={filters}
         partners={partnerOptions}
+        businesses={businessOptions}
       />
       <AdminMetricsReport result={reportState} />
     </main>

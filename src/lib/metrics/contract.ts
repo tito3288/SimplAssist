@@ -93,6 +93,11 @@ export interface AdminMonthlyBusinessMetricPartnerOptionV1 {
   partner_slug: string | null;
 }
 
+export interface AdminMonthlyBusinessMetricBusinessOptionV2 {
+  business_id: string;
+  business_name: string;
+}
+
 /** Exact count-only JSON shape returned by list_admin_monthly_business_metrics_v1. */
 export interface AdminMonthlyBusinessMetricsResponseV1 {
   period: {
@@ -109,6 +114,22 @@ export interface AdminMonthlyBusinessMetricsResponseV1 {
   brand_totals: AdminMonthlyBusinessMetricBrandV1[];
   businesses: AdminMonthlyBusinessMetricRowV1[];
   partner_options: AdminMonthlyBusinessMetricPartnerOptionV1[];
+}
+
+/** Exact count-only JSON shape returned by list_admin_monthly_business_metrics_v2. */
+export interface AdminMonthlyBusinessMetricsResponseV2 {
+  period: AdminMonthlyBusinessMetricsResponseV1["period"];
+  scope: {
+    kind: AdminMonthlyMetricScopeKindV1;
+    partner_id: string | null;
+    business_id: string | null;
+  };
+  definitions: BusinessMetricDefinitionResponseV1[];
+  totals: BusinessMetricCountsV1;
+  brand_totals: AdminMonthlyBusinessMetricBrandV1[];
+  businesses: AdminMonthlyBusinessMetricRowV1[];
+  partner_options: AdminMonthlyBusinessMetricPartnerOptionV1[];
+  business_options: AdminMonthlyBusinessMetricBusinessOptionV2[];
 }
 
 const BUSINESS_METRIC_KEY_SET_V1 = new Set<string>(BUSINESS_METRIC_KEYS_V1);

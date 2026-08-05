@@ -9,6 +9,7 @@ export interface AdminMetricsFilters {
   month: string;
   scope: AdminMonthlyMetricScopeKindV1;
   partnerId: string | null;
+  businessId: string | null;
 }
 
 const MONTH = /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/;
@@ -23,29 +24,53 @@ export function parseAdminMetricsFilters(
   const month = parseMonth(searchParams?.month, now);
   const scope = searchParams?.scope;
   const partner = searchParams?.partner;
+  const business = searchParams?.business;
+  const fallback = (): AdminMetricsFilters => ({
+    month,
+    scope: "all",
+    partnerId: null,
+    businessId: null,
+  });
+
+  if (business !== undefined && typeof business !== "string") {
+    return fallback();
+  }
+  const businessValue = typeof business === "string" ? business : "";
+  if (businessValue !== "" && !UUID.test(businessValue)) {
+    return fallback();
+  }
+  const businessId =
+    businessValue === "" ? null : businessValue.toLowerCase();
 
   if (scope === undefined) {
-    return { month, scope: "all", partnerId: null };
+    return partner === undefined || partner === ""
+      ? { month, scope: "all", partnerId: null, businessId }
+      : fallback();
   }
   if (
     !isAdminMetricScope(scope) ||
     (partner !== undefined && typeof partner !== "string")
   ) {
-    return { month, scope: "all", partnerId: null };
+    return fallback();
   }
 
   const partnerValue = typeof partner === "string" ? partner : "";
   if (scope === "partner") {
     return UUID.test(partnerValue)
-      ? { month, scope, partnerId: partnerValue.toLowerCase() }
-      : { month, scope: "all", partnerId: null };
+      ? {
+          month,
+          scope,
+          partnerId: partnerValue.toLowerCase(),
+          businessId,
+        }
+      : fallback();
   }
 
   if (partnerValue !== "") {
-    return { month, scope: "all", partnerId: null };
+    return fallback();
   }
 
-  return { month, scope, partnerId: null };
+  return { month, scope, partnerId: null, businessId };
 }
 
 function isAdminMetricScope(

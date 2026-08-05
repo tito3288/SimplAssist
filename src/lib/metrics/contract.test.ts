@@ -10,6 +10,7 @@ import {
   isBusinessMetricBookingOriginV1,
   isBusinessMetricKeyV1,
   type AdminMonthlyBusinessMetricsResponseV1,
+  type AdminMonthlyBusinessMetricsResponseV2,
   type BusinessMetricCountsV1,
 } from "./contract";
 
@@ -115,6 +116,64 @@ describe("business metric v1 contract", () => {
       "brand_totals",
       "businesses",
       "partner_options",
+    ]);
+    expect(collectKeys(response)).not.toEqual(
+      expect.arrayContaining([
+        "messages",
+        "content",
+        "metadata",
+        "phone",
+        "phone_number",
+        "prompt",
+        "tokens",
+        "provider_payload",
+      ]),
+    );
+  });
+
+  it("adds only the v2 business scope echo and business options", () => {
+    const response: AdminMonthlyBusinessMetricsResponseV2 = {
+      period: {
+        month: "2026-08",
+        start: "2026-08-01T00:00:00+00:00",
+        end_exclusive: "2026-09-01T00:00:00+00:00",
+      },
+      scope: {
+        kind: "direct",
+        partner_id: null,
+        business_id: "20000000-0000-4000-a050-000000000001",
+      },
+      definitions: [],
+      totals: ZERO_COUNTS,
+      brand_totals: [],
+      businesses: [],
+      partner_options: [],
+      business_options: [
+        {
+          business_id: "20000000-0000-4000-a050-000000000001",
+          business_name: "River City Dental",
+        },
+      ],
+    };
+
+    expect(Object.keys(response)).toEqual([
+      "period",
+      "scope",
+      "definitions",
+      "totals",
+      "brand_totals",
+      "businesses",
+      "partner_options",
+      "business_options",
+    ]);
+    expect(Object.keys(response.scope)).toEqual([
+      "kind",
+      "partner_id",
+      "business_id",
+    ]);
+    expect(Object.keys(response.business_options[0])).toEqual([
+      "business_id",
+      "business_name",
     ]);
     expect(collectKeys(response)).not.toEqual(
       expect.arrayContaining([

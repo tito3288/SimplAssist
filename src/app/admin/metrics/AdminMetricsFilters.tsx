@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { primaryCtaCompactClass, secondaryCtaCompactClass } from "@/lib/glass";
 import type {
+  AdminMonthlyBusinessMetricBusinessOptionV2,
   AdminMonthlyBusinessMetricPartnerOptionV1,
   AdminMonthlyMetricScopeKindV1,
 } from "@/lib/metrics/contract";
@@ -13,11 +14,13 @@ export interface AdminMetricsFilterSelection {
   month: string;
   scope: AdminMonthlyMetricScopeKindV1;
   partnerId: string | null;
+  businessId: string | null;
 }
 
 interface AdminMetricsFiltersProps {
   filters: AdminMetricsFilterSelection;
   partners: readonly AdminMonthlyBusinessMetricPartnerOptionV1[];
+  businesses: readonly AdminMonthlyBusinessMetricBusinessOptionV2[];
 }
 
 const controlClass =
@@ -26,9 +29,13 @@ const controlClass =
 export function AdminMetricsFilters({
   filters,
   partners,
+  businesses,
 }: AdminMetricsFiltersProps) {
   const selectedPartnerIsAvailable = partners.some(
     (partner) => partner.partner_id === filters.partnerId,
+  );
+  const selectedBusinessIsAvailable = businesses.some(
+    (business) => business.business_id === filters.businessId,
   );
 
   return (
@@ -38,7 +45,7 @@ export function AdminMetricsFilters({
       aria-label="Filter monthly metrics"
       className={`space-y-4 p-4 ${card}`}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <FilterLabel
           label="UTC month"
           hint="Month boundaries are calculated in UTC."
@@ -57,10 +64,13 @@ export function AdminMetricsFilters({
             name="scope"
             defaultValue={filters.scope}
             onChange={(event) => {
+              const form = event.currentTarget.form;
               synchronizePartnerControl(
                 event.currentTarget.value,
-                event.currentTarget.form?.elements.namedItem("partner") ??
-                  null,
+                form?.elements.namedItem("partner") ?? null,
+              );
+              clearBusinessControl(
+                form?.elements.namedItem("business") ?? null,
               );
             }}
             className={controlClass}
@@ -80,6 +90,12 @@ export function AdminMetricsFilters({
             defaultValue={filters.partnerId ?? ""}
             disabled={filters.scope !== "partner"}
             required={filters.scope === "partner"}
+            onChange={(event) => {
+              clearBusinessControl(
+                event.currentTarget.form?.elements.namedItem("business") ??
+                  null,
+              );
+            }}
             className={controlClass}
           >
             <option value="">Choose a partner</option>
@@ -91,6 +107,29 @@ export function AdminMetricsFilters({
             {partners.map((partner) => (
               <option key={partner.partner_id} value={partner.partner_id}>
                 {partnerOptionLabel(partner)}
+              </option>
+            ))}
+          </select>
+        </FilterLabel>
+
+        <FilterLabel
+          label="Specific business"
+          hint="Options include scoped businesses with zero activity."
+        >
+          <select
+            name="business"
+            defaultValue={filters.businessId ?? ""}
+            className={controlClass}
+          >
+            <option value="">All businesses</option>
+            {filters.businessId && !selectedBusinessIsAvailable ? (
+              <option value={filters.businessId}>
+                {selectedBusinessLabel(filters.businessId)}
+              </option>
+            ) : null}
+            {businesses.map((business) => (
+              <option key={business.business_id} value={business.business_id}>
+                {business.business_name}
               </option>
             ))}
           </select>
@@ -129,6 +168,13 @@ export function synchronizePartnerControl(
   control.required = partnerScope;
 }
 
+export function clearBusinessControl(
+  control: Element | RadioNodeList | null,
+): void {
+  if (control === null || !("value" in control)) return;
+  (control as { value: string }).value = "";
+}
+
 function FilterLabel({
   label,
   hint,
@@ -159,4 +205,8 @@ function partnerOptionLabel(
 
 function historicalPartnerLabel(partnerId: string): string {
   return `Historical partner (${partnerId})`;
+}
+
+function selectedBusinessLabel(businessId: string): string {
+  return `Selected business (${businessId})`;
 }

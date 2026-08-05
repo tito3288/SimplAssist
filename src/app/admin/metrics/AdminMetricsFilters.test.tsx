@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdminMetricsFilters,
+  clearBusinessControl,
   synchronizePartnerControl,
 } from "./AdminMetricsFilters";
 
 const PARTNER_ID = "20000000-0000-4000-a050-000000000001";
 const HISTORICAL_PARTNER_ID = "20000000-0000-4000-a050-000000000002";
+const BUSINESS_ID = "10000000-0000-4000-a050-000000000001";
+const ZERO_EVENT_BUSINESS_ID = "10000000-0000-4000-a050-000000000002";
+const MISSING_BUSINESS_ID = "10000000-0000-4000-a050-000000000099";
 
 const PARTNERS = [
   {
@@ -22,12 +26,29 @@ const PARTNERS = [
   },
 ] as const;
 
+const BUSINESSES = [
+  {
+    business_id: BUSINESS_ID,
+    business_name: "River City Dental",
+  },
+  {
+    business_id: ZERO_EVENT_BUSINESS_ID,
+    business_name: "Zero Event Dental",
+  },
+] as const;
+
 describe("AdminMetricsFilters", () => {
   it("renders a native read-only GET filter with the exact controls", () => {
     const html = renderToStaticMarkup(
       <AdminMetricsFilters
-        filters={{ month: "2026-08", scope: "all", partnerId: null }}
+        filters={{
+          month: "2026-08",
+          scope: "all",
+          partnerId: null,
+          businessId: null,
+        }}
         partners={PARTNERS}
+        businesses={BUSINESSES}
       />,
     );
 
@@ -40,6 +61,11 @@ describe("AdminMetricsFilters", () => {
     expect(html).toContain('<option value="all" selected="">All</option>');
     expect(html).toContain('name="partner"');
     expect(html).toContain('name="partner" disabled=""');
+    expect(html).toContain('name="business"');
+    expect(html).toContain('<option value="" selected="">All businesses</option>');
+    expect(html).toContain(
+      `<option value="${ZERO_EVENT_BUSINESS_ID}">Zero Event Dental</option>`,
+    );
     expect(html).toContain('value="direct">SimplAssist direct</option>');
     expect(html).toContain('value="partner">Specific partner</option>');
     expect(html).toContain("Month boundaries are calculated in UTC.");
@@ -63,8 +89,10 @@ describe("AdminMetricsFilters", () => {
           month: "2026-08",
           scope,
           partnerId: scope === "partner" ? PARTNER_ID : null,
+          businessId: null,
         }}
         partners={PARTNERS}
+        businesses={BUSINESSES}
       />,
     );
 
@@ -80,8 +108,10 @@ describe("AdminMetricsFilters", () => {
           month: "2026-08",
           scope: "partner",
           partnerId: HISTORICAL_PARTNER_ID,
+          businessId: null,
         }}
         partners={PARTNERS}
+        businesses={BUSINESSES}
       />,
     );
 
@@ -100,8 +130,10 @@ describe("AdminMetricsFilters", () => {
           month: "2026-07",
           scope: "partner",
           partnerId: PARTNER_ID,
+          businessId: null,
         }}
         partners={[]}
+        businesses={[]}
       />,
     );
 
@@ -111,6 +143,44 @@ describe("AdminMetricsFilters", () => {
     );
     expect(html).toContain('name="partner" required=""');
     expect(html).not.toContain('name="partner" disabled=""');
+  });
+
+  it("preserves a selected business from the scoped business options", () => {
+    const html = renderToStaticMarkup(
+      <AdminMetricsFilters
+        filters={{
+          month: "2026-08",
+          scope: "direct",
+          partnerId: null,
+          businessId: ZERO_EVENT_BUSINESS_ID,
+        }}
+        partners={PARTNERS}
+        businesses={BUSINESSES}
+      />,
+    );
+
+    expect(html).toContain(
+      `<option value="${ZERO_EVENT_BUSINESS_ID}" selected="">Zero Event Dental</option>`,
+    );
+  });
+
+  it("preserves a selected business even when it is absent from the response options", () => {
+    const html = renderToStaticMarkup(
+      <AdminMetricsFilters
+        filters={{
+          month: "2026-08",
+          scope: "all",
+          partnerId: null,
+          businessId: MISSING_BUSINESS_ID,
+        }}
+        partners={PARTNERS}
+        businesses={BUSINESSES}
+      />,
+    );
+
+    expect(html).toContain(
+      `<option value="${MISSING_BUSINESS_ID}" selected="">Selected business (${MISSING_BUSINESS_ID})</option>`,
+    );
   });
 
   it("omits a stale partner when the scope changes from partner to direct", () => {
@@ -125,5 +195,15 @@ describe("AdminMetricsFilters", () => {
       disabled: true,
       required: false,
     });
+  });
+
+  it("clears a stale business when scope or partner changes", () => {
+    const businessControl = {
+      value: BUSINESS_ID,
+    } as HTMLSelectElement;
+
+    clearBusinessControl(businessControl);
+
+    expect(businessControl.value).toBe("");
   });
 });
