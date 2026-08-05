@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireAdminUser } from "@/lib/admin/auth";
 import {
   parseAdminMetricsFilters,
@@ -42,12 +43,20 @@ export default async function AdminMetricsPage({
 
   return (
     <main className="space-y-8">
-      <section>
-        <h1 className="text-2xl font-bold">Admin metrics</h1>
-        <p className={`mt-1 text-sm ${bodyFaint}`}>
-          Read-only monthly counts with event-time brand attribution. Month
-          boundaries and availability dates use UTC.
-        </p>
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Admin metrics</h1>
+          <p className={`mt-1 text-sm ${bodyFaint}`}>
+            Read-only monthly counts with event-time brand attribution. Month
+            boundaries and availability dates use UTC.
+          </p>
+        </div>
+        <Link
+          href="/admin/metrics/settings"
+          className="text-sm font-semibold text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+        >
+          Report settings
+        </Link>
       </section>
 
       <AdminMetricsFilters

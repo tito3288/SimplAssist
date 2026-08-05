@@ -42,6 +42,17 @@ vi.mock("./AdminMetricsReport", () => ({
     return <div>Report state: {props.result.state}</div>;
   },
 }));
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 import AdminMetricsPage from "./page";
 
@@ -129,6 +140,8 @@ describe("AdminMetricsPage", () => {
     expect(html).toContain("Admin metrics");
     expect(html).toContain("Read-only monthly counts");
     expect(html).toContain("UTC");
+    expect(html).toContain('href="/admin/metrics/settings"');
+    expect(html).toContain("Report settings");
     expect(html).toContain("Report state: ready");
   });
 
