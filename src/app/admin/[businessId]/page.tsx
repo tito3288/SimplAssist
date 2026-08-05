@@ -30,8 +30,13 @@ import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
 import { AdminAccountActivityTimeline } from "./AdminAccountActivityTimeline";
 import { AdminAccountHealthCard } from "./AdminAccountHealthCard";
 import { AdminAccountServiceControls } from "./AdminAccountServiceControls";
+import {
+  AdminSmsComplianceCard,
+  type AdminSmsCompliancePhoneSnapshot,
+} from "./AdminSmsComplianceCard";
 import type {
   BillingMode,
+  CampaignAssignmentStatus,
   PartnerDomainStatus,
   PartnerStatus,
   SubscriptionPlan,
@@ -72,7 +77,8 @@ type DetailBusiness = {
   onboarding_registration_status: string | null;
   brand_status: string | null;
   campaign_status: string | null;
-  pending_phone_number: string | null;
+  has_ein: boolean | null;
+  telnyx_campaign_id: string | null;
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
@@ -98,6 +104,12 @@ type UsageRow = {
   period_end: string;
 };
 
+type PhoneAssignmentRow = {
+  telnyx_campaign_assignment_status: CampaignAssignmentStatus;
+  telnyx_campaign_assignment_campaign_id: string | null;
+  telnyx_campaign_assignment_updated_at: string | null;
+};
+
 export default async function AdminBusinessPage({
   params,
 }: {
@@ -108,7 +120,7 @@ export default async function AdminBusinessPage({
   const { data: business, error: businessError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, pending_phone_number, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
+      "id, owner_id, deleted_at, deletion_scheduled_for, partner_id, billing_mode, partner_plan, name, business_type, business_type_other, website_url, use_case_description, sample_messages, opt_in_description, a2p_risk_review_status, a2p_risk_review_input_hash, a2p_risk_review_message, a2p_risk_review_reason, a2p_risk_review_findings, a2p_risk_review_customer_answer, a2p_risk_review_customer_selections, a2p_risk_review_reviewed_at, a2p_risk_review_override_note, onboarding_registration_status, brand_status, campaign_status, has_ein, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, telnyx_submission_disabled, sms_overage_opt_in, billing_admin_notes",
     )
     .eq("id", params.businessId)
     .maybeSingle<DetailBusiness>();
@@ -177,6 +189,10 @@ export default async function AdminBusinessPage({
     { data: usage },
     existingBrandLinkState,
     { data: partners, error: partnersError },
+    {
+      data: phoneAssignmentRows,
+      error: phoneAssignmentError,
+    },
   ] = await Promise.all([
     supabaseAdmin
       .from("billing_usage_periods")
@@ -193,6 +209,15 @@ export default async function AdminBusinessPage({
       .select("id, name, status, domain_status")
       .order("name", { ascending: true })
       .returns<PartnerRow[]>(),
+    supabaseAdmin
+      .from("phone_numbers")
+      .select(
+        "telnyx_campaign_assignment_status, telnyx_campaign_assignment_campaign_id, telnyx_campaign_assignment_updated_at",
+      )
+      .eq("business_id", params.businessId)
+      .eq("is_active", true)
+      .eq("resource_status", "active")
+      .returns<PhoneAssignmentRow[]>(),
   ]);
 
   if (partnersError) {
@@ -202,6 +227,13 @@ export default async function AdminBusinessPage({
   const { input } = await buildA2pRiskInputForBusiness(business.id);
   const currentInputHash = hashA2pRiskInput(input);
   const hashMatches = business.a2p_risk_review_input_hash === currentInputHash;
+  const phoneSnapshot = buildPhoneAssignmentSnapshot(
+    phoneAssignmentError ? null : (phoneAssignmentRows ?? []),
+    business.telnyx_campaign_id,
+  );
+  const registrationFailureCodes = new Set(
+    effectiveHealth.failedSetup.reasons.map((reason) => reason.code),
+  );
   const usedSms = usage
     ? usage.inbound_sms_parts + usage.outbound_sms_parts
     : 0;
@@ -260,7 +292,7 @@ export default async function AdminBusinessPage({
       <AdminAccountActivityTimeline {...activity} />
 
       <section className="grid gap-4 md:grid-cols-2">
-        <Card title="A2P Review">
+        <Card title="Pre-submission risk screen">
           <dl className="space-y-2 text-sm">
             <Row
               label="Status"
@@ -357,36 +389,40 @@ export default async function AdminBusinessPage({
           </dl>
         </Card>
 
-        <Card title="Registration">
-          <dl className="space-y-2 text-sm">
-            <Row
-              label="Onboarding registration"
-              value={business.onboarding_registration_status ?? "not_started"}
-            />
-            <Row
-              label="Brand"
-              value={business.brand_status ?? "not submitted"}
-            />
-            <Row
-              label="Campaign"
-              value={business.campaign_status ?? "not submitted"}
-            />
-            <Row
-              label="Pending number"
-              value={business.pending_phone_number ?? "none"}
-            />
-          </dl>
-        </Card>
+        <AdminSmsComplianceCard
+          businessId={business.id}
+          checkedAt={new Date().toISOString()}
+          hasEin={business.has_ein === true}
+          operationsSuspended={
+            effectiveHealth.operations.state === "suspended"
+          }
+          submissionDisabled={business.telnyx_submission_disabled}
+          riskReviewStatus={effectiveHealth.registration.riskReviewStatus}
+          riskInputCurrent={hashMatches}
+          onboardingRegistrationStatus={
+            effectiveHealth.registration.onboardingStatus
+          }
+          registrationSubmissionStale={registrationFailureCodes.has(
+            "registration_submission_stale",
+          )}
+          brandStatus={effectiveHealth.registration.brandStatus}
+          campaignStatus={effectiveHealth.registration.campaignStatus}
+          healthActivePhoneCount={effectiveHealth.phone.activeCount}
+          phoneSnapshot={phoneSnapshot}
+        />
       </section>
 
-      <Card title="Existing Telnyx Brand">
+      <DetailsCard
+        title="Existing Telnyx brand recovery"
+        open={existingBrandLinkState !== null}
+      >
         <ExistingTelnyxBrandForm
           businessId={business.id}
           initialLinkState={existingBrandLinkState}
         />
-      </Card>
+      </DetailsCard>
 
-      <Card title="Carrier-Safe Review Fields">
+      <DetailsCard title="Carrier-safe submitted copy">
         <div className="space-y-4 text-sm">
           <Block label="Use case" value={business.use_case_description} />
           <Block
@@ -402,9 +438,9 @@ export default async function AdminBusinessPage({
             </ul>
           </div>
         </div>
-      </Card>
+      </DetailsCard>
 
-      <Card title="Risk Findings">
+      <DetailsCard title="Risk findings">
         {(business.a2p_risk_review_findings ?? []).length === 0 ? (
           <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
             No findings stored.
@@ -429,7 +465,7 @@ export default async function AdminBusinessPage({
             ))}
           </div>
         )}
-      </Card>
+      </DetailsCard>
 
       <AdminAccountDeletionPanel initialPreview={deletionPreview} />
     </main>
@@ -544,6 +580,50 @@ function Card({
       {children}
     </section>
   );
+}
+
+function DetailsCard({
+  title,
+  open = false,
+  children,
+}: {
+  title: string;
+  open?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className={`${card} p-4`} open={open}>
+      <summary className="cursor-pointer text-lg font-semibold">
+        {title}
+      </summary>
+      <div className="mt-4">{children}</div>
+    </details>
+  );
+}
+
+function buildPhoneAssignmentSnapshot(
+  rows: PhoneAssignmentRow[] | null,
+  campaignId: string | null,
+): AdminSmsCompliancePhoneSnapshot | null {
+  if (rows === null) return null;
+  const assignment = rows.length === 1 ? rows[0] : null;
+  const assignmentCampaignId =
+    assignment?.telnyx_campaign_assignment_campaign_id ?? null;
+  const campaignMatch =
+    campaignId === null || assignmentCampaignId === null
+      ? "unavailable"
+      : assignmentCampaignId === campaignId
+        ? "yes"
+        : "no";
+
+  return {
+    directActiveCount: rows.length,
+    assignmentStatus:
+      assignment?.telnyx_campaign_assignment_status ?? null,
+    assignmentUpdatedAt:
+      assignment?.telnyx_campaign_assignment_updated_at ?? null,
+    campaignMatch,
+  };
 }
 
 function Row({ label, value }: { label: string; value: string }) {

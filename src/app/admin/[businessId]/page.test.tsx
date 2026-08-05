@@ -88,6 +88,35 @@ vi.mock("./AdminAccountServiceControls", () => ({
     </div>
   ),
 }));
+vi.mock("./AdminSmsComplianceCard", () => ({
+  AdminSmsComplianceCard: ({
+    hasEin,
+    healthActivePhoneCount,
+    phoneSnapshot,
+  }: {
+    hasEin: boolean;
+    healthActivePhoneCount: number;
+    phoneSnapshot: {
+      directActiveCount: number;
+      campaignMatch: string;
+      assignmentStatus: string | null;
+    } | null;
+  }) => (
+    <div
+      data-has-ein={String(hasEin)}
+      data-health-active-count={String(healthActivePhoneCount)}
+      data-direct-active-count={
+        phoneSnapshot ? String(phoneSnapshot.directActiveCount) : "unavailable"
+      }
+      data-assignment-status={
+        phoneSnapshot?.assignmentStatus ?? "unavailable"
+      }
+      data-campaign-match={phoneSnapshot?.campaignMatch ?? "unavailable"}
+    >
+      SMS_COMPLIANCE_CARD
+    </div>
+  ),
+}));
 
 import AdminBusinessPage from "./page";
 
@@ -122,7 +151,10 @@ function storedBusiness(overrides: Record<string, unknown> = {}) {
     onboarding_registration_status: "pending",
     brand_status: "pending",
     campaign_status: "pending",
-    pending_phone_number: null,
+    has_ein: true,
+    ein: "12-3456789",
+    telnyx_campaign_id: "campaign-current",
+    pending_phone_number: "+13175550049",
     billing_pilot: false,
     billing_comped: false,
     billing_exempt: false,
@@ -220,13 +252,30 @@ beforeEach(() => {
     ["businesses", { data: storedBusiness(), error: null }],
     ["billing_usage_periods", { data: null, error: null }],
     ["partners", { data: [], error: null }],
+    [
+      "phone_numbers",
+      {
+        data: [
+          {
+            telnyx_campaign_assignment_status: "assigned",
+            telnyx_campaign_assignment_campaign_id: "campaign-current",
+            telnyx_campaign_assignment_updated_at:
+              "2026-08-04T12:00:00.000Z",
+            phone_number: "+13175550149",
+            telnyx_campaign_assignment_failure_reason:
+              "PRIVATE PROVIDER FAILURE",
+          },
+        ],
+        error: null,
+      },
+    ],
   ]);
   mocks.getPreview.mockResolvedValue(preview());
   mocks.loadHealth.mockResolvedValue(storedHealth());
   mocks.loadActivity.mockResolvedValue([]);
   mocks.buildRisk.mockResolvedValue({ input: { businessName: "Lifecycle" } });
   mocks.hashRisk.mockReturnValue("risk-hash");
-  mocks.getExistingBrand.mockResolvedValue({ state: "none" });
+  mocks.getExistingBrand.mockResolvedValue(null);
   mocks.from.mockImplementation((table: string) => {
     const query = {
       select: vi.fn(),
@@ -279,6 +328,25 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(businessQuery.select).toHaveBeenCalledWith(
       expect.stringContaining("owner_id, deleted_at, deletion_scheduled_for"),
     );
+    const businessSelect = businessQuery.select.mock.calls[0]?.[0] as string;
+    expect(businessSelect).toContain("has_ein");
+    expect(businessSelect).toContain("telnyx_campaign_id");
+    expect(businessSelect).not.toMatch(/(?:^|,\s*)ein(?:\s*,|$)/);
+    expect(businessSelect).not.toContain("pending_phone_number");
+    const phoneQueryIndex = mocks.from.mock.calls.findIndex(
+      ([table]) => table === "phone_numbers",
+    );
+    const phoneQuery = mocks.from.mock.results[phoneQueryIndex]?.value;
+    expect(phoneQuery.select).toHaveBeenCalledWith(
+      "telnyx_campaign_assignment_status, telnyx_campaign_assignment_campaign_id, telnyx_campaign_assignment_updated_at",
+    );
+    expect(phoneQuery.select.mock.calls[0]?.[0]).not.toContain("phone_number");
+    expect(phoneQuery.select.mock.calls[0]?.[0]).not.toContain(
+      "failure_reason",
+    );
+    expect(phoneQuery.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
+    expect(phoneQuery.eq).toHaveBeenCalledWith("is_active", true);
+    expect(phoneQuery.eq).toHaveBeenCalledWith("resource_status", "active");
     expect(mocks.getPreview).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.loadHealth).toHaveBeenCalledOnce();
     expect(mocks.loadHealth).toHaveBeenCalledWith(BUSINESS_ID);
@@ -294,6 +362,17 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).toContain("PARTNER_BILLING_FORM");
     expect(html).toContain("A2P_APPROVE_FORM");
     expect(html).toContain("EXISTING_TELNYX_FORM");
+    expect(html).toContain("SMS_COMPLIANCE_CARD");
+    expect(html).toContain('data-has-ein="true"');
+    expect(html).toContain('data-health-active-count="1"');
+    expect(html).toContain('data-direct-active-count="1"');
+    expect(html).toContain('data-assignment-status="assigned"');
+    expect(html).toContain('data-campaign-match="yes"');
+    expect(html).not.toContain("campaign-current");
+    expect(html).not.toContain("12-3456789");
+    expect(html).not.toContain("+13175550049");
+    expect(html).not.toContain("+13175550149");
+    expect(html).not.toContain("PRIVATE PROVIDER FAILURE");
     expect(html).toContain("Account health");
     expect(html).toContain("ADMIN_SERVICE_CONTROLS");
     expect(html).toContain('data-billing-mode="stripe"');
@@ -308,6 +387,127 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html.indexOf("ADMIN_SERVICE_CONTROLS")).toBeLessThan(
       html.indexOf("Account activity"),
     );
+    expect(html).toContain("Pre-submission risk screen");
+    expect(html).not.toContain("A2P Review");
+    expect(html).not.toContain(">Registration</h2>");
+    expect(html).toMatch(
+      /<details(?![^>]*open="")[^>]*><summary[^>]*>Carrier-safe submitted copy<\/summary>/,
+    );
+    expect(html).toMatch(
+      /<details(?![^>]*open="")[^>]*><summary[^>]*>Risk findings<\/summary>/,
+    );
+    expect(html).toMatch(
+      /<details(?![^>]*open="")[^>]*><summary[^>]*>Existing Telnyx brand recovery<\/summary>/,
+    );
+  });
+
+  it("keeps an existing-brand recovery closed unless durable recovery state exists", async () => {
+    mocks.getExistingBrand.mockResolvedValue({
+      status: "pending_admin",
+      tcrBrandId: "PUBLIC-TCR-ID",
+      inspectedAt: "2026-08-04T12:00:00.000Z",
+      approvedAt: null,
+      consumedAt: null,
+      lastErrorCode: null,
+    });
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toMatch(
+      /<details[^>]*open=""[^>]*><summary[^>]*>Existing Telnyx brand recovery<\/summary>/,
+    );
+    expect(html).not.toContain("PUBLIC-TCR-ID");
+  });
+
+  it("fails the SMS card phone snapshot closed when the minimal query errors", async () => {
+    mocks.results.set("phone_numbers", {
+      data: [
+        {
+          telnyx_campaign_assignment_status: "failed",
+          telnyx_campaign_assignment_campaign_id: "PRIVATE-CAMPAIGN-ID",
+          telnyx_campaign_assignment_updated_at: null,
+        },
+      ],
+      error: { message: "phone lookup failed" },
+    });
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toContain("SMS_COMPLIANCE_CARD");
+    expect(html).toContain('data-direct-active-count="unavailable"');
+    expect(html).toContain('data-assignment-status="unavailable"');
+    expect(html).toContain('data-campaign-match="unavailable"');
+    expect(html).not.toContain("PRIVATE-CAMPAIGN-ID");
+  });
+
+  it("passes only a derived mismatch and direct count when active phone rows disagree", async () => {
+    mocks.results.set("businesses", {
+      data: storedBusiness({
+        has_ein: false,
+        telnyx_campaign_id: "CURRENT-CAMPAIGN-ID",
+      }),
+      error: null,
+    });
+    mocks.results.set("phone_numbers", {
+      data: [
+        {
+          telnyx_campaign_assignment_status: "failed",
+          telnyx_campaign_assignment_campaign_id: "OLD-CAMPAIGN-ID",
+          telnyx_campaign_assignment_updated_at: null,
+        },
+        {
+          telnyx_campaign_assignment_status: "pending",
+          telnyx_campaign_assignment_campaign_id: "CURRENT-CAMPAIGN-ID",
+          telnyx_campaign_assignment_updated_at: null,
+        },
+      ],
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toContain('data-has-ein="false"');
+    expect(html).toContain('data-health-active-count="1"');
+    expect(html).toContain('data-direct-active-count="2"');
+    expect(html).toContain('data-assignment-status="unavailable"');
+    expect(html).toContain('data-campaign-match="unavailable"');
+    expect(html).not.toContain("CURRENT-CAMPAIGN-ID");
+    expect(html).not.toContain("OLD-CAMPAIGN-ID");
+  });
+
+  it("derives a one-row campaign mismatch on the server without passing either ID", async () => {
+    mocks.results.set("businesses", {
+      data: storedBusiness({ telnyx_campaign_id: "CURRENT-CAMPAIGN-ID" }),
+      error: null,
+    });
+    mocks.results.set("phone_numbers", {
+      data: [
+        {
+          telnyx_campaign_assignment_status: "assigned",
+          telnyx_campaign_assignment_campaign_id: "OLD-CAMPAIGN-ID",
+          telnyx_campaign_assignment_updated_at:
+            "2026-08-04T12:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+
+    expect(html).toContain('data-direct-active-count="1"');
+    expect(html).toContain('data-assignment-status="assigned"');
+    expect(html).toContain('data-campaign-match="no"');
+    expect(html).not.toContain("CURRENT-CAMPAIGN-ID");
+    expect(html).not.toContain("OLD-CAMPAIGN-ID");
+    expect(html).not.toContain("12-3456789");
   });
 
   it("renders a scheduled account read-only without operational queries or mutation forms", async () => {
@@ -348,6 +548,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("A2P_APPROVE_FORM");
     expect(html).not.toContain("EXISTING_TELNYX_FORM");
     expect(html).not.toContain("ADMIN_SERVICE_CONTROLS");
+    expect(html).not.toContain("SMS_COMPLIANCE_CARD");
   });
 
   it("fails closed to the fresh suspended preview when the first row read was active", async () => {
@@ -373,6 +574,7 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
     expect(html).not.toContain("ADMIN_FLAG_FORM");
     expect(html).not.toContain("PARTNER_BILLING_FORM");
     expect(html).not.toContain("ADMIN_SERVICE_CONTROLS");
+    expect(html).not.toContain("SMS_COMPLIANCE_CARD");
   });
 
   it("uses the fresh active preview when the first row read was scheduled", async () => {
