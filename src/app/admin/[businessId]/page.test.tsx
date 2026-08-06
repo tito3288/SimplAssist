@@ -618,6 +618,8 @@ describe("AdminBusinessPage account lifecycle rendering", () => {
       {
         id: "lifecycle:deletion:scheduled",
         category: "lifecycle",
+        facets: ["lifecycle", "admin"],
+        registrationEventType: null,
         occurredAt: "2026-04-01T12:00:00.000Z",
         title: "Account deletion scheduled",
         detail: null,

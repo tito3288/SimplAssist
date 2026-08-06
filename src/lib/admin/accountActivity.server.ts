@@ -3,19 +3,16 @@ import "server-only";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-const SOURCE_LIMIT = 100;
+export const ACCOUNT_ACTIVITY_PAGE_SIZE = 500;
 
 export const ACCOUNT_ACTIVITY_COLUMNS = {
   milestones:
     "compliance_info_completed_at, onboarding_registration_submitted_at, onboarding_completed_at",
   releaseScheduled: "id, triggered_at, release_at",
   releaseCanceled: "id, canceled_at",
-  deletionAdmin:
-    "id, actor_admin_user_id, deletion_scheduled_for, reason:summary->>reason",
-  operationalAdmin:
-    "id, action, actor_admin_user_id, created_at, reason:summary->>reason, service:summary->>service",
+  adminActions:
+    "id, action, actor_admin_user_id, created_at, deletion_scheduled_for, reason:summary->>reason, service:summary->>service",
   provisioningJob: "id",
-  provisioningAdmin: "id, action, actor_admin_user_id, created_at",
   risk:
     "id, event_type, created_at, reviewed_by:raw_payload->>reviewedBy",
   registration: "id, event_type, created_at",
@@ -33,19 +30,21 @@ export type AdminAccountActivityCategory =
   | "rejection"
   | "calendar";
 
-type AdminAccountActivityEventBase = {
+export type AdminAccountActivityFacet =
+  | "lifecycle"
+  | "admin"
+  | "registration";
+
+export type AdminAccountActivityEvent = {
   id: string;
+  category: AdminAccountActivityCategory;
+  facets: readonly AdminAccountActivityFacet[];
+  registrationEventType: "campaign_status_refreshed" | null;
   occurredAt: string;
   title: string;
   detail: string | null;
   actor: string | null;
 };
-
-export type AdminAccountActivityEvent = {
-  [Category in AdminAccountActivityCategory]: AdminAccountActivityEventBase & {
-    category: Category;
-  };
-}[AdminAccountActivityCategory];
 
 export class AdminAccountActivityUnavailableError extends Error {
   readonly code:
@@ -110,68 +109,7 @@ const releaseCanceledRowSchema = z
     canceled_at: nullableTimestampSchema,
   })
   .strict();
-const deletionAdminRowSchema = z
-  .object({
-    id: z.string().uuid(),
-    actor_admin_user_id: z.string().uuid(),
-    deletion_scheduled_for: timestampSchema,
-    reason: adminReasonSchema.nullable(),
-  })
-  .strict();
-const operationalAdminRowSchema = z
-  .object({
-    id: z.string().uuid(),
-    action: z.enum([
-      "account_operations_suspended",
-      "account_operations_reactivated",
-      "account_service_paused",
-      "account_service_resumed",
-      "phone_assignment_recheck_requested",
-    ]),
-    actor_admin_user_id: z.string().uuid(),
-    created_at: timestampSchema,
-    reason: adminReasonSchema.nullable(),
-    service: z.enum(["ai_replies", "texting", "bookings"]).nullable(),
-  })
-  .strict()
-  .superRefine((row, context) => {
-    if (row.action === "phone_assignment_recheck_requested") {
-      if (row.reason !== null || row.service !== null) {
-        context.addIssue({
-          code: "custom",
-          message: "Assignment recheck audit summary is inconsistent",
-        });
-      }
-      return;
-    }
-    const isAccountAction =
-      row.action === "account_operations_suspended" ||
-      row.action === "account_operations_reactivated";
-    if (isAccountAction && (row.reason === null || row.service !== null)) {
-      context.addIssue({
-        code: "custom",
-        message: "Account operational action summary is inconsistent",
-      });
-    }
-    if (!isAccountAction && row.service === null) {
-      context.addIssue({
-        code: "custom",
-        message: "Service operational action summary is inconsistent",
-      });
-    }
-  });
 const provisioningJobSchema = z.object({ id: z.string().uuid() }).strict();
-const provisioningAdminRowSchema = z
-  .object({
-    id: z.string().uuid(),
-    action: z.enum([
-      "provisioning_job_dismissed",
-      "provisioning_job_restored",
-    ]),
-    actor_admin_user_id: z.string().uuid(),
-    created_at: timestampSchema,
-  })
-  .strict();
 const riskRowSchema = z
   .object({
     id: z.string().uuid(),
@@ -205,12 +143,112 @@ const calendarSchema = z
   .object({ created_at: nullableTimestampSchema })
   .strict();
 
+const OPERATIONAL_ADMIN_ACTIONS = new Set([
+  "account_operations_suspended",
+  "account_operations_reactivated",
+  "account_service_paused",
+  "account_service_resumed",
+  "phone_assignment_recheck_requested",
+]);
+const PROVISIONING_ADMIN_ACTIONS = new Set([
+  "provisioning_job_dismissed",
+  "provisioning_job_restored",
+]);
+const OPERATIONAL_SERVICE_LABELS = {
+  ai_replies: "AI replies",
+  texting: "Texting",
+  bookings: "Bookings",
+} as const;
+type OperationalService = keyof typeof OPERATIONAL_SERVICE_LABELS;
+
+const adminActionRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    action: z.string().trim().min(1),
+    actor_admin_user_id: z.string().uuid(),
+    created_at: timestampSchema,
+    deletion_scheduled_for: nullableTimestampSchema,
+    reason: z.string().nullable(),
+    service: z.string().nullable(),
+  })
+  .strict()
+  .superRefine((row, context) => {
+    if (row.action === "account_deletion_scheduled") {
+      if (
+        row.deletion_scheduled_for === null ||
+        row.service !== null ||
+        (row.reason !== null && !adminReasonSchema.safeParse(row.reason).success)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Account deletion audit summary is inconsistent",
+        });
+      }
+      return;
+    }
+
+    if (PROVISIONING_ADMIN_ACTIONS.has(row.action)) {
+      if (
+        row.deletion_scheduled_for !== null ||
+        row.reason !== null ||
+        row.service !== null
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Provisioning audit summary is inconsistent",
+        });
+      }
+      return;
+    }
+
+    if (!OPERATIONAL_ADMIN_ACTIONS.has(row.action)) return;
+    if (row.deletion_scheduled_for !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Operational action has a deletion target",
+      });
+      return;
+    }
+    if (row.action === "phone_assignment_recheck_requested") {
+      if (row.reason !== null || row.service !== null) {
+        context.addIssue({
+          code: "custom",
+          message: "Assignment recheck audit summary is inconsistent",
+        });
+      }
+      return;
+    }
+    const isAccountAction =
+      row.action === "account_operations_suspended" ||
+      row.action === "account_operations_reactivated";
+    if (
+      isAccountAction &&
+      (row.reason === null ||
+        !adminReasonSchema.safeParse(row.reason).success ||
+        row.service !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Account operational action summary is inconsistent",
+      });
+    }
+    if (
+      !isAccountAction &&
+      (row.service === null ||
+        !isOperationalService(row.service) ||
+        (row.reason !== null && !adminReasonSchema.safeParse(row.reason).success))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Service operational action summary is inconsistent",
+      });
+    }
+  });
+
 type MilestonesRow = z.infer<typeof milestonesSchema>;
 type ReleaseScheduledRow = z.infer<typeof releaseScheduledRowSchema>;
 type ReleaseCanceledRow = z.infer<typeof releaseCanceledRowSchema>;
-type DeletionAdminRow = z.infer<typeof deletionAdminRowSchema>;
-type OperationalAdminRow = z.infer<typeof operationalAdminRowSchema>;
-type ProvisioningAdminRow = z.infer<typeof provisioningAdminRowSchema>;
+type AdminActionRow = z.infer<typeof adminActionRowSchema>;
 type RiskRow = z.infer<typeof riskRowSchema>;
 type RegistrationRow = z.infer<typeof registrationRowSchema>;
 type BrandLinkRow = z.infer<typeof brandLinkRowSchema>;
@@ -222,9 +260,8 @@ export interface AdminAccountActivitySnapshot {
   milestones: MilestonesRow | null;
   releaseScheduled: ReleaseScheduledRow[];
   releaseCanceled: ReleaseCanceledRow[];
-  deletionAdminEvents: DeletionAdminRow[];
-  operationalAdminEvents: OperationalAdminRow[];
-  provisioningAdminEvents: ProvisioningAdminRow[];
+  businessAdminEvents: AdminActionRow[];
+  provisioningAdminEvents: AdminActionRow[];
   riskEvents: RiskRow[];
   registrationEvents: RegistrationRow[];
   brandLinkEvents: BrandLinkRow[];
@@ -234,20 +271,6 @@ export interface AdminAccountActivitySnapshot {
 }
 
 type ReadResult = { data: unknown; error: unknown };
-
-const OPERATIONAL_ADMIN_ACTIONS = [
-  "account_operations_suspended",
-  "account_operations_reactivated",
-  "account_service_paused",
-  "account_service_resumed",
-  "phone_assignment_recheck_requested",
-] as const;
-
-const OPERATIONAL_SERVICE_LABELS = {
-  ai_replies: "AI replies",
-  texting: "Texting",
-  bookings: "Bookings",
-} as const;
 
 /**
  * Loads recorded account history through fixed, minimized service-role reads.
@@ -266,15 +289,14 @@ export async function loadAdminAccountActivity(
 
   const [
     milestoneResult,
-    releaseScheduledResult,
-    releaseCanceledResult,
-    deletionAdminResult,
-    operationalAdminResult,
-    riskResult,
-    registrationResult,
-    brandLinkResult,
-    rejectedBrandsResult,
-    rejectedCampaignsResult,
+    releaseScheduled,
+    releaseCanceled,
+    businessAdminEvents,
+    riskEvents,
+    registrationEvents,
+    brandLinkEvents,
+    rejectedBrands,
+    rejectedCampaigns,
     calendarResult,
     provisioningAdminEvents,
   ] = await Promise.all([
@@ -283,81 +305,101 @@ export async function loadAdminAccountActivity(
       .select(ACCOUNT_ACTIVITY_COLUMNS.milestones)
       .eq("id", businessId)
       .maybeSingle(),
-    supabaseAdmin
-      .from("telnyx_resource_release_reasons")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.releaseScheduled)
-      .eq("business_id", businessId)
-      .eq("reason_type", "account_deletion")
-      .order("triggered_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("telnyx_resource_release_reasons")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.releaseCanceled)
-      .eq("business_id", businessId)
-      .eq("reason_type", "account_deletion")
-      .not("canceled_at", "is", null)
-      .order("canceled_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("admin_action_events")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.deletionAdmin)
-      .eq("business_id", businessId)
-      .eq("action", "account_deletion_scheduled")
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("admin_action_events")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.operationalAdmin)
-      .eq("business_id", businessId)
-      .in("action", OPERATIONAL_ADMIN_ACTIONS)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("a2p_risk_review_events")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.risk)
-      .eq("business_id", businessId)
-      .in("event_type", Object.keys(RISK_TITLES))
-      .not("created_at", "is", null)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("telnyx_registration_events")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.registration)
-      .eq("business_id", businessId)
-      .in("event_type", Object.keys(REGISTRATION_TITLES))
-      .not("created_at", "is", null)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("telnyx_brand_link_events")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.brandLink)
-      .eq("business_id", businessId)
-      .in("event_type", Object.keys(BRAND_LINK_TITLES))
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("rejected_brands")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.rejected)
-      .eq("business_id", businessId)
-      .not("archived_at", "is", null)
-      .order("archived_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
-    supabaseAdmin
-      .from("rejected_campaigns")
-      .select(ACCOUNT_ACTIVITY_COLUMNS.rejected)
-      .eq("business_id", businessId)
-      .not("archived_at", "is", null)
-      .order("archived_at", { ascending: false })
-      .order("id", { ascending: true })
-      .limit(SOURCE_LIMIT),
+    loadAllPages(
+      "deletion schedules",
+      releaseScheduledRowSchema,
+      (cursor) => {
+        let query = supabaseAdmin
+          .from("telnyx_resource_release_reasons")
+          .select(ACCOUNT_ACTIVITY_COLUMNS.releaseScheduled)
+          .eq("business_id", businessId)
+          .eq("reason_type", "account_deletion")
+          .order("id", { ascending: true })
+          .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+        if (cursor !== null) query = query.gt("id", cursor);
+        return query;
+      },
+    ),
+    loadAllPages(
+      "deletion cancellations",
+      releaseCanceledRowSchema,
+      (cursor) => {
+        let query = supabaseAdmin
+          .from("telnyx_resource_release_reasons")
+          .select(ACCOUNT_ACTIVITY_COLUMNS.releaseCanceled)
+          .eq("business_id", businessId)
+          .eq("reason_type", "account_deletion")
+          .not("canceled_at", "is", null)
+          .order("id", { ascending: true })
+          .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+        if (cursor !== null) query = query.gt("id", cursor);
+        return query;
+      },
+    ),
+    loadAllPages("business admin actions", adminActionRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("admin_action_events")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.adminActions)
+        .eq("business_id", businessId)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
+    loadAllPages("risk review activity", riskRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("a2p_risk_review_events")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.risk)
+        .eq("business_id", businessId)
+        .not("created_at", "is", null)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
+    loadAllPages("registration activity", registrationRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("telnyx_registration_events")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.registration)
+        .eq("business_id", businessId)
+        .not("created_at", "is", null)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
+    loadAllPages("existing-brand activity", brandLinkRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("telnyx_brand_link_events")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.brandLink)
+        .eq("business_id", businessId)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
+    loadAllPages("rejected brand history", rejectedRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("rejected_brands")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.rejected)
+        .eq("business_id", businessId)
+        .not("archived_at", "is", null)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
+    loadAllPages("rejected campaign history", rejectedRowSchema, (cursor) => {
+      let query = supabaseAdmin
+        .from("rejected_campaigns")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.rejected)
+        .eq("business_id", businessId)
+        .not("archived_at", "is", null)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    }),
     supabaseAdmin
       .from("google_calendar_tokens")
       .select(ACCOUNT_ACTIVITY_COLUMNS.calendar)
@@ -371,51 +413,6 @@ export async function loadAdminAccountActivity(
     milestoneResult,
     milestonesSchema,
   );
-  const releaseScheduled = parseRows(
-    "deletion schedules",
-    releaseScheduledResult,
-    releaseScheduledRowSchema,
-  );
-  const releaseCanceled = parseRows(
-    "deletion cancellations",
-    releaseCanceledResult,
-    releaseCanceledRowSchema,
-  );
-  const deletionAdminEvents = parseRows(
-    "deletion admin actions",
-    deletionAdminResult,
-    deletionAdminRowSchema,
-  );
-  const operationalAdminEvents = parseRows(
-    "operational admin actions",
-    operationalAdminResult,
-    operationalAdminRowSchema,
-  );
-  const riskEvents = parseRows(
-    "risk review activity",
-    riskResult,
-    riskRowSchema,
-  );
-  const registrationEvents = parseRows(
-    "registration activity",
-    registrationResult,
-    registrationRowSchema,
-  );
-  const brandLinkEvents = parseRows(
-    "existing-brand activity",
-    brandLinkResult,
-    brandLinkRowSchema,
-  );
-  const rejectedBrands = parseRows(
-    "rejected brand history",
-    rejectedBrandsResult,
-    rejectedRowSchema,
-  );
-  const rejectedCampaigns = parseRows(
-    "rejected campaign history",
-    rejectedCampaignsResult,
-    rejectedRowSchema,
-  );
   const calendar = parseOptionalRow(
     "Calendar connection",
     calendarResult,
@@ -427,8 +424,7 @@ export async function loadAdminAccountActivity(
     milestones,
     releaseScheduled,
     releaseCanceled,
-    deletionAdminEvents,
-    operationalAdminEvents,
+    businessAdminEvents,
     provisioningAdminEvents,
     riskEvents,
     registrationEvents,
@@ -441,7 +437,7 @@ export async function loadAdminAccountActivity(
 
 async function loadProvisioningAdminEvents(
   businessId: string,
-): Promise<ProvisioningAdminRow[]> {
+): Promise<AdminActionRow[]> {
   const provisioningJobResult = await supabaseAdmin
     .from("partner_client_provisioning_jobs")
     .select(ACCOUNT_ACTIVITY_COLUMNS.provisioningJob)
@@ -454,21 +450,19 @@ async function loadProvisioningAdminEvents(
   );
   if (!provisioningJob) return [];
 
-  const provisioningAdminResult = await supabaseAdmin
-    .from("admin_action_events")
-    .select(ACCOUNT_ACTIVITY_COLUMNS.provisioningAdmin)
-    .eq("provisioning_job_id", provisioningJob.id)
-    .in("action", [
-      "provisioning_job_dismissed",
-      "provisioning_job_restored",
-    ])
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: true })
-    .limit(SOURCE_LIMIT);
-  return parseRows(
+  return loadAllPages(
     "provisioning admin actions",
-    provisioningAdminResult,
-    provisioningAdminRowSchema,
+    adminActionRowSchema,
+    (cursor) => {
+      let query = supabaseAdmin
+        .from("admin_action_events")
+        .select(ACCOUNT_ACTIVITY_COLUMNS.adminActions)
+        .eq("provisioning_job_id", provisioningJob.id)
+        .order("id", { ascending: true })
+        .limit(ACCOUNT_ACTIVITY_PAGE_SIZE);
+      if (cursor !== null) query = query.gt("id", cursor);
+      return query;
+    },
   );
 }
 
@@ -476,34 +470,42 @@ export function normalizeAdminAccountActivity(
   snapshot: AdminAccountActivitySnapshot,
 ): AdminAccountActivityEvent[] {
   const events: AdminAccountActivityEvent[] = [];
-  const deletionAudits = new Map<
-    string,
-    { actor: string; reason: string | null }
-  >();
-  for (const event of snapshot.deletionAdminEvents) {
-    const scheduledFor = normalizeTimestamp(event.deletion_scheduled_for);
-    // The source read is newest-first. Preserve the newest exact match if a
-    // historical duplicate exists instead of letting an older row replace it.
-    if (!deletionAudits.has(scheduledFor)) {
-      deletionAudits.set(scheduledFor, {
-        actor: event.actor_admin_user_id,
-        reason: event.reason,
-      });
+  const deletionAudits = new Map<string, AdminActionRow[]>();
+  const consumedDeletionAuditIds = new Set<string>();
+
+  for (const event of snapshot.businessAdminEvents) {
+    if (
+      event.action !== "account_deletion_scheduled" ||
+      event.deletion_scheduled_for === null
+    ) {
+      continue;
     }
+    const scheduledFor = normalizeTimestamp(event.deletion_scheduled_for);
+    const matching = deletionAudits.get(scheduledFor) ?? [];
+    matching.push(event);
+    deletionAudits.set(scheduledFor, matching);
   }
+  deletionAudits.forEach((matching) => {
+    matching.sort(compareAdminActionsNewestFirst);
+  });
 
   for (const reason of snapshot.releaseScheduled) {
     const releaseAt = normalizeTimestamp(reason.release_at);
-    const deletionAudit = deletionAudits.get(releaseAt);
+    const deletionAudit = deletionAudits.get(releaseAt)?.find(
+      (candidate) => !consumedDeletionAuditIds.has(candidate.id),
+    );
+    if (deletionAudit) consumedDeletionAuditIds.add(deletionAudit.id);
     events.push({
       id: `lifecycle:${reason.id}:scheduled`,
       category: "lifecycle",
+      facets: deletionAudit ? ["lifecycle", "admin"] : ["lifecycle"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(reason.triggered_at),
       title: "Account deletion scheduled",
       detail: deletionAudit?.reason
         ? `Reason: ${deletionAudit.reason} · Terminal cleanup target: ${releaseAt}`
         : `Terminal cleanup target: ${releaseAt}`,
-      actor: deletionAudit?.actor ?? null,
+      actor: deletionAudit?.actor_admin_user_id ?? null,
     });
   }
 
@@ -512,6 +514,8 @@ export function normalizeAdminAccountActivity(
     events.push({
       id: `lifecycle:${reason.id}:canceled`,
       category: "lifecycle",
+      facets: ["lifecycle"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(reason.canceled_at),
       title: "Account reactivated; deletion canceled",
       detail: null,
@@ -538,43 +542,34 @@ export function normalizeAdminAccountActivity(
     "Onboarding completed; account launched",
   );
 
-  for (const event of snapshot.provisioningAdminEvents) {
-    events.push({
-      id: `admin:${event.id}`,
-      category: "admin",
-      occurredAt: normalizeTimestamp(event.created_at),
-      title:
-        event.action === "provisioning_job_dismissed"
-          ? "Provisioning issue dismissed"
-          : "Provisioning issue restored",
-      detail: null,
-      actor: event.actor_admin_user_id,
-    });
+  for (const event of snapshot.businessAdminEvents) {
+    if (event.action === "account_deletion_scheduled") {
+      if (!consumedDeletionAuditIds.has(event.id)) {
+        events.push(standaloneDeletionAudit(event));
+      }
+      continue;
+    }
+    events.push(normalizeAdminAction(event, "business"));
   }
 
-  for (const event of snapshot.operationalAdminEvents) {
-    events.push({
-      id: `admin:${event.id}`,
-      category: "admin",
-      occurredAt: normalizeTimestamp(event.created_at),
-      title: operationalAdminTitle(event),
-      detail: event.reason,
-      actor: event.actor_admin_user_id,
-    });
+  for (const event of snapshot.provisioningAdminEvents) {
+    events.push(normalizeAdminAction(event, "provisioning"));
   }
 
   for (const event of snapshot.riskEvents) {
     if (!event.created_at) continue;
     const title = knownTitle(RISK_TITLES, event.event_type);
-    if (!title) continue;
+    const isKnown = title !== null;
     events.push({
       id: `risk:${event.id}`,
       category: "risk_review",
+      facets: ["registration"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(event.created_at),
-      title,
+      title: title ?? "A2P risk review event recorded",
       detail: null,
       actor:
-        event.event_type === "admin_approved"
+        isKnown && event.event_type === "admin_approved"
           ? sanitizeActor(event.reviewed_by)
           : null,
     });
@@ -583,12 +578,16 @@ export function normalizeAdminAccountActivity(
   for (const event of snapshot.registrationEvents) {
     if (!event.created_at) continue;
     const title = knownTitle(REGISTRATION_TITLES, event.event_type);
-    if (!title) continue;
     events.push({
       id: `registration:${event.id}`,
       category: "registration",
+      facets: ["registration"],
+      registrationEventType:
+        event.event_type === "campaign_status_refreshed"
+          ? "campaign_status_refreshed"
+          : null,
       occurredAt: normalizeTimestamp(event.created_at),
-      title,
+      title: title ?? "Registration event recorded",
       detail: null,
       actor: null,
     });
@@ -596,14 +595,16 @@ export function normalizeAdminAccountActivity(
 
   for (const event of snapshot.brandLinkEvents) {
     const title = knownTitle(BRAND_LINK_TITLES, event.event_type);
-    if (!title) continue;
+    const isKnown = title !== null;
     events.push({
       id: `brand:${event.id}`,
       category: "brand",
+      facets: ["registration"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(event.created_at),
-      title,
+      title: title ?? "Existing-brand event recorded",
       detail: null,
-      actor: sanitizeActor(event.actor_user_id),
+      actor: isKnown ? sanitizeActor(event.actor_user_id) : null,
     });
   }
 
@@ -612,6 +613,8 @@ export function normalizeAdminAccountActivity(
     events.push({
       id: `rejected-brand:${event.id}`,
       category: "rejection",
+      facets: ["registration"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(event.archived_at),
       title: "Rejected brand archived",
       detail: null,
@@ -623,6 +626,8 @@ export function normalizeAdminAccountActivity(
     events.push({
       id: `rejected-campaign:${event.id}`,
       category: "rejection",
+      facets: ["registration"],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(event.archived_at),
       title: "Campaign archived during registration recovery",
       detail: null,
@@ -634,6 +639,8 @@ export function normalizeAdminAccountActivity(
     events.push({
       id: `calendar:${snapshot.businessId}:current`,
       category: "calendar",
+      facets: [],
+      registrationEventType: null,
       occurredAt: normalizeTimestamp(snapshot.calendar.created_at),
       title: "Calendar connected",
       detail: null,
@@ -641,13 +648,7 @@ export function normalizeAdminAccountActivity(
     });
   }
 
-  return events
-    .sort(
-      (left, right) =>
-        Date.parse(right.occurredAt) - Date.parse(left.occurredAt) ||
-        left.id.localeCompare(right.id),
-    )
-    .slice(0, 100);
+  return events.sort(compareActivityEventsNewestFirst);
 }
 
 const RISK_TITLES: Readonly<Record<string, string>> = {
@@ -657,24 +658,6 @@ const RISK_TITLES: Readonly<Record<string, string>> = {
   review_email_sent: "A2P review notification sent",
   admin_approved: "A2P risk review approved",
 };
-
-function operationalAdminTitle(event: OperationalAdminRow): string {
-  if (event.action === "phone_assignment_recheck_requested") {
-    return "Phone assignment recheck requested";
-  }
-  if (event.action === "account_operations_suspended") {
-    return "Account operations suspended";
-  }
-  if (event.action === "account_operations_reactivated") {
-    return "Account operations reactivated";
-  }
-  if (event.service === null) {
-    throw new Error("Operational service action is missing its service");
-  }
-  return `${OPERATIONAL_SERVICE_LABELS[event.service]} ${
-    event.action === "account_service_paused" ? "paused" : "resumed"
-  }`;
-}
 
 const REGISTRATION_TITLES: Readonly<Record<string, string>> = {
   brand_submitted: "Brand submission attempt recorded",
@@ -703,6 +686,93 @@ const BRAND_LINK_TITLES: Readonly<Record<string, string>> = {
   link_consumed: "Existing brand linked",
 };
 
+function normalizeAdminAction(
+  event: AdminActionRow,
+  association: "business" | "provisioning",
+): AdminAccountActivityEvent {
+  const knownOperational = OPERATIONAL_ADMIN_ACTIONS.has(event.action);
+  const knownProvisioning = PROVISIONING_ADMIN_ACTIONS.has(event.action);
+  if (knownOperational) {
+    return {
+      id: `admin:${event.id}`,
+      category: "admin",
+      facets: ["admin"],
+      registrationEventType: null,
+      occurredAt: normalizeTimestamp(event.created_at),
+      title: operationalAdminTitle(event),
+      detail: event.reason,
+      actor: event.actor_admin_user_id,
+    };
+  }
+  if (knownProvisioning) {
+    return {
+      id: `admin:${event.id}`,
+      category: "admin",
+      facets: ["admin"],
+      registrationEventType: null,
+      occurredAt: normalizeTimestamp(event.created_at),
+      title:
+        event.action === "provisioning_job_dismissed"
+          ? "Provisioning issue dismissed"
+          : "Provisioning issue restored",
+      detail: null,
+      actor: event.actor_admin_user_id,
+    };
+  }
+  return {
+    id: `admin:${event.id}`,
+    category: "admin",
+    facets: ["admin"],
+    registrationEventType: null,
+    occurredAt: normalizeTimestamp(event.created_at),
+    title:
+      association === "provisioning"
+        ? "Provisioning admin action recorded"
+        : "Admin action recorded",
+    detail: null,
+    actor: null,
+  };
+}
+
+function standaloneDeletionAudit(
+  event: AdminActionRow,
+): AdminAccountActivityEvent {
+  if (event.deletion_scheduled_for === null) {
+    throw new Error("Deletion audit is missing its scheduled target");
+  }
+  const releaseAt = normalizeTimestamp(event.deletion_scheduled_for);
+  return {
+    id: `admin:${event.id}`,
+    category: "admin",
+    facets: ["admin"],
+    registrationEventType: null,
+    occurredAt: normalizeTimestamp(event.created_at),
+    title: "Account deletion scheduled",
+    detail: event.reason
+      ? `Reason: ${event.reason} · Terminal cleanup target: ${releaseAt}`
+      : `Terminal cleanup target: ${releaseAt}`,
+    actor: event.actor_admin_user_id,
+  };
+}
+
+function operationalAdminTitle(event: AdminActionRow): string {
+  if (event.action === "phone_assignment_recheck_requested") {
+    return "Phone assignment recheck requested";
+  }
+  if (event.action === "account_operations_suspended") {
+    return "Account operations suspended";
+  }
+  if (event.action === "account_operations_reactivated") {
+    return "Account operations reactivated";
+  }
+  if (!isOperationalService(event.service)) {
+    throw new Error("Operational service action is missing its service");
+  }
+  return `${OPERATIONAL_SERVICE_LABELS[event.service]} ${
+    event.action === "account_service_paused" ? "paused" : "resumed"
+  }`;
+}
+
 function knownTitle(
   titles: Readonly<Record<string, string>>,
   eventType: string,
@@ -728,6 +798,8 @@ function addMilestone(
   events.push({
     id,
     category: "lifecycle",
+    facets: ["lifecycle"],
+    registrationEventType: null,
     occurredAt: normalizeTimestamp(occurredAt),
     title,
     detail: null,
@@ -735,8 +807,62 @@ function addMilestone(
   });
 }
 
+function compareAdminActionsNewestFirst(
+  left: AdminActionRow,
+  right: AdminActionRow,
+): number {
+  return (
+    Date.parse(right.created_at) - Date.parse(left.created_at) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function compareActivityEventsNewestFirst(
+  left: AdminAccountActivityEvent,
+  right: AdminAccountActivityEvent,
+): number {
+  return (
+    Date.parse(right.occurredAt) - Date.parse(left.occurredAt) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function isOperationalService(value: string | null): value is OperationalService {
+  return (
+    value !== null &&
+    Object.prototype.hasOwnProperty.call(OPERATIONAL_SERVICE_LABELS, value)
+  );
+}
+
 function normalizeTimestamp(value: string): string {
   return new Date(value).toISOString();
+}
+
+async function loadAllPages<Schema extends z.ZodTypeAny>(
+  source: string,
+  rowSchema: Schema,
+  fetchPage: (cursor: string | null) => PromiseLike<ReadResult>,
+): Promise<z.infer<Schema>[]> {
+  const rows: z.infer<Schema>[] = [];
+  let cursor: string | null = null;
+
+  while (true) {
+    const page: Array<z.infer<Schema>> = parseRows(
+      source,
+      await fetchPage(cursor),
+      rowSchema,
+    );
+    if (page.length === 0) return rows;
+    const nextCursor: string = (page.at(-1) as { id: string }).id;
+    if (cursor !== null && nextCursor <= cursor) {
+      throw invalidResponse(
+        source,
+        new Error("Activity page did not advance its ID cursor"),
+      );
+    }
+    rows.push(...page);
+    cursor = nextCursor;
+  }
 }
 
 function parseRows<Schema extends z.ZodTypeAny>(
