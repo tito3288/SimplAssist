@@ -28,7 +28,7 @@ vi.mock("./AdminSignOutButton", () => ({
 import AdminLayout from "./layout";
 
 describe("AdminLayout navigation", () => {
-  it("links authenticated admins to clients, metrics, and partner management", async () => {
+  it("renders authenticated admin sections as compact navigation buttons", async () => {
     mocks.getAdminGateState.mockResolvedValue({
       state: "admin",
       admin: { id: "admin-1", email: null },
@@ -46,6 +46,27 @@ describe("AdminLayout navigation", () => {
     expect(html).toContain("flex-wrap");
     expect(html).toContain('href="/admin/partners"');
     expect(html).toContain(">Partners</a>");
+    expect(html).toContain('href="/admin/tickets"');
+    expect(html).toContain(">Tickets</a>");
+    expect(html).toContain('href="/admin/waitlist"');
+    expect(html).toContain(">Waitlist</a>");
+    expect(html).toContain('aria-label="Admin sections"');
+
+    const navigation = html.match(
+      /<nav aria-label="Admin sections"[^>]*>([\s\S]*?)<\/nav>/,
+    )?.[1];
+    const navigationLinks = navigation?.match(/<a\b[^>]*>/g) ?? [];
+
+    expect(navigationLinks).toHaveLength(5);
+    expect(
+      navigationLinks.every(
+        (link) =>
+          link.includes("inline-flex") &&
+          link.includes("rounded-full") &&
+          link.includes("px-3") &&
+          link.includes("py-1.5"),
+      ),
+    ).toBe(true);
   });
 
   it("does not expose admin navigation before authentication", async () => {
@@ -58,5 +79,6 @@ describe("AdminLayout navigation", () => {
     expect(html).toContain("Admin login");
     expect(html).not.toContain("Private admin content");
     expect(html).not.toContain('href="/admin/metrics"');
+    expect(html).not.toContain('aria-label="Admin sections"');
   });
 });

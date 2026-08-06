@@ -21,6 +21,7 @@ import {
   type WaitlistRow,
   type WaitlistStatus,
 } from "./waitlistView";
+import { AdminBackLink } from "../AdminBackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -151,6 +152,8 @@ export default async function AdminWaitlistPage({
 
   return (
     <main className="space-y-6">
+      <AdminBackLink />
+
       <section>
         <h1 className={`text-2xl font-bold ${ink}`}>Full Suite waitlist</h1>
         <p className={`mt-1 text-sm ${bodyFaint}`}>

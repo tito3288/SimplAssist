@@ -15,6 +15,7 @@ import {
   statusSuccess,
   statusWarning,
 } from "@/lib/theme-v2/theme";
+import { AdminBackLink } from "../AdminBackLink";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +42,8 @@ export default async function AdminClientsPage({
 
   return (
     <main className="space-y-6">
+      <AdminBackLink />
+
       <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Clients</h1>

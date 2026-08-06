@@ -84,6 +84,9 @@ describe("AdminClientsPage", () => {
       mocks.listRecords.mock.invocationCallOrder[0],
     );
     expect(mocks.listRecords).toHaveBeenCalledWith("current");
+    expect(html).toContain('href="/admin"');
+    expect(html).toContain('aria-label="Back to admin"');
+    expect(html).toContain("Back</a>");
     expect(html).toContain("No current provisioning jobs.");
     expect(html).toContain('href="/admin/clients/new"');
     expect(html).toContain("Create client");

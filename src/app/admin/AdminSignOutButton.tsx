@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAdminSessionBrowserClient } from "@/lib/admin/sessionClient";
+import { btnSecondaryCompact } from "@/lib/theme-v2/theme";
 
 // Ends only the admin session channel: scope "local" revokes just this
 // session server-side and clears only the sa-admin-auth cookies — any
@@ -32,7 +33,7 @@ export default function AdminSignOutButton() {
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className="text-sm text-stone-500 hover:text-[#c2410c] disabled:opacity-60 dark:hover:text-[#ff914d]"
+      className={`${btnSecondaryCompact} disabled:cursor-not-allowed disabled:opacity-60 disabled:active:translate-y-0`}
     >
       {signingOut ? "Signing out…" : "Sign out"}
     </button>

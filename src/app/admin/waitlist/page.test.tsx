@@ -187,6 +187,9 @@ describe("AdminWaitlistPage", () => {
     expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.from.mock.invocationCallOrder[0]
     );
+    expect(markup).toContain('href="/admin"');
+    expect(markup).toContain('aria-label="Back to admin"');
+    expect(markup).toContain("Back</a>");
     expect(markup).toMatch(/Total[\s\S]*205/);
     expect(markup).toMatch(/Pending[\s\S]*100/);
     expect(markup).toMatch(/Notified[\s\S]*80/);

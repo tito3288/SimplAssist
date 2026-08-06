@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminGateState } from "@/lib/admin/auth";
 import {
+  btnSecondaryCompact,
   pageShell,
   fontStack,
   lightAmbient,
@@ -47,43 +48,31 @@ export default async function AdminLayout({
       ) : (
         <AdminSetupLinkProvider>
           <div className="mx-auto max-w-6xl">
-            <header className="mb-6 flex items-center justify-between border-b border-[#ece4d8] pb-4 dark:border-white/[0.10]">
+            <header className="mb-6 flex flex-col items-start gap-3 border-b border-[#ece4d8] pb-4 md:flex-row md:items-center md:justify-between dark:border-white/[0.10]">
               <Link href="/admin" className="text-lg font-semibold">
                 SimplAssist Admin
               </Link>
-              <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-                <Link
-                  href="/admin/clients"
-                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
-                >
+              <nav
+                aria-label="Admin sections"
+                className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end"
+              >
+                <Link href="/admin/clients" className={btnSecondaryCompact}>
                   Clients
                 </Link>
-                <Link
-                  href="/admin/metrics"
-                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
-                >
+                <Link href="/admin/metrics" className={btnSecondaryCompact}>
                   Metrics
                 </Link>
-                <Link
-                  href="/admin/partners"
-                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
-                >
+                <Link href="/admin/partners" className={btnSecondaryCompact}>
                   Partners
                 </Link>
-                <Link
-                  href="/admin/tickets"
-                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
-                >
+                <Link href="/admin/tickets" className={btnSecondaryCompact}>
                   Tickets
                 </Link>
-                <Link
-                  href="/admin/waitlist"
-                  className="text-sm text-stone-500 hover:text-[#c2410c] dark:hover:text-[#ff914d]"
-                >
+                <Link href="/admin/waitlist" className={btnSecondaryCompact}>
                   Waitlist
                 </Link>
                 <AdminSignOutButton />
-              </div>
+              </nav>
             </header>
             {children}
           </div>

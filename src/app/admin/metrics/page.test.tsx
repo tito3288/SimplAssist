@@ -145,6 +145,9 @@ describe("AdminMetricsPage", () => {
     expect(html).toContain("Admin metrics");
     expect(html).toContain("Read-only monthly counts");
     expect(html).toContain("UTC");
+    expect(html).toContain('href="/admin"');
+    expect(html).toContain('aria-label="Back to admin"');
+    expect(html).toContain("Back</a>");
     expect(html).toContain('href="/admin/metrics/settings"');
     expect(html).toContain("Report settings");
     expect(html).toContain("Report state: ready");
