@@ -50,30 +50,27 @@ export default async function AdminLayout({
         <AdminSetupLinkProvider>
           <div className="mx-auto max-w-6xl">
             <header className="mb-8 border-b border-[#e8dfd3] pb-4 dark:border-white/[0.10]">
-              <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <Link
                   href="/admin"
-                  className={`inline-flex w-fit items-center gap-3 rounded-md ${ink} focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]`}
+                  className={`inline-flex w-fit items-center rounded-md ${ink} focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]`}
                 >
                   <Image
                     src="/logo-light.png"
                     alt="SimplAssist"
-                    width={156}
-                    height={36}
-                    className="h-8 w-auto object-contain dark:hidden sm:h-9"
+                    width={190}
+                    height={44}
+                    className="h-10 w-auto object-contain dark:hidden sm:h-11"
                     priority
                   />
                   <Image
                     src="/logo-dark.png"
                     alt="SimplAssist"
-                    width={153}
-                    height={36}
-                    className="hidden h-8 w-auto object-contain dark:block sm:h-9"
+                    width={187}
+                    height={44}
+                    className="hidden h-10 w-auto object-contain dark:block sm:h-11"
                     priority
                   />
-                  <span className="text-2xl font-bold leading-none tracking-tight sm:text-[27px]">
-                    Admin
-                  </span>
                 </Link>
                 <AdminNavigation />
               </div>

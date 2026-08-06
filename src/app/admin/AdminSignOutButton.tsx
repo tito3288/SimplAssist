@@ -32,7 +32,7 @@ export default function AdminSignOutButton() {
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className="inline-flex border-b-2 border-transparent px-0.5 py-2 text-sm font-semibold text-stone-600 transition-colors hover:border-[var(--brand-primary)] hover:text-[var(--brand-primary-active)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] disabled:cursor-not-allowed disabled:opacity-60 dark:text-stone-300 dark:hover:text-[var(--brand-primary-dark)]"
+      className="inline-flex w-full justify-start border-b-2 border-transparent px-0.5 py-2 text-sm font-semibold text-stone-600 transition-colors hover:border-[var(--brand-primary)] hover:text-[var(--brand-primary-active)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] disabled:cursor-not-allowed disabled:opacity-60 md:w-auto dark:text-stone-300 dark:hover:text-[var(--brand-primary-dark)]"
     >
       {signingOut ? "Signing out…" : "Sign out"}
     </button>

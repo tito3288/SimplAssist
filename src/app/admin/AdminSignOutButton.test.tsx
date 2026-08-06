@@ -24,6 +24,9 @@ describe("AdminSignOutButton", () => {
     expect(html).toContain('type="button"');
     expect(html).toContain("Sign out</button>");
     expect(html).toContain("inline-flex");
+    expect(html).toContain("w-full");
+    expect(html).toContain("md:w-auto");
+    expect(html).toContain("justify-start");
     expect(html).toContain("border-b-2");
     expect(html).toContain("border-transparent");
     expect(html).toContain("hover:border-[var(--brand-primary)]");

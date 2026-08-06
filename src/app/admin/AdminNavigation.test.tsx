@@ -21,7 +21,7 @@ vi.mock("./AdminSignOutButton", () => ({
   default: () => <button type="button">Sign out</button>,
 }));
 
-import { AdminNavigation } from "./AdminNavigation";
+import { AdminNavigation, nextAdminMenuOpen } from "./AdminNavigation";
 
 function renderedLinks() {
   const html = renderToStaticMarkup(<AdminNavigation />);
@@ -41,9 +41,16 @@ describe("AdminNavigation", () => {
   it("renders every section as plain text without a redundant Overview link", () => {
     const { html, links } = renderedLinks();
 
+    expect(html).toContain('type="button"');
+    expect(html).toContain('aria-label="Open admin menu"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="admin-navigation-menu"');
+    expect(html).toContain('id="admin-navigation-menu"');
+    expect(html).toContain("lucide-menu");
+    expect(html).not.toContain("lucide-x");
+    expect(html).not.toContain("<details");
+    expect(html).toContain("md:flex");
     expect(html).toContain('aria-label="Admin sections"');
-    expect(html).toContain("justify-start");
-    expect(html).toContain("md:justify-end");
     expect(links.map(({ label }) => label)).toEqual([
       "Clients",
       "Metrics",
@@ -55,6 +62,8 @@ describe("AdminNavigation", () => {
       links.every(
         ({ attributes }) =>
           attributes.includes("inline-flex") &&
+          attributes.includes("w-full") &&
+          attributes.includes("md:w-auto") &&
           attributes.includes("border-b-2") &&
           attributes.includes("px-0.5") &&
           attributes.includes("py-2") &&
@@ -63,6 +72,11 @@ describe("AdminNavigation", () => {
     ).toBe(true);
     expect(html).not.toContain(">Overview</a>");
     expect(html).toContain("Sign out</button>");
+  });
+
+  it("toggles the mobile menu state in both directions", () => {
+    expect(nextAdminMenuOpen(false)).toBe(true);
+    expect(nextAdminMenuOpen(true)).toBe(false);
   });
 
   it.each([

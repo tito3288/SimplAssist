@@ -50,7 +50,10 @@ describe("AdminLayout navigation", () => {
     expect(html).toContain('src="/logo-light.png"');
     expect(html).toContain('src="/logo-dark.png"');
     expect(html).toContain('alt="SimplAssist"');
-    expect(html).toContain(">Admin</span>");
+    expect(html).toContain('width="190"');
+    expect(html).toContain('height="44"');
+    expect(html).toContain("h-10");
+    expect(html).not.toContain(">Admin</span>");
     expect(html).toContain("border-b");
     expect(html).toContain("items-center");
     expect(html).not.toContain("rounded-[20px]");
