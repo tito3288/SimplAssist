@@ -9,6 +9,12 @@ vi.mock("@/lib/admin/auth", () => ({
   getAdminGateState: mocks.getAdminGateState,
 }));
 vi.mock("next/navigation", () => ({ notFound: vi.fn() }));
+vi.mock("next/image", () => ({
+  default: ({ alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img alt={alt} {...props} />
+  ),
+}));
 vi.mock("next/link", () => ({
   default: ({
     children,
@@ -40,13 +46,16 @@ describe("AdminLayout navigation", () => {
       await AdminLayout({ children: <main>Admin content</main> }),
     );
 
-    expect(html).toContain("Admin console");
     expect(html).toContain('href="/admin"');
-    expect(html).toContain(">SimplAssist Admin</a>");
-    expect(html).toContain("bg-[#fffaf6]");
+    expect(html).toContain('src="/logo-light.png"');
+    expect(html).toContain('src="/logo-dark.png"');
+    expect(html).toContain('alt="SimplAssist"');
+    expect(html).toContain(">Admin</span>");
+    expect(html).toContain("border-b");
     expect(html).toContain("items-center");
-    expect(html).toContain("text-center");
-    expect(html).toContain("lg:text-left");
+    expect(html).not.toContain("rounded-[20px]");
+    expect(html).not.toContain("bg-[#fffaf6]");
+    expect(html).not.toContain("Admin console");
     expect(html).not.toContain("Internal operations workspace");
     expect(html).not.toContain("lucide-shield-check");
     expect(html).toContain('aria-label="Admin sections"');
@@ -63,7 +72,7 @@ describe("AdminLayout navigation", () => {
 
     expect(html).toContain("Admin login");
     expect(html).not.toContain("Private admin content");
-    expect(html).not.toContain("Admin console");
+    expect(html).not.toContain("/logo-light.png");
     expect(html).not.toContain('aria-label="Admin sections"');
   });
 });

@@ -18,15 +18,16 @@ vi.mock("@/lib/admin/sessionClient", () => ({
 import AdminSignOutButton from "./AdminSignOutButton";
 
 describe("AdminSignOutButton", () => {
-  it("renders the session action as a compact navigation button", () => {
+  it("renders the session action as a plain underlined navigation control", () => {
     const html = renderToStaticMarkup(<AdminSignOutButton />);
 
     expect(html).toContain('type="button"');
     expect(html).toContain("Sign out</button>");
     expect(html).toContain("inline-flex");
-    expect(html).toContain("rounded-full");
-    expect(html).toContain("px-3");
-    expect(html).toContain("py-1.5");
+    expect(html).toContain("border-b-2");
+    expect(html).toContain("border-transparent");
+    expect(html).toContain("hover:border-[var(--brand-primary)]");
+    expect(html).not.toContain("rounded-full");
     expect(html).toContain("disabled:cursor-not-allowed");
     expect(html).not.toContain('disabled=""');
   });

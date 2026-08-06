@@ -38,14 +38,13 @@ beforeEach(() => {
 });
 
 describe("AdminNavigation", () => {
-  it("renders every section as a compact pill with Overview first", () => {
+  it("renders every section as plain text without a redundant Overview link", () => {
     const { html, links } = renderedLinks();
 
     expect(html).toContain('aria-label="Admin sections"');
-    expect(html).toContain("justify-center");
-    expect(html).toContain("lg:justify-end");
+    expect(html).toContain("justify-start");
+    expect(html).toContain("md:justify-end");
     expect(links.map(({ label }) => label)).toEqual([
-      "Overview",
       "Clients",
       "Metrics",
       "Partners",
@@ -56,17 +55,17 @@ describe("AdminNavigation", () => {
       links.every(
         ({ attributes }) =>
           attributes.includes("inline-flex") &&
-          attributes.includes("rounded-full") &&
-          attributes.includes("px-3") &&
-          attributes.includes("py-1.5"),
+          attributes.includes("border-b-2") &&
+          attributes.includes("px-0.5") &&
+          attributes.includes("py-2") &&
+          !attributes.includes("rounded-full"),
       ),
     ).toBe(true);
+    expect(html).not.toContain(">Overview</a>");
     expect(html).toContain("Sign out</button>");
   });
 
   it.each([
-    ["/admin", "Overview"],
-    ["/admin/10000000-0000-4000-a045-000000000001", "Overview"],
     ["/admin/clients", "Clients"],
     ["/admin/clients/new", "Clients"],
     ["/admin/clients/provisioning-1", "Clients"],
@@ -87,6 +86,24 @@ describe("AdminNavigation", () => {
 
     expect(currentLinks).toHaveLength(1);
     expect(currentLinks[0]?.label).toBe(expectedLabel);
-    expect(currentLinks[0]?.attributes).toContain("bg-[var(--brand-primary)]");
+    expect(currentLinks[0]?.attributes).toContain(
+      "border-[var(--brand-primary)]",
+    );
+    expect(currentLinks[0]?.attributes).not.toContain(
+      "bg-[var(--brand-primary)]",
+    );
   });
+
+  it.each(["/admin", "/admin/10000000-0000-4000-a045-000000000001"])(
+    "leaves section links inactive on %s",
+    (pathname) => {
+      mocks.pathname = pathname;
+
+      const { links } = renderedLinks();
+
+      expect(
+        links.some(({ attributes }) => attributes.includes("aria-current")),
+      ).toBe(false);
+    },
+  );
 });
