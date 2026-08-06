@@ -349,10 +349,15 @@ export default function AISettingsForm({
               </label>
             </div>
 
-            {/* Google Calendar Connection - inline, only when Direct scheduling selected */}
-            {businessId && bookingMode === 'schedule_direct' && (
+            {/* Google Calendar Connection - inline whenever booking is enabled */}
+            {businessId && (
               <div className="mt-4 p-4 rounded-xl bg-white border border-[#ece4d8] dark:bg-white/5 dark:border-white/[0.08]">
                 <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Google Calendar</p>
+                {bookingMode === 'collect_info' && (
+                  <p className="mb-3 text-xs text-stone-500 dark:text-[#bdbdbf]">
+                    optional — connect to enable direct scheduling
+                  </p>
+                )}
                 <GoogleCalendarConnect
                   businessId={businessId}
                   connectedEmail={calendarEmail ?? null}

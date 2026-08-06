@@ -80,21 +80,35 @@ import CalendarPage from "./page";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 
-function dashboardContext() {
-  const query = {
-    select: vi.fn(),
-    eq: vi.fn(),
-    single: vi.fn().mockResolvedValue({
-      data: { google_email: "owner@example.com" },
-      error: null,
-    }),
-  };
-  query.select.mockReturnValue(query);
-  query.eq.mockReturnValue(query);
+function dashboardContext({
+  bookingEnabled = false,
+  calendarToken = { google_email: "owner@example.com" } as {
+    google_email: string;
+  } | null,
+}: {
+  bookingEnabled?: boolean;
+  calendarToken?: { google_email: string } | null;
+} = {}) {
+  const from = vi.fn((table: string) => {
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      single: vi.fn().mockResolvedValue({
+        data:
+          table === "google_calendar_tokens"
+            ? calendarToken
+            : { booking_enabled: bookingEnabled },
+        error: null,
+      }),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    return query;
+  });
 
   return {
     status: "resolved",
-    supabase: { from: vi.fn(() => query) },
+    supabase: { from },
     business: { id: BUSINESS_ID },
     entitlements: { active: true, plan: "sms_and_chat" },
   };
@@ -110,6 +124,49 @@ beforeEach(() => {
   mocks.getDashboardEntitledContext.mockResolvedValue(dashboardContext());
   mocks.canUseFeature.mockReturnValue(true);
   mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
+});
+
+describe("Calendar page Google Calendar connection prompt", () => {
+  it.each([
+    ["booking is enabled and Calendar is disconnected", true, null, true],
+    [
+      "Calendar is already connected",
+      true,
+      { google_email: "owner@example.com" },
+      false,
+    ],
+    ["booking is disabled", false, null, false],
+  ] as const)(
+    "%s",
+    async (_scenario, bookingEnabled, calendarToken, shouldShowPrompt) => {
+      mocks.getDashboardEntitledContext.mockResolvedValueOnce(
+        dashboardContext({ bookingEnabled, calendarToken })
+      );
+
+      const html = renderToStaticMarkup(await CalendarPage());
+
+      expect(html.includes("Connect Google Calendar")).toBe(shouldShowPrompt);
+      expect(
+        html.includes(
+          "Connect Google Calendar to make direct scheduling available for your assistant."
+        )
+      ).toBe(shouldShowPrompt);
+    }
+  );
+
+  it("places the connection card before the Calendar view", async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValueOnce(
+      dashboardContext({ bookingEnabled: true, calendarToken: null })
+    );
+
+    const html = renderToStaticMarkup(await CalendarPage());
+
+    expect(
+      html.indexOf(
+        "Connect Google Calendar to make direct scheduling available for your assistant."
+      )
+    ).toBeLessThan(html.indexOf("Connect your Google Calendar"));
+  });
 });
 
 describe("Calendar page event creation state", () => {

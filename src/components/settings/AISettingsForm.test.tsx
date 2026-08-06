@@ -26,6 +26,65 @@ const SETTINGS: AISettings = {
 };
 
 describe("AISettingsForm Google Calendar connection state", () => {
+  it("shows the optional connection in collect-info mode when booking is enabled", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={{
+          ...SETTINGS,
+          booking_enabled: true,
+          booking_mode: "collect_info",
+        }}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarConnected={false}
+      />
+    );
+
+    expect(html).toContain("Google Calendar");
+    expect(html).toContain(
+      "optional — connect to enable direct scheduling"
+    );
+    expect(html).toContain("Connect Google Calendar");
+  });
+
+  it("keeps the current connection presentation in direct mode", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={{
+          ...SETTINGS,
+          booking_enabled: true,
+          booking_mode: "schedule_direct",
+        }}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarConnected={false}
+      />
+    );
+
+    expect(html).toContain("Direct scheduling");
+    expect(html).toContain("Google Calendar");
+    expect(html).toContain("Connect Google Calendar");
+    expect(html).not.toContain(
+      "optional — connect to enable direct scheduling"
+    );
+  });
+
+  it("hides the connection when appointment booking is disabled", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarConnected={false}
+      />
+    );
+
+    expect(html).not.toContain("Connect Google Calendar");
+    expect(html).not.toContain(
+      "optional — connect to enable direct scheduling"
+    );
+  });
+
   it("preserves disconnect for a saved token whose google_email is null", () => {
     const html = renderToStaticMarkup(
       <AISettingsForm

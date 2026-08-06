@@ -26,11 +26,18 @@ export default async function CalendarPage() {
   const { supabase, business, entitlements } = context;
   const planActive = entitlements.active;
 
-  const { data: calendarToken } = await supabase
-    .from("google_calendar_tokens")
-    .select("google_email")
-    .eq("business_id", business.id)
-    .single();
+  const [{ data: calendarToken }, { data: aiSettings }] = await Promise.all([
+    supabase
+      .from("google_calendar_tokens")
+      .select("google_email")
+      .eq("business_id", business.id)
+      .single(),
+    supabase
+      .from("ai_settings")
+      .select("booking_enabled")
+      .eq("business_id", business.id)
+      .single(),
+  ]);
 
   if (!canUseFeature(entitlements, "calendar")) {
     return (
@@ -78,6 +85,19 @@ export default async function CalendarPage() {
           View your upcoming appointments and events
         </p>
       </div>
+      {aiSettings?.booking_enabled && !calendarToken && (
+        <div className="rounded-2xl border border-[#ece4d8] bg-white p-5 dark:border-white/[0.10] dark:bg-white/[0.04]">
+          <p className="mb-4 text-sm text-stone-600 dark:text-[#bdbdbf]">
+            Connect Google Calendar to make direct scheduling available for your assistant.
+          </p>
+          <GoogleCalendarConnect
+            businessId={business.id}
+            connectedEmail={null}
+            isConnected={false}
+            canConnect={true}
+          />
+        </div>
+      )}
       <CalendarView
         isConnected={!!calendarToken}
         googleEmail={calendarToken?.google_email ?? null}
