@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   resolveAssignedPartnerName: vi.fn(),
   getRequestBrand: vi.fn(),
+  isPlanAvailable: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -19,6 +20,9 @@ vi.mock("@/lib/dashboard/context", () => ({
 }));
 vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: mocks.getRequestBrand,
+}));
+vi.mock("@/lib/billing/planAvailability", () => ({
+  isPlanAvailable: mocks.isPlanAvailable,
 }));
 vi.mock("./billing-actions", () => ({
   BillingActions: ({ mode }: { mode: string }) => (
@@ -62,6 +66,9 @@ beforeEach(() => {
     isPreview: false,
     brand: { name: "SimplAssist" },
   });
+  mocks.isPlanAvailable.mockImplementation(
+    (plan: string) => plan !== "full"
+  );
 });
 
 describe("BillingPage", () => {
@@ -127,6 +134,102 @@ describe("BillingPage", () => {
     expect(html).toContain("Stripe billing action");
     expect(html).not.toContain("Billing during suspension");
     expect(html).not.toContain("billing continues");
+  });
+
+  it("omits unavailable Full from the new-subscription plan choices", async () => {
+    mocks.from.mockImplementation(() =>
+      queryThenable(Promise.resolve({ data: null }))
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: null,
+        billing_mode: "stripe",
+        operations_suspended_at: null,
+      },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage());
+
+    expect(html).toContain("Starter / SMS Only");
+    expect(html).toContain("Growth / SMS + Web Chat");
+    expect(html).not.toContain("Pro / Full Suite");
+    expect(html).not.toContain("Notify Me When It Launches");
+    expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(2);
+    expect(mocks.isPlanAvailable).toHaveBeenCalledWith("full");
+  });
+
+  it("restores the Full choice and checkout when Full becomes available", async () => {
+    mocks.isPlanAvailable.mockReturnValue(true);
+    mocks.from.mockImplementation(() =>
+      queryThenable(Promise.resolve({ data: null }))
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: null,
+        billing_mode: "stripe",
+        operations_suspended_at: null,
+      },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage());
+
+    expect(html).toContain("Pro / Full Suite");
+    expect(html).toContain("$65");
+    expect(html).not.toContain("Coming Soon");
+    expect(html).not.toContain("Notify Me When It Launches");
+    expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(3);
+  });
+
+  it("keeps an existing active Full subscription and portal visible while Full is unavailable", async () => {
+    mocks.from.mockImplementation((table: string) =>
+      queryThenable(
+        Promise.resolve(
+          table === "subscriptions"
+            ? {
+                data: {
+                  plan: "full",
+                  status: "active",
+                  current_period_end: "2026-09-01T12:00:00.000Z",
+                },
+              }
+            : {
+                data: {
+                  inbound_sms_parts: 20,
+                  outbound_sms_parts: 30,
+                  included_sms_parts: 2_500,
+                },
+              }
+        )
+      )
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: null,
+        billing_mode: "stripe",
+        operations_suspended_at: null,
+      },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage());
+
+    expect(html).toContain("Pro / Full Suite");
+    expect(html).toContain("Stripe billing action: portal");
+    expect(html).toContain("50 / 2,500 parts");
+    expect(html).not.toContain("Stripe billing action: checkout");
+    expect(html).not.toContain("Choose a plan to get started");
+    expect(mocks.isPlanAvailable).not.toHaveBeenCalled();
   });
 
   it("shows Stripe billing truth during suspension without hiding subscription details or portal access", async () => {
@@ -209,7 +312,10 @@ describe("BillingPage", () => {
       expect(html).not.toContain("Manage your subscription");
       expect(html).not.toContain("SMS usage");
       expect(html).not.toContain("Billing during suspension");
+      expect(html).not.toContain("Pro / Full Suite");
+      expect(html).not.toContain("Notify Me When It Launches");
       expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+      expect(mocks.isPlanAvailable).not.toHaveBeenCalled();
     }
   );
 

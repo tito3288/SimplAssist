@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
@@ -7,8 +8,13 @@ const mocks = vi.hoisted(() => ({
   getDashboardEntitlements: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   canUseFeature: vi.fn(),
+  isPlanAvailable: vi.fn(),
   getFirstNameFromAuthMetadata: vi.fn(),
   shouldShowCallForwardingNudge: vi.fn(),
+  featureStatusBanners: vi.fn((props: unknown) => {
+    void props;
+    return null;
+  }),
   from: vi.fn(),
 }));
 
@@ -27,6 +33,9 @@ vi.mock("@/lib/messaging/lookup", () => ({
 vi.mock("@/lib/billing/entitlements", () => ({
   canUseFeature: mocks.canUseFeature,
 }));
+vi.mock("@/lib/billing/planAvailability", () => ({
+  isPlanAvailable: mocks.isPlanAvailable,
+}));
 vi.mock("@/lib/utils", () => ({
   getFirstNameFromAuthMetadata: mocks.getFirstNameFromAuthMetadata,
 }));
@@ -37,7 +46,7 @@ vi.mock("@/components/dashboard/DashboardOverview", () => ({
   default: () => null,
 }));
 vi.mock("@/components/entitlements/FeatureStatusBanners", () => ({
-  FeatureStatusBanners: () => null,
+  FeatureStatusBanners: mocks.featureStatusBanners,
 }));
 
 import DashboardPage from "./page";
@@ -51,6 +60,18 @@ const ENTITLEMENTS = {
   active: true,
   cancelAtPeriodEnd: false,
 } as const;
+
+interface FeatureStatusBannerProps {
+  businessId: string;
+  plan: string;
+  status: string;
+  pausedFeatures: string[];
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.isPlanAvailable.mockReturnValue(true);
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -76,6 +97,73 @@ function queryThenable(result: Promise<unknown>) {
   query.then = result.then.bind(result);
   query.catch = result.catch.bind(result);
   return query;
+}
+
+function configureResolvedDashboardWithSavedGuardrails() {
+  const tableCalls = new Map<string, number>();
+
+  mocks.from.mockImplementation((table: string) => {
+    const call = (tableCalls.get(table) ?? 0) + 1;
+    tableCalls.set(table, call);
+
+    let result: Promise<unknown>;
+    if (table === "conversations" && call <= 2) {
+      result = Promise.resolve({ count: 0 });
+    } else if (table === "conversations") {
+      result = Promise.resolve({ data: [] });
+    } else if (table === "contacts" && call === 1) {
+      result = Promise.resolve({ count: 0 });
+    } else if (table === "contacts") {
+      result = Promise.resolve({ data: [] });
+    } else if (table === "messages") {
+      result = Promise.resolve({ count: 0 });
+    } else if (table === "ai_settings") {
+      result = Promise.resolve({
+        data: {
+          booking_enabled: false,
+          booking_mode: "collect_info",
+          guardrails: ["Never promise a fixed price"],
+        },
+      });
+    } else {
+      result = Promise.resolve({ data: null });
+    }
+
+    return queryThenable(result);
+  });
+
+  mocks.getDashboardBusinessContext.mockResolvedValue({
+    status: "resolved",
+    supabase: { from: mocks.from },
+    user: { id: "user-1", user_metadata: {} },
+    business: {
+      id: BUSINESS_ID,
+      call_forwarding_enabled: false,
+      call_forwarding_nudge_resolved_at: null,
+      billing_mode: "stripe",
+    },
+  });
+  mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
+  mocks.getSmsReadinessForBusiness.mockResolvedValue({
+    smsReady: true,
+    blockReason: null,
+    assignmentStatus: "assigned",
+    assignmentFailureReason: null,
+    phoneNumber: "+13175550123",
+  });
+  mocks.canUseFeature.mockImplementation(
+    (_entitlements: unknown, feature: string) =>
+      feature !== "advanced_guardrails"
+  );
+  mocks.getFirstNameFromAuthMetadata.mockReturnValue("Owner");
+  mocks.shouldShowCallForwardingNudge.mockReturnValue(false);
+}
+
+async function renderedFeatureStatusBannerProps() {
+  renderToStaticMarkup(await DashboardPage());
+  return mocks.featureStatusBanners.mock.calls.at(-1)?.[0] as
+    | FeatureStatusBannerProps
+    | undefined;
 }
 
 describe("DashboardPage query scheduling", () => {
@@ -154,5 +242,37 @@ describe("DashboardPage query scheduling", () => {
 
     preview.resolve({ data: [{ content: "Latest message" }] });
     await expect(page).resolves.toBeDefined();
+  });
+});
+
+describe("DashboardPage paused Full Suite features", () => {
+  it("suppresses saved Advanced AI guardrails while Full Suite is unavailable", async () => {
+    configureResolvedDashboardWithSavedGuardrails();
+    mocks.isPlanAvailable.mockReturnValue(false);
+
+    const bannerProps = await renderedFeatureStatusBannerProps();
+
+    expect(mocks.isPlanAvailable).toHaveBeenCalledWith("full");
+    expect(bannerProps).toMatchObject({
+      businessId: BUSINESS_ID,
+      plan: "sms_and_chat",
+      status: "active",
+      pausedFeatures: [],
+    });
+  });
+
+  it("restores the saved Advanced AI guardrails entry when Full Suite is available", async () => {
+    configureResolvedDashboardWithSavedGuardrails();
+    mocks.isPlanAvailable.mockReturnValue(true);
+
+    const bannerProps = await renderedFeatureStatusBannerProps();
+
+    expect(mocks.isPlanAvailable).toHaveBeenCalledWith("full");
+    expect(bannerProps).toMatchObject({
+      businessId: BUSINESS_ID,
+      plan: "sms_and_chat",
+      status: "active",
+      pausedFeatures: ["Advanced AI guardrails"],
+    });
   });
 });

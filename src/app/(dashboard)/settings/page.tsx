@@ -12,6 +12,7 @@ import { card } from '@/lib/theme-v2/theme';
 import DangerZone from '@/components/settings/DangerZone';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 import { canUseFeature } from '@/lib/billing/entitlements';
+import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
@@ -25,6 +26,7 @@ export default async function SettingsPage() {
   const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
   const canUseGuardrails = canUseFeature(entitlements, 'advanced_guardrails');
+  const fullSuiteAvailable = isPlanAvailable('full');
 
   const [
     { data: aiSettings },
@@ -112,6 +114,7 @@ export default async function SettingsPage() {
           canUseCalendar={canUseCalendar}
           canUseGuardrails={canUseGuardrails}
           planActive={entitlements.active}
+          fullSuiteAvailable={fullSuiteAvailable}
         />
       </div>
 

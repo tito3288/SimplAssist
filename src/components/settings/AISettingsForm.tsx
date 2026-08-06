@@ -47,6 +47,7 @@ interface AISettingsFormProps {
   canUseCalendar?: boolean;
   canUseGuardrails?: boolean;
   planActive?: boolean;
+  fullSuiteAvailable: boolean;
 }
 function UpgradeNotice({
   plan,
@@ -80,6 +81,7 @@ export default function AISettingsForm({
   canUseCalendar = true,
   canUseGuardrails = true,
   planActive = true,
+  fullSuiteAvailable,
 }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -410,7 +412,7 @@ export default function AISettingsForm({
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Guardrails</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Rules that guide what your AI can and can&apos;t say.</p>
 
-        {!canUseGuardrails && (
+        {!canUseGuardrails && (!planActive || fullSuiteAvailable) && (
           <UpgradeNotice plan="Full Suite" planActive={planActive}>Advanced guardrails require the</UpgradeNotice>
         )}
 

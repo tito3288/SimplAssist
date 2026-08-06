@@ -33,6 +33,7 @@ describe("AISettingsForm Google Calendar connection state", () => {
         businessName="Example Business"
         businessId="business-1"
         calendarConnected={false}
+        fullSuiteAvailable={false}
       />
     );
 
@@ -66,6 +67,7 @@ describe("AISettingsForm Google Calendar connection state", () => {
         businessName="Example Business"
         businessId="business-1"
         calendarConnected={false}
+        fullSuiteAvailable={false}
       />
     );
 
@@ -87,6 +89,7 @@ describe("AISettingsForm Google Calendar connection state", () => {
         businessName="Example Business"
         businessId="business-1"
         calendarConnected={false}
+        fullSuiteAvailable={false}
       />
     );
 
@@ -105,6 +108,7 @@ describe("AISettingsForm Google Calendar connection state", () => {
         businessName="Example Business"
         businessId="business-1"
         calendarConnected={false}
+        fullSuiteAvailable={false}
       />
     );
 
@@ -123,11 +127,60 @@ describe("AISettingsForm Google Calendar connection state", () => {
         calendarEmail={null}
         calendarConnected
         canUseCalendar={false}
+        fullSuiteAvailable={false}
       />
     );
 
     expect(html).toContain("Connected");
     expect(html).toContain("Disconnect");
     expect(html).not.toContain("Connect Google Calendar");
+  });
+});
+
+describe("AISettingsForm advanced guardrails plan notice", () => {
+  function renderNotice({
+    fullSuiteAvailable,
+    planActive = true,
+  }: {
+    fullSuiteAvailable: boolean;
+    planActive?: boolean;
+  }) {
+    return renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        canUseGuardrails={false}
+        planActive={planActive}
+        fullSuiteAvailable={fullSuiteAvailable}
+      />
+    );
+  }
+
+  it("hides the active lower-tier Full Suite notice while the plan is unavailable", () => {
+    const html = renderNotice({ fullSuiteAvailable: false });
+
+    expect(html).not.toContain("Advanced guardrails require the");
+    expect(html).not.toContain("Full Suite plan");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
+  });
+
+  it("restores the exact active lower-tier Full Suite notice when the plan is available", () => {
+    const html = renderNotice({ fullSuiteAvailable: true });
+
+    expect(html).toContain("Advanced guardrails require the");
+    expect(html).toContain("Full Suite plan");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
+  });
+
+  it("preserves the neutral inactive-subscription notice while Full Suite is unavailable", () => {
+    const html = renderNotice({
+      fullSuiteAvailable: false,
+      planActive: false,
+    });
+
+    expect(html).toContain("Your subscription is inactive. Reactivate it in");
+    expect(html).toContain(">Billing</a>");
+    expect(html).not.toContain("Full Suite plan");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 });

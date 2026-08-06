@@ -5,6 +5,7 @@ import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 import { canUseFeature } from '@/lib/billing/entitlements';
+import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
 import { shouldShowCallForwardingNudge } from '@/components/dashboard/callForwardingNudgeEligibility';
 import {
@@ -92,6 +93,7 @@ export default async function DashboardPage() {
   const firstName = getFirstNameFromAuthMetadata(user);
   const welcomeLine = firstName ? `Welcome ${firstName}!` : 'Welcome back!';
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
+  const fullSuiteAvailable = isPlanAvailable('full');
   const activePhoneNumber = smsReadiness.phoneNumber || phoneNumberRow?.phone_number || null;
   const showCallForwardingNudge = shouldShowCallForwardingNudge({
     hasActivePhoneNumber: Boolean(activePhoneNumber),
@@ -110,7 +112,8 @@ export default async function DashboardPage() {
     (calendarToken || aiSettings?.booking_enabled) && !canUseCalendar
       ? 'Google Calendar and AI booking'
       : null,
-    Array.isArray(aiSettings?.guardrails) && aiSettings.guardrails.length > 0 &&
+    fullSuiteAvailable &&
+      Array.isArray(aiSettings?.guardrails) && aiSettings.guardrails.length > 0 &&
       !canUseFeature(entitlements, 'advanced_guardrails')
       ? 'Advanced AI guardrails'
       : null,

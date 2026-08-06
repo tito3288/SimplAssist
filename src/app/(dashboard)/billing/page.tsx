@@ -143,6 +143,8 @@ export default async function BillingPage() {
             const available = isPlanAvailable(key);
             const presentedPlan = getPlanPresentation(key, brand.name);
 
+            if (key === "full" && !available) return null;
+
             return (
               <div
                 key={key}
