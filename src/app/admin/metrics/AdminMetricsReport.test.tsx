@@ -8,12 +8,36 @@ import {
 } from "@/lib/metrics/contract";
 import {
   AdminMetricsReport,
+  buildBrandTotalsCsvData,
+  buildMetricsExportFilters,
+  buildPerBusinessCsvData,
   type AdminMetricsReportErrorState,
 } from "./AdminMetricsReport";
+import {
+  buildAdminMetricsCsv,
+  buildAdminMetricsExportFilename,
+} from "./AdminMetricsExport";
 
 const BUSINESS_ID = "10000000-0000-4000-a050-000000000001";
 const MISSING_BUSINESS_ID = "10000000-0000-4000-a050-000000000099";
 const PARTNER_ID = "20000000-0000-4000-a050-000000000001";
+
+const METRIC_HEADERS = [
+  "Missed calls caught",
+  "AI conversations engaged",
+  "Bookings confirmed",
+  "AI bookings",
+  "Dashboard bookings",
+  "Web chat sessions engaged",
+  "Contacts created",
+  "Hot leads classified",
+  "Inbound SMS messages",
+  "Outbound SMS messages",
+  "Inbound SMS parts",
+  "Outbound SMS parts",
+  "Inbound MMS events",
+  "Outbound MMS events",
+];
 
 function counts(overrides: Partial<BusinessMetricCountsV1> = {}) {
   return {
@@ -198,6 +222,129 @@ describe("AdminMetricsReport", () => {
     expect(html).toContain("Dashboard bookings");
   });
 
+  it("projects brand and per-business CSV columns in the displayed metric order", () => {
+    const current = report();
+    const brandTotals = buildBrandTotalsCsvData(current);
+    const perBusiness = buildPerBusinessCsvData(current);
+
+    expect(brandTotals.headers).toEqual([
+      "Event-time brand",
+      "Brand kind",
+      "partner_id_at_event",
+      ...METRIC_HEADERS,
+    ]);
+    expect(brandTotals.rows[0]).toEqual([
+      "SimplAssist direct",
+      "direct",
+      "",
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    expect(brandTotals.rows[1]?.slice(0, 8)).toEqual([
+      "Alpha Agency",
+      "partner",
+      PARTNER_ID,
+      0,
+      2,
+      5,
+      3,
+      2,
+    ]);
+
+    expect(perBusiness.headers).toEqual([
+      "Business name",
+      "business_id",
+      "Event-time brand",
+      "partner_id_at_event",
+      ...METRIC_HEADERS,
+    ]);
+    expect(perBusiness.rows[0]?.slice(0, 5)).toEqual([
+      "River City Dental",
+      BUSINESS_ID,
+      "SimplAssist direct",
+      "",
+      1,
+    ]);
+    expect(perBusiness.rows[1]?.slice(0, 9)).toEqual([
+      "River City Dental",
+      BUSINESS_ID,
+      "Alpha Agency",
+      PARTNER_ID,
+      0,
+      2,
+      5,
+      3,
+      2,
+    ]);
+  });
+
+  it.each(["=", "+", "-", "@"])(
+    "hardens projected report labels beginning with %s against formulas",
+    (prefix) => {
+      const current = report();
+      current.brand_totals[1] = {
+        ...current.brand_totals[1]!,
+        partner_name: `${prefix}Agency`,
+      };
+      current.businesses[1] = {
+        ...current.businesses[1]!,
+        business_name: `${prefix}Business`,
+        partner_name: `${prefix}Agency`,
+      };
+
+      const brandCsv = buildAdminMetricsCsv(buildBrandTotalsCsvData(current));
+      const businessCsv = buildAdminMetricsCsv(
+        buildPerBusinessCsvData(current),
+      );
+
+      expect(brandCsv).toContain(`\r\n'${prefix}Agency,partner,${PARTNER_ID},`);
+      expect(businessCsv).toContain(
+        `\r\n'${prefix}Business,${BUSINESS_ID},'${prefix}Agency,${PARTNER_ID},`,
+      );
+    },
+  );
+
+  it("renders each export only for its corresponding ready table with rows", () => {
+    const both = renderToStaticMarkup(
+      <AdminMetricsReport result={{ state: "ready", report: report() }} />,
+    );
+    const brandOnly = renderToStaticMarkup(
+      <AdminMetricsReport
+        result={{
+          state: "ready",
+          report: report({ businesses: [] }),
+        }}
+      />,
+    );
+    const perBusinessOnly = renderToStaticMarkup(
+      <AdminMetricsReport
+        result={{
+          state: "ready",
+          report: report({ brand_totals: [] }),
+        }}
+      />,
+    );
+
+    expect(both).toContain("Export brand totals (CSV)");
+    expect(both).toContain("Export per-business (CSV)");
+    expect(brandOnly).toContain("Export brand totals (CSV)");
+    expect(brandOnly).not.toContain("Export per-business (CSV)");
+    expect(perBusinessOnly).not.toContain("Export brand totals (CSV)");
+    expect(perBusinessOnly).toContain("Export per-business (CSV)");
+  });
+
   it("renders every definition with UTC availability and honest coverage labels", () => {
     const html = renderToStaticMarkup(
       <AdminMetricsReport result={{ state: "ready", report: report() }} />,
@@ -237,6 +384,8 @@ describe("AdminMetricsReport", () => {
     expect(html).not.toContain(
       'aria-label="Monthly event-time business metric rows"',
     );
+    expect(html).not.toContain("Export brand totals (CSV)");
+    expect(html).not.toContain("Export per-business (CSV)");
     expect(html).not.toContain("Metrics query unavailable");
   });
 
@@ -257,6 +406,25 @@ describe("AdminMetricsReport", () => {
     );
   });
 
+  it("derives partner and business filename filters from the loaded report", () => {
+    const scoped = report({
+      scope: {
+        kind: "partner",
+        partner_id: PARTNER_ID,
+        business_id: BUSINESS_ID,
+      },
+    });
+
+    expect(
+      buildAdminMetricsExportFilename(
+        "per-business",
+        buildMetricsExportFilters(scoped),
+      ),
+    ).toBe(
+      "simplassist-per-business-2026-08-partner-alpha-agency-business-river-city-dental-10000000-0000-4000-a050-000000000001.csv",
+    );
+  });
+
   it("uses the selected UUID when the business is absent from response options", () => {
     const filtered = report({
       scope: {
@@ -272,6 +440,14 @@ describe("AdminMetricsReport", () => {
 
     expect(html).toContain(
       `Selected business (${MISSING_BUSINESS_ID}) · All brands · UTC range`,
+    );
+    expect(
+      buildAdminMetricsExportFilename(
+        "per-business",
+        buildMetricsExportFilters(filtered),
+      ),
+    ).toBe(
+      `simplassist-per-business-2026-08-all-business-${MISSING_BUSINESS_ID}.csv`,
     );
   });
 
@@ -333,6 +509,8 @@ describe("AdminMetricsReport", () => {
       );
       expect(html).not.toContain("Overall metric totals");
       expect(html).not.toContain("Metric availability");
+      expect(html).not.toContain("Export brand totals (CSV)");
+      expect(html).not.toContain("Export per-business (CSV)");
     },
   );
 
@@ -396,5 +574,13 @@ describe("AdminMetricsReport", () => {
 
     expect(html).toContain(`Historical partner (${historicalId})`);
     expect(html).not.toContain("Unknown partner");
+    expect(
+      buildAdminMetricsExportFilename(
+        "brand-totals",
+        buildMetricsExportFilters(scoped),
+      ),
+    ).toBe(
+      `simplassist-brand-totals-2026-08-partner-historical-${historicalId}.csv`,
+    );
   });
 });

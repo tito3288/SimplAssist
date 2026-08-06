@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   BUSINESS_METRIC_KEYS_V1,
   BUSINESS_METRIC_LABELS_V1,
@@ -15,6 +16,11 @@ import {
   statusNeutral,
   tile,
 } from "@/lib/theme-v2/theme";
+import {
+  AdminMetricsExport,
+  type AdminMetricsCsvData,
+  type AdminMetricsExportFilters,
+} from "./AdminMetricsExport";
 
 export type AdminMetricsReportErrorState =
   | "query_failed"
@@ -68,6 +74,23 @@ const COUNT_LABELS: Record<BusinessMetricCountKeyV1, string> = {
   booking_confirmed_dashboard: "Dashboard bookings",
 };
 
+const METRIC_CSV_HEADERS = TABLE_COLUMNS.map((key) => COUNT_LABELS[key]);
+
+const BRAND_TOTALS_CSV_HEADERS = [
+  "Event-time brand",
+  "Brand kind",
+  "partner_id_at_event",
+  ...METRIC_CSV_HEADERS,
+];
+
+const PER_BUSINESS_CSV_HEADERS = [
+  "Business name",
+  "business_id",
+  "Event-time brand",
+  "partner_id_at_event",
+  ...METRIC_CSV_HEADERS,
+];
+
 const ERROR_COPY: Record<
   AdminMetricsReportErrorState,
   { heading: string; detail: string }
@@ -108,7 +131,11 @@ export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
   }
 
   const { report } = result;
-  const empty = report.businesses.length === 0;
+  const empty =
+    report.brand_totals.length === 0 && report.businesses.length === 0;
+  const exportFilters = buildMetricsExportFilters(report);
+  const brandTotalsCsv = buildBrandTotalsCsvData(report);
+  const perBusinessCsv = buildPerBusinessCsvData(report);
 
   return (
     <div className="space-y-6">
@@ -146,39 +173,57 @@ export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
         </p>
       ) : (
         <>
-          <MetricTable
-            heading="Brand totals"
-            ariaLabel="Monthly brand metric totals"
-            identityHeading="Event-time brand"
-            rows={report.brand_totals.map((brand) => ({
-              key: brandKey(brand),
-              primary: brandLabel(
-                brand.partner_id_at_event,
-                brand.partner_name,
-                brand.partner_slug,
-              ),
-              secondary:
-                brand.partner_id_at_event === null
-                  ? "Direct"
-                  : brand.partner_id_at_event,
-              counts: brand.counts,
-            }))}
-          />
-          <MetricTable
-            heading="Per-business metrics"
-            ariaLabel="Monthly event-time business metric rows"
-            identityHeading="Business and event-time brand"
-            rows={report.businesses.map((business) => ({
-              key: businessKey(business),
-              primary: business.business_name,
-              secondary: `Event-time brand: ${brandLabel(
-                business.partner_id_at_event,
-                business.partner_name,
-                business.partner_slug,
-              )}`,
-              counts: business.counts,
-            }))}
-          />
+          {report.brand_totals.length > 0 ? (
+            <MetricTable
+              heading="Brand totals"
+              ariaLabel="Monthly brand metric totals"
+              identityHeading="Event-time brand"
+              action={
+                <AdminMetricsExport
+                  kind="brand-totals"
+                  filters={exportFilters}
+                  data={brandTotalsCsv}
+                />
+              }
+              rows={report.brand_totals.map((brand) => ({
+                key: brandKey(brand),
+                primary: brandLabel(
+                  brand.partner_id_at_event,
+                  brand.partner_name,
+                  brand.partner_slug,
+                ),
+                secondary:
+                  brand.partner_id_at_event === null
+                    ? "Direct"
+                    : brand.partner_id_at_event,
+                counts: brand.counts,
+              }))}
+            />
+          ) : null}
+          {report.businesses.length > 0 ? (
+            <MetricTable
+              heading="Per-business metrics"
+              ariaLabel="Monthly event-time business metric rows"
+              identityHeading="Business and event-time brand"
+              action={
+                <AdminMetricsExport
+                  kind="per-business"
+                  filters={exportFilters}
+                  data={perBusinessCsv}
+                />
+              }
+              rows={report.businesses.map((business) => ({
+                key: businessKey(business),
+                primary: business.business_name,
+                secondary: `Event-time brand: ${brandLabel(
+                  business.partner_id_at_event,
+                  business.partner_name,
+                  business.partner_slug,
+                )}`,
+                counts: business.counts,
+              }))}
+            />
+          ) : null}
         </>
       )}
 
@@ -236,16 +281,21 @@ function MetricTable({
   heading,
   ariaLabel,
   identityHeading,
+  action,
   rows,
 }: {
   heading: string;
   ariaLabel: string;
   identityHeading: string;
+  action?: ReactNode;
   rows: MetricTableRow[];
 }) {
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">{heading}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">{heading}</h2>
+        {action}
+      </div>
       <div className={`overflow-hidden ${card}`}>
         <div className="overflow-x-auto">
           <table
@@ -331,6 +381,79 @@ function MetricDefinitions({
       </dl>
     </section>
   );
+}
+
+export function buildBrandTotalsCsvData(
+  report: AdminMonthlyBusinessMetricsResponseV2,
+): AdminMetricsCsvData {
+  return {
+    headers: BRAND_TOTALS_CSV_HEADERS,
+    rows: report.brand_totals.map((brand) => [
+      brandLabel(
+        brand.partner_id_at_event,
+        brand.partner_name,
+        brand.partner_slug,
+      ),
+      brand.brand_kind,
+      brand.partner_id_at_event ?? "",
+      ...TABLE_COLUMNS.map((key) => brand.counts[key]),
+    ]),
+  };
+}
+
+export function buildPerBusinessCsvData(
+  report: AdminMonthlyBusinessMetricsResponseV2,
+): AdminMetricsCsvData {
+  return {
+    headers: PER_BUSINESS_CSV_HEADERS,
+    rows: report.businesses.map((business) => [
+      business.business_name,
+      business.business_id,
+      brandLabel(
+        business.partner_id_at_event,
+        business.partner_name,
+        business.partner_slug,
+      ),
+      business.partner_id_at_event ?? "",
+      ...TABLE_COLUMNS.map((key) => business.counts[key]),
+    ]),
+  };
+}
+
+export function buildMetricsExportFilters(
+  report: AdminMonthlyBusinessMetricsResponseV2,
+): AdminMetricsExportFilters {
+  const partnerId = report.scope.partner_id;
+  const partnerSlug =
+    partnerId === null
+      ? null
+      : (report.partner_options.find(
+          (partner) => partner.partner_id === partnerId,
+        )?.partner_slug ??
+        report.brand_totals.find(
+          (brand) => brand.partner_id_at_event === partnerId,
+        )?.partner_slug ??
+        null);
+  const businessId = report.scope.business_id;
+  const businessName =
+    businessId === null
+      ? null
+      : (report.business_options.find(
+          (business) => business.business_id === businessId,
+        )?.business_name ??
+        report.businesses.find(
+          (business) => business.business_id === businessId,
+        )?.business_name ??
+        null);
+
+  return {
+    month: report.period.month,
+    scope: report.scope.kind,
+    partnerSlug,
+    partnerId,
+    businessName,
+    businessId,
+  };
 }
 
 function reportScopeLabel(
