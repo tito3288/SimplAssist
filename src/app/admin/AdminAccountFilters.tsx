@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   primaryCtaCompactClass,
   secondaryCtaCompactClass,
@@ -114,9 +113,9 @@ export function AdminAccountFilters({
         <button type="submit" className={primaryCtaCompactClass}>
           Apply filters
         </button>
-        <Link href="/admin" className={secondaryCtaCompactClass}>
+        <a href="/admin" className={secondaryCtaCompactClass}>
           Clear filters
-        </Link>
+        </a>
         <p className={`text-xs ${bodyFaint}`}>
           Filters combine to narrow the newest 75 accounts.
         </p>

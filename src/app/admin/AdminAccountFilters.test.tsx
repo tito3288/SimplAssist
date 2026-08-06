@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AdminAccountFilters } from "./AdminAccountFilters";
@@ -6,6 +7,37 @@ const PARTNER_ID = "9c3c5b98-bda7-48ea-a972-22c1ab4d2f71";
 const INACTIVE_PARTNER_ID = "5cb75e6c-1262-4850-a381-7aaac51cb911";
 
 describe("AdminAccountFilters", () => {
+  it("uses document navigation for Clear and renders cleared defaults", () => {
+    const source = readFileSync(
+      new URL("./AdminAccountFilters.tsx", import.meta.url),
+      "utf8",
+    );
+    const html = renderToStaticMarkup(
+      <AdminAccountFilters
+        filters={{
+          lifecycle: null,
+          ownership: null,
+          partnerId: null,
+          plan: null,
+          query: null,
+        }}
+        partners={[]}
+      />,
+    );
+
+    expect(source).not.toContain('from "next/link"');
+    expect(source).toContain('<a href="/admin"');
+    expect(html).toMatch(
+      /<option value="" selected="">All account states<\/option>/,
+    );
+    expect(html).toMatch(
+      /<option value="" selected="">All ownership<\/option>/,
+    );
+    expect(html).toMatch(/<option value="" selected="">All partners<\/option>/);
+    expect(html).toMatch(/<option value="" selected="">All plans<\/option>/);
+    expect(html).toMatch(/<input[^>]*type="search"[^>]*value=""/);
+  });
+
   it("renders a native GET form with every supported filter", () => {
     const html = renderToStaticMarkup(
       <AdminAccountFilters

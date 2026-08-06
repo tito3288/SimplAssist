@@ -159,7 +159,7 @@ beforeEach(() => {
 });
 
 describe("AdminPage account lifecycle and health rendering", () => {
-  it("authenticates before one batch read, preserves metrics, and omits terminal health", async () => {
+  it("authenticates before one batch read and preserves lifecycle and metrics", async () => {
     mocks.loadHealthList.mockResolvedValue([
       record({
         business: business(ACTIVE_ID, "Active Dental"),
@@ -217,7 +217,7 @@ describe("AdminPage account lifecycle and health rendering", () => {
     expect(html).toContain("Lifecycle: pending deletion");
     expect(html).toContain("Terminally cleaned");
     expect(html).toContain("Read-only retained tombstone");
-    expect(html.match(/aria-label="Account health"/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Account health"/g)).toHaveLength(3);
     expect(html).toContain(`href="/admin/${SCHEDULED_ID}"`);
     expect(html).toContain(`href="/admin/${TERMINAL_ID}"`);
   });
@@ -255,8 +255,8 @@ describe("AdminPage account lifecycle and health rendering", () => {
     expect(html).toContain("AI replies paused");
     expect(html).not.toContain("Texting paused");
     expect(html).not.toContain("Bookings paused");
-    expect(html.indexOf("Account suspended")).toBeLessThan(
-      html.indexOf("Lifecycle: live"),
+    expect(html.indexOf("Lifecycle: live")).toBeLessThan(
+      html.indexOf("Account suspended"),
     );
   });
 });

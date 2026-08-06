@@ -4,12 +4,7 @@ import { isSubscriptionPlan } from "@/lib/billing/features";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { AdminAccountHealth } from "@/lib/admin/accountHealth";
-import {
-  body,
-  statusDanger,
-  statusNeutral,
-  statusWarning,
-} from "@/lib/theme-v2/theme";
+import { body } from "@/lib/theme-v2/theme";
 import type {
   A2pRiskReviewStatus,
   BillingMode,
@@ -90,51 +85,30 @@ export function AdminAccountRow({
   const roughMargin = revenue - estimatedSmsCost - 10;
 
   return (
-    <Link
-      href={`/admin/${business.id}`}
-      className="block border-b border-[#f0e9de] px-4 py-4 last:border-b-0 hover:bg-[#faf6ef] dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
-    >
+    <div className="border-b border-[#f0e9de] px-4 py-4 last:border-b-0 hover:bg-[#faf6ef] dark:border-white/[0.08] dark:hover:bg-white/[0.04]">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="font-medium">{business.name}</p>
-          <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
-            {business.website_url ?? "No website"} ·{" "}
-            {business.business_type ?? "unknown"}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {lifecycle === "terminal" ? (
-              <Badge tone="danger">Terminally cleaned</Badge>
-            ) : (
-              <>
-                <Badge>
-                  Risk: {business.a2p_risk_review_status ?? "not_started"}
-                </Badge>
-                <Badge>
-                  Brand: {business.brand_status ?? "not submitted"}
-                </Badge>
-                <Badge>
-                  Campaign: {business.campaign_status ?? "not submitted"}
-                </Badge>
-                {business.telnyx_submission_disabled && (
-                  <Badge tone="danger">No Telnyx submit</Badge>
-                )}
-                {business.billing_pilot && <Badge>Pilot</Badge>}
-                {business.billing_comped && <Badge>Comped</Badge>}
-                {business.billing_exempt && <Badge>Billing exempt</Badge>}
-                {lifecycle === "scheduled" && (
-                  <Badge tone="warning">
-                    Deletion scheduled
-                    {business.deletion_scheduled_for
-                      ? ` · ${formatDate(business.deletion_scheduled_for)}`
-                      : ""}
-                  </Badge>
-                )}
-              </>
-            )}
-          </div>
-          {lifecycle !== "terminal" && health ? (
-            <AdminAccountHealthChips health={health} />
-          ) : null}
+          <Link href={`/admin/${business.id}`} className="block rounded-sm">
+            <p className="font-medium">{business.name}</p>
+            <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
+              {business.website_url ?? "No website"} ·{" "}
+              {business.business_type ?? "unknown"}
+            </p>
+          </Link>
+          <AdminAccountHealthChips
+            health={lifecycle === "terminal" ? null : health}
+            listAccount={{
+              lifecycle,
+              riskReviewStatus: business.a2p_risk_review_status,
+              brandStatus: business.brand_status,
+              campaignStatus: business.campaign_status,
+              telnyxSubmissionDisabled: business.telnyx_submission_disabled,
+              billingPilot: business.billing_pilot,
+              billingComped: business.billing_comped,
+              billingExempt: business.billing_exempt,
+              deletionScheduledFor: business.deletion_scheduled_for,
+            }}
+          />
         </div>
         {lifecycle === "terminal" ? (
           <div className={`text-sm ${body} md:text-right`}>
@@ -153,7 +127,7 @@ export function AdminAccountRow({
           </div>
         )}
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -197,30 +171,4 @@ function BillingLine({
       {partnerName} · {plan.name} · {business.billing_mode}
     </p>
   );
-}
-
-function Badge({
-  children,
-  tone = "default",
-}: {
-  children: React.ReactNode;
-  tone?: "default" | "danger" | "warning";
-}) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs ${
-        tone === "danger"
-          ? statusDanger
-          : tone === "warning"
-            ? statusWarning
-            : statusNeutral
-      }`}
-    >
-      {children}
-    </span>
-  );
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString();
 }
