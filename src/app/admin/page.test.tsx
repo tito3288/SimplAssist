@@ -210,6 +210,9 @@ describe("AdminPage account lifecycle and health rendering", () => {
     expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.loadPartnerOptions.mock.invocationCallOrder[0],
     );
+    expect(html).toContain(">Operations overview</h1>");
+    expect(html).not.toContain(">Admin</h1>");
+    expect(html).not.toContain("Admin workspace");
     expect(html).toMatch(/A2P review queue<\/p><p[^>]*>1<\/p>/);
     expect(html).toMatch(/High usage accounts<\/p><p[^>]*>1<\/p>/);
     expect(html).toMatch(/Visible accounts<\/p><p[^>]*>3<\/p>/);
