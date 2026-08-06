@@ -18,13 +18,17 @@ type MockQuery = {
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  getUserById: vi.fn(),
   queues: new Map<string, ReadResult[]>(),
   queries: [] as MockQuery[],
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: {
+    from: mocks.from,
+    auth: { admin: { getUserById: mocks.getUserById } },
+  },
 }));
 
 import {
@@ -251,6 +255,10 @@ beforeEach(() => {
   mocks.queues = validQueues();
   mocks.queries = [];
   mocks.from.mockImplementation((table: string) => makeQuery(table));
+  mocks.getUserById.mockResolvedValue({
+    data: { user: null },
+    error: null,
+  });
 });
 
 describe("normalizeAdminAccountActivity", () => {
@@ -746,6 +754,247 @@ describe("loadAdminAccountActivity", () => {
         query.eqValues.has("provisioning_job_id"),
       ),
     ).toHaveLength(0);
+  });
+
+  it("deduplicates admin actor reads, resolves email, and leaves non-admin UUID actors untouched", async () => {
+    const firstAdminEventId = uuid("59000000-0000-4000-a048", 1);
+    const secondAdminEventId = uuid("59000000-0000-4000-a048", 2);
+    const nonAdminActorId = "31000000-0000-4000-a048-000000000001";
+    setPagedQueue(
+      "admin_action_events",
+      ACCOUNT_ACTIVITY_COLUMNS.adminActions,
+      [
+        [
+          adminEvent(firstAdminEventId, "account_operations_suspended", {
+            reason: "Compliance review requested",
+          }),
+          adminEvent(secondAdminEventId, "account_service_paused", {
+            service: "texting",
+          }),
+        ],
+        [],
+      ],
+      "business",
+    );
+    setPagedQueue(
+      "a2p_risk_review_events",
+      ACCOUNT_ACTIVITY_COLUMNS.risk,
+      [
+        [
+          {
+            id: uuid("59000000-0000-4000-a048", 3),
+            event_type: "admin_approved",
+            created_at: AT,
+            reviewed_by: nonAdminActorId,
+          },
+        ],
+        [],
+      ],
+    );
+    mocks.getUserById.mockResolvedValue({
+      data: { user: { email: " admin@simplassist.test " } },
+      error: null,
+    });
+
+    const events = await loadAdminAccountActivity(BUSINESS_ID);
+
+    expect(
+      events
+        .filter((event) => event.facets.includes("admin"))
+        .map((event) => event.actor),
+    ).toEqual(["admin@simplassist.test", "admin@simplassist.test"]);
+    expect(
+      events.find((event) => event.category === "risk_review")?.actor,
+    ).toBe(nonAdminActorId);
+    expect(mocks.getUserById).toHaveBeenCalledOnce();
+    expect(mocks.getUserById).toHaveBeenCalledWith(ADMIN_ID);
+  });
+
+  it("falls back to each admin UUID when its auth user or email cannot be resolved", async () => {
+    const missingActorId = "30000000-0000-4000-a048-000000000002";
+    const erroredActorId = "30000000-0000-4000-a048-000000000003";
+    const thrownActorId = "30000000-0000-4000-a048-000000000004";
+    const actorByEventId = [
+      [uuid("5a000000-0000-4000-a048", 1), missingActorId],
+      [uuid("5a000000-0000-4000-a048", 2), erroredActorId],
+      [uuid("5a000000-0000-4000-a048", 3), thrownActorId],
+    ] as const;
+    setPagedQueue(
+      "admin_action_events",
+      ACCOUNT_ACTIVITY_COLUMNS.adminActions,
+      [
+        [
+          ...actorByEventId.map(([id, actorAdminUserId]) =>
+            adminEvent(id, "account_operations_suspended", {
+              actor_admin_user_id: actorAdminUserId,
+              reason: "Compliance review requested",
+            }),
+          ),
+        ],
+        [],
+      ],
+      "business",
+    );
+    mocks.getUserById.mockImplementation(async (actorId: string) => {
+      if (actorId === missingActorId) {
+        return { data: { user: null }, error: null };
+      }
+      if (actorId === erroredActorId) {
+        return {
+          data: { user: null },
+          error: { code: "auth_lookup_failed" },
+        };
+      }
+      throw new Error("Auth lookup unavailable");
+    });
+
+    const events = await loadAdminAccountActivity(BUSINESS_ID);
+
+    for (const [eventId, actorId] of actorByEventId) {
+      expect(events.find((event) => event.id === `admin:${eventId}`)?.actor).toBe(
+        actorId,
+      );
+    }
+    expect(mocks.getUserById).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to admin UUIDs for null, malformed, overlong, control, and bidi-unsafe auth emails", async () => {
+    const emailCases = [
+      {
+        eventId: uuid("5b000000-0000-4000-a048", 1),
+        actorId: "30000000-0000-4000-a048-000000000005",
+        email: null,
+      },
+      {
+        eventId: uuid("5b000000-0000-4000-a048", 2),
+        actorId: "30000000-0000-4000-a048-000000000006",
+        email: "not-an-email",
+      },
+      {
+        eventId: uuid("5b000000-0000-4000-a048", 3),
+        actorId: "30000000-0000-4000-a048-000000000007",
+        email: "admin@simplassist.test\u202e",
+      },
+      {
+        eventId: uuid("5b000000-0000-4000-a048", 4),
+        actorId: "30000000-0000-4000-a048-000000000008",
+        email: "admin\u0000@simplassist.test",
+      },
+      {
+        eventId: uuid("5b000000-0000-4000-a048", 5),
+        actorId: "30000000-0000-4000-a048-000000000009",
+        email: `${"a".repeat(250)}@simplassist.test`,
+      },
+    ] as const;
+    setPagedQueue(
+      "admin_action_events",
+      ACCOUNT_ACTIVITY_COLUMNS.adminActions,
+      [
+        [
+          ...emailCases.map(({ eventId, actorId }) =>
+            adminEvent(eventId, "account_operations_suspended", {
+              actor_admin_user_id: actorId,
+              reason: "Compliance review requested",
+            }),
+          ),
+        ],
+        [],
+      ],
+      "business",
+    );
+    mocks.getUserById.mockImplementation(async (actorId: string) => ({
+      data: {
+        user: {
+          email: emailCases.find((value) => value.actorId === actorId)?.email,
+        },
+      },
+      error: null,
+    }));
+
+    const events = await loadAdminAccountActivity(BUSINESS_ID);
+
+    for (const { eventId, actorId } of emailCases) {
+      expect(events.find((event) => event.id === `admin:${eventId}`)?.actor).toBe(
+        actorId,
+      );
+    }
+    expect(mocks.getUserById).toHaveBeenCalledTimes(emailCases.length);
+  });
+
+  it("resolves UUID actors for every authenticated-admin existing-brand event type", async () => {
+    const adminBrandEventTypes = [
+      "inspection_recorded",
+      "link_staged",
+      "link_approved",
+      "link_reset",
+    ];
+    setPagedQueue(
+      "telnyx_brand_link_events",
+      ACCOUNT_ACTIVITY_COLUMNS.brandLink,
+      [
+        adminBrandEventTypes.map((eventType, index) => ({
+          id: uuid("5c000000-0000-4000-a048", index + 1),
+          event_type: eventType,
+          actor_user_id: ADMIN_ID,
+          created_at: AT,
+        })),
+        [],
+      ],
+    );
+    mocks.getUserById.mockResolvedValue({
+      data: { user: { email: "admin@simplassist.test" } },
+      error: null,
+    });
+
+    const events = await loadAdminAccountActivity(BUSINESS_ID);
+
+    expect(events).toHaveLength(adminBrandEventTypes.length);
+    expect(events.every((event) => event.actor === "admin@simplassist.test")).toBe(
+      true,
+    );
+    expect(mocks.getUserById).toHaveBeenCalledOnce();
+    expect(mocks.getUserById).toHaveBeenCalledWith(ADMIN_ID);
+  });
+
+  it("does not inspect customer- or system-authored existing-brand UUID actors", async () => {
+    const nonAdminBrandEvents = [
+      {
+        eventType: "approval_invalidated",
+        actorId: "32000000-0000-4000-a048-000000000001",
+      },
+      {
+        eventType: "link_blocked",
+        actorId: "32000000-0000-4000-a048-000000000002",
+      },
+      {
+        eventType: "link_consumed",
+        actorId: "32000000-0000-4000-a048-000000000003",
+      },
+    ];
+    setPagedQueue(
+      "telnyx_brand_link_events",
+      ACCOUNT_ACTIVITY_COLUMNS.brandLink,
+      [
+        nonAdminBrandEvents.map(({ eventType, actorId }, index) => ({
+          id: uuid("5d000000-0000-4000-a048", index + 1),
+          event_type: eventType,
+          actor_user_id: actorId,
+          created_at: AT,
+        })),
+        [],
+      ],
+    );
+    mocks.getUserById.mockResolvedValue({
+      data: { user: { email: "must-not-resolve@simplassist.test" } },
+      error: null,
+    });
+
+    const events = await loadAdminAccountActivity(BUSINESS_ID);
+
+    expect(events.map((event) => event.actor)).toEqual(
+      nonAdminBrandEvents.map(({ actorId }) => actorId),
+    );
+    expect(mocks.getUserById).not.toHaveBeenCalled();
   });
 
   it("loads unknown source types without reflecting raw discriminators or bodies", async () => {

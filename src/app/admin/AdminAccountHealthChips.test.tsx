@@ -188,6 +188,7 @@ describe("AdminAccountHealthChips", () => {
   });
 
   it("shows past due separately while retaining active AI presentation", () => {
+    const label = "Billing: sms and chat · past due";
     const html = render({
       entitlements: {
         plan: "sms_and_chat",
@@ -198,9 +199,11 @@ describe("AdminAccountHealthChips", () => {
       },
     });
 
-    expect(html).toContain("Billing: sms and chat · past due");
+    expect(html).toContain(label);
     expect(html).toContain("Past due");
     expect(html).toContain("AI: active (SMS + web chat)");
+    expect(billingChipClass(html, label)).toContain("text-amber-800");
+    expect(billingChipClass(html, label)).not.toContain("text-green-700");
   });
 
   it("uses the exact neutral no-subscription label only during Stripe onboarding", () => {
@@ -595,6 +598,11 @@ describe("AdminAccountHealthChips", () => {
       {
         id: "health.operations.bookings_paused",
         label: "Bookings paused",
+        tone: "warning",
+      },
+      {
+        id: "health.billing",
+        label: "Billing: sms and chat · past due",
         tone: "warning",
       },
       {
@@ -1421,7 +1429,19 @@ describe("AdminAccountHealthChips", () => {
     expect(html).toContain("+4 more");
   });
 
-  it("places the row disclosure outside the account navigation link", () => {
+  it("offers Show less while the native chip disclosure is expanded", () => {
+    const html = renderList(normalizedHealth());
+
+    expect(html).toContain('<details class="group basis-full">');
+    expect(html).toMatch(
+      /<span class="group-open:hidden">\+\d+ more<\/span>/,
+    );
+    expect(html).toContain(
+      '<span class="hidden group-open:inline">Show less</span>',
+    );
+  });
+
+  it("places the disclosure outside the link and confines hover affordance to the link", () => {
     const html = renderToStaticMarkup(
       <AdminAccountRow
         business={business()}
@@ -1437,10 +1457,17 @@ describe("AdminAccountHealthChips", () => {
     const detailsIndex = html.indexOf("<details");
     const lastAnchorOpen = html.lastIndexOf("<a", detailsIndex);
     const lastAnchorClose = html.lastIndexOf("</a>", detailsIndex);
+    const rowClass = html.match(/^<div class="([^"]*)"/)?.[1] ?? "";
+    const linkClass =
+      html.match(/<a href="\/admin\/[^"]+" class="([^"]*)"/)?.[1] ?? "";
 
     expect(detailsIndex).toBeGreaterThan(-1);
     expect(html.match(/<details/g)).toHaveLength(1);
     expect(lastAnchorClose).toBeGreaterThan(lastAnchorOpen);
+    expect(rowClass).not.toContain("hover:bg-[#faf6ef]");
+    expect(rowClass).not.toContain("dark:hover:bg-white/[0.04]");
+    expect(linkClass).toContain("hover:bg-[#faf6ef]");
+    expect(linkClass).toContain("dark:hover:bg-white/[0.04]");
     expect(html).toContain(
       'href="/admin/11111111-1111-4111-8111-111111111111"',
     );

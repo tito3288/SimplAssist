@@ -102,11 +102,12 @@ export function AdminAccountHealthChips({
         </HealthChip>
       ))}
       {collapsed.length > 0 ? (
-        <details className="basis-full">
+        <details className="group basis-full">
           <summary
             className={`inline-flex cursor-pointer rounded-full px-2 py-0.5 text-xs marker:hidden ${statusNeutral}`}
           >
-            +{collapsed.length} more
+            <span className="group-open:hidden">+{collapsed.length} more</span>
+            <span className="hidden group-open:inline">Show less</span>
           </summary>
           <div
             aria-label="More account health"
@@ -485,6 +486,7 @@ function billingTone(health: AdminAccountHealth): AdminHealthTone {
   if (isBillingNotStarted(health)) return "neutral";
   if (health.billing.state === "unknown") return "danger";
   if (health.billing.state === "inactive") return "danger";
+  if (health.billing.state === "past_due") return "warning";
   return "success";
 }
 

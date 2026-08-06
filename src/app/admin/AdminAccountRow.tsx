@@ -85,10 +85,13 @@ export function AdminAccountRow({
   const roughMargin = revenue - estimatedSmsCost - 10;
 
   return (
-    <div className="border-b border-[#f0e9de] px-4 py-4 last:border-b-0 hover:bg-[#faf6ef] dark:border-white/[0.08] dark:hover:bg-white/[0.04]">
+    <div className="border-b border-[#f0e9de] px-4 py-4 last:border-b-0 dark:border-white/[0.08]">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <Link href={`/admin/${business.id}`} className="block rounded-sm">
+          <Link
+            href={`/admin/${business.id}`}
+            className="block rounded-sm transition-colors hover:bg-[#faf6ef] dark:hover:bg-white/[0.04]"
+          >
             <p className="font-medium">{business.name}</p>
             <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">
               {business.website_url ?? "No website"} ·{" "}

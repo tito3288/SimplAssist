@@ -131,6 +131,60 @@ describe("AdminAccountActivityTimeline", () => {
     );
   });
 
+  it("formats ISO timestamps embedded in event detail with the canonical UTC formatter", () => {
+    const rawTimestamp = "2026-10-01T12:00:00.000Z";
+    const html = renderToStaticMarkup(
+      <AdminAccountActivityTimeline
+        events={[
+          event("deletion:1", "lifecycle", "2026-08-07T12:00:00.000Z", {
+            detail: `Terminal cleanup target: ${rawTimestamp}`,
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(
+      "Terminal cleanup target: Oct 1, 2026, 12:00 PM UTC",
+    );
+    expect(html).not.toContain(rawTimestamp);
+  });
+
+  it("formats multiple valid Z and numeric-offset timestamps", () => {
+    const zTimestamp = "2026-10-01T12:00:00Z";
+    const offsetTimestamp = "2026-10-01T15:30:00+02:00";
+    const html = renderToStaticMarkup(
+      <AdminAccountActivityTimeline
+        events={[
+          event("window:1", "admin", "2026-08-07T12:00:00.000Z", {
+            detail: `Window: ${zTimestamp} through ${offsetTimestamp}`,
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(
+      "Window: Oct 1, 2026, 12:00 PM UTC through Oct 1, 2026, 1:30 PM UTC",
+    );
+    expect(html).not.toContain(zTimestamp);
+    expect(html).not.toContain(offsetTimestamp);
+  });
+
+  it("leaves calendar-invalid ISO-like timestamps verbatim", () => {
+    const invalidTimestamp = "2026-02-30T12:00:00Z";
+    const html = renderToStaticMarkup(
+      <AdminAccountActivityTimeline
+        events={[
+          event("invalid:1", "admin", "2026-08-07T12:00:00.000Z", {
+            detail: `Terminal cleanup target: ${invalidTimestamp}`,
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(`Terminal cleanup target: ${invalidTimestamp}`);
+    expect(html).not.toContain("Mar 2, 2026");
+  });
+
   it("maps filters exclusively, keeps a dual-facet deletion in both views, and never duplicates it in All", () => {
     const events = [
       event("deletion", "lifecycle", "2026-08-08T12:00:00.000Z", {

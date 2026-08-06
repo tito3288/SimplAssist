@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { requireAdminUser } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -25,7 +26,12 @@ import {
   loadAdminAccountActivity,
   type AdminAccountActivityEvent,
 } from "@/lib/admin/accountActivity.server";
-import { card, statusDanger, statusWarning } from "@/lib/theme-v2/theme";
+import {
+  btnSecondaryCompact,
+  card,
+  statusDanger,
+  statusWarning,
+} from "@/lib/theme-v2/theme";
 import { AdminAccountDeletionPanel } from "./AdminAccountDeletionPanel";
 import { AdminAccountActivityTimeline } from "./AdminAccountActivityTimeline";
 import { AdminAccountHealthCard } from "./AdminAccountHealthCard";
@@ -521,9 +527,11 @@ function BackToAdmin() {
   return (
     <Link
       href="/admin"
-      className="text-sm text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
+      aria-label="Back to admin"
+      className={`${btnSecondaryCompact} w-fit`}
     >
-      Back to admin
+      <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+      Back
     </Link>
   );
 }

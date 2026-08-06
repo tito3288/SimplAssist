@@ -80,6 +80,17 @@ const safeActorSchema = z
   .min(1)
   .max(254)
   .refine((value) => !/[\u0000-\u001f\u007f]/.test(value));
+const safeAdminEmailSchema = z
+  .string()
+  .trim()
+  .email()
+  .max(254)
+  .refine(
+    (value) =>
+      !/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(
+        value,
+      ),
+  );
 const adminReasonSchema = z
   .string()
   .refine((value) => {
@@ -153,6 +164,12 @@ const OPERATIONAL_ADMIN_ACTIONS = new Set([
 const PROVISIONING_ADMIN_ACTIONS = new Set([
   "provisioning_job_dismissed",
   "provisioning_job_restored",
+]);
+const ADMIN_AUTHORED_BRAND_LINK_EVENTS = new Set([
+  "inspection_recorded",
+  "link_staged",
+  "link_approved",
+  "link_reset",
 ]);
 const OPERATIONAL_SERVICE_LABELS = {
   ai_replies: "AI replies",
@@ -419,7 +436,7 @@ export async function loadAdminAccountActivity(
     calendarSchema,
   );
 
-  return normalizeAdminAccountActivity({
+  const events = normalizeAdminAccountActivity({
     businessId,
     milestones,
     releaseScheduled,
@@ -433,6 +450,21 @@ export async function loadAdminAccountActivity(
     rejectedCampaigns,
     calendar,
   });
+
+  return resolveAdminActorEmails(
+    events,
+    [
+      ...businessAdminEvents.map((event) => event.actor_admin_user_id),
+      ...provisioningAdminEvents.map((event) => event.actor_admin_user_id),
+    ],
+    brandLinkEvents.flatMap((event) =>
+      ADMIN_AUTHORED_BRAND_LINK_EVENTS.has(event.event_type) &&
+      event.actor_user_id !== null &&
+      z.string().uuid().safeParse(event.actor_user_id).success
+        ? [{ eventId: `brand:${event.id}`, actorId: event.actor_user_id }]
+        : [],
+    ),
+  );
 }
 
 async function loadProvisioningAdminEvents(
@@ -786,6 +818,75 @@ function sanitizeActor(value: string | null): string | null {
   if (value === null) return null;
   const parsed = safeActorSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+function sanitizeAdminEmail(value: string | null): string | null {
+  if (value === null) return null;
+  const parsed = safeAdminEmailSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+async function resolveAdminActorEmails(
+  events: AdminAccountActivityEvent[],
+  actorAdminUserIds: readonly string[],
+  brandLinkAdminActors: readonly { eventId: string; actorId: string }[],
+): Promise<AdminAccountActivityEvent[]> {
+  const provenanceIds = new Set(actorAdminUserIds);
+  const brandActorByEventId = new Map(
+    brandLinkAdminActors.map(({ eventId, actorId }) => [eventId, actorId]),
+  );
+  const visibleActorIds = Array.from(
+    new Set(
+      events.flatMap((event) =>
+        isResolvableAdminActorEvent(
+          event,
+          provenanceIds,
+          brandActorByEventId,
+        )
+          ? [event.actor]
+          : [],
+      ),
+    ),
+  );
+  const resolvedEntries = await Promise.all(
+    visibleActorIds.map(async (actorId) => {
+      try {
+        const result = await supabaseAdmin.auth.admin.getUserById(actorId);
+        if (result.error) return [actorId, null] as const;
+        return [
+          actorId,
+          sanitizeAdminEmail(result.data.user?.email ?? null),
+        ] as const;
+      } catch {
+        return [actorId, null] as const;
+      }
+    }),
+  );
+  const emailByActorId = new Map<string, string>();
+  for (const [actorId, email] of resolvedEntries) {
+    if (email !== null) emailByActorId.set(actorId, email);
+  }
+  if (emailByActorId.size === 0) return events;
+
+  return events.map((event) => {
+    if (!isResolvableAdminActorEvent(event, provenanceIds, brandActorByEventId)) {
+      return event;
+    }
+    const email = emailByActorId.get(event.actor);
+    return email ? { ...event, actor: email } : event;
+  });
+}
+
+function isResolvableAdminActorEvent(
+  event: AdminAccountActivityEvent,
+  adminActionActorIds: ReadonlySet<string>,
+  brandActorByEventId: ReadonlyMap<string, string>,
+): event is AdminAccountActivityEvent & { actor: string } {
+  if (event.actor === null) return false;
+  return (
+    (event.facets.includes("admin") && adminActionActorIds.has(event.actor)) ||
+    brandActorByEventId.get(event.id) === event.actor
+  );
 }
 
 function addMilestone(

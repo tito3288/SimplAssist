@@ -297,6 +297,22 @@ beforeEach(() => {
 });
 
 describe("AdminBusinessPage account lifecycle rendering", () => {
+  it("renders a compact arrow Back control to the admin account list", async () => {
+    const html = renderToStaticMarkup(
+      await AdminBusinessPage({ params: { businessId: BUSINESS_ID } }),
+    );
+    const backLink = html.match(/<a href="\/admin"[^>]*>[\s\S]*?<\/a>/)?.[0];
+
+    expect(backLink).toBeDefined();
+    expect(backLink).toContain('aria-label="Back to admin"');
+    expect(backLink).toContain("lucide-arrow-left");
+    expect(backLink).toContain("rounded-full");
+    expect(backLink).toContain("px-3");
+    expect(backLink).toContain("py-1.5");
+    expect(backLink).toContain("Back</a>");
+    expect(backLink).not.toContain("Back to admin</a>");
+  });
+
   it("completes admin authentication before starting any service-role read", async () => {
     mocks.requireAdminUser.mockRejectedValue(new Error("NOT_FOUND"));
 

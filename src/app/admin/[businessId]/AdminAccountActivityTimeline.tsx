@@ -18,6 +18,11 @@ interface AdminAccountActivityTimelineProps {
 const CAPTION =
   "Recorded activity only. Partner assignment, billing-mode, and billing-flag changes were not historically recorded. Historical provisioning actions are available only while a stored job association still links them to the account.";
 
+const EMBEDDED_ISO_TIMESTAMP_PATTERN =
+  /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g;
+const STRICT_ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+
 const CATEGORY_LABELS: Record<AdminAccountActivityEvent["category"], string> = {
   lifecycle: "Lifecycle",
   admin: "Admin action",
@@ -310,7 +315,9 @@ function ActivityEvent({ event }: { event: AdminAccountActivityEvent }) {
           <h3 className="font-semibold">{event.title}</h3>
         </div>
         {event.detail ? (
-          <p className={`mt-2 text-sm ${bodyFaint}`}>{event.detail}</p>
+          <p className={`mt-2 text-sm ${bodyFaint}`}>
+            {formatEmbeddedTimestamps(event.detail)}
+          </p>
         ) : null}
         {event.actor ? (
           <p className={`mt-1 break-all text-xs ${bodyFaint}`}>
@@ -416,4 +423,54 @@ function formatTimestamp(value: string): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(new Date(value))} UTC`;
+}
+
+function formatEmbeddedTimestamps(value: string): string {
+  return value.replace(EMBEDDED_ISO_TIMESTAMP_PATTERN, (timestamp) =>
+    isValidIsoTimestamp(timestamp) ? formatTimestamp(timestamp) : timestamp,
+  );
+}
+
+function isValidIsoTimestamp(value: string): boolean {
+  const match = STRICT_ISO_TIMESTAMP_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] =
+    match;
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+  const numericDay = Number(day);
+  const numericHour = Number(hour);
+  const numericMinute = Number(minute);
+  const numericSecond = Number(second);
+  if (
+    numericMonth < 1 ||
+    numericMonth > 12 ||
+    numericDay < 1 ||
+    numericDay > daysInMonth(numericYear, numericMonth) ||
+    numericHour > 23 ||
+    numericMinute > 59 ||
+    numericSecond > 59
+  ) {
+    return false;
+  }
+  if (offsetHour !== undefined && offsetMinute !== undefined) {
+    const numericOffsetHour = Number(offsetHour);
+    const numericOffsetMinute = Number(offsetMinute);
+    if (
+      numericOffsetHour > 14 ||
+      numericOffsetMinute > 59 ||
+      (numericOffsetHour === 14 && numericOffsetMinute !== 0)
+    ) {
+      return false;
+    }
+  }
+  return Number.isFinite(Date.parse(value));
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leapYear ? 29 : 28;
+  }
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
 }
