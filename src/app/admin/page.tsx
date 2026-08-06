@@ -67,7 +67,11 @@ export default async function AdminPage(
         <Metric label="Visible accounts" value={records.length} />
       </section>
 
-      <AdminAccountFilters filters={filters} partners={partnerOptions} />
+      <AdminAccountFilters
+        filters={filters}
+        partners={partnerOptions}
+        visibleCount={records.length}
+      />
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Accounts</h2>

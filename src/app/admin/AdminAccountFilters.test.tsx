@@ -22,11 +22,12 @@ describe("AdminAccountFilters", () => {
           query: null,
         }}
         partners={[]}
+        visibleCount={0}
       />,
     );
 
     expect(source).not.toContain('from "next/link"');
-    expect(source).toContain('<a href="/admin"');
+    expect(source).toContain('href="/admin"');
     expect(html).toMatch(
       /<option value="" selected="">All account states<\/option>/,
     );
@@ -37,9 +38,10 @@ describe("AdminAccountFilters", () => {
     expect(html).not.toContain("Specific partner");
     expect(html).toMatch(/<option value="" selected="">All plans<\/option>/);
     expect(html).toMatch(/<input[^>]*type="search"[^>]*value=""/);
+    expect(html).toContain("No filters applied");
   });
 
-  it("renders a native GET form with every always-visible filter", () => {
+  it("renders a search-first native GET form with every always-visible filter", () => {
     const html = renderToStaticMarkup(
       <AdminAccountFilters
         filters={{
@@ -50,6 +52,7 @@ describe("AdminAccountFilters", () => {
           query: null,
         }}
         partners={[]}
+        visibleCount={12}
       />,
     );
 
@@ -63,14 +66,18 @@ describe("AdminAccountFilters", () => {
     expect(html).not.toContain('name="partner"');
     expect(html).toContain('name="plan"');
     expect(html).toContain('type="search" name="q"');
+    expect(html).toContain(
+      'placeholder="Search by business name or contact email"',
+    );
     expect(html).toContain('pattern="\\s*[\\s\\S]{0,100}\\s*"');
     expect(html).not.toContain("maxLength=");
     expect(html).toContain('href="/admin"');
+    expect(html).toContain("Find accounts");
+    expect(html).toContain("12</span> visible accounts");
+    expect(html.indexOf("Search")).toBeLessThan(html.indexOf("Account state"));
     expect(html).toContain("Apply filters");
-    expect(html).toContain("Clear filters");
-    expect(html).toContain(
-      "Filters combine to narrow the newest 75 accounts.",
-    );
+    expect(html).toContain("Clear all");
+    expect(html).toContain("Filters combine to narrow the newest 75 accounts.");
   });
 
   it("offers only the specified account-state, ownership, and plan predicates", () => {
@@ -84,6 +91,7 @@ describe("AdminAccountFilters", () => {
           query: null,
         }}
         partners={[]}
+        visibleCount={0}
       />,
     );
 
@@ -120,6 +128,7 @@ describe("AdminAccountFilters", () => {
           query: null,
         }}
         partners={[]}
+        visibleCount={1}
       />,
     );
 
@@ -139,6 +148,7 @@ describe("AdminAccountFilters", () => {
           query: "Dental &amp; Co",
         }}
         partners={[{ id: PARTNER_ID, name: "Agency One" }]}
+        visibleCount={1}
       />,
     );
 
@@ -151,10 +161,28 @@ describe("AdminAccountFilters", () => {
     expect(html).toContain("Specific partner");
     expect(html).toContain('name="partner"');
     expect(html).toMatch(
-      new RegExp(`<option value="${PARTNER_ID}" selected="">Agency One</option>`),
+      new RegExp(
+        `<option value="${PARTNER_ID}" selected="">Agency One</option>`,
+      ),
     );
     expect(html).toMatch(/<option value="full" selected="">Full<\/option>/);
     expect(html).toContain('value="Dental &amp;amp; Co"');
+    expect(html).toContain("Active:");
+    expect(html).toContain("Failed setup");
+    expect(html).toContain("Partner: Agency One");
+    expect(html).toContain("Search: “Dental &amp;amp; Co”");
+    expect(html).toContain('aria-label="Remove Failed setup filter"');
+    expect(html).toContain('aria-label="Remove Partner: Agency One filter"');
+    expect(html).toContain('aria-label="Remove Full filter"');
+    expect(html).toContain(
+      'aria-label="Remove Search: “Dental &amp;amp; Co” filter"',
+    );
+    expect(html).toContain(
+      `href="/admin?ownership=partner&amp;partner=${PARTNER_ID}&amp;plan=full&amp;q=Dental+%26amp%3B+Co"`,
+    );
+    expect(html).toContain(
+      'href="/admin?lifecycle=failed_setup&amp;plan=full&amp;q=Dental+%26amp%3B+Co"',
+    );
   });
 
   it("includes supplied partners regardless of status without redundant ownership copy", () => {
@@ -174,6 +202,7 @@ describe("AdminAccountFilters", () => {
             name: "Retired Agency",
           },
         ]}
+        visibleCount={1}
       />,
     );
 
@@ -196,6 +225,7 @@ describe("AdminAccountFilters", () => {
           query: null,
         }}
         partners={[]}
+        visibleCount={1}
       />,
     );
 

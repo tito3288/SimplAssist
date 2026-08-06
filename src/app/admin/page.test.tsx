@@ -216,6 +216,8 @@ describe("AdminPage account lifecycle and health rendering", () => {
     expect(html).toMatch(/A2P review queue<\/p><p[^>]*>1<\/p>/);
     expect(html).toMatch(/High usage accounts<\/p><p[^>]*>1<\/p>/);
     expect(html).toMatch(/Visible accounts<\/p><p[^>]*>3<\/p>/);
+    expect(html).toContain("Find accounts");
+    expect(html).toContain("3</span> visible accounts");
     expect(html).toContain("Deletion scheduled");
     expect(html).toContain("Lifecycle: pending deletion");
     expect(html).toContain("Terminally cleaned");
