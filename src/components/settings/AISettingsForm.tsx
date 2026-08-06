@@ -11,6 +11,7 @@ import type { AISettings } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import GoogleCalendarConnect from './GoogleCalendarConnect';
 import { primaryCtaInlineClass } from '@/lib/glass';
+import { tile } from '@/lib/theme-v2/theme';
 
 const aiSettingsSchema = z.object({
   tone: z.enum(['friendly', 'professional', 'balanced'] as const),
@@ -295,42 +296,65 @@ export default function AISettingsForm({
       </section>
 
       {/* Section 4: Booking */}
-      <section>
-        <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Booking</h3>
-        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Let your AI handle appointment scheduling.</p>
+      <section className={`${tile} p-5 sm:p-6`} data-booking-card="true">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#ece4d8] bg-white dark:border-white/[0.12] dark:bg-white/[0.08]">
+              <span
+                role="img"
+                aria-label="Google Calendar"
+                className="h-7 w-7 bg-contain bg-center bg-no-repeat"
+                style={{ backgroundImage: "url('/marketing/technology/google-calendar.svg')" }}
+                data-google-calendar-icon="true"
+              />
+            </span>
+            <div>
+              <h3 className="mb-1 text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]">Booking</h3>
+              <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+                Let your AI handle appointment scheduling.
+              </p>
+            </div>
+          </div>
+
+          <div className={`flex items-center justify-between gap-3 sm:justify-end ${!canUseCalendar ? 'opacity-60' : ''}`}>
+            <span className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">
+              Enable Appointment Booking
+            </span>
+            <Controller
+              name="booking_enabled"
+              control={control}
+              render={({ field }) => (
+                <button
+                  type="button"
+                  onClick={() => canUseCalendar && field.onChange(!field.value)}
+                  disabled={!canUseCalendar}
+                  aria-label="Enable Appointment Booking"
+                  aria-pressed={field.value}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    field.value ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                      field.value ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              )}
+            />
+          </div>
+        </div>
 
         {!canUseCalendar && (
-          <UpgradeNotice plan="Growth" planActive={planActive}>Google Calendar and AI booking require the</UpgradeNotice>
+          <div className="mt-4">
+            <UpgradeNotice plan="Growth" planActive={planActive}>Google Calendar and AI booking require the</UpgradeNotice>
+          </div>
         )}
-
-        <div className={`flex items-center justify-between ${!canUseCalendar ? 'opacity-60' : ''}`}>
-          <label className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">Enable Appointment Booking</label>
-          <Controller
-            name="booking_enabled"
-            control={control}
-            render={({ field }) => (
-              <button
-                type="button"
-                onClick={() => canUseCalendar && field.onChange(!field.value)}
-                disabled={!canUseCalendar}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  field.value ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]' : 'bg-stone-200 dark:bg-white/[0.12]'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                    field.value ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            )}
-          />
-        </div>
 
         {bookingEnabled && (
           <>
             <div
-              className={`mt-3 space-y-2 border-l-2 border-[rgb(var(--brand-primary-rgb)/.30)] pl-4 dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] ${!canUseCalendar ? 'pointer-events-none opacity-60' : ''}`}
+              className={`mt-5 space-y-2 border-l-2 border-[rgb(var(--brand-primary-rgb)/.30)] pl-4 dark:border-[rgb(var(--brand-primary-dark-rgb)/.30)] ${!canUseCalendar ? 'pointer-events-none opacity-60' : ''}`}
               aria-disabled={!canUseCalendar}
             >
               <label className="flex items-center gap-2 cursor-pointer">
@@ -351,8 +375,8 @@ export default function AISettingsForm({
 
             {/* Google Calendar Connection - inline whenever booking is enabled */}
             {businessId && (
-              <div className="mt-4 p-4 rounded-xl bg-white border border-[#ece4d8] dark:bg-white/5 dark:border-white/[0.08]">
-                <p className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5] mb-2">Google Calendar</p>
+              <div className="mt-5 border-t border-[#e3dacc] pt-5 dark:border-white/[0.12]">
+                <p className="mb-2 text-sm font-medium text-stone-900 dark:text-[#f5f5f5]">Google Calendar</p>
                 {bookingMode === 'collect_info' && (
                   <p className="mb-3 text-xs text-stone-500 dark:text-[#bdbdbf]">
                     optional — connect to enable direct scheduling
@@ -370,7 +394,7 @@ export default function AISettingsForm({
         )}
 
         {!canUseCalendar && businessId && calendarConnected && !bookingEnabled && (
-          <div className="mt-4 rounded-xl border border-[#ece4d8] bg-white p-4 dark:border-white/[0.08] dark:bg-white/5">
+          <div className="mt-5 border-t border-[#e3dacc] pt-5 dark:border-white/[0.12]">
             <GoogleCalendarConnect
               businessId={businessId}
               connectedEmail={calendarEmail ?? null}

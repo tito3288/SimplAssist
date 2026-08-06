@@ -26,6 +26,35 @@ const SETTINGS: AISettings = {
 };
 
 describe("AISettingsForm Google Calendar connection state", () => {
+  it("presents booking as a dedicated card with the existing Google Calendar icon", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarConnected={false}
+      />
+    );
+
+    const bookingCard = html.match(
+      /<section[^>]*data-booking-card="true"[\s\S]*?<\/section>/
+    )?.[0];
+
+    expect(bookingCard).toBeDefined();
+    expect(bookingCard).toContain('data-google-calendar-icon="true"');
+    expect(bookingCard).toContain('role="img"');
+    expect(bookingCard).toContain('aria-label="Google Calendar"');
+    expect(bookingCard).toContain(
+      "/marketing/technology/google-calendar.svg"
+    );
+    expect(bookingCard).toContain("Booking");
+    expect(bookingCard).toContain("Let your AI handle appointment scheduling.");
+    expect(bookingCard).toContain("Enable Appointment Booking");
+    expect(bookingCard).toContain('aria-pressed="false"');
+    expect(bookingCard).toContain("rounded-[22px]");
+    expect(bookingCard).not.toContain("Guardrails");
+  });
+
   it("shows the optional connection in collect-info mode when booking is enabled", () => {
     const html = renderToStaticMarkup(
       <AISettingsForm
