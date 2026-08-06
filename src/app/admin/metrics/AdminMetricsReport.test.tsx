@@ -7,10 +7,12 @@ import {
   type BusinessMetricCountsV1,
 } from "@/lib/metrics/contract";
 import {
+  AdminBusinessMetricsReport,
   AdminMetricsReport,
   buildBrandTotalsCsvData,
   buildMetricsExportFilters,
   buildPerBusinessCsvData,
+  buildSingleBusinessCsvData,
   type AdminMetricsReportErrorState,
 } from "./AdminMetricsReport";
 import {
@@ -220,7 +222,240 @@ describe("AdminMetricsReport", () => {
     expect(html).toContain("Event-time brand: Alpha Agency");
     expect(html).toContain("AI bookings");
     expect(html).toContain("Dashboard bookings");
+    expect(
+      html.match(
+        new RegExp(`href="/admin/metrics/${BUSINESS_ID}\\?month=2026-08"`, "g"),
+      ),
+    ).toHaveLength(2);
+    expect(html).toContain("Export per-business (CSV)");
   });
+
+  it("renders a vertical single-business report with aggregate counts and event-time brands", () => {
+    const scoped = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+    });
+    const html = renderToStaticMarkup(
+      <AdminBusinessMetricsReport
+        result={{ state: "ready", report: scoped }}
+        businessId={BUSINESS_ID}
+        month="2026-08"
+      />,
+    );
+
+    expect(html).toContain("<h1");
+    expect(html).toContain("River City Dental</h1>");
+    expect(html).toContain(
+      "Event-time brands: SimplAssist direct · Alpha Agency",
+    );
+    expect(html).toContain("August 2026 (UTC)");
+    expect(html).toContain('aria-label="Monthly business metric counts"');
+    expect(html.match(/<dt/g)).toHaveLength(METRIC_HEADERS.length);
+    expect(html.match(/<dd/g)).toHaveLength(METRIC_HEADERS.length);
+
+    const metricList = html.slice(
+      html.indexOf('aria-label="Monthly business metric counts"'),
+    );
+    let previousLabelIndex = -1;
+    for (const label of METRIC_HEADERS) {
+      const labelIndex = metricList.indexOf(label);
+      expect(labelIndex).toBeGreaterThan(previousLabelIndex);
+      previousLabelIndex = labelIndex;
+    }
+    expect(metricList).toMatch(/Missed calls caught[\s\S]*>1<\/dd>/);
+    expect(metricList).toMatch(/Outbound MMS events[\s\S]*>14<\/dd>/);
+    expect(html).toContain("Export per-business (CSV)");
+    expect(html).not.toContain("Export brand totals (CSV)");
+  });
+
+  it("renders all metric rows as zero for a known business with no monthly activity", () => {
+    const zeroEventReport = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+      totals: counts(),
+      brand_totals: [],
+      businesses: [],
+    });
+    const html = renderToStaticMarkup(
+      <AdminBusinessMetricsReport
+        result={{ state: "ready", report: zeroEventReport }}
+        businessId={BUSINESS_ID}
+        month="2026-08"
+      />,
+    );
+
+    expect(html).toContain("River City Dental</h1>");
+    expect(html).toContain("Event-time brand: No metric events this month");
+    expect(html.match(/<dt/g)).toHaveLength(METRIC_HEADERS.length);
+    expect(html.match(/<dd[^>]*>0<\/dd>/g)).toHaveLength(METRIC_HEADERS.length);
+    expect(html).toContain("Export per-business (CSV)");
+    expect(html).not.toContain("SimplAssist direct");
+
+    const csv = buildSingleBusinessCsvData(
+      zeroEventReport,
+      BUSINESS_ID,
+      "River City Dental",
+    );
+    expect(csv.rows).toEqual([
+      [
+        "River City Dental",
+        BUSINESS_ID,
+        "No metric events this month",
+        "",
+        ...METRIC_HEADERS.map(() => 0),
+      ],
+    ]);
+  });
+
+  it("keeps same-named event-time brands distinct by partner identity", () => {
+    const secondPartnerId = "20000000-0000-4000-a050-000000000002";
+    const scoped = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+      businesses: [
+        {
+          business_id: BUSINESS_ID,
+          business_name: "River City Dental",
+          partner_id_at_event: PARTNER_ID,
+          partner_name: "Shared Agency",
+          partner_slug: "shared-agency-one",
+          counts: counts({ missed_call_caught: 1 }),
+        },
+        {
+          business_id: BUSINESS_ID,
+          business_name: "River City Dental",
+          partner_id_at_event: secondPartnerId,
+          partner_name: "Shared Agency",
+          partner_slug: "shared-agency-two",
+          counts: counts({ sms_message_outbound: 1 }),
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      <AdminBusinessMetricsReport
+        result={{ state: "ready", report: scoped }}
+        businessId={BUSINESS_ID}
+        month="2026-08"
+      />,
+    );
+
+    expect(html).toContain(
+      "Event-time brands: Shared Agency (shared-agency-one) · Shared Agency (shared-agency-two)",
+    );
+  });
+
+  it("filters the drill-down CSV to the selected business while retaining brand segments", () => {
+    const otherBusinessId = "10000000-0000-4000-a050-000000000002";
+    const current = report();
+    const scoped = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+      businesses: [
+        ...current.businesses,
+        {
+          business_id: otherBusinessId,
+          business_name: "Other Business",
+          partner_id_at_event: null,
+          partner_name: null,
+          partner_slug: null,
+          counts: counts({ contact_created: 99 }),
+        },
+      ],
+    });
+
+    const csv = buildSingleBusinessCsvData(
+      scoped,
+      BUSINESS_ID,
+      "River City Dental",
+    );
+
+    expect(csv.headers).toEqual([
+      "Business name",
+      "business_id",
+      "Event-time brand",
+      "partner_id_at_event",
+      ...METRIC_HEADERS,
+    ]);
+    expect(csv.rows).toHaveLength(2);
+    expect(csv.rows.every((row) => row[1] === BUSINESS_ID)).toBe(true);
+    expect(csv.rows.map((row) => row[2])).toEqual([
+      "SimplAssist direct",
+      "Alpha Agency",
+    ]);
+    expect(
+      buildAdminMetricsExportFilename(
+        "per-business",
+        buildMetricsExportFilters(scoped),
+      ),
+    ).toBe(
+      `simplassist-per-business-2026-08-all-business-river-city-dental-${BUSINESS_ID}.csv`,
+    );
+  });
+
+  it("renders the compact month form for the selected business route", () => {
+    const scoped = report({
+      scope: {
+        kind: "all",
+        partner_id: null,
+        business_id: BUSINESS_ID,
+      },
+    });
+    const html = renderToStaticMarkup(
+      <AdminBusinessMetricsReport
+        result={{ state: "ready", report: scoped }}
+        businessId={BUSINESS_ID}
+        month="2026-08"
+      />,
+    );
+
+    expect(html).toContain(
+      `action="/admin/metrics/${BUSINESS_ID}" method="get"`,
+    );
+    expect(html).toContain('aria-label="Select metrics month"');
+    expect(html).toMatch(
+      /<input[^>]*type="month"[^>]*name="month"[^>]*required=""[^>]*value="2026-08"/,
+    );
+    expect(html).toContain("Month boundaries are calculated in UTC.");
+    expect(html).toContain("View metrics</button>");
+  });
+
+  it.each([
+    ["query_failed", "Metrics query unavailable"],
+    ["invalid_response", "Metrics response unavailable"],
+    ["inconsistent_response", "Metrics totals unavailable"],
+    ["business_unavailable", "Business metrics unavailable"],
+  ] as const)(
+    "renders the drill-down %s error with no fabricated metric list",
+    (state, heading) => {
+      const html = renderToStaticMarkup(
+        <AdminBusinessMetricsReport
+          result={{ state }}
+          businessId={BUSINESS_ID}
+          month="2026-08"
+        />,
+      );
+
+      expect(html).toContain('role="alert"');
+      expect(html).toContain(heading);
+      expect(html).toContain(
+        "No partial, estimated, or fabricated zero counts are shown.",
+      );
+      expect(html).not.toContain('aria-label="Monthly business metric counts"');
+      expect(html).not.toContain("Export per-business (CSV)");
+    },
+  );
 
   it("projects brand and per-business CSV columns in the displayed metric order", () => {
     const current = report();
@@ -370,9 +605,7 @@ describe("AdminMetricsReport", () => {
       businesses: [],
     });
     const html = renderToStaticMarkup(
-      <AdminMetricsReport
-        result={{ state: "ready", report: emptyReport }}
-      />,
+      <AdminMetricsReport result={{ state: "ready", report: emptyReport }} />,
     );
 
     expect(html).toContain(
@@ -463,9 +696,7 @@ describe("AdminMetricsReport", () => {
       businesses: [],
     });
     const html = renderToStaticMarkup(
-      <AdminMetricsReport
-        result={{ state: "ready", report: emptyReport }}
-      />,
+      <AdminMetricsReport result={{ state: "ready", report: emptyReport }} />,
     );
 
     expect(html).toContain(
@@ -523,9 +754,7 @@ describe("AdminMetricsReport", () => {
     } as AdminMonthlyBusinessMetricsResponseV2;
 
     const html = renderToStaticMarkup(
-      <AdminMetricsReport
-        result={{ state: "ready", report: unsafeReport }}
-      />,
+      <AdminMetricsReport result={{ state: "ready", report: unsafeReport }} />,
     );
 
     expect(html).not.toContain("private message body");

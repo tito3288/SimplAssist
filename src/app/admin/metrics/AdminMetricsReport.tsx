@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   BUSINESS_METRIC_KEYS_V1,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/metrics/contract";
 import {
   bodyFaint,
+  btnPrimaryCompact,
   card,
   statusDanger,
   statusNeutral,
@@ -33,6 +35,17 @@ export type AdminMetricsReportState =
       report: AdminMonthlyBusinessMetricsResponseV2;
     }
   | { state: AdminMetricsReportErrorState };
+
+export type AdminBusinessMetricsReportErrorState =
+  | AdminMetricsReportErrorState
+  | "business_unavailable";
+
+export type AdminBusinessMetricsReportState =
+  | {
+      state: "ready";
+      report: AdminMonthlyBusinessMetricsResponseV2;
+    }
+  | { state: AdminBusinessMetricsReportErrorState };
 
 interface AdminMetricsReportProps {
   result: AdminMetricsReportState;
@@ -91,8 +104,10 @@ const PER_BUSINESS_CSV_HEADERS = [
   ...METRIC_CSV_HEADERS,
 ];
 
+const NO_METRIC_EVENTS_BRAND_LABEL = "No metric events this month";
+
 const ERROR_COPY: Record<
-  AdminMetricsReportErrorState,
+  AdminBusinessMetricsReportErrorState,
   { heading: string; detail: string }
 > = {
   query_failed: {
@@ -107,27 +122,15 @@ const ERROR_COPY: Record<
     heading: "Metrics totals unavailable",
     detail: "The monthly metrics response did not pass consistency checks.",
   },
+  business_unavailable: {
+    heading: "Business metrics unavailable",
+    detail: "The selected business could not be found.",
+  },
 };
 
 export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
   if (result.state !== "ready") {
-    const copy = ERROR_COPY[result.state];
-    return (
-      <section
-        className={`p-5 sm:p-6 ${card}`}
-        aria-labelledby="metrics-error-heading"
-      >
-        <div className={`rounded-2xl px-4 py-4 ${statusDanger}`} role="alert">
-          <h2 id="metrics-error-heading" className="text-sm font-semibold">
-            {copy.heading}
-          </h2>
-          <p className="mt-1 text-sm">{copy.detail}</p>
-          <p className="mt-1 text-xs">
-            No partial, estimated, or fabricated zero counts are shown.
-          </p>
-        </div>
-      </section>
-    );
+    return <MetricsError state={result.state} />;
   }
 
   const { report } = result;
@@ -214,7 +217,14 @@ export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
               }
               rows={report.businesses.map((business) => ({
                 key: businessKey(business),
-                primary: business.business_name,
+                primary: (
+                  <Link
+                    href={`/admin/metrics/${business.business_id}?month=${report.period.month}`}
+                    className="text-[#c2410c] underline-offset-2 hover:underline dark:text-[#ff914d]"
+                  >
+                    {business.business_name}
+                  </Link>
+                ),
                 secondary: `Event-time brand: ${brandLabel(
                   business.partner_id_at_event,
                   business.partner_name,
@@ -237,6 +247,218 @@ export function AdminMetricsReport({ result }: AdminMetricsReportProps) {
   );
 }
 
+export function AdminBusinessMetricsReport({
+  result,
+  businessId,
+  month,
+}: {
+  result: AdminBusinessMetricsReportState;
+  businessId: string;
+  month: string;
+}) {
+  if (result.state !== "ready") {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold">Business metrics</h1>
+        <MonthSelector businessId={businessId} month={month} />
+        <MetricsError state={result.state} />
+      </div>
+    );
+  }
+
+  const { report } = result;
+  const selectedBusinessId = report.scope.business_id?.toLowerCase() ?? null;
+  const businessRows =
+    selectedBusinessId === null
+      ? []
+      : report.businesses.filter(
+          (business) =>
+            business.business_id.toLowerCase() === selectedBusinessId,
+        );
+  const businessOption =
+    selectedBusinessId === null
+      ? undefined
+      : report.business_options.find(
+          (business) =>
+            business.business_id.toLowerCase() === selectedBusinessId,
+        );
+  const businessName =
+    businessOption?.business_name ?? businessRows[0]?.business_name;
+
+  if (selectedBusinessId === null || businessName === undefined) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold">Business metrics</h1>
+        <MonthSelector businessId={businessId} month={month} />
+        <MetricsError state="business_unavailable" />
+      </div>
+    );
+  }
+
+  const eventTimeBrands = eventTimeBrandLabels(businessRows);
+  const brandHeading =
+    eventTimeBrands.length === 0
+      ? NO_METRIC_EVENTS_BRAND_LABEL
+      : eventTimeBrands.join(" · ");
+  const perBusinessCsv = buildSingleBusinessCsvData(
+    report,
+    selectedBusinessId,
+    businessName,
+  );
+
+  return (
+    <div className="space-y-6">
+      <section className={`p-5 sm:p-6 ${card}`}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">{businessName}</h1>
+            <p className={`mt-1 text-sm ${bodyFaint}`}>
+              {`${eventTimeBrands.length > 1 ? "Event-time brands" : "Event-time brand"}: ${brandHeading}`}
+            </p>
+            <p className={`mt-2 text-sm font-medium ${bodyFaint}`}>
+              Reporting period: {formatMonth(report.period.month)} (UTC)
+            </p>
+          </div>
+          <AdminMetricsExport
+            kind="per-business"
+            filters={buildMetricsExportFilters(report)}
+            data={perBusinessCsv}
+          />
+        </div>
+      </section>
+
+      <MonthSelector
+        businessId={selectedBusinessId}
+        month={report.period.month}
+      />
+
+      <section
+        className={`p-5 sm:p-6 ${card}`}
+        aria-labelledby="business-metric-counts-heading"
+      >
+        <h2
+          id="business-metric-counts-heading"
+          className="text-lg font-semibold"
+        >
+          Monthly metrics
+        </h2>
+        <dl
+          className={`mt-4 divide-y divide-[#e8dfd3] overflow-hidden px-4 dark:divide-white/[0.08] ${tile}`}
+          aria-label="Monthly business metric counts"
+        >
+          {TABLE_COLUMNS.map((key) => (
+            <div
+              key={key}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-3"
+            >
+              <dt className={`text-sm ${bodyFaint}`}>{COUNT_LABELS[key]}</dt>
+              <dd className="font-semibold tabular-nums">
+                {formatCount(report.totals[key])}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <p className={`text-xs ${bodyFaint}`}>
+        Counts contain no message content and remain attributed to the business
+        brand recorded at event time.
+      </p>
+    </div>
+  );
+}
+
+function MonthSelector({
+  businessId,
+  month,
+}: {
+  businessId: string;
+  month: string;
+}) {
+  return (
+    <form
+      action={`/admin/metrics/${encodeURIComponent(businessId)}`}
+      method="get"
+      aria-label="Select metrics month"
+      className={`flex flex-col gap-3 p-4 sm:flex-row sm:items-end ${card}`}
+    >
+      <label className="w-full max-w-xs space-y-1 text-sm">
+        <span className="block font-medium">UTC month</span>
+        <input
+          type="month"
+          name="month"
+          required
+          defaultValue={month}
+          className="w-full rounded-md border border-[#e3dacc] bg-white px-3 py-2 text-sm text-stone-900 dark:border-white/[0.12] dark:bg-[#242426] dark:text-[#f5f5f5]"
+        />
+        <span className={`block text-xs ${bodyFaint}`}>
+          Month boundaries are calculated in UTC.
+        </span>
+      </label>
+      <button type="submit" className={btnPrimaryCompact}>
+        View metrics
+      </button>
+    </form>
+  );
+}
+
+function MetricsError({
+  state,
+}: {
+  state: AdminBusinessMetricsReportErrorState;
+}) {
+  const copy = ERROR_COPY[state];
+  return (
+    <section
+      className={`p-5 sm:p-6 ${card}`}
+      aria-labelledby="metrics-error-heading"
+    >
+      <div className={`rounded-2xl px-4 py-4 ${statusDanger}`} role="alert">
+        <h2 id="metrics-error-heading" className="text-sm font-semibold">
+          {copy.heading}
+        </h2>
+        <p className="mt-1 text-sm">{copy.detail}</p>
+        <p className="mt-1 text-xs">
+          No partial, estimated, or fabricated zero counts are shown.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function eventTimeBrandLabels(
+  businessRows: readonly AdminMonthlyBusinessMetricRowV1[],
+): string[] {
+  const segments = new Map<string, { label: string; qualifier: string }>();
+
+  for (const business of businessRows) {
+    const identity = business.partner_id_at_event ?? "direct";
+    if (segments.has(identity)) continue;
+    segments.set(identity, {
+      label: brandLabel(
+        business.partner_id_at_event,
+        business.partner_name,
+        business.partner_slug,
+      ),
+      qualifier:
+        business.partner_id_at_event === null
+          ? "direct"
+          : (business.partner_slug ?? business.partner_id_at_event),
+    });
+  }
+
+  const labelCounts = new Map<string, number>();
+  for (const segment of Array.from(segments.values())) {
+    labelCounts.set(segment.label, (labelCounts.get(segment.label) ?? 0) + 1);
+  }
+
+  return Array.from(segments.values(), (segment) =>
+    labelCounts.get(segment.label) === 1
+      ? segment.label
+      : `${segment.label} (${segment.qualifier})`,
+  );
+}
+
 function CountGroup({
   heading,
   keys,
@@ -253,7 +475,10 @@ function CountGroup({
       <h3 className="font-semibold">{heading}</h3>
       <dl className="mt-3 divide-y divide-[#e8dfd3] dark:divide-white/[0.08]">
         {keys.map((key) => (
-          <div key={key} className="flex items-start justify-between gap-4 py-2">
+          <div
+            key={key}
+            className="flex items-start justify-between gap-4 py-2"
+          >
             <dt className={`text-sm ${bodyFaint}`}>
               {COUNT_LABELS[key]}
               {showBookingBreakdown && key === "booking_confirmed" ? (
@@ -262,7 +487,9 @@ function CountGroup({
                 </span>
               ) : null}
             </dt>
-            <dd className="font-semibold tabular-nums">{formatCount(counts[key])}</dd>
+            <dd className="font-semibold tabular-nums">
+              {formatCount(counts[key])}
+            </dd>
           </div>
         ))}
       </dl>
@@ -272,7 +499,7 @@ function CountGroup({
 
 interface MetricTableRow {
   key: string;
-  primary: string;
+  primary: ReactNode;
   secondary: string;
   counts: BusinessMetricCountsV1;
 }
@@ -403,10 +630,10 @@ export function buildBrandTotalsCsvData(
 
 export function buildPerBusinessCsvData(
   report: AdminMonthlyBusinessMetricsResponseV2,
+  zeroEventBusiness?: { businessId: string; businessName: string },
 ): AdminMetricsCsvData {
-  return {
-    headers: PER_BUSINESS_CSV_HEADERS,
-    rows: report.businesses.map((business) => [
+  const rows: AdminMetricsCsvData["rows"][number][] = report.businesses.map(
+    (business) => [
       business.business_name,
       business.business_id,
       brandLabel(
@@ -416,8 +643,40 @@ export function buildPerBusinessCsvData(
       ),
       business.partner_id_at_event ?? "",
       ...TABLE_COLUMNS.map((key) => business.counts[key]),
-    ]),
+    ],
+  );
+
+  if (rows.length === 0 && zeroEventBusiness !== undefined) {
+    rows.push([
+      zeroEventBusiness.businessName,
+      zeroEventBusiness.businessId,
+      NO_METRIC_EVENTS_BRAND_LABEL,
+      "",
+      ...TABLE_COLUMNS.map((key) => report.totals[key]),
+    ]);
+  }
+
+  return {
+    headers: PER_BUSINESS_CSV_HEADERS,
+    rows,
   };
+}
+
+export function buildSingleBusinessCsvData(
+  report: AdminMonthlyBusinessMetricsResponseV2,
+  businessId: string,
+  businessName: string,
+): AdminMetricsCsvData {
+  const selectedId = businessId.toLowerCase();
+  return buildPerBusinessCsvData(
+    {
+      ...report,
+      businesses: report.businesses.filter(
+        (business) => business.business_id.toLowerCase() === selectedId,
+      ),
+    },
+    { businessId: selectedId, businessName },
+  );
 }
 
 export function buildMetricsExportFilters(
