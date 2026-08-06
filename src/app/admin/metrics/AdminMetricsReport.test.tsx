@@ -228,6 +228,7 @@ describe("AdminMetricsReport", () => {
       ),
     ).toHaveLength(2);
     expect(html).toContain("Export per-business (CSV)");
+    expect(html).not.toContain("Export CSV");
   });
 
   it("renders a vertical single-business report with aggregate counts and event-time brands", () => {
@@ -267,7 +268,8 @@ describe("AdminMetricsReport", () => {
     }
     expect(metricList).toMatch(/Missed calls caught[\s\S]*>1<\/dd>/);
     expect(metricList).toMatch(/Outbound MMS events[\s\S]*>14<\/dd>/);
-    expect(html).toContain("Export per-business (CSV)");
+    expect(html).toContain("Export CSV");
+    expect(html).not.toContain("Export per-business (CSV)");
     expect(html).not.toContain("Export brand totals (CSV)");
   });
 
@@ -294,7 +296,8 @@ describe("AdminMetricsReport", () => {
     expect(html).toContain("Event-time brand: No metric events this month");
     expect(html.match(/<dt/g)).toHaveLength(METRIC_HEADERS.length);
     expect(html.match(/<dd[^>]*>0<\/dd>/g)).toHaveLength(METRIC_HEADERS.length);
-    expect(html).toContain("Export per-business (CSV)");
+    expect(html).toContain("Export CSV");
+    expect(html).not.toContain("Export per-business (CSV)");
     expect(html).not.toContain("SimplAssist direct");
 
     const csv = buildSingleBusinessCsvData(

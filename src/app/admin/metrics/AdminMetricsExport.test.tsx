@@ -47,6 +47,29 @@ describe("AdminMetricsExport", () => {
     expect(empty).toBe("");
   });
 
+  it("uses the kind label by default and supports a caller override", () => {
+    const data = { headers: ["Business"], rows: [["River City Dental"]] };
+    const defaultLabel = renderToStaticMarkup(
+      <AdminMetricsExport
+        kind="per-business"
+        filters={ALL_FILTERS}
+        data={data}
+      />,
+    );
+    const overriddenLabel = renderToStaticMarkup(
+      <AdminMetricsExport
+        kind="per-business"
+        filters={ALL_FILTERS}
+        data={data}
+        label="Export CSV"
+      />,
+    );
+
+    expect(defaultLabel).toContain("Export per-business (CSV)");
+    expect(overriddenLabel).toContain("Export CSV");
+    expect(overriddenLabel).not.toContain("Export per-business (CSV)");
+  });
+
   it.each([
     ["plain", "plain"],
     ["", ""],
@@ -81,9 +104,9 @@ describe("AdminMetricsExport", () => {
   });
 
   it("builds filenames from every applied report filter", () => {
-    expect(
-      buildAdminMetricsExportFilename("brand-totals", ALL_FILTERS),
-    ).toBe("simplassist-brand-totals-2026-07-all.csv");
+    expect(buildAdminMetricsExportFilename("brand-totals", ALL_FILTERS)).toBe(
+      "simplassist-brand-totals-2026-07-all.csv",
+    );
     expect(
       buildAdminMetricsExportFilename("per-business", {
         ...ALL_FILTERS,
@@ -97,9 +120,7 @@ describe("AdminMetricsExport", () => {
         partnerSlug: "Alpha Agency",
         partnerId: "20000000-0000-4000-a050-000000000001",
       }),
-    ).toBe(
-      "simplassist-brand-totals-2026-07-partner-alpha-agency.csv",
-    );
+    ).toBe("simplassist-brand-totals-2026-07-partner-alpha-agency.csv");
     expect(
       buildAdminMetricsExportFilename("per-business", {
         ...ALL_FILTERS,

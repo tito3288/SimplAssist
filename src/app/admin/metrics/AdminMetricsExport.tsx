@@ -30,12 +30,14 @@ interface AdminMetricsExportProps {
   kind: AdminMetricsExportKind;
   filters: AdminMetricsExportFilters;
   data: AdminMetricsCsvData;
+  label?: string;
 }
 
 export function AdminMetricsExport({
   kind,
   filters,
   data,
+  label,
 }: AdminMetricsExportProps) {
   if (data.rows.length === 0) return null;
 
@@ -50,7 +52,7 @@ export function AdminMetricsExport({
         );
       }}
     >
-      {EXPORT_LABELS[kind]}
+      {label ?? EXPORT_LABELS[kind]}
     </button>
   );
 }

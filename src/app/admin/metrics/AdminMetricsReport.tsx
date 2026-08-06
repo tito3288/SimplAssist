@@ -323,6 +323,7 @@ export function AdminBusinessMetricsReport({
             kind="per-business"
             filters={buildMetricsExportFilters(report)}
             data={perBusinessCsv}
+            label="Export CSV"
           />
         </div>
       </section>
