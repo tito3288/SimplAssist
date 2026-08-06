@@ -239,6 +239,11 @@ Deletion-pipeline PII crumbs (verified real, pre-existing, out of scope of PR #7
 
 Post-launch items:
 
+- pgTAP suite repair for migrations 029–037: refresh stale date-sensitive
+  fixtures, role/grant expectations, and concurrency isolation so
+  `npx supabase test db --local` runs green end-to-end after a clean disposable
+  database replay. Preserve the production invariants rather than weakening
+  assertions to make the tests pass.
 - Dashboard-side brand-rejection retry button (with pause-warning confirmation —
   the cascade archives the approved campaign and SMS pauses until re-approval).
 - `mapBrandStatus` broadening — only `UNVERIFIED` + `REGISTRATION_FAILED` map to
