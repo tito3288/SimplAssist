@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-
 import { primaryCtaCompactClass, secondaryCtaCompactClass } from "@/lib/glass";
 import type {
   AdminMonthlyBusinessMetricBusinessOptionV2,
@@ -17,10 +15,17 @@ export interface AdminMetricsFilterSelection {
   businessId: string | null;
 }
 
+interface AdminMetricsBusinessOptionGroup {
+  id: string;
+  label: string;
+  businesses: readonly AdminMonthlyBusinessMetricBusinessOptionV2[];
+}
+
 interface AdminMetricsFiltersProps {
   filters: AdminMetricsFilterSelection;
   partners: readonly AdminMonthlyBusinessMetricPartnerOptionV1[];
   businesses: readonly AdminMonthlyBusinessMetricBusinessOptionV2[];
+  businessGroups: readonly AdminMetricsBusinessOptionGroup[] | null;
 }
 
 const controlClass =
@@ -30,6 +35,7 @@ export function AdminMetricsFilters({
   filters,
   partners,
   businesses,
+  businessGroups,
 }: AdminMetricsFiltersProps) {
   const selectedPartnerIsAvailable = partners.some(
     (partner) => partner.partner_id === filters.partnerId,
@@ -127,11 +133,23 @@ export function AdminMetricsFilters({
                 {selectedBusinessLabel(filters.businessId)}
               </option>
             ) : null}
-            {businesses.map((business) => (
-              <option key={business.business_id} value={business.business_id}>
-                {business.business_name}
-              </option>
-            ))}
+            {businessGroups === null
+              ? businesses.map((business) => (
+                  <BusinessOption
+                    key={business.business_id}
+                    business={business}
+                  />
+                ))
+              : businessGroups.map((group) => (
+                  <optgroup key={group.id} label={group.label}>
+                    {group.businesses.map((business) => (
+                      <BusinessOption
+                        key={business.business_id}
+                        business={business}
+                      />
+                    ))}
+                  </optgroup>
+                ))}
           </select>
         </FilterLabel>
       </div>
@@ -140,15 +158,23 @@ export function AdminMetricsFilters({
         <button type="submit" className={primaryCtaCompactClass}>
           View metrics
         </button>
-        <Link href="/admin/metrics" className={secondaryCtaCompactClass}>
+        <a href="/admin/metrics" className={secondaryCtaCompactClass}>
           Clear filters
-        </Link>
+        </a>
         <p className={`text-xs ${bodyFaint}`}>
           Counts are read-only and attributed to the brand at event time.
         </p>
       </div>
     </form>
   );
+}
+
+function BusinessOption({
+  business,
+}: {
+  business: AdminMonthlyBusinessMetricBusinessOptionV2;
+}) {
+  return <option value={business.business_id}>{business.business_name}</option>;
 }
 
 export function synchronizePartnerControl(

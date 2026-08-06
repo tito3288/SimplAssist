@@ -18,8 +18,18 @@ import { PartnerForm } from "./PartnerForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminPartnersPage() {
+type AdminPartnerSearchParams = {
+  create?: string | string[];
+};
+
+export default async function AdminPartnersPage({
+  searchParams,
+}: {
+  searchParams?: AdminPartnerSearchParams;
+}) {
   await requireAdminUser();
+
+  const createOpen = searchParams?.create === "1";
 
   const { data, error } = await supabaseAdmin
     .from("partners")
@@ -62,10 +72,16 @@ export default async function AdminPartnersPage() {
           </p>
         </div>
         <Link
-          href="#create-partner"
+          href={
+            createOpen
+              ? "/admin/partners"
+              : "/admin/partners?create=1#create-partner"
+          }
+          aria-expanded={createOpen}
+          aria-controls="create-partner"
           className="text-sm font-semibold text-[#c2410c] hover:text-[#9a3412] dark:text-[#ff914d] dark:hover:text-[#ffb07a]"
         >
-          Create partner
+          {createOpen ? "Hide create form" : "Create partner"}
         </Link>
       </section>
 
@@ -176,7 +192,11 @@ export default async function AdminPartnersPage() {
         </div>
       </section>
 
-      <section id="create-partner" className={`scroll-mt-6 p-5 sm:p-6 ${card}`}>
+      <section
+        id="create-partner"
+        hidden={!createOpen}
+        className={`scroll-mt-6 p-5 sm:p-6 ${card}`}
+      >
         <h2 className="text-lg font-semibold">Create partner</h2>
         <p className={`mt-1 text-sm ${bodyFaint}`}>
           Add profile values and assets. The custom domain remains Pending until

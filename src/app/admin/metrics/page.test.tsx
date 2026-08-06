@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
   return {
     requireAdminUser: vi.fn(),
     loadMetrics: vi.fn(),
+    loadBusinessOptionGroups: vi.fn(),
     renderFilters: vi.fn(),
     renderReport: vi.fn(),
     AdminMetricsReadError,
@@ -29,6 +30,9 @@ vi.mock("@/lib/admin/auth", () => ({
 vi.mock("@/lib/admin/metrics.server", () => ({
   AdminMetricsReadError: mocks.AdminMetricsReadError,
   loadAdminMonthlyBusinessMetrics: mocks.loadMetrics,
+}));
+vi.mock("@/lib/admin/metricsBusinessOptions.server", () => ({
+  loadAdminMetricsBusinessOptionGroups: mocks.loadBusinessOptionGroups,
 }));
 vi.mock("./AdminMetricsFilters", () => ({
   AdminMetricsFilters: (props: unknown) => {
@@ -83,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireAdminUser.mockResolvedValue({ id: "admin-1", email: null });
   mocks.loadMetrics.mockResolvedValue(report());
+  mocks.loadBusinessOptionGroups.mockResolvedValue(null);
 });
 
 describe("AdminMetricsPage", () => {
@@ -182,7 +187,118 @@ describe("AdminMetricsPage", () => {
       },
       partners: partnerOptions,
       businesses: businessOptions,
+      businessGroups: null,
     });
+    expect(mocks.loadBusinessOptionGroups).not.toHaveBeenCalled();
+  });
+
+  it("enriches All-scope options and passes only trustworthy groups", async () => {
+    const partnerOptions = [
+      {
+        partner_id: PARTNER_ID,
+        partner_name: "Agency One",
+        partner_slug: "agency-one",
+      },
+    ];
+    const businessOptions = [
+      {
+        business_id: BUSINESS_ID,
+        business_name: "River City Dental",
+      },
+    ];
+    const businessGroups = [
+      {
+        id: PARTNER_ID,
+        label: "Agency One",
+        businesses: businessOptions,
+      },
+    ];
+    mocks.loadMetrics.mockResolvedValue(
+      report(partnerOptions, businessOptions),
+    );
+    mocks.loadBusinessOptionGroups.mockResolvedValue(businessGroups);
+
+    renderToStaticMarkup(
+      await AdminMetricsPage({
+        searchParams: { month: "2026-07", scope: "all" },
+      }),
+    );
+
+    expect(mocks.loadBusinessOptionGroups).toHaveBeenCalledOnce();
+    expect(mocks.loadBusinessOptionGroups).toHaveBeenCalledWith(
+      businessOptions,
+      partnerOptions,
+    );
+    expect(mocks.loadMetrics.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.loadBusinessOptionGroups.mock.invocationCallOrder[0],
+    );
+    expect(mocks.renderFilters).toHaveBeenCalledWith({
+      filters: {
+        month: "2026-07",
+        scope: "all",
+        partnerId: null,
+        businessId: null,
+      },
+      partners: partnerOptions,
+      businesses: businessOptions,
+      businessGroups,
+    });
+  });
+
+  it("keeps the authoritative flat options when enrichment is incomplete", async () => {
+    const businessOptions = [
+      {
+        business_id: BUSINESS_ID,
+        business_name: "River City Dental",
+      },
+    ];
+    mocks.loadMetrics.mockResolvedValue(report([], businessOptions));
+    mocks.loadBusinessOptionGroups.mockResolvedValue(null);
+
+    renderToStaticMarkup(
+      await AdminMetricsPage({
+        searchParams: { month: "2026-07", scope: "all" },
+      }),
+    );
+
+    expect(mocks.renderFilters).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businesses: businessOptions,
+        businessGroups: null,
+      }),
+    );
+    expect(mocks.renderReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ state: "ready" }),
+      }),
+    );
+  });
+
+  it("keeps the report and flat picker if optional enrichment throws", async () => {
+    const businessOptions = [
+      {
+        business_id: BUSINESS_ID,
+        business_name: "River City Dental",
+      },
+    ];
+    mocks.loadMetrics.mockResolvedValue(report([], businessOptions));
+    mocks.loadBusinessOptionGroups.mockRejectedValue(
+      new Error("optional enrichment failed"),
+    );
+
+    const html = renderToStaticMarkup(
+      await AdminMetricsPage({
+        searchParams: { month: "2026-07", scope: "all" },
+      }),
+    );
+
+    expect(html).toContain("Report state: ready");
+    expect(mocks.renderFilters).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businesses: businessOptions,
+        businessGroups: null,
+      }),
+    );
   });
 
   it.each([
@@ -205,8 +321,13 @@ describe("AdminMetricsPage", () => {
       result: { state: code },
     });
     expect(mocks.renderFilters).toHaveBeenCalledWith(
-      expect.objectContaining({ partners: [], businesses: [] }),
+      expect.objectContaining({
+        partners: [],
+        businesses: [],
+        businessGroups: null,
+      }),
     );
+    expect(mocks.loadBusinessOptionGroups).not.toHaveBeenCalled();
   });
 
   it("does not create or call the service-role loader when authentication fails", async () => {
@@ -220,6 +341,7 @@ describe("AdminMetricsPage", () => {
     ).rejects.toBe(authError);
 
     expect(mocks.loadMetrics).not.toHaveBeenCalled();
+    expect(mocks.loadBusinessOptionGroups).not.toHaveBeenCalled();
     expect(mocks.renderFilters).not.toHaveBeenCalled();
     expect(mocks.renderReport).not.toHaveBeenCalled();
   });
@@ -233,5 +355,6 @@ describe("AdminMetricsPage", () => {
         searchParams: { month: "2026-07", scope: "all" },
       }),
     ).rejects.toBe(unexpected);
+    expect(mocks.loadBusinessOptionGroups).not.toHaveBeenCalled();
   });
 });

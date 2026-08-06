@@ -82,7 +82,7 @@ describe("AdminPartnersPage", () => {
   it("authorizes before the service-role list read and renders all list actions", async () => {
     mocks.result = { data: [storedPartner()], error: null };
 
-    const html = renderToStaticMarkup(await AdminPartnersPage());
+    const html = renderToStaticMarkup(await AdminPartnersPage({}));
 
     expect(mocks.requireAdminUser).toHaveBeenCalledOnce();
     expect(mocks.requireAdminUser.mock.invocationCallOrder[0]).toBeLessThan(
@@ -105,9 +105,50 @@ describe("AdminPartnersPage", () => {
       'href="/admin/partners/10000000-0000-4000-a000-000000000043"',
     );
     expect(html).toContain('href="/login?brand=alpha-dog"');
-    expect(html).toContain('href="#create-partner"');
+    expect(html).toContain(
+      'href="/admin/partners?create=1#create-partner"',
+    );
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="create-partner"');
+    expect(html).toContain('id="create-partner" hidden=""');
     expect(html).toContain("Partner create form");
+    expect(html.indexOf("Partner records")).toBeLessThan(
+      html.indexOf('id="create-partner"'),
+    );
     expect(html.toLowerCase()).not.toContain("delete");
+  });
+
+  it("reveals the existing create form only for scalar create=1", async () => {
+    const html = renderToStaticMarkup(
+      await AdminPartnersPage({ searchParams: { create: "1" } }),
+    );
+
+    expect(html).toContain('href="/admin/partners"');
+    expect(html).toContain("Hide create form");
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-controls="create-partner"');
+    expect(html).toContain('id="create-partner"');
+    expect(html).not.toContain('id="create-partner" hidden=""');
+    expect(html).toContain("Partner create form");
+  });
+
+  it.each([
+    ["the wrong value", { create: "true" }],
+    ["an empty value", { create: "" }],
+    ["a repeated value", { create: ["1", "1"] }],
+    ["a single-item array", { create: ["1"] }],
+  ])("keeps the create form hidden for %s", async (_label, searchParams) => {
+    const html = renderToStaticMarkup(
+      await AdminPartnersPage({ searchParams }),
+    );
+
+    expect(html).toContain(
+      'href="/admin/partners?create=1#create-partner"',
+    );
+    expect(html).toContain("Create partner");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('id="create-partner" hidden=""');
+    expect(html).toContain("Partner create form");
   });
 
   it("omits stored rows that fail shared read-boundary validation", async () => {
@@ -124,7 +165,7 @@ describe("AdminPartnersPage", () => {
       error: null,
     };
 
-    const html = renderToStaticMarkup(await AdminPartnersPage());
+    const html = renderToStaticMarkup(await AdminPartnersPage({}));
 
     expect(html).toContain("Alpha Dog Agency");
     expect(html).not.toContain("Unsafe Partner");

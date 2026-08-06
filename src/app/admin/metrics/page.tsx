@@ -8,6 +8,7 @@ import {
   AdminMetricsReadError,
   loadAdminMonthlyBusinessMetrics,
 } from "@/lib/admin/metrics.server";
+import { loadAdminMetricsBusinessOptionGroups } from "@/lib/admin/metricsBusinessOptions.server";
 import { bodyFaint } from "@/lib/theme-v2/theme";
 import { AdminMetricsFilters } from "./AdminMetricsFilters";
 import {
@@ -40,6 +41,19 @@ export default async function AdminMetricsPage({
     reportState.state === "ready" ? reportState.report.partner_options : [];
   const businessOptions =
     reportState.state === "ready" ? reportState.report.business_options : [];
+  let businessGroups: Awaited<
+    ReturnType<typeof loadAdminMetricsBusinessOptionGroups>
+  > = null;
+  if (reportState.state === "ready" && filters.scope === "all") {
+    try {
+      businessGroups = await loadAdminMetricsBusinessOptionGroups(
+        businessOptions,
+        partnerOptions,
+      );
+    } catch {
+      businessGroups = null;
+    }
+  }
 
   return (
     <main className="space-y-8">
@@ -63,6 +77,7 @@ export default async function AdminMetricsPage({
         filters={filters}
         partners={partnerOptions}
         businesses={businessOptions}
+        businessGroups={businessGroups}
       />
       <AdminMetricsReport result={reportState} />
     </main>

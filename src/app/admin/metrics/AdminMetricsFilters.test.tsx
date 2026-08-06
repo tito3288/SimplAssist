@@ -1,5 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => {
+  throw new Error("Metrics Clear must use a literal anchor");
+});
 
 import {
   AdminMetricsFilters,
@@ -37,6 +41,19 @@ const BUSINESSES = [
   },
 ] as const;
 
+const BUSINESS_GROUPS = [
+  {
+    id: "direct",
+    label: "SimplAssist direct",
+    businesses: [BUSINESSES[0]],
+  },
+  {
+    id: PARTNER_ID,
+    label: "Alpha Agency",
+    businesses: [BUSINESSES[1]],
+  },
+] as const;
+
 describe("AdminMetricsFilters", () => {
   it("renders a native read-only GET filter with the exact controls", () => {
     const html = renderToStaticMarkup(
@@ -49,6 +66,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={PARTNERS}
         businesses={BUSINESSES}
+        businessGroups={null}
       />,
     );
 
@@ -75,7 +93,74 @@ describe("AdminMetricsFilters", () => {
     expect(html).toContain("View metrics");
     expect(html).toContain('href="/admin/metrics"');
     expect(html).toContain("Clear filters");
+    expect(html).not.toContain("<optgroup");
     expect(html).not.toMatch(/onChange|fetch\(|service.role/i);
+    expect(AdminMetricsFilters.toString()).not.toMatch(/\bfetch\s*\(/);
+  });
+
+  it("renders trustworthy All-scope groups in helper-provided order", () => {
+    const groups = [
+      BUSINESS_GROUPS[0],
+      BUSINESS_GROUPS[1],
+      {
+        id: HISTORICAL_PARTNER_ID,
+        label: "Zulu Agency",
+        businesses: [],
+      },
+    ] as const;
+    const html = renderToStaticMarkup(
+      <AdminMetricsFilters
+        filters={{
+          month: "2026-08",
+          scope: "all",
+          partnerId: null,
+          businessId: ZERO_EVENT_BUSINESS_ID,
+        }}
+        partners={PARTNERS}
+        businesses={BUSINESSES}
+        businessGroups={groups}
+      />,
+    );
+
+    expect(html).toContain('<optgroup label="SimplAssist direct">');
+    expect(html).toContain('<optgroup label="Alpha Agency">');
+    expect(html).toContain('<optgroup label="Zulu Agency">');
+    expect(html.indexOf('label="SimplAssist direct"')).toBeLessThan(
+      html.indexOf('label="Alpha Agency"'),
+    );
+    expect(html.indexOf('label="Alpha Agency"')).toBeLessThan(
+      html.indexOf('label="Zulu Agency"'),
+    );
+    expect(html).toContain(
+      `<option value="${ZERO_EVENT_BUSINESS_ID}" selected="">Zero Event Dental</option>`,
+    );
+  });
+
+  it("uses literal document navigation to clear every displayed control", () => {
+    const html = renderToStaticMarkup(
+      <AdminMetricsFilters
+        filters={{
+          month: "2026-07",
+          scope: "partner",
+          partnerId: PARTNER_ID,
+          businessId: BUSINESS_ID,
+        }}
+        partners={PARTNERS}
+        businesses={BUSINESSES}
+        businessGroups={null}
+      />,
+    );
+
+    expect(html).toMatch(
+      /<a href="\/admin\/metrics"[^>]*>Clear filters<\/a>/,
+    );
+    expect(html).toContain('value="2026-07"');
+    expect(html).toContain(
+      `<option value="${PARTNER_ID}" selected="">Alpha Agency</option>`,
+    );
+    expect(html).toContain(
+      `<option value="${BUSINESS_ID}" selected="">River City Dental</option>`,
+    );
   });
 
   it.each([
@@ -93,6 +178,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={PARTNERS}
         businesses={BUSINESSES}
+        businessGroups={null}
       />,
     );
 
@@ -112,6 +198,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={PARTNERS}
         businesses={BUSINESSES}
+        businessGroups={null}
       />,
     );
 
@@ -134,6 +221,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={[]}
         businesses={[]}
+        businessGroups={null}
       />,
     );
 
@@ -156,6 +244,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={PARTNERS}
         businesses={BUSINESSES}
+        businessGroups={null}
       />,
     );
 
@@ -175,6 +264,7 @@ describe("AdminMetricsFilters", () => {
         }}
         partners={PARTNERS}
         businesses={BUSINESSES}
+        businessGroups={null}
       />,
     );
 
