@@ -1,6 +1,9 @@
 import type { AISettings } from "@/types/database";
 import type Anthropic from "@anthropic-ai/sdk";
 
+export const CREATE_BOOKING_START_TIME_CONTRACT =
+  "create_booking.start_time must be a business-local wall time in exactly YYYY-MM-DDTHH:mm:ss format with NO Z suffix or UTC offset.";
+
 export const calendarTools: Anthropic.Tool[] = [
   {
     name: "check_availability",
@@ -43,7 +46,7 @@ export const calendarTools: Anthropic.Tool[] = [
         },
         start_time: {
           type: "string",
-          description: "Appointment start time in ISO 8601 format",
+          description: CREATE_BOOKING_START_TIME_CONTRACT,
         },
         duration_minutes: {
           type: "number",

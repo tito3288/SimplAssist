@@ -7,6 +7,7 @@ import type {
   Message,
 } from "@/types/database";
 import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
+import { CREATE_BOOKING_START_TIME_CONTRACT } from "./tools";
 
 const DAY_NAMES = [
   "Sunday",
@@ -197,6 +198,8 @@ export function buildSystemPrompt(
       );
     } else if (calendarConnected) {
       sections.push(
+        `BUSINESS TIMEZONE (IANA): ${business.timezone}\n` +
+        `${CREATE_BOOKING_START_TIME_CONTRACT} Interpret the timestamp in the business timezone above; never convert it to UTC or add an offset.\n` +
         "When a customer wants to book an appointment:\n" +
         "1. Ask what service they need and their preferred date AND time. If they only give a date, ask for a time. If they only give a time, ask for a date.\n" +
         "2. IMPORTANT: Convert any relative date the customer gives (like 'this Friday', 'next Monday', 'tomorrow', 'the 15th') into YYYY-MM-DD format before calling any tool. You know today's date from the context above — use it to calculate the correct date.\n" +
@@ -206,7 +209,7 @@ export function buildSystemPrompt(
         "6. Once they pick a time, confirm the full details back to them: 'Just to confirm — [service] on [day, month date] at [time]. Is that correct?'\n" +
         "7. After they confirm, ask for their name if you don't have it yet\n" +
         "8. Ask for their email so we can send them a calendar invite with the appointment details. You MUST have their email before booking.\n" +
-        "9. Use the create_booking tool to book it — always include the customer_email\n" +
+        "9. Use the create_booking tool to book it — always include the customer_email and format start_time exactly as required above\n" +
         "10. Confirm the appointment with date, time, and service\n" +
         "Keep responses conversational and brief — this is SMS/chat."
       );

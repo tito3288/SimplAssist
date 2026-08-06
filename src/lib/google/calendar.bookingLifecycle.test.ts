@@ -65,6 +65,8 @@ const CONVERSATION_ID = "00000000-0000-4000-8000-000000000003";
 const SOURCE_MESSAGE_ID = "00000000-0000-4000-8000-000000000004";
 const BOOKING_ID = "00000000-0000-4000-8000-000000000005";
 const CALENDAR_ID = "connected-calendar";
+const BUSINESS_TIMEZONE = "America/Indiana/Indianapolis";
+const ORIGINAL_HOST_TIMEZONE = process.env.TZ;
 const STARTS_AT = "2026-08-01T14:00:00.000Z";
 const ENDS_AT = "2026-08-01T14:30:00.000Z";
 const CURRENT_CLAIM = "00000000-0000-4000-8000-000000000006";
@@ -85,19 +87,33 @@ const linkage = {
   sourceMessageId: SOURCE_MESSAGE_ID,
 };
 
-const REQUEST_FINGERPRINT = createHash("sha256")
-  .update(
-    JSON.stringify({
-      customerName: params.customerName,
-      customerPhone: params.customerPhone,
-      customerEmail: params.customerEmail,
-      serviceName: params.serviceName,
-      startTime: STARTS_AT,
-      endTime: ENDS_AT,
-      timezone: "UTC",
-    })
-  )
-  .digest("hex");
+function bookingFingerprint(
+  bookingParams: typeof params,
+  timezone: string,
+  startsAt: string,
+  endsAt: string,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        customerName: bookingParams.customerName,
+        customerPhone: bookingParams.customerPhone,
+        customerEmail: bookingParams.customerEmail,
+        serviceName: bookingParams.serviceName,
+        startTime: startsAt,
+        endTime: endsAt,
+        timezone,
+      }),
+    )
+    .digest("hex");
+}
+
+const REQUEST_FINGERPRINT = bookingFingerprint(
+  params,
+  "UTC",
+  STARTS_AT,
+  ENDS_AT,
+);
 
 function bookingRow(
   overrides: Partial<{
@@ -135,12 +151,16 @@ function bookingRow(
   };
 }
 
-function googleEvent(id = "google-event-1") {
+function googleEvent(
+  id = "google-event-1",
+  startsAt = STARTS_AT,
+  endsAt = ENDS_AT,
+) {
   return {
     id,
     summary: "Estimate - Jane Customer",
-    start: { dateTime: STARTS_AT },
-    end: { dateTime: ENDS_AT },
+    start: { dateTime: startsAt },
+    end: { dateTime: endsAt },
     extendedProperties: {
       private: { simplassist_booking_id: BOOKING_ID },
     },
@@ -152,6 +172,7 @@ async function book() {
 }
 
 beforeEach(() => {
+  process.env.TZ = "UTC";
   vi.resetAllMocks();
 
   const tokenQuery = {
@@ -198,9 +219,210 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  if (ORIGINAL_HOST_TIMEZONE === undefined) {
+    delete process.env.TZ;
+  } else {
+    process.env.TZ = ORIGINAL_HOST_TIMEZONE;
+  }
 });
 
 describe("createBooking lifecycle", () => {
+  it("interprets an offsetless booking as Indianapolis wall time and submits ISO instants to Google", async () => {
+    const localParams = {
+      ...params,
+      startTime: "2026-08-01T10:00:00",
+    };
+    const requestFingerprint = bookingFingerprint(
+      localParams,
+      BUSINESS_TIMEZONE,
+      STARTS_AT,
+      ENDS_AT,
+    );
+    mocks.rpc
+      .mockResolvedValueOnce({
+        data: bookingRow({ request_fingerprint: requestFingerprint }),
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: bookingRow({
+          google_event_id: "google-event-1",
+          operation_claim_token: null,
+          operation_claimed_at: null,
+          request_fingerprint: requestFingerprint,
+          status: "confirmed",
+        }),
+        error: null,
+      });
+
+    await expect(
+      createBooking(
+        BUSINESS_ID,
+        localParams,
+        BUSINESS_TIMEZONE,
+        linkage,
+      ),
+    ).resolves.toEqual({
+      eventId: "google-event-1",
+      summary: "Estimate - Jane Customer",
+      startTime: STARTS_AT,
+      endTime: ENDS_AT,
+    });
+
+    expect(mocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "reserve_calendar_booking",
+      expect.objectContaining({
+        p_starts_at: STARTS_AT,
+        p_ends_at: ENDS_AT,
+        p_request_fingerprint: requestFingerprint,
+      }),
+    );
+    expect(mocks.eventsInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          start: {
+            dateTime: STARTS_AT,
+            timeZone: BUSINESS_TIMEZONE,
+          },
+          end: {
+            dateTime: ENDS_AT,
+            timeZone: BUSINESS_TIMEZONE,
+          },
+        }),
+      }),
+    );
+  });
+
+  it("honors an offset-qualified booking as an absolute instant", async () => {
+    const offsetParams = {
+      ...params,
+      startTime: "2026-08-01T10:00:00-07:00",
+    };
+    const qualifiedStartsAt = "2026-08-01T17:00:00.000Z";
+    const qualifiedEndsAt = "2026-08-01T17:30:00.000Z";
+    const requestFingerprint = bookingFingerprint(
+      offsetParams,
+      BUSINESS_TIMEZONE,
+      qualifiedStartsAt,
+      qualifiedEndsAt,
+    );
+    mocks.eventsInsert.mockResolvedValueOnce({
+      data: googleEvent(
+        "google-event-1",
+        qualifiedStartsAt,
+        qualifiedEndsAt,
+      ),
+    });
+    mocks.rpc
+      .mockResolvedValueOnce({
+        data: bookingRow({
+          starts_at: qualifiedStartsAt,
+          ends_at: qualifiedEndsAt,
+          request_fingerprint: requestFingerprint,
+        }),
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: bookingRow({
+          google_event_id: "google-event-1",
+          operation_claim_token: null,
+          operation_claimed_at: null,
+          request_fingerprint: requestFingerprint,
+          starts_at: qualifiedStartsAt,
+          ends_at: qualifiedEndsAt,
+          status: "confirmed",
+        }),
+        error: null,
+      });
+
+    await expect(
+      createBooking(
+        BUSINESS_ID,
+        offsetParams,
+        BUSINESS_TIMEZONE,
+        linkage,
+      ),
+    ).resolves.toEqual({
+      eventId: "google-event-1",
+      summary: "Estimate - Jane Customer",
+      startTime: qualifiedStartsAt,
+      endTime: qualifiedEndsAt,
+    });
+
+    expect(mocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "reserve_calendar_booking",
+      expect.objectContaining({
+        p_starts_at: qualifiedStartsAt,
+        p_ends_at: qualifiedEndsAt,
+      }),
+    );
+    expect(mocks.eventsInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          start: {
+            dateTime: qualifiedStartsAt,
+            timeZone: BUSINESS_TIMEZONE,
+          },
+          end: {
+            dateTime: qualifiedEndsAt,
+            timeZone: BUSINESS_TIMEZONE,
+          },
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    "2026-02-29T10:00:00Z",
+    "2026-04-31T10:00:00-04:00",
+  ])(
+    "rejects an impossible offset-qualified calendar date without coercing it: %s",
+    async (startTime) => {
+      await expect(
+        createBooking(
+          BUSINESS_ID,
+          { ...params, startTime },
+          BUSINESS_TIMEZONE,
+          linkage,
+        ),
+      ).rejects.toThrow(
+        "Appointment start time contains an invalid calendar date.",
+      );
+
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.eventsGet).not.toHaveBeenCalled();
+      expect(mocks.eventsList).not.toHaveBeenCalled();
+      expect(mocks.eventsInsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["missing", undefined],
+    ["empty", ""],
+    ["whitespace-only", "   "],
+    ["invalid", "Definitely/Not_A_Timezone"],
+  ])(
+    "rejects a %s business timezone before reservation or provider mutation",
+    async (_name, timezone) => {
+      await expect(
+        createBooking(
+          BUSINESS_ID,
+          params,
+          timezone as string,
+          linkage,
+        ),
+      ).rejects.toThrow(
+        "A valid IANA business timezone is required to create a booking.",
+      );
+
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.eventsGet).not.toHaveBeenCalled();
+      expect(mocks.eventsList).not.toHaveBeenCalled();
+      expect(mocks.eventsInsert).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     [
       "account suspension",

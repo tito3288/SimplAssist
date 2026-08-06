@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertBookingOperationallyAllowed: vi.fn(),
@@ -45,6 +45,8 @@ import { checkAvailability } from "./calendar";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const CALENDAR_ID = "connected-calendar";
+const BUSINESS_TIMEZONE = "America/Indiana/Indianapolis";
+const ORIGINAL_HOST_TIMEZONE = process.env.TZ;
 const BUSINESS_HOURS = {
   id: "00000000-0000-4000-8000-000000000002",
   business_id: BUSINESS_ID,
@@ -65,6 +67,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  process.env.TZ = "UTC";
   vi.resetAllMocks();
 
   const tokenQuery = {
@@ -113,6 +116,129 @@ beforeEach(() => {
     data: { calendars: { [CALENDAR_ID]: { busy: [] } } },
   });
   mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  if (ORIGINAL_HOST_TIMEZONE === undefined) {
+    delete process.env.TZ;
+  } else {
+    process.env.TZ = ORIGINAL_HOST_TIMEZONE;
+  }
+});
+
+describe("availability business timezone handling", () => {
+  it("queries the Indianapolis business window as absolute instants and excludes the matching busy slot", async () => {
+    mocks.hoursSingle.mockResolvedValueOnce({
+      data: {
+        ...BUSINESS_HOURS,
+        close_time: "10:30:00",
+      },
+      error: null,
+    });
+    mocks.freeBusyQuery.mockResolvedValueOnce({
+      data: {
+        calendars: {
+          [CALENDAR_ID]: {
+            busy: [
+              {
+                start: "2026-08-03T13:30:00.000Z",
+                end: "2026-08-03T14:00:00.000Z",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(
+      checkAvailability(
+        BUSINESS_ID,
+        "2026-08-03",
+        BUSINESS_TIMEZONE,
+      ),
+    ).resolves.toEqual(["9:00 AM", "10:00 AM"]);
+
+    expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
+      requestBody: {
+        timeMin: "2026-08-03T13:00:00.000Z",
+        timeMax: "2026-08-03T14:30:00.000Z",
+        timeZone: BUSINESS_TIMEZONE,
+        items: [{ id: CALENDAR_ID }],
+      },
+    });
+  });
+
+  it.each([
+    {
+      date: "2026-03-08",
+      openTime: "01:00:00",
+      closeTime: "04:00:00",
+      timeMin: "2026-03-08T06:00:00.000Z",
+      timeMax: "2026-03-08T08:00:00.000Z",
+      slots: ["1:00 AM", "1:30 AM", "3:00 AM", "3:30 AM"],
+    },
+    {
+      date: "2026-11-01",
+      openTime: "01:00:00",
+      closeTime: "03:00:00",
+      timeMin: "2026-11-01T05:00:00.000Z",
+      timeMax: "2026-11-01T08:00:00.000Z",
+      slots: ["1:00 AM", "1:30 AM", "2:00 AM", "2:30 AM"],
+    },
+  ])(
+    "constructs $date transition-day windows and candidate starts deterministically",
+    async ({ date, openTime, closeTime, timeMin, timeMax, slots }) => {
+      mocks.hoursSingle.mockResolvedValueOnce({
+        data: {
+          ...BUSINESS_HOURS,
+          day_of_week: 0,
+          open_time: openTime,
+          close_time: closeTime,
+        },
+        error: null,
+      });
+
+      await expect(
+        checkAvailability(BUSINESS_ID, date, BUSINESS_TIMEZONE),
+      ).resolves.toEqual(slots);
+
+      expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
+        requestBody: {
+          timeMin,
+          timeMax,
+          timeZone: BUSINESS_TIMEZONE,
+          items: [{ id: CALENDAR_ID }],
+        },
+      });
+    },
+  );
+
+  it("resolves today in the business timezone across the UTC midnight boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T02:30:00.000Z"));
+    mocks.hoursSingle.mockResolvedValueOnce({
+      data: {
+        ...BUSINESS_HOURS,
+        day_of_week: 0,
+      },
+      error: null,
+    });
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "today", BUSINESS_TIMEZONE),
+    ).resolves.toEqual(["9:00 AM", "9:30 AM"]);
+
+    expect(mocks.hoursEq).toHaveBeenCalledWith("day_of_week", 0);
+    expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
+      requestBody: {
+        timeMin: "2026-08-02T13:00:00.000Z",
+        timeMax: "2026-08-02T14:00:00.000Z",
+        timeZone: BUSINESS_TIMEZONE,
+        items: [{ id: CALENDAR_ID }],
+      },
+    });
+  });
 });
 
 describe("availability operational races", () => {

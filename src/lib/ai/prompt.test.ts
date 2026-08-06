@@ -8,6 +8,7 @@ import type {
 } from "@/types/database";
 import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 import { buildSystemPrompt } from "./prompt";
+import { CREATE_BOOKING_START_TIME_CONTRACT } from "./tools";
 
 const PHONE_NUMBER = "+1 574-555-0100";
 const EMAIL = "help@acme.test";
@@ -221,6 +222,66 @@ describe("buildSystemPrompt booking operational availability", () => {
         "When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
       );
       expect(settings).toEqual(savedSettings);
+    }
+  );
+});
+
+describe("buildSystemPrompt direct-booking timestamp contract", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-06T02:30:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("states the business IANA timezone and exact no-offset contract", () => {
+    const settings: AISettings = {
+      ...AI_SETTINGS,
+      booking_mode: "schedule_direct",
+    };
+    const prompt = buildSystemPrompt(
+      business({ timezone: "America/Indiana/Indianapolis" }),
+      settings,
+      SERVICES,
+      FAQS,
+      [],
+      true,
+      "sms"
+    );
+
+    expect(prompt).toContain("TODAY'S DATE: Wednesday, August 5, 2026");
+    expect(prompt).toContain(
+      "BUSINESS TIMEZONE (IANA): America/Indiana/Indianapolis"
+    );
+    expect(prompt).toContain(CREATE_BOOKING_START_TIME_CONTRACT);
+    expect(prompt).toContain(
+      "Interpret the timestamp in the business timezone above; never convert it to UTC or add an offset."
+    );
+    expect(prompt).toContain(
+      "always include the customer_email and format start_time exactly as required above"
+    );
+  });
+
+  it.each([
+    { bookingMode: "collect_info" as const, calendarConnected: true },
+    { bookingMode: "schedule_direct" as const, calendarConnected: false },
+  ])(
+    "omits the tool timestamp contract outside connected direct booking %#",
+    ({ bookingMode, calendarConnected }) => {
+      const prompt = buildSystemPrompt(
+        business({ timezone: "America/Indiana/Indianapolis" }),
+        { ...AI_SETTINGS, booking_mode: bookingMode },
+        SERVICES,
+        FAQS,
+        [],
+        calendarConnected,
+        "sms"
+      );
+
+      expect(prompt).not.toContain("BUSINESS TIMEZONE (IANA):");
+      expect(prompt).not.toContain(CREATE_BOOKING_START_TIME_CONTRACT);
     }
   );
 });

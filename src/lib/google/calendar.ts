@@ -12,19 +12,57 @@ import {
   BookingOperationalStateError,
   isBookingOperationalBlockedError,
 } from "./bookingOperational.server";
+import { businessWallTimeToInstant } from "./calendarTime";
 
 const SLOT_DURATION_MINUTES = 30;
+const CREATE_BOOKING_TIMEZONE_ERROR =
+  "A valid IANA business timezone is required to create a booking.";
+
+function requireBusinessTimeZone(
+  timezone: string,
+  errorMessage: string
+): string {
+  if (typeof timezone !== "string" || timezone.trim().length === 0) {
+    throw new Error(errorMessage);
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(
+      new Date(0)
+    );
+  } catch {
+    throw new Error(errorMessage);
+  }
+
+  return timezone;
+}
+
+function businessCalendarDate(now: Date, timezone: string): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+  return new Date(Date.UTC(values.year, values.month - 1, values.day));
+}
 
 /**
  * Attempts to parse relative date strings into YYYY-MM-DD format.
  * Safety net in case the AI passes a non-ISO date string.
  */
-function normalizeDate(input: string): string {
+function normalizeDate(input: string, timezone: string): string {
   // Already in YYYY-MM-DD format
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
 
   const lower = input.toLowerCase().trim();
-  const now = new Date();
+  const now = businessCalendarDate(new Date(), timezone);
 
   // Handle common relative dates
   if (lower === "today") {
@@ -32,7 +70,7 @@ function normalizeDate(input: string): string {
   }
   if (lower === "tomorrow") {
     const d = new Date(now);
-    d.setDate(d.getDate() + 1);
+    d.setUTCDate(d.getUTCDate() + 1);
     return formatYMD(d);
   }
 
@@ -43,18 +81,18 @@ function normalizeDate(input: string): string {
   const dayIndex = dayNames.indexOf(cleaned);
 
   if (dayIndex !== -1) {
-    const today = now.getDay();
+    const today = now.getUTCDay();
     let daysAhead = dayIndex - today;
     if (daysAhead <= 0) daysAhead += 7;
     if (isNext && daysAhead <= 7) daysAhead += 7;
     const d = new Date(now);
-    d.setDate(d.getDate() + daysAhead);
+    d.setUTCDate(d.getUTCDate() + daysAhead);
     return formatYMD(d);
   }
 
   // Try native Date parsing as last resort (handles "April 11, 2026", "4/11/2026", etc.)
-  const parsed = new Date(input);
-  if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 2000) {
+  const parsed = new Date(`${input.trim()} 12:00:00 UTC`);
+  if (!isNaN(parsed.getTime()) && parsed.getUTCFullYear() > 2000) {
     return formatYMD(parsed);
   }
 
@@ -63,12 +101,48 @@ function normalizeDate(input: string): string {
 }
 
 function formatYMD(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${String(d.getUTCFullYear()).padStart(4, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
-/** Format as YYYY-MM-DDTHH:MM:SS (no Z suffix) for Google Calendar event creation */
-function formatLocalDateTime(d: Date): string {
-  return `${formatYMD(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+function isValidCalendarDate(input: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input) || Number(input.slice(0, 4)) < 1) {
+    return false;
+  }
+
+  const parsed = new Date(`${input}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && formatYMD(parsed) === input;
+}
+
+function formatWallTime(minutes: number): string {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseBookingStartTime(input: string, timezone: string): Date {
+  const localMatch = input.match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)$/
+  );
+  if (localMatch) {
+    return businessWallTimeToInstant(localMatch[1], localMatch[2], timezone);
+  }
+
+  const qualifiedMatch = input.match(
+    /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:[0-5]\d)$/i
+  );
+  if (qualifiedMatch) {
+    if (!isValidCalendarDate(qualifiedMatch[1])) {
+      throw new Error(
+        "Appointment start time contains an invalid calendar date."
+      );
+    }
+    const parsed = new Date(input);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  throw new Error(
+    "Appointment start time must be YYYY-MM-DDTHH:mm:ss in the business timezone or an ISO 8601 timestamp with a UTC offset."
+  );
 }
 
 interface BookingParams {
@@ -76,7 +150,7 @@ interface BookingParams {
   customerPhone?: string;
   customerEmail?: string;
   serviceName: string;
-  startTime: string; // ISO 8601
+  startTime: string; // Business-local wall time or offset-qualified ISO 8601
   durationMinutes?: number;
 }
 
@@ -133,6 +207,10 @@ export async function checkAvailability(
   date: string, // YYYY-MM-DD
   timezone: string
 ): Promise<string[]> {
+  const businessTimezone = requireBusinessTimeZone(
+    timezone,
+    "A valid IANA business timezone is required to check availability."
+  );
   await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
@@ -152,11 +230,14 @@ export async function checkAvailability(
   const calendarId = tokenData?.calendar_id || "primary";
 
   // Normalize date in case AI passes a relative date string
-  const normalizedDate = normalizeDate(date);
+  const normalizedDate = normalizeDate(date, businessTimezone);
 
   // Get business hours for this day
-  const dayDate = new Date(`${normalizedDate}T12:00:00`);
-  const dayOfWeek = dayDate.getDay();
+  if (!isValidCalendarDate(normalizedDate)) {
+    throw new RangeError(`Invalid appointment date: ${date}`);
+  }
+  const dayDate = new Date(`${normalizedDate}T00:00:00.000Z`);
+  const dayOfWeek = dayDate.getUTCDay();
 
   const { data: hoursData } = await supabaseAdmin
     .from("business_hours")
@@ -171,22 +252,25 @@ export async function checkAvailability(
     return [];
   }
 
-  // Query Google Calendar for busy times
-  // Build Date objects from business hours and convert to ISO for Google API
-  const [openH, openM] = hours.open_time.split(":").map(Number);
-  const [closeH, closeM] = hours.close_time.split(":").map(Number);
-
-  const minDate = new Date(`${normalizedDate}T12:00:00`);
-  minDate.setHours(openH, openM, 0, 0);
-  const maxDate = new Date(`${normalizedDate}T12:00:00`);
-  maxDate.setHours(closeH, closeM, 0, 0);
+  // Query Google Calendar for busy times using absolute instants derived from
+  // the business-local date and hours.
+  const minDate = businessWallTimeToInstant(
+    normalizedDate,
+    hours.open_time,
+    businessTimezone
+  );
+  const maxDate = businessWallTimeToInstant(
+    normalizedDate,
+    hours.close_time,
+    businessTimezone
+  );
 
   await assertBookingOperationallyAllowed(businessId);
   const freeBusy = await calendar.freebusy.query({
     requestBody: {
       timeMin: minDate.toISOString(),
       timeMax: maxDate.toISOString(),
-      timeZone: timezone,
+      timeZone: businessTimezone,
       items: [{ id: calendarId }],
     },
   });
@@ -208,11 +292,23 @@ export async function checkAvailability(
     m + SLOT_DURATION_MINUTES <= closeMinutes;
     m += SLOT_DURATION_MINUTES
   ) {
-    const slotStart = new Date(`${normalizedDate}T00:00:00`);
-    slotStart.setHours(Math.floor(m / 60), m % 60, 0, 0);
+    let slotStart: Date;
+    try {
+      slotStart = businessWallTimeToInstant(
+        normalizedDate,
+        formatWallTime(m),
+        businessTimezone
+      );
+    } catch (error) {
+      // A wall-clock slot in the spring-forward gap does not exist and must
+      // never be advertised as available.
+      if (error instanceof RangeError) continue;
+      throw error;
+    }
 
-    const slotEnd = new Date(slotStart);
-    slotEnd.setMinutes(slotEnd.getMinutes() + SLOT_DURATION_MINUTES);
+    const slotEnd = new Date(
+      slotStart.getTime() + SLOT_DURATION_MINUTES * 60 * 1000
+    );
 
     // Check if this slot overlaps with any busy period
     const isBusy = busySlots.some((busy) => {
@@ -241,6 +337,10 @@ export async function createBooking(
   timezone: string,
   linkage: BookingLinkage
 ): Promise<BookingResult> {
+  const businessTimezone = requireBusinessTimeZone(
+    timezone,
+    CREATE_BOOKING_TIMEZONE_ERROR
+  );
   await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
   const client = await getAuthenticatedClient(businessId);
@@ -263,13 +363,16 @@ export async function createBooking(
   const selectedCalendarId = tokenData?.calendar_id || "primary";
   const duration = params.durationMinutes ?? SLOT_DURATION_MINUTES;
 
-  const startDate = new Date(params.startTime);
+  const startDate = parseBookingStartTime(
+    params.startTime,
+    businessTimezone
+  );
   const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
   validateBookingInput(params, linkage, startDate, endDate, duration);
   const requestedSummary = `${params.serviceName} - ${params.customerName}`;
   const requestFingerprint = bookingRequestFingerprint(
     params,
-    timezone,
+    businessTimezone,
     startDate,
     endDate
   );
@@ -348,12 +451,12 @@ export async function createBooking(
     summary,
     description: descriptionParts.join("\n"),
     start: {
-      dateTime: formatLocalDateTime(reservedStartDate),
-      timeZone: timezone,
+      dateTime: reservedStartDate.toISOString(),
+      timeZone: businessTimezone,
     },
     end: {
-      dateTime: formatLocalDateTime(reservedEndDate),
-      timeZone: timezone,
+      dateTime: reservedEndDate.toISOString(),
+      timeZone: businessTimezone,
     },
     reminders: {
       useDefault: true,
