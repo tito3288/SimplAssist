@@ -2,14 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminGateState } from "@/lib/admin/auth";
 import {
-  btnSecondaryCompact,
-  pageShell,
-  fontStack,
-  lightAmbient,
+  accentText,
   darkAmbient,
+  fontStack,
+  ink,
+  lightAmbient,
+  pageShell,
 } from "@/lib/theme-v2/theme";
 import AdminLoginForm from "./AdminLoginForm";
-import AdminSignOutButton from "./AdminSignOutButton";
+import { AdminNavigation } from "./AdminNavigation";
 import { AdminSetupLinkProvider } from "./AdminSetupLinkProvider";
 import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
 
@@ -48,31 +49,23 @@ export default async function AdminLayout({
       ) : (
         <AdminSetupLinkProvider>
           <div className="mx-auto max-w-6xl">
-            <header className="mb-6 flex flex-col items-start gap-3 border-b border-[#ece4d8] pb-4 md:flex-row md:items-center md:justify-between dark:border-white/[0.10]">
-              <Link href="/admin" className="text-lg font-semibold">
-                SimplAssist Admin
-              </Link>
-              <nav
-                aria-label="Admin sections"
-                className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end"
-              >
-                <Link href="/admin/clients" className={btnSecondaryCompact}>
-                  Clients
-                </Link>
-                <Link href="/admin/metrics" className={btnSecondaryCompact}>
-                  Metrics
-                </Link>
-                <Link href="/admin/partners" className={btnSecondaryCompact}>
-                  Partners
-                </Link>
-                <Link href="/admin/tickets" className={btnSecondaryCompact}>
-                  Tickets
-                </Link>
-                <Link href="/admin/waitlist" className={btnSecondaryCompact}>
-                  Waitlist
-                </Link>
-                <AdminSignOutButton />
-              </nav>
+            <header className="mb-8 rounded-[20px] border border-[#eadfce] bg-[#fffaf6] px-4 py-3.5 shadow-[0_10px_26px_-22px_rgba(67,46,28,0.35)] sm:rounded-[22px] sm:px-5 sm:py-4 dark:border-white/[0.12] dark:bg-white/[0.05] dark:shadow-[0_16px_36px_-24px_rgba(0,0,0,0.75)]">
+              <div className="flex flex-col items-center gap-4 text-center lg:flex-row lg:justify-between lg:text-left">
+                <div>
+                  <p
+                    className={`text-[11px] font-bold uppercase tracking-[0.18em] ${accentText}`}
+                  >
+                    Admin console
+                  </p>
+                  <Link
+                    href="/admin"
+                    className={`mx-auto mt-0.5 block w-fit rounded-md text-lg font-bold lg:mx-0 ${ink} focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]`}
+                  >
+                    SimplAssist Admin
+                  </Link>
+                </div>
+                <AdminNavigation />
+              </div>
             </header>
             {children}
           </div>

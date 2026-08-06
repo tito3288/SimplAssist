@@ -1,6 +1,7 @@
 import {
   bodyFaint,
   card,
+  ink,
   tile,
 } from "@/lib/theme-v2/theme";
 import {
@@ -52,8 +53,10 @@ export default async function AdminPage(
   return (
     <main className="space-y-8">
       <section>
-        <h1 className="text-2xl font-bold">Admin</h1>
-        <p className={`mt-1 text-sm ${bodyFaint}`}>
+        <h1 className={`text-3xl font-bold tracking-tight ${ink}`}>
+          Operations overview
+        </h1>
+        <p className={`mt-1.5 max-w-2xl text-sm leading-6 ${bodyFaint}`}>
           A2P review queue, billing flags, usage, and high-usage visibility.
         </p>
       </section>
