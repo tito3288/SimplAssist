@@ -4,11 +4,12 @@ import {
 } from "@/lib/glass";
 import type { AdminAccountFilters } from "@/lib/admin/accountFilters";
 import { bodyFaint, card } from "@/lib/theme-v2/theme";
+import {
+  AdminOwnershipFields,
+  type AdminAccountPartnerOption,
+} from "./AdminOwnershipFields";
 
-export interface AdminAccountPartnerOption {
-  id: string;
-  name: string;
-}
+export type { AdminAccountPartnerOption } from "./AdminOwnershipFields";
 
 interface AdminAccountFiltersProps {
   filters: AdminAccountFilters;
@@ -22,10 +23,6 @@ export function AdminAccountFilters({
   filters,
   partners,
 }: AdminAccountFiltersProps) {
-  const selectedPartnerIsAvailable = partners.some(
-    (partner) => partner.id === filters.partnerId,
-  );
-
   return (
     <form
       action="/admin"
@@ -50,38 +47,12 @@ export function AdminAccountFilters({
           </select>
         </FilterLabel>
 
-        <FilterLabel label="Ownership">
-          <select
-            name="ownership"
-            defaultValue={filters.ownership ?? ""}
-            className={controlClass}
-          >
-            <option value="">All ownership</option>
-            <option value="direct">Direct</option>
-            <option value="partner">Partner</option>
-          </select>
-        </FilterLabel>
-
-        <FilterLabel
-          label="Specific partner"
-          hint="Applied only when ownership is Partner."
-        >
-          <select
-            name="partner"
-            defaultValue={filters.partnerId ?? ""}
-            className={controlClass}
-          >
-            <option value="">All partners</option>
-            {filters.partnerId && !selectedPartnerIsAvailable ? (
-              <option value={filters.partnerId}>Selected partner unavailable</option>
-            ) : null}
-            {partners.map((partner) => (
-              <option key={partner.id} value={partner.id}>
-                {partner.name}
-              </option>
-            ))}
-          </select>
-        </FilterLabel>
+        <AdminOwnershipFields
+          controlClass={controlClass}
+          initialOwnership={filters.ownership}
+          initialPartnerId={filters.partnerId}
+          partners={partners}
+        />
 
         <FilterLabel label="Plan">
           <select
@@ -126,18 +97,15 @@ export function AdminAccountFilters({
 
 function FilterLabel({
   label,
-  hint,
   children,
 }: {
   label: string;
-  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <label className="space-y-1 text-sm">
       <span className="block font-medium">{label}</span>
       {children}
-      {hint ? <span className={`block text-xs ${bodyFaint}`}>{hint}</span> : null}
     </label>
   );
 }

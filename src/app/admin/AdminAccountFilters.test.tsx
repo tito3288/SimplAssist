@@ -33,12 +33,13 @@ describe("AdminAccountFilters", () => {
     expect(html).toMatch(
       /<option value="" selected="">All ownership<\/option>/,
     );
-    expect(html).toMatch(/<option value="" selected="">All partners<\/option>/);
+    expect(html).not.toContain('name="partner"');
+    expect(html).not.toContain("Specific partner");
     expect(html).toMatch(/<option value="" selected="">All plans<\/option>/);
     expect(html).toMatch(/<input[^>]*type="search"[^>]*value=""/);
   });
 
-  it("renders a native GET form with every supported filter", () => {
+  it("renders a native GET form with every always-visible filter", () => {
     const html = renderToStaticMarkup(
       <AdminAccountFilters
         filters={{
@@ -59,7 +60,7 @@ describe("AdminAccountFilters", () => {
     expect(html).toContain("Account state");
     expect(html).toContain("All account states");
     expect(html).toContain('name="ownership"');
-    expect(html).toContain('name="partner"');
+    expect(html).not.toContain('name="partner"');
     expect(html).toContain('name="plan"');
     expect(html).toContain('type="search" name="q"');
     expect(html).toContain('pattern="\\s*[\\s\\S]{0,100}\\s*"');
@@ -102,6 +103,10 @@ describe("AdminAccountFilters", () => {
       expect(html).toContain(`value="${value}"`);
     }
     expect(html).not.toContain('value="terminal"');
+    expect(html).toContain(
+      '<option value="direct">SimplAssist Direct</option>',
+    );
+    expect(html).not.toContain('<option value="direct">Direct</option>');
   });
 
   it("preserves the suspended account-state selection", () => {
@@ -143,6 +148,8 @@ describe("AdminAccountFilters", () => {
     expect(html).toMatch(
       /<option value="partner" selected="">Partner<\/option>/,
     );
+    expect(html).toContain("Specific partner");
+    expect(html).toContain('name="partner"');
     expect(html).toMatch(
       new RegExp(`<option value="${PARTNER_ID}" selected="">Agency One</option>`),
     );
@@ -150,7 +157,7 @@ describe("AdminAccountFilters", () => {
     expect(html).toContain('value="Dental &amp;amp; Co"');
   });
 
-  it("includes supplied partners regardless of status and explains ownership coupling", () => {
+  it("includes supplied partners regardless of status without redundant ownership copy", () => {
     const html = renderToStaticMarkup(
       <AdminAccountFilters
         filters={{
@@ -172,7 +179,7 @@ describe("AdminAccountFilters", () => {
 
     expect(html).toContain("Active Agency");
     expect(html).toContain("Retired Agency");
-    expect(html).toContain("Applied only when ownership is Partner.");
+    expect(html).not.toContain("Applied only when ownership is Partner.");
     expect(html).toContain(
       `<option value="${INACTIVE_PARTNER_ID}" selected="">Retired Agency</option>`,
     );
