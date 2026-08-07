@@ -37,6 +37,7 @@ export default async function DashboardLayout({
   if (business.deleted_at) {
     redirect("/account-deleted");
   }
+  const isPartnerManagedBilling = business.partner_id !== null;
 
   // Dashboard unlocks only after SMS is actually ready: approved campaign plus
   // the active phone number assigned to that campaign.
@@ -92,6 +93,7 @@ export default async function DashboardLayout({
         websiteUrl={business.website_url ?? null}
         canUseCalendar={canUseFeature(entitlements, "calendar")}
         canUseWidget={canUseFeature(entitlements, "web_chat")}
+        isPartnerManagedBilling={isPartnerManagedBilling}
       />
       <main className="flex-1 bg-transparent px-4 pt-[4.75rem] pb-6 lg:pt-5 lg:pr-6 lg:pb-6 lg:pl-0 relative z-[1] min-w-0 lg:min-h-0 lg:overflow-y-auto">
         <AccountServiceStatusBanner

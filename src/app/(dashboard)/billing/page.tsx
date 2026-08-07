@@ -21,13 +21,21 @@ import {
   statusDanger,
 } from "@/lib/theme-v2/theme";
 
-export default async function BillingPage() {
+type BillingPageProps = {
+  searchParams?: Record<string, string | string[] | undefined>;
+};
+
+export default async function BillingPage(_props: BillingPageProps) {
+  void _props;
   await requireWorkspacePageAccess();
   const context = await getDashboardBusinessContext();
   if (context.status === "unauthenticated") redirect("/login");
   if (context.status !== "resolved") redirect("/onboarding");
 
   const { supabase, business } = context;
+  const isPartnerManagedBilling = business.partner_id !== null;
+  if (isPartnerManagedBilling) redirect("/dashboard");
+
   const suspensionBillingNotice =
     business.operations_suspended_at !== null ? (
       <section

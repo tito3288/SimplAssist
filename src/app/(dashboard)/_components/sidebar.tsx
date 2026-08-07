@@ -41,6 +41,7 @@ export default function Sidebar({
   activePath,
   canUseCalendar = true,
   canUseWidget = true,
+  isPartnerManagedBilling = false,
 }: {
   userEmail: string;
   websiteUrl: string | null;
@@ -49,11 +50,15 @@ export default function Sidebar({
   activePath?: string;
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
+  isPartnerManagedBilling?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const supabase = createBrowserClient();
+  const visibleNavItems = isPartnerManagedBilling
+    ? navItems.filter((item) => item.href !== "/billing")
+    : navItems;
 
   async function handleSignOut() {
     // Global scope (the default) is deliberate: it is the customer's only
@@ -83,7 +88,7 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive = (activePath ?? pathname) === item.href;
           const isLocked =
             (item.href === "/calendar" && !canUseCalendar) ||

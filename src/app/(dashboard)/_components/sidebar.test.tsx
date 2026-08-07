@@ -91,6 +91,7 @@ function renderSidebar(props?: {
   activePath?: string;
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
+  isPartnerManagedBilling?: boolean;
   requestBrand?: RequestBrand;
 }) {
   const { requestBrand = DEFAULT_REQUEST, ...sidebarProps } = props ?? {};
@@ -109,12 +110,50 @@ function renderedNavSections(markup: string): string[] {
   return Array.from(markup.matchAll(/<nav\b[^>]*>(.*?)<\/nav>/g), (match) => match[1]);
 }
 
+function renderedNavHrefs(nav: string): string[] {
+  return Array.from(nav.matchAll(/<a href="([^"]+)"/g), (match) => match[1]);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.pathname = "/dashboard";
 });
 
 describe("Sidebar navigation", () => {
+  it.each([
+    ["the default", undefined],
+    ["an explicit direct-business setting", false],
+  ] as const)("shows Billing exactly once in each nav for %s", (_scenario, isPartnerManagedBilling) => {
+    const navSections = renderedNavSections(
+      renderSidebar({ isPartnerManagedBilling }),
+    );
+
+    expect(navSections).toHaveLength(2);
+    for (const nav of navSections) {
+      expect(nav.match(/href="\/billing"/g)).toHaveLength(1);
+      expect(nav).toContain(">Billing</span>");
+    }
+  });
+
+  it("removes only Billing from both partner-managed navs", () => {
+    const directNavSections = renderedNavSections(renderSidebar());
+    const partnerNavSections = renderedNavSections(
+      renderSidebar({ isPartnerManagedBilling: true }),
+    );
+
+    expect(directNavSections).toHaveLength(2);
+    expect(partnerNavSections).toHaveLength(2);
+    partnerNavSections.forEach((nav, index) => {
+      expect(nav).not.toContain('href="/billing"');
+      expect(nav).not.toContain(">Billing</span>");
+      expect(renderedNavHrefs(nav)).toEqual(
+        renderedNavHrefs(directNavSections[index]).filter(
+          (href) => href !== "/billing",
+        ),
+      );
+    });
+  });
+
   it("shows Knowledge Gaps between Conversations and Contacts", () => {
     const navSections = renderedNavSections(renderSidebar());
 

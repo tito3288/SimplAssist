@@ -21,6 +21,7 @@ export default async function DashboardPage() {
   if (context.status !== 'resolved') redirect('/onboarding');
 
   const { supabase, user, business } = context;
+  const isPartnerManagedBilling = business.partner_id !== null;
 
   // Calculate date for "this week" queries
   const now = new Date();
@@ -171,6 +172,7 @@ export default async function DashboardPage() {
         phoneNumber={activePhoneNumber}
         showCallForwardingNudge={showCallForwardingNudge}
         billingMode={business.billing_mode}
+        isPartnerManagedBilling={isPartnerManagedBilling}
         a2pStatus={{
           brandStatus: business.brand_status ?? null,
           brandStatusUpdatedAt: business.brand_status_updated_at ?? null,

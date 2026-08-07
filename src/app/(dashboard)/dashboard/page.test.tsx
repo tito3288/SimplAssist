@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   isPlanAvailable: vi.fn(),
   getFirstNameFromAuthMetadata: vi.fn(),
   shouldShowCallForwardingNudge: vi.fn(),
+  dashboardOverview: vi.fn((props: unknown) => {
+    void props;
+    return null;
+  }),
   featureStatusBanners: vi.fn((props: unknown) => {
     void props;
     return null;
@@ -43,7 +47,7 @@ vi.mock("@/components/dashboard/callForwardingNudgeEligibility", () => ({
   shouldShowCallForwardingNudge: mocks.shouldShowCallForwardingNudge,
 }));
 vi.mock("@/components/dashboard/DashboardOverview", () => ({
-  default: () => null,
+  default: mocks.dashboardOverview,
 }));
 vi.mock("@/components/entitlements/FeatureStatusBanners", () => ({
   FeatureStatusBanners: mocks.featureStatusBanners,
@@ -66,6 +70,11 @@ interface FeatureStatusBannerProps {
   plan: string;
   status: string;
   pausedFeatures: string[];
+}
+
+interface DashboardOverviewProps {
+  billingMode: "stripe" | "invoiced" | "comped";
+  isPartnerManagedBilling: boolean;
 }
 
 beforeEach(() => {
@@ -99,7 +108,13 @@ function queryThenable(result: Promise<unknown>) {
   return query;
 }
 
-function configureResolvedDashboardWithSavedGuardrails() {
+function configureResolvedDashboardWithSavedGuardrails({
+  partnerId = null,
+  billingMode = "stripe",
+}: {
+  partnerId?: string | null;
+  billingMode?: "stripe" | "invoiced" | "comped";
+} = {}) {
   const tableCalls = new Map<string, number>();
 
   mocks.from.mockImplementation((table: string) => {
@@ -140,7 +155,8 @@ function configureResolvedDashboardWithSavedGuardrails() {
       id: BUSINESS_ID,
       call_forwarding_enabled: false,
       call_forwarding_nudge_resolved_at: null,
-      billing_mode: "stripe",
+      partner_id: partnerId,
+      billing_mode: billingMode,
     },
   });
   mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
@@ -163,6 +179,13 @@ async function renderedFeatureStatusBannerProps() {
   renderToStaticMarkup(await DashboardPage());
   return mocks.featureStatusBanners.mock.calls.at(-1)?.[0] as
     | FeatureStatusBannerProps
+    | undefined;
+}
+
+async function renderedDashboardOverviewProps() {
+  renderToStaticMarkup(await DashboardPage());
+  return mocks.dashboardOverview.mock.calls.at(-1)?.[0] as
+    | DashboardOverviewProps
     | undefined;
 }
 
@@ -212,6 +235,7 @@ describe("DashboardPage query scheduling", () => {
         id: BUSINESS_ID,
         call_forwarding_enabled: false,
         call_forwarding_nudge_resolved_at: null,
+        partner_id: null,
         billing_mode: "stripe",
       },
     });
@@ -243,6 +267,30 @@ describe("DashboardPage query scheduling", () => {
     preview.resolve({ data: [{ content: "Latest message" }] });
     await expect(page).resolves.toBeDefined();
   });
+});
+
+describe("DashboardPage partner-managed billing presentation", () => {
+  it.each([
+    [null, "stripe", false],
+    [null, "comped", false],
+    ["partner-1", "stripe", true],
+    ["partner-1", "invoiced", true],
+  ] as const)(
+    "maps partner_id %s with %s billing to visibility %s",
+    async (partnerId, billingMode, expected) => {
+      configureResolvedDashboardWithSavedGuardrails({
+        partnerId,
+        billingMode,
+      });
+
+      const overviewProps = await renderedDashboardOverviewProps();
+
+      expect(overviewProps).toMatchObject({
+        billingMode,
+        isPartnerManagedBilling: expected,
+      });
+    }
+  );
 });
 
 describe("DashboardPage paused Full Suite features", () => {

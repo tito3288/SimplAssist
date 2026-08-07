@@ -32,6 +32,7 @@ interface DashboardOverviewProps {
   a2pStatus: A2pStatusCardProps;
   showCallForwardingNudge: boolean;
   billingMode: BillingMode;
+  isPartnerManagedBilling?: boolean;
 }
 
 const statCards = [
@@ -79,6 +80,7 @@ export default function DashboardOverview({
   a2pStatus,
   showCallForwardingNudge,
   billingMode,
+  isPartnerManagedBilling = false,
 }: DashboardOverviewProps) {
   const brand = useBrand();
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
@@ -321,30 +323,32 @@ export default function DashboardOverview({
               Manage business details, hours, messaging, and the features included in your plan.
             </p>
           </Link>
-          <Link
-            href="/billing"
-            className="group relative block rounded-[22px] p-6 sm:p-7 pt-14 sm:pt-16
-              bg-white dark:bg-[rgba(30,30,34,0.88)]
-              border border-[#ece4d8] dark:border-white/[0.10]
-              shadow-sm dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
-              transition-all duration-300 ease-out
-              hover:border-[rgb(var(--brand-primary-rgb)/.35)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.28)]
-              hover:-translate-y-1 hover:shadow-md dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
-          >
-            <div
-              className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
+          {!isPartnerManagedBilling && (
+            <Link
+              href="/billing"
+              className="group relative block rounded-[22px] p-6 sm:p-7 pt-14 sm:pt-16
+                bg-white dark:bg-[rgba(30,30,34,0.88)]
+                border border-[#ece4d8] dark:border-white/[0.10]
+                shadow-sm dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
+                transition-all duration-300 ease-out
+                hover:border-[rgb(var(--brand-primary-rgb)/.35)] dark:hover:border-[rgb(var(--brand-primary-dark-rgb)/.28)]
+                hover:-translate-y-1 hover:shadow-md dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
             >
-              <CreditCard className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
-            </div>
-            <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${ink}`}>
-              Billing
-            </h4>
-            <p className={`text-sm leading-relaxed ${body}`}>
-              {billingMode === 'stripe'
-                ? 'Manage your plan, payment method, and subscription details.'
-                : 'View your partner-managed billing details'}
-            </p>
-          </Link>
+              <div
+                className={`absolute top-5 right-5 p-2.5 ${orangeAccentIcon}`}
+              >
+                <CreditCard className="w-5 h-5 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
+              </div>
+              <h4 className={`text-base sm:text-lg font-semibold mb-2 pr-2 ${ink}`}>
+                Billing
+              </h4>
+              <p className={`text-sm leading-relaxed ${body}`}>
+                {billingMode === 'stripe'
+                  ? 'Manage your plan, payment method, and subscription details.'
+                  : 'View your partner-managed billing details'}
+              </p>
+            </Link>
+          )}
         </div>
       </section>
 

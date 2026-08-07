@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   canUseFeature: vi.fn(),
   getWorkspaceAccess: vi.fn(),
   workspacePageRedirectTarget: vi.fn(),
+  sidebar: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -32,7 +33,10 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   workspacePageRedirectTarget: mocks.workspacePageRedirectTarget,
 }));
 vi.mock("./_components/sidebar", () => ({
-  default: () => null,
+  default: (props: unknown) => {
+    mocks.sidebar(props);
+    return null;
+  },
 }));
 
 import DashboardLayout from "./layout";
@@ -45,6 +49,8 @@ const BUSINESS = {
   ai_replies_paused_at: null,
   texting_paused_at: null,
   bookings_paused_at: null,
+  partner_id: null,
+  billing_mode: "stripe",
 };
 const ENTITLEMENTS = {
   businessId: BUSINESS.id,
@@ -129,6 +135,36 @@ describe("DashboardLayout access gate", () => {
     expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledWith(BUSINESS.id);
     expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
   });
+
+  it.each([
+    ["partner-owned Stripe", "partner-1", "stripe", true],
+    ["partner-owned invoiced", "partner-1", "invoiced", true],
+    ["direct Stripe", null, "stripe", false],
+    ["direct invoiced", null, "invoiced", false],
+  ] as const)(
+    "derives Billing visibility for %s from partner ownership, not billing mode",
+    async (_scenario, partnerId, billingMode, expected) => {
+      mocks.getDashboardBusinessContext.mockResolvedValue({
+        status: "resolved",
+        supabase: {},
+        user: { id: "user-1", email: "owner@example.com" },
+        business: {
+          ...BUSINESS,
+          partner_id: partnerId,
+          billing_mode: billingMode,
+        },
+      });
+
+      const layout = await DashboardLayout({
+        children: <div>Dashboard child</div>,
+      });
+      renderToStaticMarkup(layout);
+
+      expect(mocks.sidebar).toHaveBeenCalledWith(
+        expect.objectContaining({ isPartnerManagedBilling: expected }),
+      );
+    },
+  );
 
   it("starts readiness and entitlements together once the business is known", async () => {
     const readiness = deferred<{ smsReady: boolean }>();

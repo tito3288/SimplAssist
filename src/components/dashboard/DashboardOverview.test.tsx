@@ -101,6 +101,7 @@ function renderOverview(args: {
   requestBrand: RequestBrand;
   phoneNumber: string | null;
   billingMode?: "stripe" | "invoiced" | "comped";
+  isPartnerManagedBilling?: boolean;
   stateValues?: unknown[];
 }): string {
   mocks.stateIndex = 0;
@@ -121,6 +122,7 @@ function renderOverview(args: {
         a2pStatus={a2pStatus}
         showCallForwardingNudge={false}
         billingMode={args.billingMode ?? "stripe"}
+        isPartnerManagedBilling={args.isPartnerManagedBilling}
       />
     </BrandProvider>
   );
@@ -161,13 +163,15 @@ describe("DashboardOverview visible brand copy", () => {
 });
 
 describe("DashboardOverview billing copy", () => {
-  it("preserves subscription-management copy for Stripe billing", () => {
+  it("preserves the exact Billing link and subscription-management copy by default for direct Stripe billing", () => {
     const html = renderOverview({
       requestBrand: DEFAULT_REQUEST_BRAND,
       phoneNumber: null,
       billingMode: "stripe",
     });
 
+    expect(html.match(/href="\/billing"/g)).toHaveLength(1);
+    expect(html).toContain(">Billing</h4>");
     expect(html).toContain(
       "Manage your plan, payment method, and subscription details."
     );
@@ -175,18 +179,42 @@ describe("DashboardOverview billing copy", () => {
   });
 
   it.each(["invoiced", "comped"] as const)(
-    "uses partner-managed copy for %s billing",
+    "preserves the exact Billing link and existing copy for direct %s billing",
     (billingMode) => {
       const html = renderOverview({
         requestBrand: DEFAULT_REQUEST_BRAND,
         phoneNumber: null,
         billingMode,
+        isPartnerManagedBilling: false,
       });
 
+      expect(html.match(/href="\/billing"/g)).toHaveLength(1);
+      expect(html).toContain(">Billing</h4>");
       expect(html).toContain("View your partner-managed billing details");
       expect(html).not.toContain(
         "Manage your plan, payment method, and subscription details."
       );
+    }
+  );
+
+  it.each(["stripe", "invoiced", "comped"] as const)(
+    "hides the whole Billing quick action for partner-managed %s billing",
+    (billingMode) => {
+      const html = renderOverview({
+        requestBrand: PARTNER_REQUEST_BRAND,
+        phoneNumber: null,
+        billingMode,
+        isPartnerManagedBilling: true,
+      });
+
+      expect(html).toContain('href="/conversations"');
+      expect(html).toContain('href="/settings"');
+      expect(html).not.toContain('href="/billing"');
+      expect(html).not.toContain(">Billing</h4>");
+      expect(html).not.toContain(
+        "Manage your plan, payment method, and subscription details."
+      );
+      expect(html).not.toContain("View your partner-managed billing details");
     }
   );
 });
