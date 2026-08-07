@@ -20,7 +20,11 @@ const setPasswordSchema = z
 
 type SetPasswordValues = z.infer<typeof setPasswordSchema>;
 
-export default function SetPasswordForm() {
+export default function SetPasswordForm({
+  mode,
+}: {
+  mode: "setup" | "reset";
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const {
@@ -38,7 +42,11 @@ export default function SetPasswordForm() {
       const response = await fetch("/api/auth/set-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: values.password }),
+        body: JSON.stringify(
+          mode === "reset"
+            ? { password: values.password, mode: "reset" }
+            : { password: values.password },
+        ),
       });
       const payload = (await response.json().catch(() => null)) as {
         message?: string;
@@ -47,7 +55,9 @@ export default function SetPasswordForm() {
       if (!response.ok) {
         setError(
           payload?.message ??
-            "We could not set your password. Request a new setup link and try again.",
+            (mode === "reset"
+              ? "We could not reset your password. Request a new link and try again."
+              : "We could not set your password. Request a new setup link and try again."),
         );
         return;
       }
@@ -55,17 +65,23 @@ export default function SetPasswordForm() {
       router.refresh();
       router.replace("/onboarding");
     } catch {
-      setError("We could not set your password. Please try again.");
+      setError(
+        mode === "reset"
+          ? "We could not reset your password. Please try again."
+          : "We could not set your password. Please try again.",
+      );
     }
   }
 
   return (
     <div>
       <h1 className={`text-center text-2xl font-bold tracking-tight ${ink}`}>
-        Create your password
+        {mode === "reset" ? "Reset your password" : "Create your password"}
       </h1>
       <p className={`mt-2 text-center text-sm leading-6 ${body}`}>
-        Choose the password you&apos;ll use to sign in to this workspace.
+        {mode === "reset"
+          ? "Choose a new password for this account."
+          : "Choose the password you'll use to sign in to this workspace."}
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-5">
@@ -101,10 +117,10 @@ export default function SetPasswordForm() {
           {isSubmitting ? (
             <>
               <LoadingDot />
-              Saving password…
+              {mode === "reset" ? "Resetting password…" : "Saving password…"}
             </>
           ) : (
-            "Set password"
+            mode === "reset" ? "Reset password" : "Set password"
           )}
         </button>
       </form>

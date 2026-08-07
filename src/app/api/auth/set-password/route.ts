@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getCanonicalAppOrigin } from "@/lib/branding/defaultBrand";
-import { normalizeHostHeader } from "@/lib/branding/hostname";
+import {
+  PASSWORD_RESET_INTENT_COOKIE,
+  passwordResetOriginForWorkspaceHost,
+  verifyPasswordResetIntent,
+} from "@/lib/auth/recovery.server";
 import { requirePasswordSetupRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const passwordSchema = z
   .object({
     password: z.string().min(6).max(128),
+    mode: z.literal("reset").optional(),
   })
   .strict();
 
@@ -21,23 +25,17 @@ export async function POST(request: NextRequest) {
   }
 
   const { user } = workspace.access;
-  if (!isExactSameOriginRequest(request, workspace.access.hostKind)) {
+  const requestOrigin = passwordResetOriginForWorkspaceHost(
+    workspace.access.hostKind,
+    request.headers.get("host"),
+  );
+  if (!requestOrigin || !isExactSameOriginRequest(request, requestOrigin)) {
     return json(
       {
         error: "same_origin_required",
         message: "Password setup must be submitted from this workspace.",
       },
       403,
-    );
-  }
-
-  if (user.app_metadata?.must_set_password !== true) {
-    return json(
-      {
-        error: "password_setup_not_required",
-        message: "This password setup link is no longer active.",
-      },
-      409,
     );
   }
 
@@ -54,21 +52,55 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Retain an explicit false tombstone while preserving unrelated app
-  // metadata. Every setup gate activates on literal true only, so stale or
-  // malformed values fail closed and a replay cannot reopen this flow.
-  const appMetadata = {
-    ...user.app_metadata,
-    must_set_password: false,
-  };
+  const isReset = parsed.mode === "reset";
+  const mustSetPassword = user.app_metadata?.must_set_password === true;
+
+  if (
+    isReset &&
+    !verifyPasswordResetIntent(
+      user.id,
+      requestOrigin,
+      request.cookies.get(PASSWORD_RESET_INTENT_COOKIE)?.value,
+    )
+  ) {
+    return json(
+      {
+        error: "password_reset_intent_required",
+        message: "This password reset link is no longer active.",
+      },
+      403,
+    );
+  }
+
+  if (!isReset && !mustSetPassword) {
+    return json(
+      {
+        error: "password_setup_not_required",
+        message: "This password setup link is no longer active.",
+      },
+      409,
+    );
+  }
+
+  // Setup always consumes the literal-true gate. Recovery accepts every
+  // marker state, but only writes the false tombstone when that gate was
+  // actually active; ordinary password resets must not re-arm or otherwise
+  // alter setup-flow metadata.
+  const attributes =
+    !isReset || mustSetPassword
+      ? {
+          password: parsed.password,
+          app_metadata: {
+            ...user.app_metadata,
+            must_set_password: false,
+          },
+        }
+      : { password: parsed.password };
 
   try {
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
       user.id,
-      {
-        password: parsed.password,
-        app_metadata: appMetadata,
-      },
+      attributes,
     );
 
     if (error || !data.user || data.user.id !== user.id) {
@@ -90,7 +122,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return json({ ok: true, redirectTo: "/onboarding" }, 200);
+  const response = json({ ok: true, redirectTo: "/onboarding" }, 200);
+  if (isReset) expireResetIntentCookie(response, requestOrigin);
+  return response;
 }
 
 function json(body: object, status: number) {
@@ -99,7 +133,7 @@ function json(body: object, status: number) {
 
 function isExactSameOriginRequest(
   request: NextRequest,
-  hostKind: "canonical" | "partner",
+  expectedOrigin: string,
 ): boolean {
   // This endpoint changes an Auth credential. Require both browser fetch
   // metadata and an exact allow-listed current origin; neither raw Host nor
@@ -109,16 +143,7 @@ function isExactSameOriginRequest(
   const providedOrigin = request.headers.get("origin");
   if (!providedOrigin) return false;
 
-  let expectedOrigin: string;
   try {
-    if (hostKind === "canonical") {
-      expectedOrigin = getCanonicalAppOrigin();
-    } else {
-      const hostname = normalizeHostHeader(request.headers.get("host"));
-      if (!hostname) return false;
-      expectedOrigin = `https://${hostname}`;
-    }
-
     const parsedOrigin = new URL(providedOrigin);
     return (
       (parsedOrigin.protocol === "https:" ||
@@ -133,4 +158,20 @@ function isExactSameOriginRequest(
   } catch {
     return false;
   }
+}
+
+function expireResetIntentCookie(
+  response: NextResponse,
+  origin: string,
+): void {
+  response.cookies.set({
+    name: PASSWORD_RESET_INTENT_COOKIE,
+    value: "",
+    httpOnly: true,
+    secure: new URL(origin).protocol === "https:",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+    expires: new Date(0),
+  });
 }

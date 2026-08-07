@@ -5,6 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getCanonicalAppHostname } from "@/lib/branding/defaultBrand";
 import { normalizeHostHeader } from "@/lib/branding/hostname";
+import { generateAuthRecoveryLink } from "@/lib/auth/recovery.server";
 import { sendConciergeSetupEmail } from "@/lib/email/conciergeSetup";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
@@ -1377,18 +1378,11 @@ const defaultDependencies: ClientProvisioningDependencies = {
   },
 
   async generateRecoveryLink(input) {
-    const result = await supabaseAdmin.auth.admin.generateLink({
-      type: "recovery",
-      email: input.email,
-      options: { redirectTo: input.redirectTo },
-    });
-    if (result.error || !result.data.properties || !result.data.user) {
-      throw result.error ?? new Error("Recovery link generation failed");
-    }
+    const result = await generateAuthRecoveryLink(input);
     return {
-      hashedToken: result.data.properties.hashed_token,
-      verificationType: result.data.properties.verification_type,
-      user: authUser(result.data.user),
+      hashedToken: result.hashedToken,
+      verificationType: result.verificationType,
+      user: authUser(result.user),
     };
   },
 

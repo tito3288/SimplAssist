@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const USER_ID = "10000000-0000-4000-a000-000000000001";
 
@@ -18,6 +18,10 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 
+import {
+  createPasswordResetIntent,
+  PASSWORD_RESET_INTENT_COOKIE,
+} from "@/lib/auth/recovery.server";
 import { POST } from "./route";
 
 function request(
@@ -26,6 +30,7 @@ function request(
   securityHeaders: {
     origin?: string | null;
     fetchSite?: string | null;
+    resetIntent?: string | null;
   } = {},
 ) {
   const origin =
@@ -39,6 +44,17 @@ function request(
   const headers = new Headers({ host, "content-type": "application/json" });
   if (origin !== null) headers.set("origin", origin);
   if (fetchSite !== null) headers.set("sec-fetch-site", fetchSite);
+  const isReset =
+    body !== null &&
+    typeof body === "object" &&
+    (body as Record<string, unknown>).mode === "reset";
+  const resetIntent =
+    securityHeaders.resetIntent === undefined && isReset
+      ? createPasswordResetIntent(USER_ID, origin ?? `https://${host}`)
+      : securityHeaders.resetIntent;
+  if (resetIntent) {
+    headers.set("cookie", `${PASSWORD_RESET_INTENT_COOKIE}=${resetIntent}`);
+  }
 
   return new NextRequest("http://localhost:8080/api/auth/set-password", {
     method: "POST",
@@ -47,19 +63,25 @@ function request(
   });
 }
 
-function resolvedWorkspace(mustSetPassword: unknown) {
+function resolvedWorkspace(
+  mustSetPassword: unknown,
+  options: { includeMarker?: boolean } = {},
+) {
+  const appMetadata: Record<string, unknown> = {
+    provider: "email",
+    concierge_provisioning_id: "40000000-0000-4000-a000-000000000001",
+  };
+  if (options.includeMarker !== false) {
+    appMetadata.must_set_password = mustSetPassword;
+  }
+
   return {
     ok: true as const,
     access: {
       status: "resolved" as const,
       user: {
         id: USER_ID,
-        app_metadata: {
-          provider: "email",
-          concierge_provisioning_id:
-            "40000000-0000-4000-a000-000000000001",
-          must_set_password: mustSetPassword,
-        },
+        app_metadata: appMetadata,
       },
       business: {
         id: "20000000-0000-4000-a000-000000000001",
@@ -72,6 +94,8 @@ function resolvedWorkspace(mustSetPassword: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://simplassist.com");
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-secret");
   mocks.requirePasswordSetupRouteAccess.mockResolvedValue(
     resolvedWorkspace(true),
   );
@@ -79,6 +103,10 @@ beforeEach(() => {
     data: { user: { id: USER_ID } },
     error: null,
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/auth/set-password", () => {
@@ -102,6 +130,75 @@ describe("POST /api/auth/set-password", () => {
     });
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
+
+  it("resets the password and clears a literal-true setup marker while preserving unrelated metadata", async () => {
+    const response = await POST(
+      request({ password: "replacement-password", mode: "reset" }),
+    );
+
+    expect(mocks.updateUserById).toHaveBeenCalledWith(USER_ID, {
+      password: "replacement-password",
+      app_metadata: {
+        provider: "email",
+        concierge_provisioning_id:
+          "40000000-0000-4000-a000-000000000001",
+        must_set_password: false,
+      },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      redirectTo: "/onboarding",
+    });
+    expect(response.headers.get("set-cookie")).toContain(
+      `${PASSWORD_RESET_INTENT_COOKIE}=`,
+    );
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("rejects reset mode from an ordinary authenticated session without callback intent", async () => {
+    const response = await POST(
+      request(
+        { password: "replacement-password", mode: "reset" },
+        "app.alphadogagency.ai",
+        { resetIntent: null },
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "password_reset_intent_required",
+      message: "This password reset link is no longer active.",
+    });
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["false", false, true],
+    ["null", null, true],
+    ["malformed", "true", true],
+    ["absent", undefined, false],
+  ])(
+    "resets the password with a %s setup marker without writing app metadata",
+    async (_label, mustSetPassword, includeMarker) => {
+      mocks.requirePasswordSetupRouteAccess.mockResolvedValue(
+        resolvedWorkspace(mustSetPassword, { includeMarker }),
+      );
+
+      const response = await POST(
+        request({ password: "replacement-password", mode: "reset" }),
+      );
+
+      expect(mocks.updateUserById).toHaveBeenCalledWith(USER_ID, {
+        password: "replacement-password",
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        redirectTo: "/onboarding",
+      });
+    },
+  );
 
   it("fails a wrong-Host workspace decision before touching Auth", async () => {
     mocks.requirePasswordSetupRouteAccess.mockResolvedValue({
@@ -196,6 +293,9 @@ describe("POST /api/auth/set-password", () => {
   it.each([
     {},
     { password: "short" },
+    { password: "new-password", mode: "setup" },
+    { password: "new-password", mode: "RESET" },
+    { password: "new-password", mode: null },
     { password: "new-password", next: "https://evil.example" },
     { password: "new-password", redirectTo: "/admin" },
   ])("rejects malformed or redirect-shaped input %#", async (body) => {
@@ -220,5 +320,26 @@ describe("POST /api/auth/set-password", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: "password_update_failed",
     });
+  });
+
+  it("returns a fixed failure when a password-only reset update throws", async () => {
+    mocks.requirePasswordSetupRouteAccess.mockResolvedValue(
+      resolvedWorkspace(false),
+    );
+    mocks.updateUserById.mockRejectedValue(new Error("Auth unavailable"));
+
+    const response = await POST(
+      request({ password: "replacement-password", mode: "reset" }),
+    );
+
+    expect(mocks.updateUserById).toHaveBeenCalledWith(USER_ID, {
+      password: "replacement-password",
+    });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "password_update_failed",
+      message: "We could not set your password. Please try again.",
+    });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 });

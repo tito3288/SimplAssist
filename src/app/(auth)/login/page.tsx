@@ -93,6 +93,12 @@ export default function LoginPage() {
           error={errors.password?.message}
         />
 
+        <div className="text-right">
+          <Link href="/forgot-password" className={`text-sm ${inlineLink}`}>
+            Forgot password?
+          </Link>
+        </div>
+
         {error && (
           <div
             className="

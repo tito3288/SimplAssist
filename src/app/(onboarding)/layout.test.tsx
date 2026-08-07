@@ -83,13 +83,14 @@ beforeEach(() => {
 });
 
 describe("OnboardingLayout workspace access", () => {
-  it("renders only after the shared workspace decision resolves", async () => {
+  it("renders incomplete onboarding only after the shared workspace decision resolves", async () => {
     const layout = await OnboardingLayout({
       children: <main>Onboarding</main>,
     });
     const html = renderToStaticMarkup(layout);
 
     expect(mocks.getWorkspaceAccess).toHaveBeenCalledOnce();
+    expect(mocks.redirect).not.toHaveBeenCalled();
     expect(mocks.getUser).toHaveBeenCalledOnce();
     expect(mocks.getOnboardingStateForOwner).toHaveBeenCalledWith(USER.id);
     expect(html).toContain("Delete account");
@@ -99,6 +100,19 @@ describe("OnboardingLayout workspace access", () => {
     expect(projection).toContain("ai_replies_paused_at");
     expect(projection).toContain("texting_paused_at");
     expect(projection).toContain("bookings_paused_at");
+  });
+
+  it("redirects a completed onboarding account to the dashboard instead of rendering the wizard", async () => {
+    mocks.getOnboardingStateForOwner.mockResolvedValue({
+      dashboardReady: true,
+    });
+
+    await expect(
+      OnboardingLayout({ children: <main>Onboarding wizard</main> }),
+    ).rejects.toThrow("redirect:/dashboard");
+
+    expect(mocks.getOnboardingStateForOwner).toHaveBeenCalledWith(USER.id);
+    expect(mocks.redirect).toHaveBeenCalledWith("/dashboard");
   });
 
   it("renders deletion on an exact resolved partner workspace", async () => {
