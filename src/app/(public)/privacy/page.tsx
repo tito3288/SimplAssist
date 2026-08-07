@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LegalDocLayout } from "@/components/legal/LegalDocLayout";
 import { LegalSection } from "@/components/legal/legal-section";
-import { inlineLink } from "@/lib/theme-v2/theme";
+import { body, inlineLink } from "@/lib/theme-v2/theme";
 import { SUPPORT_EMAIL, SUPPORT_PATH } from "@/lib/support/constants";
 
 const linkClass = `${inlineLink} underline-offset-2 hover:underline`;
@@ -13,6 +13,8 @@ export default function PrivacyPage() {
       siblingHref="/terms"
       siblingLabel="Terms of Service"
     >
+      <p className={`-mt-8 text-sm ${body}`}>Effective date: August 7, 2026</p>
+
       <LegalSection title="1. Introduction">
         <p>
           SimplAssist (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;), a product of
@@ -39,7 +41,38 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="4. SMS and Text Messaging">
+      <LegalSection title="4. Google User Data">
+        <p className="mb-4">
+          SimplAssist&apos;s use and transfer to any other app of information received from Google APIs
+          will adhere to the{" "}
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            className={linkClass}
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements.
+        </p>
+        <p className="mb-4">
+          Google Calendar data is accessed only with the user&apos;s explicit consent via Google sign-in
+          and is used solely to check availability and to create and manage appointments requested
+          through SimplAssist.
+        </p>
+        <p className="mb-4">
+          Google user data is never sold, never used for advertising, and never transferred to third
+          parties except as necessary to provide this feature, to comply with law, or as part of a
+          merger or acquisition with equivalent protections.
+        </p>
+        <p>
+          Users can revoke SimplAssist&apos;s access at any time via their{" "}
+          <a href="https://myaccount.google.com/permissions" className={linkClass}>
+            Google Account security settings
+          </a>
+          .
+        </p>
+      </LegalSection>
+
+      <LegalSection title="5. SMS and Text Messaging">
         <p className="mb-4">
           SimplAssist sends automated text messages on behalf of businesses using our platform.
           These messages are sent via Telnyx, a third-party messaging service. By using SimplAssist,
@@ -95,7 +128,7 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="5. Data Storage and Security">
+      <LegalSection title="6. Data Storage and Security">
         <p>
           All data is stored securely using Supabase (PostgreSQL). Conversations are encrypted in
           transit. We retain conversation data for as long as your account is active. You can
@@ -103,7 +136,7 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="6. Account Deletion and Data Retention">
+      <LegalSection title="7. Account Deletion and Data Retention">
         <p className="mb-4">
           You may delete your account at any time from the Settings page. Upon deletion,
           your account enters a 60-day grace period during which you can log back in
@@ -122,14 +155,15 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="7. Third-Party Services">
+      <LegalSection title="8. Third-Party Services">
         <p>
-          SimplAssist integrates with Telnyx (messaging), Anthropic (AI), Stripe (payments), and
-          Supabase (database). Each service has its own privacy policy.
+          SimplAssist integrates with Telnyx (messaging), Anthropic (AI conversation processing),
+          Stripe (payments), Supabase (database), and Resend (transactional email delivery). Each
+          service has its own privacy policy.
         </p>
       </LegalSection>
 
-      <LegalSection title="8. Contact Us">
+      <LegalSection title="9. Contact Us">
         <p>
           For privacy questions, reach us from our{" "}
           <Link href={SUPPORT_PATH} className={linkClass}>
