@@ -151,6 +151,17 @@ function record(args: {
   };
 }
 
+function accountRecords(count: number): AdminAccountHealthRecord[] {
+  return Array.from({ length: count }, (_, index) => {
+    const ordinal = index + 1;
+    const id = `30000000-0000-4000-a045-${String(ordinal).padStart(12, "0")}`;
+
+    return record({
+      business: business(id, `Business ${String(ordinal).padStart(2, "0")}`),
+    });
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireAdminUser.mockResolvedValue({ id: "admin-1", email: null });
@@ -455,5 +466,77 @@ describe("AdminPage server-side filters", () => {
 
     expect(mocks.loadHealthList).not.toHaveBeenCalled();
     expect(mocks.loadPartnerOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminPage account pagination", () => {
+  it("shows only the first 10 matching accounts and links to the next page", async () => {
+    mocks.loadHealthList.mockResolvedValue(accountRecords(12));
+
+    const html = renderToStaticMarkup(await AdminPage({}));
+
+    expect(html).toContain(">Business 01</p>");
+    expect(html).toContain(">Business 10</p>");
+    expect(html).not.toContain(">Business 11</p>");
+    expect(html).not.toContain(">Business 12</p>");
+    expect(html.match(/aria-label="Account health"/g)).toHaveLength(10);
+    expect(html).toContain('aria-label="Accounts pagination"');
+    expect(html).toContain("Showing 1–10 of 12");
+    expect(html).toContain('aria-disabled="true">Previous</span>');
+    expect(html).toContain('href="/admin?page=2"');
+  });
+
+  it("preserves account filters while paging through the matching results", async () => {
+    const partnerId = "20000000-0000-4000-a045-000000000001";
+    mocks.loadHealthList.mockResolvedValue(accountRecords(23));
+
+    const html = renderToStaticMarkup(
+      await AdminPage({
+        searchParams: {
+          lifecycle: "live",
+          ownership: "partner",
+          partner: partnerId,
+          plan: "full",
+          q: "  River City Dental  ",
+          page: "2",
+        },
+      }),
+    );
+
+    expect(html).not.toContain(">Business 10</p>");
+    expect(html).toContain(">Business 11</p>");
+    expect(html).toContain(">Business 20</p>");
+    expect(html).not.toContain(">Business 21</p>");
+    expect(html).toContain("Showing 11–20 of 23");
+    expect(html).toContain(
+      `href="/admin?lifecycle=live&amp;ownership=partner&amp;partner=${partnerId}&amp;plan=full&amp;q=River+City+Dental"`,
+    );
+    expect(html).toContain(
+      `href="/admin?lifecycle=live&amp;ownership=partner&amp;partner=${partnerId}&amp;plan=full&amp;q=River+City+Dental&amp;page=3"`,
+    );
+  });
+
+  it("clamps an out-of-range page to the final page", async () => {
+    mocks.loadHealthList.mockResolvedValue(accountRecords(23));
+
+    const html = renderToStaticMarkup(
+      await AdminPage({ searchParams: { page: "99" } }),
+    );
+
+    expect(html).not.toContain(">Business 20</p>");
+    expect(html).toContain(">Business 21</p>");
+    expect(html).toContain(">Business 23</p>");
+    expect(html).toContain("Showing 21–23 of 23");
+    expect(html).toContain('href="/admin?page=2"');
+    expect(html).toContain('aria-disabled="true">Next</span>');
+  });
+
+  it("does not show pagination controls when 10 or fewer accounts match", async () => {
+    mocks.loadHealthList.mockResolvedValue(accountRecords(10));
+
+    const html = renderToStaticMarkup(await AdminPage({}));
+
+    expect(html.match(/aria-label="Account health"/g)).toHaveLength(10);
+    expect(html).not.toContain('aria-label="Accounts pagination"');
   });
 });

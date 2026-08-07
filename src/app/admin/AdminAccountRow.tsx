@@ -90,7 +90,7 @@ export function AdminAccountRow({
         <div>
           <Link
             href={`/admin/${business.id}`}
-            className="block rounded-sm transition-colors hover:bg-[#faf6ef] dark:hover:bg-white/[0.04]"
+            className="block rounded-sm transition-colors hover:text-[var(--brand-primary-active)] dark:hover:text-[var(--brand-primary-dark)]"
           >
             <p className="font-medium">{business.name}</p>
             <p className="mt-1 text-xs text-stone-500 dark:text-[#bdbdbf]">

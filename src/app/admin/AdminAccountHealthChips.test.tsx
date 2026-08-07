@@ -1441,7 +1441,7 @@ describe("AdminAccountHealthChips", () => {
     );
   });
 
-  it("places the disclosure outside the link and confines hover affordance to the link", () => {
+  it("keeps the account metadata linked and uses a text-only hover affordance", () => {
     const html = renderToStaticMarkup(
       <AdminAccountRow
         business={business()}
@@ -1466,8 +1466,14 @@ describe("AdminAccountHealthChips", () => {
     expect(lastAnchorClose).toBeGreaterThan(lastAnchorOpen);
     expect(rowClass).not.toContain("hover:bg-[#faf6ef]");
     expect(rowClass).not.toContain("dark:hover:bg-white/[0.04]");
-    expect(linkClass).toContain("hover:bg-[#faf6ef]");
-    expect(linkClass).toContain("dark:hover:bg-white/[0.04]");
+    expect(linkClass).not.toContain("hover:bg-[#faf6ef]");
+    expect(linkClass).not.toContain("dark:hover:bg-white/[0.04]");
+    expect(linkClass).toContain(
+      "hover:text-[var(--brand-primary-active)]",
+    );
+    expect(linkClass).toContain(
+      "dark:hover:text-[var(--brand-primary-dark)]",
+    );
     expect(html).toContain(
       'href="/admin/11111111-1111-4111-8111-111111111111"',
     );

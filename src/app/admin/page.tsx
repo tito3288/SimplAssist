@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   bodyFaint,
   card,
@@ -17,6 +18,8 @@ import { AdminAccountRow } from "./AdminAccountRow";
 
 export const dynamic = "force-dynamic";
 
+const ACCOUNTS_PER_PAGE = 10;
+
 export default async function AdminPage(
   {
     searchParams,
@@ -29,6 +32,13 @@ export default async function AdminPage(
     loadAdminAccountHealthList(filters),
     loadAdminPartnerFilterOptions(),
   ]);
+  const totalPages = Math.max(1, Math.ceil(records.length / ACCOUNTS_PER_PAGE));
+  const currentPage = Math.min(parsePage(searchParams?.page), totalPages);
+  const firstRecordIndex = (currentPage - 1) * ACCOUNTS_PER_PAGE;
+  const pageRecords = records.slice(
+    firstRecordIndex,
+    firstRecordIndex + ACCOUNTS_PER_PAGE,
+  );
   const activeRecords = records.filter(
     ({ business }) =>
       getAdminBusinessLifecycle({
@@ -81,22 +91,90 @@ export default async function AdminPage(
               No accounts match these filters.
             </p>
           ) : (
-            records.map(({ business, subscription, usage, health }) => {
-              return (
-                <AdminAccountRow
-                  key={business.id}
-                  business={business}
-                  subscription={subscription}
-                  usage={usage}
-                  health={health}
-                />
-              );
-            })
+            <div>
+              {pageRecords.map(
+                ({ business, subscription, usage, health }) => {
+                  return (
+                    <AdminAccountRow
+                      key={business.id}
+                      business={business}
+                      subscription={subscription}
+                      usage={usage}
+                      health={health}
+                    />
+                  );
+                },
+              )}
+            </div>
           )}
+          {records.length > ACCOUNTS_PER_PAGE ? (
+            <nav
+              className="flex items-center justify-between gap-4 border-t border-[#ece4d8] px-5 py-4 dark:border-white/[0.10]"
+              aria-label="Accounts pagination"
+            >
+              {currentPage > 1 ? (
+                <Link
+                  href={buildPageHref(filters, currentPage - 1)}
+                  className="text-sm font-medium text-[#c2410c] hover:underline dark:text-[#ff914d]"
+                >
+                  Previous
+                </Link>
+              ) : (
+                <span className={`text-sm ${bodyFaint}`} aria-disabled="true">
+                  Previous
+                </span>
+              )}
+              <span className={`text-center text-sm ${bodyFaint}`}>
+                Showing {firstRecordIndex + 1}–
+                {Math.min(firstRecordIndex + ACCOUNTS_PER_PAGE, records.length)}
+                {" "}of {records.length}
+              </span>
+              {currentPage < totalPages ? (
+                <Link
+                  href={buildPageHref(filters, currentPage + 1)}
+                  className="text-sm font-medium text-[#c2410c] hover:underline dark:text-[#ff914d]"
+                >
+                  Next
+                </Link>
+              ) : (
+                <span className={`text-sm ${bodyFaint}`} aria-disabled="true">
+                  Next
+                </span>
+              )}
+            </nav>
+          ) : null}
         </div>
       </section>
     </main>
   );
+}
+
+function parsePage(value: string | string[] | undefined): number {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return 1;
+
+  const page = Number(value);
+  return Number.isSafeInteger(page) ? page : 1;
+}
+
+function buildPageHref(
+  filters: ReturnType<typeof parseAdminAccountFilters>,
+  page: number,
+): string {
+  const searchParams = new URLSearchParams();
+
+  if (filters.lifecycle) searchParams.set("lifecycle", filters.lifecycle);
+  if (filters.ownership) {
+    searchParams.set("ownership", filters.ownership);
+    if (filters.ownership === "partner" && filters.partnerId) {
+      searchParams.set("partner", filters.partnerId);
+    }
+  }
+  if (filters.plan) searchParams.set("plan", filters.plan);
+  if (filters.query) searchParams.set("q", filters.query);
+  if (page > 1) searchParams.set("page", String(page));
+
+  const query = searchParams.toString();
+  return query ? `/admin?${query}` : "/admin";
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
