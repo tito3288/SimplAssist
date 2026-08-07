@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRequestBrand } from "@/components/branding/BrandProvider";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
   body,
@@ -26,6 +27,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const requestBrand = useRequestBrand();
   const [error, setError] = useState<string | null>(null);
   const supabase = createBrowserClient();
 
@@ -127,12 +129,14 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className={`mt-8 text-center text-sm ${body}`}>
-        Don&apos;t have an account?{" "}
-        <Link href="/signup" className={inlineLink}>
-          Create one
-        </Link>
-      </p>
+      {requestBrand.source !== "partner_host" && (
+        <p className={`mt-8 text-center text-sm ${body}`}>
+          Don&apos;t have an account?{" "}
+          <Link href="/signup" className={inlineLink}>
+            Create one
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

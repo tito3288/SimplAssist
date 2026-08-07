@@ -6,9 +6,21 @@ import { SignupConfirmation } from "./SignupConfirmation";
 
 const mocks = vi.hoisted(() => ({
   createBrowserClient: vi.fn(),
+  currentHost: "simplassist.com",
+  getRequestBrand: vi.fn(),
+  resolveStrictAuthCallbackOrigin: vi.fn(),
   signUp: vi.fn(),
 }));
 
+vi.mock("next/headers", () => ({
+  headers: () => new Headers({ host: mocks.currentHost }),
+}));
+vi.mock("@/lib/auth/callbackOrigin.server", () => ({
+  resolveStrictAuthCallbackOrigin: mocks.resolveStrictAuthCallbackOrigin,
+}));
+vi.mock("@/lib/branding/requestBrand.server", () => ({
+  getRequestBrand: mocks.getRequestBrand,
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserClient: mocks.createBrowserClient,
 }));
@@ -53,11 +65,32 @@ const PARTNER_REQUEST: RequestBrand = {
   },
 };
 
+const PREVIEW_REQUEST: RequestBrand = {
+  ...PARTNER_REQUEST,
+  source: "admin_preview",
+  isPreview: true,
+};
+
+const DIRECT_IDENTITY = {
+  origin: "https://simplassist.com",
+  kind: "direct" as const,
+  partnerId: null,
+};
+
+const PARTNER_IDENTITY = {
+  origin: "https://app.alphadogagency.ai",
+  kind: "partner" as const,
+  partnerId: "11111111-1111-4111-8111-111111111111",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.currentHost = "simplassist.com";
   mocks.createBrowserClient.mockReturnValue({
     auth: { signUp: mocks.signUp },
   });
+  mocks.getRequestBrand.mockResolvedValue(DEFAULT_REQUEST);
+  mocks.resolveStrictAuthCallbackOrigin.mockResolvedValue(DIRECT_IDENTITY);
 });
 
 function renderConfirmation(requestBrand: RequestBrand): string {
@@ -68,55 +101,148 @@ function renderConfirmation(requestBrand: RequestBrand): string {
   );
 }
 
-function renderPage(requestBrand: RequestBrand): string {
+async function renderPage(
+  requestBrand: RequestBrand = DEFAULT_REQUEST,
+): Promise<string> {
   return renderToStaticMarkup(
     <BrandProvider requestBrand={requestBrand}>
-      <SignupPage />
-    </BrandProvider>
+      {await SignupPage()}
+    </BrandProvider>,
   );
 }
 
-describe("SignupPage host policy", () => {
-  it("keeps the canonical public signup form", () => {
-    const html = renderPage(DEFAULT_REQUEST);
+function expectInvitationOnly(html: string): void {
+  expect(html).toContain("Account creation is by invitation");
+  expect(html).toContain("Contact your provider to request access.");
+  expect(html).toContain("Already have access?");
+  expect(html).toContain('href="/login"');
+  expect(html).not.toContain("<form");
+  expect(html).not.toContain('type="email"');
+  expect(html).not.toContain("Create account");
+  expect(mocks.createBrowserClient).not.toHaveBeenCalled();
+  expect(mocks.signUp).not.toHaveBeenCalled();
+}
 
+describe("SignupPage strict host policy", () => {
+  it("keeps the canonical public signup form", async () => {
+    const html = await renderPage();
+
+    expect(mocks.resolveStrictAuthCallbackOrigin).toHaveBeenCalledWith(
+      "simplassist.com",
+    );
     expect(html).toContain("Create your account");
     expect(html).toContain("<form");
     expect(html).toContain('type="email"');
     expect(html).toContain("Create account");
+    expect(html).not.toContain("Account creation is by invitation");
     expect(mocks.createBrowserClient).toHaveBeenCalledOnce();
+    expect(mocks.getRequestBrand).not.toHaveBeenCalled();
   });
 
-  it("replaces actual partner-host signup with dynamic concierge access copy", () => {
-    const html = renderPage(PARTNER_REQUEST);
-
-    expect(html).toContain("Request access to Alpha Dog Agency");
-    expect(html).toContain(
-      "New accounts are set up for you by Alpha Dog Agency."
-    );
-    expect(html).toContain("concierge access");
-    expect(html).toContain('href="/login"');
-    expect(html).toContain("Log in to Alpha Dog Agency");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain('type="email"');
-    expect(html).not.toContain("Create account");
-    expect(html).not.toContain("SimplAssist");
-    expect(mocks.createBrowserClient).not.toHaveBeenCalled();
-    expect(mocks.signUp).not.toHaveBeenCalled();
-  });
-
-  it("keeps signup enabled during an authorized partner-brand preview", () => {
-    const html = renderPage({
-      ...PARTNER_REQUEST,
-      source: "admin_preview",
-      isPreview: true,
-    });
+  it("keeps canonical signup enabled during an authorized partner preview", async () => {
+    const html = await renderPage(PREVIEW_REQUEST);
 
     expect(html).toContain("Create your account");
     expect(html).toContain("<form");
-    expect(html).toContain("Create account");
-    expect(html).not.toContain("concierge access");
+    expect(html).not.toContain("Account creation is by invitation");
     expect(mocks.createBrowserClient).toHaveBeenCalledOnce();
+    expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+  });
+
+  it("replaces partner-host signup with branded invitation-only access", async () => {
+    mocks.currentHost = "app.alphadogagency.ai";
+    mocks.resolveStrictAuthCallbackOrigin.mockResolvedValueOnce(
+      PARTNER_IDENTITY,
+    );
+    mocks.getRequestBrand.mockResolvedValueOnce(PARTNER_REQUEST);
+
+    const html = await renderPage();
+
+    expect(mocks.resolveStrictAuthCallbackOrigin).toHaveBeenCalledWith(
+      "app.alphadogagency.ai",
+    );
+    expectInvitationOnly(html);
+    expect(html).toContain("Log in to Alpha Dog Agency");
+    expect(html).not.toContain("SimplAssist");
+    expect(mocks.getRequestBrand).toHaveBeenCalledOnce();
+  });
+
+  it("keeps partner-host signup closed with generic login copy when branding is unavailable", async () => {
+    mocks.currentHost = "app.alphadogagency.ai";
+    mocks.resolveStrictAuthCallbackOrigin.mockResolvedValueOnce(
+      PARTNER_IDENTITY,
+    );
+    mocks.getRequestBrand.mockRejectedValueOnce(new Error("branding failed"));
+
+    const html = await renderPage();
+
+    expectInvitationOnly(html);
+    expect(html).toContain(">Log in</a>");
+    expect(html).not.toContain("Log in to");
+    expect(mocks.getRequestBrand).toHaveBeenCalledOnce();
+  });
+
+  it("does not use branding that does not match the strict partner identity", async () => {
+    mocks.currentHost = "app.alphadogagency.ai";
+    mocks.resolveStrictAuthCallbackOrigin.mockResolvedValueOnce(
+      PARTNER_IDENTITY,
+    );
+    mocks.getRequestBrand.mockResolvedValueOnce(DEFAULT_REQUEST);
+
+    const html = await renderPage();
+
+    expectInvitationOnly(html);
+    expect(html).toContain(">Log in</a>");
+    expect(html).not.toContain("Log in to");
+    expect(mocks.getRequestBrand).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed with generic invitation copy for an unknown host", async () => {
+    mocks.currentHost = "unknown.example.com";
+    mocks.resolveStrictAuthCallbackOrigin.mockResolvedValueOnce(null);
+
+    const html = await renderPage();
+
+    expect(mocks.resolveStrictAuthCallbackOrigin).toHaveBeenCalledWith(
+      "unknown.example.com",
+    );
+    expectInvitationOnly(html);
+    expect(html).toContain(">Log in</a>");
+    expect(html).not.toContain("Log in to");
+    expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with generic invitation copy when resolution throws", async () => {
+    mocks.currentHost = "app.alphadogagency.ai";
+    mocks.resolveStrictAuthCallbackOrigin.mockRejectedValueOnce(
+      new Error("lookup failed"),
+    );
+
+    const html = await renderPage();
+
+    expectInvitationOnly(html);
+    expect(html).toContain(">Log in</a>");
+    expect(html).not.toContain("Log in to");
+    expect(mocks.getRequestBrand).not.toHaveBeenCalled();
+  });
+
+  it("keeps local development signup when localhost resolves as direct", async () => {
+    mocks.currentHost = "localhost:3000";
+    mocks.resolveStrictAuthCallbackOrigin.mockResolvedValueOnce({
+      ...DIRECT_IDENTITY,
+      origin: "http://localhost:3000",
+    });
+
+    const html = await renderPage();
+
+    expect(mocks.resolveStrictAuthCallbackOrigin).toHaveBeenCalledWith(
+      "localhost:3000",
+    );
+    expect(html).toContain("Create your account");
+    expect(html).toContain("<form");
+    expect(html).not.toContain("Account creation is by invitation");
+    expect(mocks.createBrowserClient).toHaveBeenCalledOnce();
+    expect(mocks.getRequestBrand).not.toHaveBeenCalled();
   });
 });
 
