@@ -82,6 +82,14 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
+/* The marketing chat is injected directly into <body>, outside React's page
+   tree. Default it to hidden unless the homepage lifecycle explicitly enables
+   it so client-side navigation cannot carry it into auth or app routes. */
+body:not(.sa-homepage-widget-route)
+  .sa-widget-container[data-homepage-only="true"] {
+  display: none !important;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

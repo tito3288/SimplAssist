@@ -20,6 +20,7 @@ export async function GET() {
   var configPath = script && script.getAttribute('data-preview') === 'true'
     ? '/api/widget/preview-config'
     : '/api/widget/config';
+  var homepageOnly = script && script.getAttribute('data-homepage-only') === 'true';
 
   var config = null;
   var messages = [];
@@ -136,6 +137,7 @@ export async function GET() {
   document.head.appendChild(style);
 
   var container = el('div', { class: 'sa-widget-container' });
+  if (homepageOnly) container.setAttribute('data-homepage-only', 'true');
   var btn = el('div');
   var badge = el('div', { class: 'sa-widget-badge', style: { display: 'none' } }, '0');
   var attentionDot = el('div', { class: 'sa-widget-attention-dot', style: { display: 'none' }, 'aria-hidden': 'true' });

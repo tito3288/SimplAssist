@@ -1,6 +1,5 @@
 import Link from "next/link";
 import Image from "next/image";
-import Script from "next/script";
 import {
   Phone,
   MessageCircle,
@@ -17,6 +16,7 @@ import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { OpenChatButton } from "./open-chat-button";
+import { HomepageChatWidget } from "./homepage-chat-widget";
 import {
   getHomepageJsonLd,
   HOME_DEFINITION,
@@ -295,11 +295,7 @@ export default function HomePage() {
           __html: serializeJsonLd(getHomepageJsonLd()),
         }}
       />
-      <Script
-        src="https://simplassist.com/widget/embed.js"
-        data-business-id="ea848911-ef72-44a6-8cf3-c47b3959be26"
-        strategy="afterInteractive"
-      />
+      <HomepageChatWidget />
 
       {/* Ambient backgrounds — light gets its own warm treatment */}
       <div

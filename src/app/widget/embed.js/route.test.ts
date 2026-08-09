@@ -193,11 +193,14 @@ class FakeDocument {
   readonly body = new FakeElement("body");
   readonly currentScript: FakeElement;
 
-  constructor(preview = false) {
+  constructor(preview = false, homepageOnly = false) {
     this.currentScript = new FakeElement("script");
     this.currentScript.src = "https://simplassist.test/widget/embed.js";
     this.currentScript.setAttribute("data-business-id", "business-123");
     if (preview) this.currentScript.setAttribute("data-preview", "true");
+    if (homepageOnly) {
+      this.currentScript.setAttribute("data-homepage-only", "true");
+    }
   }
 
   createElement(tag: string) {
@@ -285,11 +288,11 @@ interface QueuedResponse {
 
 async function createHarness(
   responses: QueuedResponse[],
-  options: { preview?: boolean } = {},
+  options: { preview?: boolean; homepageOnly?: boolean } = {},
 ) {
   const response = await GET();
   const script = await response.text();
-  const document = new FakeDocument(options.preview);
+  const document = new FakeDocument(options.preview, options.homepageOnly);
   const timers = new FakeTimers();
   const requests: Array<{ url: string; init?: Record<string, unknown> }> = [];
   const storage = new Map<string, string>();
@@ -394,6 +397,27 @@ describe("widget embed runtime", () => {
 
     expect(footerLink?.textContent).toBe("Powered by SimplAssist");
     expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
+  });
+
+  it("marks only an explicitly homepage-scoped widget container", async () => {
+    const regularHarness = await createHarness([
+      { status: 200, body: availableConfig },
+    ]);
+    const homepageHarness = await createHarness(
+      [{ status: 200, body: availableConfig }],
+      { homepageOnly: true },
+    );
+
+    expect(
+      regularHarness.document
+        .querySelector(".sa-widget-container")
+        ?.getAttribute("data-homepage-only"),
+    ).toBeNull();
+    expect(
+      homepageHarness.document
+        .querySelector(".sa-widget-container")
+        ?.getAttribute("data-homepage-only"),
+    ).toBe("true");
   });
 
   it("applies partner attribution and resets it on a later default config", async () => {
