@@ -6,7 +6,11 @@ vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
 
-import { findOrCreateContact } from "./contacts";
+import {
+  findOrCreateContact,
+  updateContactEmail,
+  updateContactName,
+} from "./contacts";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const CONTACT_ID = "00000000-0000-4000-8000-000000000002";
@@ -160,5 +164,31 @@ describe("findOrCreateContact", () => {
       "+13175550100"
     );
     expect(mocks.from).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("contact updates", () => {
+  it("rejects when saving a contact name returns a Supabase error", async () => {
+    const error = { code: "42501", message: "name update denied" };
+    queueResults({ data: null, error });
+
+    await expect(updateContactName(CONTACT_ID, "Avery")).rejects.toBe(error);
+
+    expect(chains[0].update).toHaveBeenCalledWith({ name: "Avery" });
+    expect(chains[0].eq).toHaveBeenCalledWith("id", CONTACT_ID);
+  });
+
+  it("rejects when saving a contact email returns a Supabase error", async () => {
+    const error = { code: "23505", message: "email already exists" };
+    queueResults({ data: null, error });
+
+    await expect(
+      updateContactEmail(CONTACT_ID, "avery@example.com")
+    ).rejects.toBe(error);
+
+    expect(chains[0].update).toHaveBeenCalledWith({
+      email: "avery@example.com",
+    });
+    expect(chains[0].eq).toHaveBeenCalledWith("id", CONTACT_ID);
   });
 });

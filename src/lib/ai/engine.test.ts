@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -136,6 +137,13 @@ vi.mock("./knowledgeGapSignal", async (importOriginal) => {
   };
 });
 vi.mock("./tools", () => ({
+  signupGoalTools: [
+    {
+      name: "offer_goal_link",
+      description: "signup",
+      input_schema: { type: "object", properties: {}, required: [] },
+    },
+  ],
   calendarTools: [
     {
       name: "check_availability",
@@ -209,6 +217,38 @@ const ACTIVE_CONTROLS = {
   textingPausedAt: null,
   bookingsPausedAt: null,
 };
+const EXPECTED_CONTACT_TOOLS = [
+  {
+    name: "save_contact_name",
+    description:
+      "Save the customer's name to their contact record. Call this when the customer tells you their name.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The customer's name",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "save_contact_email",
+    description:
+      "Save the customer's email to their contact record. Call this when the customer provides their email address.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: {
+          type: "string",
+          description: "The customer's email address",
+        },
+      },
+      required: ["email"],
+    },
+  },
+] as const;
 
 function operationalControls(
   overrides: Partial<{
@@ -259,6 +299,64 @@ function setAiData() {
     data: { id: "calendar_1" },
     error: null,
   });
+}
+
+function setBusinessGoal(
+  primaryGoal: "book" | "signup" | "quote" | "callback" | null | undefined,
+  goalUrl: string | null = null
+) {
+  const current = tableResults.get("businesses") as {
+    data: Record<string, unknown>;
+    error: null;
+  };
+  const data: Record<string, unknown> = {
+    ...current.data,
+    goal_url: goalUrl,
+  };
+  if (primaryGoal !== undefined) {
+    data.primary_goal = primaryGoal;
+  }
+  tableResults.set("businesses", { data, error: null });
+}
+
+function setAiSettings(overrides: Record<string, unknown>) {
+  const current = tableResults.get("ai_settings") as {
+    data: Record<string, unknown>;
+    error: null;
+  };
+  const data = { ...current.data, ...overrides };
+  tableResults.set("ai_settings", { data, error: null });
+  return data;
+}
+
+function legacyGoldenHash(
+  result: Awaited<ReturnType<typeof processIncomingMessageDetailed>>
+) {
+  const legacyResult = {
+    text: result.text,
+    knowledgeGapDetected: result.knowledgeGapDetected,
+    conversationId: result.conversationId,
+    sourceMessageId: result.sourceMessageId,
+  };
+  const projection = JSON.stringify({
+    apiParams: mocks.anthropicCreate.mock.calls[0]?.[0],
+    result: legacyResult,
+    persistedMessages: mocks.addMessage.mock.calls,
+  });
+  return createHash("sha256").update(projection).digest("hex");
+}
+
+function expectedGoalLinkIdempotencyKey(sourceMessageId: string): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        "goal-link-offered:v1",
+        BUSINESS_ID,
+        sourceMessageId,
+      ]),
+      "utf8"
+    )
+    .digest("base64url");
 }
 
 beforeEach(() => {
@@ -1083,56 +1181,72 @@ describe("processIncomingMessage operational controls", () => {
     }
   );
 
-  it("retains friendly contact-tool fallback text for an ordinary mutation failure", async () => {
-    const contactError = new Error("contact provider unavailable");
-    mocks.anthropicCreate
-      .mockResolvedValueOnce({
-        stop_reason: "tool_use",
-        content: [
-          {
-            type: "tool_use",
-            id: "tool_1",
-            name: "save_contact_name",
-            input: { name: "Pat" },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "Thanks, Pat." }],
-      });
-    mocks.updateContactName.mockRejectedValueOnce(contactError);
+  it.each([
+    {
+      toolName: "save_contact_name",
+      input: { name: "Pat" },
+      updateMock: mocks.updateContactName,
+      failureResult:
+        "Contact name could not be saved. Do not say it was saved; continue helping the customer.",
+    },
+    {
+      toolName: "save_contact_email",
+      input: { email: "pat@example.com" },
+      updateMock: mocks.updateContactEmail,
+      failureResult:
+        "Contact email could not be saved. Do not say it was saved; continue helping the customer.",
+    },
+  ])(
+    "feeds an honest $toolName failure result back to the model",
+    async ({ toolName, input, updateMock, failureResult }) => {
+      const contactError = new Error("contact provider unavailable");
+      mocks.anthropicCreate
+        .mockResolvedValueOnce({
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_1",
+              name: toolName,
+              input,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "Thanks, Pat." }],
+        });
+      updateMock.mockRejectedValueOnce(contactError);
 
-    await expect(
-      processIncomingMessage(
-        BUSINESS_ID,
-        "+15745550100",
-        null,
-        "I'm Pat.",
-        "sms"
-      )
-    ).resolves.toBe("Thanks, Pat.");
+      await expect(
+        processIncomingMessage(
+          BUSINESS_ID,
+          "+15745550100",
+          null,
+          "I'm Pat.",
+          "sms"
+        )
+      ).resolves.toBe("Thanks, Pat.");
 
-    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
-    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        messages: expect.arrayContaining([
-          expect.objectContaining({
-            role: "user",
-            content: [
-              expect.objectContaining({ content: "Contact info saved." }),
-            ],
-          }),
-        ]),
-      })
-    );
-    expect(mocks.addMessage).toHaveBeenCalledTimes(2);
-    expect(console.error).toHaveBeenCalledWith(
-      "[contact-tool] Error executing save_contact_name:",
-      contactError
-    );
-  });
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+      expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "user",
+              content: [expect.objectContaining({ content: failureResult })],
+            }),
+          ]),
+        })
+      );
+      expect(mocks.addMessage).toHaveBeenCalledTimes(2);
+      expect(console.error).toHaveBeenCalledWith(
+        `[contact-tool] Error executing ${toolName}:`,
+        contactError
+      );
+    }
+  );
 
   it("retains friendly calendar fallback text for an ordinary provider failure", async () => {
     const calendarError = new Error("calendar provider unavailable");
@@ -1950,6 +2064,8 @@ describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
       knowledgeGapDetected: true,
       conversationId: CONVERSATION.id,
       sourceMessageId: "message_1",
+      actions: [],
+      assistantMessageId: "message_1",
     });
 
     expect(mocks.addMessage).toHaveBeenNthCalledWith(
@@ -2023,6 +2139,8 @@ describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
       knowledgeGapDetected: false,
       conversationId: CONVERSATION.id,
       sourceMessageId: "provider-message-1",
+      actions: [],
+      assistantMessageId: null,
     });
     expect(mocks.addMessage).not.toHaveBeenCalled();
   });
@@ -2084,5 +2202,539 @@ describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
       "[ai-engine] Knowledge-gap signal parsing failed:",
       parserError
     );
+  });
+});
+
+describe("processIncomingMessageDetailed goal-aware behavior", () => {
+  it.each([undefined, null, "book", "quote", "callback"] as const)(
+    "keeps the clean-origin SMS model/output projection for primary_goal=%s",
+    async (primaryGoal) => {
+      setBusinessGoal(primaryGoal);
+
+      const result = await processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Can I book?",
+        "sms"
+      );
+
+      expect(legacyGoldenHash(result)).toBe(
+        "cfaa3122d6d5fdf4e38521aad0ea1e0e5b85570db3e85d5b4d2bfee9f6f79a27"
+      );
+      expect(result.actions).toEqual([]);
+      expect(result.assistantMessageId).toBe("message_1");
+      expect(
+        mocks.anthropicCreate.mock.calls[0]?.[0].tools.map(
+          (tool: { name: string }) => tool.name
+        )
+      ).toEqual([
+        "save_contact_name",
+        "save_contact_email",
+        "check_availability",
+        "create_booking",
+      ]);
+    }
+  );
+
+  it("keeps the clean-origin web-chat model/output projection", async () => {
+    const webConversation = { ...CONVERSATION, channel: "web_chat" };
+    mocks.getOrCreateConversation.mockResolvedValue(webConversation);
+    setBusinessGoal(null);
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      null,
+      null,
+      "Can I book?",
+      "web_chat"
+    );
+
+    expect(legacyGoldenHash(result)).toBe(
+      "9760d2489472d9a48d39743f6dd7992a2a044d95e82b78d2a68185218913bbfa"
+    );
+    expect(result.actions).toEqual([]);
+    expect(result.assistantMessageId).toBe("message_1");
+  });
+
+  it.each([
+    {
+      label: "collect-info booking is active",
+      settings: {
+        booking_enabled: true,
+        booking_mode: "collect_info",
+      },
+      controls: ACTIVE_CONTROLS,
+      bookingOperationallyAvailable: true,
+    },
+    {
+      label: "booking is disabled",
+      settings: {
+        booking_enabled: false,
+        booking_mode: "schedule_direct",
+      },
+      controls: ACTIVE_CONTROLS,
+      bookingOperationallyAvailable: true,
+    },
+    {
+      label: "booking is operationally paused",
+      settings: {
+        booking_enabled: true,
+        booking_mode: "schedule_direct",
+      },
+      controls: operationalControls({
+        bookingsPausedAt: "2026-08-10T12:00:00.000Z",
+      }),
+      bookingOperationallyAvailable: false,
+    },
+  ] as const)(
+    "assembles the exact legacy non-calendar request when $label",
+    async (scenario) => {
+      // Exact prompt bytes for these three paths are independently frozen in
+      // prompt.test.ts. Keep the engine mock fixed so this assertion isolates
+      // model parameters, tool order, visible output, and persistence.
+      setBusinessGoal("book");
+      const aiSettings = setAiSettings(scenario.settings);
+      mocks.resolveBusinessOperationalControls.mockResolvedValue(
+        scenario.controls
+      );
+      mocks.shouldIncludeCalendarTools.mockImplementation(
+        (
+          settings: {
+            booking_enabled: boolean;
+            booking_mode: string;
+          },
+          hasCalendar: boolean,
+          bookingOperationallyAvailable: boolean
+        ) =>
+          bookingOperationallyAvailable &&
+          settings.booking_enabled &&
+          settings.booking_mode === "schedule_direct" &&
+          hasCalendar
+      );
+
+      const result = await processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Can I book?",
+        "sms"
+      );
+
+      expect(mocks.shouldIncludeCalendarTools).toHaveBeenCalledOnce();
+      expect(mocks.shouldIncludeCalendarTools).toHaveBeenCalledWith(
+        aiSettings,
+        true,
+        scenario.bookingOperationallyAvailable
+      );
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.anthropicCreate.mock.calls[0]?.[0]).toEqual({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 500,
+        system: "SYSTEM PROMPT",
+        messages: [{ role: "user", content: "Can I book?" }],
+        tools: EXPECTED_CONTACT_TOOLS,
+      });
+      expect(result).toEqual({
+        text: "Absolutely.",
+        knowledgeGapDetected: false,
+        conversationId: CONVERSATION.id,
+        sourceMessageId: "message_1",
+        actions: [],
+        assistantMessageId: "message_1",
+      });
+      expect(mocks.addMessage.mock.calls).toEqual([
+        [
+          CONVERSATION.id,
+          BUSINESS_ID,
+          "customer",
+          "Can I book?",
+          "sms",
+        ],
+        [
+          CONVERSATION.id,
+          BUSINESS_ID,
+          "assistant",
+          "Absolutely.",
+          "sms",
+        ],
+      ]);
+    }
+  );
+
+  it("rejects signup configuration without a goal URL before Anthropic", async () => {
+    setBusinessGoal("signup", null);
+
+    await expect(
+      processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "How do I sign up?",
+        "sms"
+      )
+    ).rejects.toBeInstanceOf(AIProcessingStateError);
+
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("offers only the signup tool and emits one linked action after the final reply contains the exact URL", async () => {
+    const goalUrl = "https://example.com/start?plan=pro";
+    setBusinessGoal("signup", goalUrl);
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "goal_tool_1",
+            name: "offer_goal_link",
+            input: {},
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: `You can get started at ${goalUrl}` }],
+      });
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "I'd like to sign up.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: "00000000-0000-4000-8000-000000000004",
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    const initialTools = mocks.anthropicCreate.mock.calls[0]?.[0].tools.map(
+      (tool: { name: string }) => tool.name
+    );
+    expect(initialTools).toEqual([
+      "save_contact_name",
+      "save_contact_email",
+      "offer_goal_link",
+    ]);
+    expect(mocks.shouldIncludeCalendarTools).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: [
+              expect.objectContaining({
+                content: expect.stringContaining(goalUrl),
+              }),
+            ],
+          }),
+        ]),
+      })
+    );
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]).toEqual({
+      kind: "goal_link_offered",
+      goalAtEvent: "signup",
+      channel: "sms",
+      contactId: CONTACT.id,
+      conversationId: CONVERSATION.id,
+      sourceMessageId: "00000000-0000-4000-8000-000000000004",
+      idempotencyKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
+    expect(result.assistantMessageId).toBeNull();
+  });
+
+  it.each([
+    {
+      label: "the final reply omits the URL",
+      firstResponse: {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "goal_tool_1",
+            name: "offer_goal_link",
+            input: {},
+          },
+        ],
+      },
+      finalText: "I can help you get started.",
+      sourceMessageId: "00000000-0000-4000-8000-000000000004",
+    },
+    {
+      label: "the model did not use the structured link tool",
+      firstResponse: null,
+      finalText: "Start at https://example.com/start",
+      sourceMessageId: "00000000-0000-4000-8000-000000000004",
+    },
+    {
+      label: "the inbound source message is not durable",
+      firstResponse: {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "goal_tool_1",
+            name: "offer_goal_link",
+            input: {},
+          },
+        ],
+      },
+      finalText: "Start at https://example.com/start",
+      sourceMessageId: undefined,
+    },
+  ])("does not emit an action when $label", async (scenario) => {
+    const goalUrl = "https://example.com/start";
+    setBusinessGoal("signup", goalUrl);
+    if (scenario.firstResponse) {
+      mocks.anthropicCreate
+        .mockResolvedValueOnce(scenario.firstResponse)
+        .mockResolvedValueOnce({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: scenario.finalText }],
+        });
+    } else {
+      mocks.anthropicCreate.mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: scenario.finalText }],
+      });
+    }
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "I'd like to sign up.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: scenario.sourceMessageId,
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    expect(result.actions).toEqual([]);
+  });
+
+  it("keeps the in-flight signup snapshot stable and applies a new signup URL on the next message", async () => {
+    const oldUrl = "https://example.com/old";
+    const newUrl = "https://example.com/new";
+    const oldSourceMessageId = "00000000-0000-4000-8000-000000000004";
+    const newSourceMessageId = "00000000-0000-4000-8000-000000000005";
+    const pendingToolRequest = deferred<{
+      stop_reason: "tool_use";
+      content: Array<{
+        type: "tool_use";
+        id: string;
+        name: string;
+        input: Record<string, never>;
+      }>;
+    }>();
+    setBusinessGoal("signup", oldUrl);
+    mocks.buildConversationMessages.mockImplementation(() => [
+      { role: "user", content: "I want to sign up." },
+    ]);
+    mocks.anthropicCreate
+      .mockReturnValueOnce(pendingToolRequest.promise)
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: `Start here: ${oldUrl}` }],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "goal_tool_2",
+            name: "offer_goal_link",
+            input: {},
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: `Start here: ${newUrl}` }],
+      });
+
+    const firstTurn = processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "I want to sign up.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: oldSourceMessageId,
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    });
+    setBusinessGoal("signup", newUrl);
+    pendingToolRequest.resolve({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "goal_tool_1",
+          name: "offer_goal_link",
+          input: {},
+        },
+      ],
+    });
+
+    const firstResult = await firstTurn;
+    expect(firstResult).toMatchObject({
+      text: `Start here: ${oldUrl}`,
+      actions: [
+        expect.objectContaining({
+          goalAtEvent: "signup",
+          sourceMessageId: oldSourceMessageId,
+          idempotencyKey:
+            expectedGoalLinkIdempotencyKey(oldSourceMessageId),
+        }),
+      ],
+    });
+    expect(
+      mocks.anthropicCreate.mock.calls[1]?.[0].messages.at(-1)
+    ).toEqual(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({ content: expect.stringContaining(oldUrl) }),
+        ],
+      })
+    );
+    expect(
+      mocks.anthropicCreate.mock.calls[1]?.[0].messages.at(-1)
+    ).not.toEqual(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({ content: expect.stringContaining(newUrl) }),
+        ],
+      })
+    );
+
+    const secondResult = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "I want to sign up with the new link.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId: newSourceMessageId,
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+    expect(secondResult).toMatchObject({
+      text: `Start here: ${newUrl}`,
+      actions: [
+        expect.objectContaining({
+          goalAtEvent: "signup",
+          sourceMessageId: newSourceMessageId,
+          idempotencyKey:
+            expectedGoalLinkIdempotencyKey(newSourceMessageId),
+        }),
+      ],
+    });
+    expect(firstResult.actions[0]?.idempotencyKey).not.toBe(
+      secondResult.actions[0]?.idempotencyKey
+    );
+    expect(
+      mocks.anthropicCreate.mock.calls[2]?.[0].tools.map(
+        (tool: { name: string }) => tool.name
+      )
+    ).toContain("offer_goal_link");
+    expect(
+      mocks.anthropicCreate.mock.calls[3]?.[0].messages.at(-1)
+    ).toEqual(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({ content: expect.stringContaining(newUrl) }),
+        ],
+      })
+    );
+    expect(
+      mocks.anthropicCreate.mock.calls[3]?.[0].messages.at(-1)
+    ).not.toEqual(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({ content: expect.stringContaining(oldUrl) }),
+        ],
+      })
+    );
+  });
+
+  it("derives a stable opaque key from the business and durable source message only", async () => {
+    const goalUrl = "https://example.com/start?email=pat@example.com";
+    const sourceMessageId = "00000000-0000-4000-8000-000000000004";
+    setBusinessGoal("signup", goalUrl);
+    mocks.buildConversationMessages.mockImplementation(() => [
+      { role: "user", content: "I want to sign up." },
+    ]);
+    for (let turn = 0; turn < 2; turn += 1) {
+      mocks.anthropicCreate
+        .mockResolvedValueOnce({
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: `goal_tool_${turn}`,
+              name: "offer_goal_link",
+              input: {},
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: `Start here: ${goalUrl}` }],
+        });
+    }
+
+    const runTurn = () =>
+      processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "I want to sign up.",
+        "sms",
+        null,
+        {
+          persistCustomer: false,
+          persistAssistant: false,
+          sourceMessageId,
+          contact: CONTACT as never,
+          conversation: CONVERSATION as never,
+        }
+      );
+    const first = await runTurn();
+    const second = await runTurn();
+    const firstKey = first.actions[0]?.idempotencyKey;
+    const secondKey = second.actions[0]?.idempotencyKey;
+
+    expect(firstKey).toBe(secondKey);
+    expect(firstKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(firstKey).not.toContain(BUSINESS_ID);
+    expect(firstKey).not.toContain(sourceMessageId);
+    expect(firstKey).not.toContain("example.com");
+    expect(firstKey).not.toContain("pat@example.com");
   });
 });

@@ -4,6 +4,19 @@ import type Anthropic from "@anthropic-ai/sdk";
 export const CREATE_BOOKING_START_TIME_CONTRACT =
   "create_booking.start_time must be a business-local wall time in exactly YYYY-MM-DDTHH:mm:ss format with NO Z suffix or UTC offset.";
 
+export const signupGoalTools: Anthropic.Tool[] = [
+  {
+    name: "offer_goal_link",
+    description:
+      "Offer the business's signup link when the customer's current inbound message shows interest in signing up or taking the next step. Use this only for the direct reply to that inbound message. The tool returns the exact URL to include in that reply.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+];
+
 export const calendarTools: Anthropic.Tool[] = [
   {
     name: "check_availability",

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AISettings,
@@ -124,6 +125,117 @@ const CONTACT_CASES = [
   },
 ] as const;
 
+// Frozen before production edits from clean origin/main
+// 9472d9f3c9c2417be56958bdabaab7121457c87b at the fixed time below.
+const LEGACY_GOLDEN_BUSINESS = {
+  id: "00000000-0000-4000-8000-000000000001",
+  name: "Golden Plumbing",
+  business_type: "plumber",
+  business_type_other: null,
+  address: "123 Main St",
+  city: "Indianapolis",
+  state: "IN",
+  zip: "46204",
+  timezone: "America/Indiana/Indianapolis",
+  phone_number: "+13175550100",
+  email: "help@golden.example",
+} as Business;
+
+const LEGACY_GOLDEN_SETTINGS = {
+  tone: "friendly",
+  business_voice: "we",
+  language: "en",
+  guardrails: ["promise discounts"],
+  booking_enabled: true,
+  booking_mode: "schedule_direct",
+} as AISettings;
+
+const LEGACY_GOLDEN_SERVICES = [
+  {
+    name: "Drain cleaning",
+    description: "Clear blocked drains",
+    price: 125,
+  },
+] as unknown as Service[];
+
+const LEGACY_GOLDEN_FAQS = [
+  {
+    question: "Do you offer emergency service?",
+    answer: "Yes, 24/7.",
+  },
+] as FAQ[];
+
+const LEGACY_GOLDEN_HOURS = [
+  {
+    day_of_week: 1,
+    open_time: "08:00",
+    close_time: "17:00",
+    is_closed: false,
+  },
+] as BusinessHours[];
+
+const LEGACY_GOLDEN_SCENARIOS = [
+  {
+    label: "sms_direct",
+    expected:
+      "759ad2dbef2b6abfeb53ea1332e39cf89b57eed78fb65dfc2243eef7355b07d4",
+    settings: LEGACY_GOLDEN_SETTINGS,
+    calendarConnected: true,
+    channel: "sms",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "web_direct",
+    expected:
+      "0a1e6fd2f11665cfb799afc8c760d2da8fa15fc395dce28655d2bc0dd18bac3d",
+    settings: LEGACY_GOLDEN_SETTINGS,
+    calendarConnected: true,
+    channel: "web_chat",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "sms_collect",
+    expected:
+      "d7fbcfcf91a8a3bfbb78ee8576e3b6564b21d47a119a8a07b604e6d281755d3a",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_mode: "collect_info",
+    } as AISettings,
+    calendarConnected: false,
+    channel: "sms",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "sms_disabled",
+    expected:
+      "1741572b06d78d39f98a591948a0dcc41385ab7713a4363dc41b94dd1d16acb2",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_enabled: false,
+    } as AISettings,
+    calendarConnected: false,
+    channel: "sms",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "sms_paused",
+    expected:
+      "972d3449bd13f540fd65bc8917a8f6608f57d911bc5b9f28ac0fcb0fcb2eefaa",
+    settings: LEGACY_GOLDEN_SETTINGS,
+    calendarConnected: true,
+    channel: "sms",
+    bookingOperationallyAvailable: false,
+  },
+] as const;
+
+const LEGACY_GOAL_CASES = [
+  { label: "omitted", value: "omitted" },
+  { label: "null", value: null },
+  { label: "book", value: "book" },
+  { label: "quote", value: "quote" },
+  { label: "callback", value: "callback" },
+] as const;
+
 function business(
   overrides: Partial<Business> = {}
 ): Business {
@@ -183,6 +295,119 @@ function expectedKnowledgeGapSection(channel: "sms" | "web_chat"): string {
     "",
   ].join("\n");
 }
+
+describe("buildSystemPrompt legacy byte-for-byte goldens", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T16:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(LEGACY_GOAL_CASES)(
+    "keeps the $label goal on every frozen legacy path",
+    ({ value }) => {
+      const goldenBusiness =
+        value === "omitted"
+          ? ({ ...LEGACY_GOLDEN_BUSINESS } as Business)
+          : ({
+              ...LEGACY_GOLDEN_BUSINESS,
+              primary_goal: value,
+            } as Business);
+
+      for (const scenario of LEGACY_GOLDEN_SCENARIOS) {
+        const prompt = buildSystemPrompt(
+          goldenBusiness,
+          scenario.settings,
+          LEGACY_GOLDEN_SERVICES,
+          LEGACY_GOLDEN_FAQS,
+          LEGACY_GOLDEN_HOURS,
+          scenario.calendarConnected,
+          scenario.channel,
+          scenario.bookingOperationallyAvailable
+        );
+        const digest = createHash("sha256").update(prompt).digest("hex");
+
+        expect(digest, scenario.label).toBe(scenario.expected);
+      }
+    }
+  );
+});
+
+describe("buildSystemPrompt signup goal", () => {
+  it.each(["sms", "web_chat"] as const)(
+    "uses trained-content signup guidance without booking behavior for %s",
+    (channel) => {
+      const goalUrl = "https://signup.golden.example/private-path";
+      const prompt = buildSystemPrompt(
+        business({
+          primary_goal: "signup",
+          goal_url: goalUrl,
+          phone_number: PHONE_NUMBER,
+          email: EMAIL,
+        }),
+        {
+          ...AI_SETTINGS,
+          booking_mode: "schedule_direct",
+        },
+        SERVICES,
+        FAQS,
+        [],
+        true,
+        channel,
+        true
+      );
+
+      expect(prompt).toContain("SIGNUP GOAL:");
+      expect(prompt).toContain(
+        "using only the supplied business information and successful tool results"
+      );
+      expect(prompt).toContain(
+        "current inbound message shows interest in signing up, enrolling, getting started, or taking the next step"
+      );
+      expect(prompt).toContain("call the offer_goal_link tool");
+      expect(prompt).toContain(
+        "Include that exact URL only in your direct reply to the current inbound customer message."
+      );
+      expect(prompt).toContain(
+        "Do not ask for or require the customer's name or email before offering it."
+      );
+      expect(prompt).toContain(
+        "Do not offer booking, appointments, calendar availability, callbacks, email follow-up, staff escalation"
+      );
+      expect(prompt).not.toContain(goalUrl);
+      expect(prompt).not.toContain("BOOKING:");
+      expect(prompt).not.toContain("Booking confirmation:");
+      expect(prompt).not.toContain("When a customer wants to book");
+      expect(prompt).not.toContain("check_availability");
+      expect(prompt).not.toContain("create_booking");
+      expect(prompt).not.toContain(
+        "After your first exchange with the customer, naturally ask for their name."
+      );
+      expect(prompt).not.toContain("What's your email so we can follow up");
+    }
+  );
+
+  it("does not reintroduce booking copy when booking is paused", () => {
+    const prompt = buildSystemPrompt(
+      business({ primary_goal: "signup" }),
+      AI_SETTINGS,
+      SERVICES,
+      FAQS,
+      [],
+      false,
+      "sms",
+      false
+    );
+
+    expect(prompt).toContain("SIGNUP GOAL:");
+    expect(prompt).not.toContain("BOOKING:");
+    expect(prompt).not.toContain("Booking is currently unavailable");
+    expect(prompt).not.toContain("Booking confirmation:");
+  });
+});
 
 describe("buildSystemPrompt booking operational availability", () => {
   it.each(["collect_info", "schedule_direct"] as const)(

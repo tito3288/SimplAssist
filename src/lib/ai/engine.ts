@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { anthropic } from "@/lib/anthropic/client";
 import {
   isOperationalControlsResolutionError,
@@ -24,7 +25,11 @@ import {
 } from "./knowledgeGapSignal";
 import type { ParsedKnowledgeGapSignal } from "./knowledgeGapSignal";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
-import { calendarTools, shouldIncludeCalendarTools } from "./tools";
+import {
+  calendarTools,
+  shouldIncludeCalendarTools,
+  signupGoalTools,
+} from "./tools";
 import { checkAvailability, createBooking } from "@/lib/google/calendar";
 import {
   isBookingOperationalBlockedError,
@@ -47,6 +52,8 @@ const FALLBACK_MESSAGE =
 
 const BOOKING_UNAVAILABLE_TOOL_RESULT =
   "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.";
+
+const GOAL_LINK_IDEMPOTENCY_NAMESPACE = "goal-link-offered:v1";
 
 export type AIProcessingBlockedReason =
   | "feature_not_entitled"
@@ -119,6 +126,34 @@ export interface ProcessIncomingMessageResult {
   knowledgeGapDetected: boolean;
   conversationId: string | null;
   sourceMessageId: string | null;
+  actions: GoalLinkOfferedAction[];
+  assistantMessageId: string | null;
+}
+
+export interface GoalLinkOfferedAction {
+  kind: "goal_link_offered";
+  goalAtEvent: "signup";
+  channel: Channel;
+  contactId: string;
+  conversationId: string;
+  sourceMessageId: string;
+  idempotencyKey: string;
+}
+
+function buildGoalLinkIdempotencyKey(
+  businessId: string,
+  sourceMessageId: string
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        GOAL_LINK_IDEMPOTENCY_NAMESPACE,
+        businessId,
+        sourceMessageId,
+      ]),
+      "utf8"
+    )
+    .digest("base64url");
 }
 
 /**
@@ -217,7 +252,13 @@ async function executeContactTool(
   } catch (error) {
     rethrowTypedAIProcessingError(error);
     console.error(`[contact-tool] Error executing ${toolName}:`, error);
-    return "Contact info saved.";
+    if (toolName === "save_contact_name") {
+      return "Contact name could not be saved. Do not say it was saved; continue helping the customer.";
+    }
+    if (toolName === "save_contact_email") {
+      return "Contact email could not be saved. Do not say it was saved; continue helping the customer.";
+    }
+    return "Contact info could not be saved. Do not say it was saved; continue helping the customer.";
   }
 }
 
@@ -495,6 +536,19 @@ export async function processIncomingMessageDetailed(
       );
     }
 
+    // Snapshot goal configuration from this turn's fresh business read. Never
+    // re-read it while carrying an action toward the delivery boundary.
+    const primaryGoal = (business as Business).primary_goal;
+    const isSignupGoal = primaryGoal === "signup";
+    const signupGoalUrl = isSignupGoal
+      ? (business as Business).goal_url
+      : null;
+    if (isSignupGoal && !signupGoalUrl) {
+      throw new AIProcessingStateError(
+        `Signup goal for business ${businessId} is missing its goal URL.`
+      );
+    }
+
     const canBookDirectly = canUseFeature(entitlements, "direct_booking");
     const hasCalendar = canBookDirectly && !!calendarToken;
     let history;
@@ -536,7 +590,9 @@ export async function processIncomingMessageDetailed(
         bookingAvailable
       );
       const requestTools: Anthropic.Tool[] = [...contactTools];
-      if (
+      if (isSignupGoal) {
+        requestTools.push(...signupGoalTools);
+      } else if (
         shouldIncludeCalendarTools(
           aiSettings as AISettings,
           hasCalendar,
@@ -572,6 +628,7 @@ export async function processIncomingMessageDetailed(
     let response = await anthropic.messages.create(apiParams);
     let loopCount = 0;
     const maxLoops = 3;
+    let goalLinkToolUsed = false;
 
     // Tool-calling loop
     while (response.stop_reason === "tool_use" && loopCount < maxLoops) {
@@ -592,6 +649,21 @@ export async function processIncomingMessageDetailed(
             toolUseBlock.name,
             toolUseBlock.input as Record<string, unknown>
           );
+        } else if (toolUseBlock.name === "offer_goal_link") {
+          await assertAIProcessingOperationallyAllowed(businessId, channel);
+          if (
+            !isSignupGoal ||
+            !signupGoalUrl ||
+            !enabledToolNames.has(toolUseBlock.name)
+          ) {
+            toolResult =
+              "That tool is not enabled for this business. Do not perform the action.";
+          } else {
+            goalLinkToolUsed = true;
+            toolResult =
+              `Offer this exact link in your direct reply to the customer's current message: ${signupGoalUrl} ` +
+              "Do not promise a callback, booking, follow-up, or any other action beyond providing the link.";
+          }
         } else if (
           toolUseBlock.name === "check_availability" ||
           toolUseBlock.name === "create_booking"
@@ -670,17 +742,40 @@ export async function processIncomingMessageDetailed(
       };
     }
     const responseText = parsedResponse.text || FALLBACK_MESSAGE;
+    const actions: GoalLinkOfferedAction[] =
+      isSignupGoal &&
+      signupGoalUrl &&
+      goalLinkToolUsed &&
+      sourceMessageId &&
+      responseText.includes(signupGoalUrl)
+        ? [
+            {
+              kind: "goal_link_offered",
+              goalAtEvent: "signup",
+              channel,
+              contactId: contact.id,
+              conversationId: conversation.id,
+              sourceMessageId,
+              idempotencyKey: buildGoalLinkIdempotencyKey(
+                businessId,
+                sourceMessageId
+              ),
+            },
+          ]
+        : [];
 
+    let assistantMessageId: string | null = null;
     if (options.persistAssistant !== false) {
       await assertAIProcessingOperationallyAllowed(businessId, channel);
       try {
-        await addMessage(
+        const persistedAssistantMessage = await addMessage(
           conversation.id,
           businessId,
           "assistant",
           responseText,
           channel
         );
+        assistantMessageId = persistedAssistantMessage.id;
       } catch (error) {
         throw new AIProcessingStateError(
           `Could not persist the assistant message for conversation ${conversation.id}.`,
@@ -701,6 +796,8 @@ export async function processIncomingMessageDetailed(
       knowledgeGapDetected: parsedResponse.knowledgeGapDetected,
       conversationId: conversation.id,
       sourceMessageId,
+      actions,
+      assistantMessageId,
     };
   } catch (error) {
     if (
@@ -718,6 +815,8 @@ export async function processIncomingMessageDetailed(
       knowledgeGapDetected: false,
       conversationId: null,
       sourceMessageId: null,
+      actions: [],
+      assistantMessageId: null,
     };
   }
 }

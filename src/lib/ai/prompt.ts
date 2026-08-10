@@ -91,6 +91,7 @@ export function buildSystemPrompt(
   channel: string = "sms",
   bookingOperationallyAvailable: boolean = true
 ): string {
+  const signupMode = business.primary_goal === "signup";
   const currentHours = isCurrentlyOpen(businessHours, business.timezone);
   const nameRef =
     aiSettings.business_voice === "we" ? "we" : business.name;
@@ -185,44 +186,64 @@ export function buildSystemPrompt(
     });
   }
 
-  sections.push("");
-  sections.push("BOOKING:");
-  if (!bookingOperationallyAvailable) {
+  if (signupMode) {
+    sections.push("");
+    sections.push("SIGNUP GOAL:");
     sections.push(
-      "Booking is currently unavailable. Do not collect booking details, offer appointment times, check availability, or claim that an appointment can be scheduled. If a customer asks to book, let them know booking is currently unavailable."
+      "Answer the customer's questions using only the supplied business information and successful tool results."
     );
-  } else if (aiSettings.booking_enabled) {
-    if (aiSettings.booking_mode === "collect_info") {
+    sections.push(
+      "When the customer's current inbound message shows interest in signing up, enrolling, getting started, or taking the next step, call the offer_goal_link tool."
+    );
+    sections.push(
+      "The tool returns the exact configured signup URL. Include that exact URL only in your direct reply to the current inbound customer message. Never alter, infer, invent, or proactively send a link, and do not reuse it in a later reply unless a new inbound message shows interest again."
+    );
+    sections.push(
+      "Offer the link as soon as the current message shows interest. Do not ask for or require the customer's name or email before offering it."
+    );
+    sections.push(
+      "Do not offer booking, appointments, calendar availability, callbacks, email follow-up, staff escalation, or any action the engine and successful tools did not actually perform."
+    );
+  } else {
+    sections.push("");
+    sections.push("BOOKING:");
+    if (!bookingOperationallyAvailable) {
       sections.push(
-        "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
+        "Booking is currently unavailable. Do not collect booking details, offer appointment times, check availability, or claim that an appointment can be scheduled. If a customer asks to book, let them know booking is currently unavailable."
       );
-    } else if (calendarConnected) {
-      sections.push(
-        `BUSINESS TIMEZONE (IANA): ${business.timezone}\n` +
-        `${CREATE_BOOKING_START_TIME_CONTRACT} Interpret the timestamp in the business timezone above; never convert it to UTC or add an offset.\n` +
-        "When a customer wants to book an appointment:\n" +
-        "1. Ask what service they need and their preferred date AND time. If they only give a date, ask for a time. If they only give a time, ask for a date.\n" +
-        "2. IMPORTANT: Convert any relative date the customer gives (like 'this Friday', 'next Monday', 'tomorrow', 'the 15th') into YYYY-MM-DD format before calling any tool. You know today's date from the context above — use it to calculate the correct date.\n" +
-        "3. If you are unsure which date they mean (e.g., 'Friday' could be this week or next), ask them to confirm: 'Did you mean this Friday the 11th or next Friday the 18th?'\n" +
-        "4. Use the check_availability tool with the date in YYYY-MM-DD format to find open slots\n" +
-        "5. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
-        "6. Once they pick a time, confirm the full details back to them: 'Just to confirm — [service] on [day, month date] at [time]. Is that correct?'\n" +
-        "7. After they confirm, ask for their name if you don't have it yet\n" +
-        "8. Ask for their email so we can send them a calendar invite with the appointment details. You MUST have their email before booking.\n" +
-        "9. Use the create_booking tool to book it — always include the customer_email and format start_time exactly as required above\n" +
-        "10. Confirm the appointment with date, time, and service\n" +
-        "Keep responses conversational and brief — this is SMS/chat."
-      );
+    } else if (aiSettings.booking_enabled) {
+      if (aiSettings.booking_mode === "collect_info") {
+        sections.push(
+          "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
+        );
+      } else if (calendarConnected) {
+        sections.push(
+          `BUSINESS TIMEZONE (IANA): ${business.timezone}\n` +
+          `${CREATE_BOOKING_START_TIME_CONTRACT} Interpret the timestamp in the business timezone above; never convert it to UTC or add an offset.\n` +
+          "When a customer wants to book an appointment:\n" +
+          "1. Ask what service they need and their preferred date AND time. If they only give a date, ask for a time. If they only give a time, ask for a date.\n" +
+          "2. IMPORTANT: Convert any relative date the customer gives (like 'this Friday', 'next Monday', 'tomorrow', 'the 15th') into YYYY-MM-DD format before calling any tool. You know today's date from the context above — use it to calculate the correct date.\n" +
+          "3. If you are unsure which date they mean (e.g., 'Friday' could be this week or next), ask them to confirm: 'Did you mean this Friday the 11th or next Friday the 18th?'\n" +
+          "4. Use the check_availability tool with the date in YYYY-MM-DD format to find open slots\n" +
+          "5. Present 3-5 available times to the customer (format as readable times like '10:00 AM')\n" +
+          "6. Once they pick a time, confirm the full details back to them: 'Just to confirm — [service] on [day, month date] at [time]. Is that correct?'\n" +
+          "7. After they confirm, ask for their name if you don't have it yet\n" +
+          "8. Ask for their email so we can send them a calendar invite with the appointment details. You MUST have their email before booking.\n" +
+          "9. Use the create_booking tool to book it — always include the customer_email and format start_time exactly as required above\n" +
+          "10. Confirm the appointment with date, time, and service\n" +
+          "Keep responses conversational and brief — this is SMS/chat."
+        );
+      } else {
+        // schedule_direct selected but calendar not connected — fall back to collect_info
+        sections.push(
+          "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
+        );
+      }
     } else {
-      // schedule_direct selected but calendar not connected — fall back to collect_info
       sections.push(
-        "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
+        `Booking is not currently available. If a customer asks to book, suggest they call during business hours${business.email ? ` or email ${business.email}` : ""}.`
       );
     }
-  } else {
-    sections.push(
-      `Booking is not currently available. If a customer asks to book, suggest they call during business hours${business.email ? ` or email ${business.email}` : ""}.`
-    );
   }
 
   sections.push("");
@@ -274,7 +295,9 @@ export function buildSystemPrompt(
     );
   }
   sections.push(
-    "- These knowledge-gap rules do not override STRICT RULES, BOOKING, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION timing."
+    signupMode
+      ? "- These knowledge-gap rules do not override STRICT RULES, SIGNUP GOAL, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION."
+      : "- These knowledge-gap rules do not override STRICT RULES, BOOKING, successful tool results, CUSTOMER CARE SMS COMPLIANCE, or CONTACT COLLECTION timing."
   );
 
   sections.push("");
@@ -286,22 +309,35 @@ export function buildSystemPrompt(
 
   sections.push("");
   sections.push("CONTACT COLLECTION:");
-  sections.push("- After your first exchange with the customer, naturally ask for their name. Example: 'Happy to help! What's your name so I can better assist you?'");
-  sections.push("- Do NOT ask for name and email at the same time — it feels like a form.");
-  sections.push("- Only ask for email when there's a clear reason:");
-  if (bookingOperationallyAvailable) {
-    sections.push("  - Booking confirmation: 'Can I get your email to send you a confirmation?'");
+  if (signupMode) {
+    sections.push(
+      "- Never ask for or require a name or email before offering the signup link."
+    );
+    sections.push(
+      "- When the customer voluntarily provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step."
+    );
+    sections.push(
+      "- When the customer voluntarily provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
+    );
+    sections.push("- Once you have their name, use it naturally in the conversation.");
+  } else {
+    sections.push("- After your first exchange with the customer, naturally ask for their name. Example: 'Happy to help! What's your name so I can better assist you?'");
+    sections.push("- Do NOT ask for name and email at the same time — it feels like a form.");
+    sections.push("- Only ask for email when there's a clear reason:");
+    if (bookingOperationallyAvailable) {
+      sections.push("  - Booking confirmation: 'Can I get your email to send you a confirmation?'");
+    }
+    sections.push("  - Quote or estimate request: 'What's your email so I can send that over?'");
+    sections.push("  - Follow-up requested: 'What's your email so we can follow up with more details?'");
+    sections.push("- Never ask for email on the first or second message.");
+    sections.push("- When the customer provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step.");
+    sections.push(
+      bookingOperationallyAvailable
+        ? "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow."
+        : "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
+    );
+    sections.push("- Once you have their name, use it naturally in the conversation.");
   }
-  sections.push("  - Quote or estimate request: 'What's your email so I can send that over?'");
-  sections.push("  - Follow-up requested: 'What's your email so we can follow up with more details?'");
-  sections.push("- Never ask for email on the first or second message.");
-  sections.push("- When the customer provides their name, you MUST call the save_contact_name tool immediately to save it. Do not skip this step.");
-  sections.push(
-    bookingOperationallyAvailable
-      ? "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step — even if you are in the middle of a booking or other flow."
-      : "- When the customer provides their email, you MUST call the save_contact_email tool immediately to save it. Do not skip this step."
-  );
-  sections.push("- Once you have their name, use it naturally in the conversation.");
 
   sections.push("");
   sections.push("KNOWLEDGE GAP SIGNALING (INTERNAL):");

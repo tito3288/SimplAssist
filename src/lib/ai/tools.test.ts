@@ -4,6 +4,7 @@ import {
   calendarTools,
   CREATE_BOOKING_START_TIME_CONTRACT,
   shouldIncludeCalendarTools,
+  signupGoalTools,
 } from "./tools";
 
 const directSettings = {
@@ -53,5 +54,22 @@ describe("calendarTools booking timestamp contract", () => {
     expect(inputSchema?.properties?.start_time?.description).toBe(
       CREATE_BOOKING_START_TIME_CONTRACT
     );
+  });
+});
+
+describe("signupGoalTools", () => {
+  it("exposes only the no-input goal-link offer tool", () => {
+    expect(signupGoalTools).toEqual([
+      {
+        name: "offer_goal_link",
+        description:
+          "Offer the business's signup link when the customer's current inbound message shows interest in signing up or taking the next step. Use this only for the direct reply to that inbound message. The tool returns the exact URL to include in that reply.",
+        input_schema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+    ]);
   });
 });

@@ -26,6 +26,8 @@ export type Language = "en" | "es" | "both";
 
 export type BookingMode = "collect_info" | "schedule_direct";
 
+export type PrimaryGoal = "book" | "signup" | "quote" | "callback";
+
 export type Channel = "sms" | "web_chat";
 
 export type OperationalService = "ai_replies" | "texting" | "bookings";
@@ -307,6 +309,8 @@ export interface Business {
   name: string;
   business_type: BusinessType;
   business_type_other: string | null;
+  primary_goal: PrimaryGoal | null;
+  goal_url: string | null;
   website_url: string | null;
   phone_number: string | null;
   email: string | null;

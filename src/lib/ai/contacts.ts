@@ -133,20 +133,22 @@ export async function updateContactName(
   contactId: string,
   name: string
 ): Promise<void> {
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("contacts")
     .update({ name })
     .eq("id", contactId);
+  if (error) throw error;
 }
 
 export async function updateContactEmail(
   contactId: string,
   email: string
 ): Promise<void> {
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("contacts")
     .update({ email })
     .eq("id", contactId);
+  if (error) throw error;
 }
 
 export async function incrementLeadScore(
