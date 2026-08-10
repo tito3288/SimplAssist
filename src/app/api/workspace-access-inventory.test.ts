@@ -84,7 +84,6 @@ describe("authenticated API workspace-access inventory", () => {
 
   it("keeps live widget and provider/auth callback routes exempt", () => {
     for (const path of [
-      "./widget/chat/route.ts",
       "./widget/end/route.ts",
       "./stripe/webhook/route.ts",
       "./messaging/webhook/route.ts",
@@ -95,6 +94,32 @@ describe("authenticated API workspace-access inventory", () => {
     ]) {
       expect(routeSource(path)).not.toContain("requireWorkspaceRouteAccess");
     }
+  });
+
+  it("keeps live widget chat public while authenticating preview chat", () => {
+    const route = routeSource("./widget/chat/route.ts");
+    const behavioralTests = routeSource("./widget/routes.test.ts");
+    const previewFlag = route.indexOf("const verifiedPreview = preview === true");
+    const previewGuard = route.indexOf("if (verifiedPreview)", previewFlag);
+    const previewGate = route.indexOf(
+      "await requireWorkspaceRouteAccess()",
+      previewGuard,
+    );
+    const firstWidgetRead = route.indexOf('.from("widget_configs")');
+
+    expect(previewFlag).toBeGreaterThan(-1);
+    expect(previewGuard).toBeGreaterThan(previewFlag);
+    expect(previewGate).toBeGreaterThan(previewGuard);
+    expect(firstWidgetRead).toBeGreaterThan(previewGate);
+    expect(behavioralTests).toContain(
+      'it("serves an unauthenticated non-preview chat request without requiring workspace access"',
+    );
+    expect(behavioralTests).toContain(
+      '"rejects an unverified preview with workspace %i before any chat read or AI work"',
+    );
+    expect(behavioralTests).toContain(
+      'it("rejects a same-session preview marker for another workspace business before AI"',
+    );
   });
 
   it("protects the sessionless Google callback with exact canonical Host and atomic attempt staging", () => {

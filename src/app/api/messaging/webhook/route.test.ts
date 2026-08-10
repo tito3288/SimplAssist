@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   addMessage: vi.fn(),
   getConversationAiState: vi.fn(),
   processIncomingMessageDetailed: vi.fn(),
+  finalizeGoalLinkEvent: vi.fn(),
   recordKnowledgeGap: vi.fn(),
   getOutboundSendContext: vi.fn(),
   resolveOutboundSmsOperationalAccess: vi.fn(),
@@ -82,6 +83,9 @@ vi.mock("@/lib/ai/engine", () => {
 vi.mock("@/lib/ai/knowledgeGaps", () => ({
   recordKnowledgeGap: mocks.recordKnowledgeGap,
 }));
+vi.mock("@/lib/ai/goalEvents", () => ({
+  finalizeGoalLinkEvent: mocks.finalizeGoalLinkEvent,
+}));
 vi.mock("@/lib/messaging/lookup", () => ({
   getOutboundSendContext: mocks.getOutboundSendContext,
 }));
@@ -145,6 +149,15 @@ const CANCELED_ENTITLEMENTS = {
 };
 const MMS_FALLBACK_WITHOUT_OPT_OUT =
   "I can't process images yet — please describe what you need in text and I'll help.";
+const GOAL_LINK_ACTION = {
+  kind: "goal_link_offered",
+  goalAtEvent: "signup",
+  channel: "sms",
+  contactId: CONTACT.id,
+  conversationId: ACTIVE_CONVERSATION.id,
+  sourceMessageId: "message_1",
+  idempotencyKey: "opaque-goal-link-key",
+} as const;
 
 const tableQueues = new Map<string, unknown[]>();
 
@@ -245,7 +258,10 @@ beforeEach(() => {
     knowledgeGapDetected: false,
     conversationId: ACTIVE_CONVERSATION.id,
     sourceMessageId: "message_1",
+    actions: [],
+    assistantMessageId: null,
   });
+  mocks.finalizeGoalLinkEvent.mockResolvedValue("inserted");
   mocks.recordKnowledgeGap.mockResolvedValue(undefined);
   mocks.getConversationAiState.mockResolvedValue(ACTIVE_CONVERSATION);
   mocks.preflightOutboundSms.mockResolvedValue({ allowed: true });
@@ -381,6 +397,14 @@ describe("POST /api/messaging/webhook", () => {
       status: "handed_off",
       is_ai_handling: false,
     });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: ACTIVE_CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
+    });
 
     const response = await messagingWebhook(request());
     expect(response.status).toBe(200);
@@ -391,6 +415,7 @@ describe("POST /api/messaging/webhook", () => {
     });
     expect(mocks.preflightOutboundSms).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it("suppresses an AI pause that lands while Anthropic is pending without fallback or outbound side effects", async () => {
@@ -651,6 +676,170 @@ describe("POST /api/messaging/webhook", () => {
       mocks.recordBusinessMetricEventBestEffort.mock.invocationCallOrder[0]
     ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[0]);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+  });
+
+  it("finalizes a carried link action only after Telnyx acceptance and assistant persistence", async () => {
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: ACTIVE_CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
+    });
+
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() =>
+      expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce()
+    );
+    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+    const finalizationInput = mocks.finalizeGoalLinkEvent.mock.calls[0]?.[0];
+    expect(finalizationInput).toEqual({
+      businessId: BUSINESS_ID,
+      action: GOAL_LINK_ACTION,
+      assistantMessageId: "assistant_message_1",
+      occurredAt: expect.any(Date),
+    });
+    expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.addMessage.mock.invocationCallOrder[0]
+    );
+    expect(mocks.addMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]
+    );
+    expect(
+      mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.recordOutboundSmsUsage.mock.invocationCallOrder[0]);
+    const metricOccurredAt = mocks.buildAiConversationSourceKey.mock.calls[0]?.[1];
+    expect(finalizationInput.occurredAt).toBe(metricOccurredAt);
+  });
+
+  it("does not finalize a carried action when outbound preflight denies delivery", async () => {
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: ACTIVE_CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
+    });
+    mocks.preflightOutboundSms.mockResolvedValue({
+      allowed: false,
+      reason: "usage_limit_reached",
+    });
+
+    const response = await messagingWebhook(request());
+    expect(response.status).toBe(200);
+
+    await vi.waitFor(() =>
+      expect(mocks.insertPausedSystemMessageIfNeeded).toHaveBeenCalledWith({
+        conversationId: ACTIVE_CONVERSATION.id,
+        businessId: BUSINESS_ID,
+        channel: "sms",
+        context: "ai_reply",
+        reason: "usage_limit_reached",
+      })
+    );
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(["inserted", "duplicate"] as const)(
+    "does not replay delivery when the completed webhook is retried after a %s finalization",
+    async (finalizationResult) => {
+      queueTable("ai_settings", {
+        data: { sms_response_delay_seconds: 0 },
+        error: null,
+      });
+      mocks.claimMessagingWebhookEvent
+        .mockResolvedValueOnce({
+          outcome: "claimed",
+          claimToken: "claim-token-1",
+        })
+        .mockResolvedValueOnce({ outcome: "completed", claimToken: null });
+      mocks.processIncomingMessageDetailed.mockResolvedValue({
+        text: "Start here: https://example.com/signup",
+        knowledgeGapDetected: false,
+        conversationId: ACTIVE_CONVERSATION.id,
+        sourceMessageId: "message_1",
+        actions: [GOAL_LINK_ACTION],
+        assistantMessageId: null,
+      });
+      mocks.finalizeGoalLinkEvent.mockResolvedValue(finalizationResult);
+
+      const first = await messagingWebhook(request());
+      expect(first.status).toBe(200);
+      await vi.waitFor(() =>
+        expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce()
+      );
+
+      const retry = await messagingWebhook(request());
+      expect(retry.status).toBe(200);
+      expect(mocks.send).toHaveBeenCalledOnce();
+      expect(mocks.addMessage).toHaveBeenCalledOnce();
+      expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+      expect(mocks.addInboundMessageOnce).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("reports and swallows finalization failure so post-send work continues and a completed retry cannot resend", async () => {
+    const finalizationError = new Error("goal event insert unavailable");
+    queueTable("ai_settings", {
+      data: { sms_response_delay_seconds: 0 },
+      error: null,
+    });
+    mocks.claimMessagingWebhookEvent
+      .mockResolvedValueOnce({
+        outcome: "claimed",
+        claimToken: "claim-token-1",
+      })
+      .mockResolvedValueOnce({ outcome: "completed", claimToken: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: true,
+      conversationId: ACTIVE_CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
+    });
+    mocks.finalizeGoalLinkEvent.mockRejectedValue(finalizationError);
+
+    const first = await messagingWebhook(request());
+    expect(first.status).toBe(200);
+    await vi.waitFor(() => expect(mocks.recordKnowledgeGap).toHaveBeenCalledOnce());
+
+    expect(console.error).toHaveBeenCalledWith(
+      "[messaging:webhook] Goal event finalization failed:",
+      {
+        businessId: BUSINESS_ID,
+        conversationId: ACTIVE_CONVERSATION.id,
+        sourceMessageId: "message_1",
+        assistantMessageId: "assistant_message_1",
+      },
+      finalizationError
+    );
+    expect(mocks.recordOutboundSmsUsage).toHaveBeenCalledOnce();
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[messaging:webhook] AI reply processing failed:",
+      expect.anything()
+    );
+
+    const retry = await messagingWebhook(request());
+    expect(retry.status).toBe(200);
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(mocks.addMessage).toHaveBeenCalledOnce();
+    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
   });
 
   it("keeps an accepted AI SMS successful when metric recording throws", async () => {
@@ -779,6 +968,8 @@ describe("POST /api/messaging/webhook", () => {
       knowledgeGapDetected: true,
       conversationId: ACTIVE_CONVERSATION.id,
       sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
     });
     mocks.send.mockRejectedValue(new Error("Telnyx unavailable"));
 
@@ -795,6 +986,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.addMessage).not.toHaveBeenCalled();
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it("does not capture a signaled gap when assistant transcript persistence fails", async () => {
@@ -807,6 +999,8 @@ describe("POST /api/messaging/webhook", () => {
       knowledgeGapDetected: true,
       conversationId: ACTIVE_CONVERSATION.id,
       sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
     });
     mocks.addMessage.mockRejectedValue(new Error("Transcript unavailable"));
 
@@ -823,6 +1017,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(1);
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it("retries without AI when prior-reply state cannot be read", async () => {
@@ -1122,6 +1317,14 @@ describe("POST /api/messaging/webhook", () => {
       data: { sms_response_delay_seconds: 0 },
       error: null,
     });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Yes, we can help.",
+      knowledgeGapDetected: false,
+      conversationId: ACTIVE_CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [GOAL_LINK_ACTION],
+      assistantMessageId: null,
+    });
     mocks.resolveOutboundSmsOperationalAccess
       .mockResolvedValueOnce({ allowed: true })
       .mockResolvedValueOnce({ allowed: true })
@@ -1153,6 +1356,7 @@ describe("POST /api/messaging/webhook", () => {
     expect(mocks.recordOutboundSmsUsage).not.toHaveBeenCalled();
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it("fails closed when the final AI operational read is indeterminate after preflight", async () => {

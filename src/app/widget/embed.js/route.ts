@@ -17,7 +17,8 @@ export async function GET() {
   if (!businessId) { console.error('SimplAssist: missing data-business-id'); return; }
 
   var baseUrl = script.src.substring(0, script.src.indexOf('/widget/embed.js'));
-  var configPath = script && script.getAttribute('data-preview') === 'true'
+  var isPreview = !!(script && script.getAttribute('data-preview') === 'true');
+  var configPath = isPreview
     ? '/api/widget/preview-config'
     : '/api/widget/config';
   var homepageOnly = script && script.getAttribute('data-homepage-only') === 'true';
@@ -571,16 +572,19 @@ export async function GET() {
     showLoading();
     sendBtn.disabled = true;
 
+    var chatPayload = {
+      businessId: businessId,
+      message: text,
+      sessionId: sessionId,
+      visitorEmail: visitorEmail || undefined,
+      visitorName: visitorName || undefined
+    };
+    if (isPreview) chatPayload.preview = true;
+
     fetch(baseUrl + '/api/widget/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        businessId: businessId,
-        message: text,
-        sessionId: sessionId,
-        visitorEmail: visitorEmail || undefined,
-        visitorName: visitorName || undefined
-      })
+      body: JSON.stringify(chatPayload)
     })
     .then(function(r) {
       return r.json()

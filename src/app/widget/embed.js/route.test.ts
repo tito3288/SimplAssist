@@ -353,6 +353,14 @@ async function flushPromises() {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
 }
 
+function requestJsonBody(request: {
+  init?: Record<string, unknown>;
+} | undefined): Record<string, unknown> {
+  const body = request?.init?.body;
+  if (typeof body !== "string") throw new Error("Expected a JSON request body");
+  return JSON.parse(body) as Record<string, unknown>;
+}
+
 const availableConfig = {
   available: true,
   businessName: "Acme Landscaping",
@@ -501,7 +509,10 @@ describe("widget embed runtime", () => {
 
   it("uses the owner-only config route in preview mode", async () => {
     const harness = await createHarness(
-      [{ status: 200, body: availableConfig }],
+      [
+        { status: 200, body: availableConfig },
+        { status: 200, body: { response: "Preview reply" } },
+      ],
       { preview: true },
     );
 
@@ -515,6 +526,23 @@ describe("widget embed runtime", () => {
         .querySelector(".sa-widget-btn")
         ?.classList.contains("sa-btn-visible"),
     ).toBe(true);
+
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!input || !send) throw new Error("Widget input controls were not rendered");
+
+    input.value = "How do I sign up?";
+    send.dispatch("click");
+
+    expect(harness.requests[1]?.url).toBe(
+      "https://simplassist.test/api/widget/chat",
+    );
+    expect(requestJsonBody(harness.requests[1])).toMatchObject({
+      businessId: "business-123",
+      message: "How do I sign up?",
+      sessionId: "session-123",
+      preview: true,
+    });
   });
 
   it("retries transient config failures with bounded backoff and then initializes", async () => {
@@ -578,6 +606,7 @@ describe("widget embed runtime", () => {
       url: "https://simplassist.test/api/widget/chat",
       init: { method: "POST" },
     });
+    expect(requestJsonBody(harness.requests[1])).not.toHaveProperty("preview");
   });
 
   it("closes and hides an open widget when a config refresh reports unavailable", async () => {

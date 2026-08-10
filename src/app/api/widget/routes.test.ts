@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     resolveBusinessEntitlements: vi.fn(),
     canUseFeature: vi.fn(),
     processIncomingMessageDetailed: vi.fn(),
+    finalizeGoalLinkEvent: vi.fn(),
     recordKnowledgeGap: vi.fn(),
     buildAiConversationSourceKey: vi.fn(),
     buildWebChatSessionSourceKey: vi.fn(),
@@ -59,6 +60,9 @@ vi.mock("@/lib/ai/engine", () => ({
   processIncomingMessageDetailed: mocks.processIncomingMessageDetailed,
   AIProcessingBlockedError: mocks.AIProcessingBlockedError,
   AIProcessingStateError: mocks.AIProcessingStateError,
+}));
+vi.mock("@/lib/ai/goalEvents", () => ({
+  finalizeGoalLinkEvent: mocks.finalizeGoalLinkEvent,
 }));
 vi.mock("@/lib/ai/knowledgeGaps", () => ({
   recordKnowledgeGap: mocks.recordKnowledgeGap,
@@ -105,6 +109,15 @@ const PAUSED_AT = "2026-08-04T12:00:00.000Z";
 const WEB_CHAT_SOURCE_KEY = `web-chat-session:${"a".repeat(64)}`;
 const AI_CONVERSATION_SOURCE_KEY =
   "ai-conversation:00000000-0000-4000-8000-000000000010:2026-08";
+const WEB_CHAT_GOAL_ACTION = {
+  kind: "goal_link_offered",
+  goalAtEvent: "signup",
+  channel: "web_chat",
+  contactId: "contact-1",
+  conversationId: "conversation-1",
+  sourceMessageId: "customer-message-1",
+  idempotencyKey: "opaque-web-chat-goal-key",
+} as const;
 const ENTITLEMENTS = {
   businessId: BUSINESS_ID,
   plan: "sms_and_chat",
@@ -125,10 +138,12 @@ type QueryResult = { data?: unknown; error?: unknown };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function queueDatabaseResults(...results: QueryResult[]) {
@@ -214,7 +229,10 @@ beforeEach(() => {
     knowledgeGapDetected: false,
     conversationId: "conversation-1",
     sourceMessageId: "customer-message-1",
+    actions: [],
+    assistantMessageId: "assistant-message-1",
   });
+  mocks.finalizeGoalLinkEvent.mockResolvedValue("inserted");
   mocks.recordKnowledgeGap.mockResolvedValue(undefined);
   mocks.buildWebChatSessionSourceKey.mockReturnValue(WEB_CHAT_SOURCE_KEY);
   mocks.buildAiConversationSourceKey.mockReturnValue(
@@ -559,6 +577,278 @@ describe("public widget entitlement boundaries", () => {
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
   });
 
+  it("finalizes a live goal action only after the engine and final operational fence", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+      actions: [WEB_CHAT_GOAL_ACTION],
+      assistantMessageId: "assistant-message-1",
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      available: true,
+      response: "Start here: https://example.com/signup",
+      sessionId: "session-1",
+    });
+    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+    const finalizationInput = mocks.finalizeGoalLinkEvent.mock.calls[0]?.[0];
+    expect(finalizationInput).toEqual({
+      businessId: BUSINESS_ID,
+      action: WEB_CHAT_GOAL_ACTION,
+      assistantMessageId: "assistant-message-1",
+      occurredAt: expect.any(Date),
+    });
+    expect(
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+    );
+    expect(
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]);
+  });
+
+  it("serves an unauthenticated non-preview chat request without requiring workspace access", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Can you help?",
+        sessionId: "public-session",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      available: true,
+      response: "How can I help?",
+      sessionId: "public-session",
+    });
+    expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+  });
+
+  it("awaits and logs a failed live finalizer without retrying or suppressing the persisted reply", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+      actions: [WEB_CHAT_GOAL_ACTION],
+      assistantMessageId: "assistant-message-1",
+    });
+    const finalization = deferred<"inserted" | "duplicate">();
+    mocks.finalizeGoalLinkEvent.mockReturnValue(finalization.promise);
+    const finalizationError = new Error("goal event insert failed");
+
+    const responsePromise = postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "session-1",
+      })
+    );
+
+    await vi.waitFor(() =>
+      expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce()
+    );
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    finalization.reject(finalizationError);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      available: true,
+      response: "Start here: https://example.com/signup",
+      sessionId: "session-1",
+    });
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+    expect(console.error).toHaveBeenCalledWith(
+      "[widget:chat] Goal event finalization failed:",
+      {
+        businessId: BUSINESS_ID,
+        conversationId: "conversation-1",
+        sourceMessageId: "customer-message-1",
+      },
+      finalizationError
+    );
+  });
+
+  it("keeps a verified same-business preview live while skipping only goal-event finalization", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+      actions: [WEB_CHAT_GOAL_ACTION],
+      assistantMessageId: "assistant-message-1",
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "preview-session",
+        preview: true,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "Start here: https://example.com/signup",
+    });
+    expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [401, { error: "Unauthorized" }],
+    [403, { error: "workspace_access_denied" }],
+    [503, { error: "workspace_access_unavailable", retryable: true }],
+  ])(
+    "rejects an unverified preview with workspace %i before any chat read or AI work",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
+
+      const response = await postChat(
+        postRequest("chat", {
+          businessId: BUSINESS_ID,
+          message: "I want to sign up.",
+          sessionId: "preview-session",
+          preview: true,
+        })
+      );
+
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual(body);
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects a same-session preview marker for another workspace business before AI", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: "user-1" },
+        business: {
+          id: "00000000-0000-4000-8000-000000000099",
+          partner_id: null,
+        },
+        hostKind: "canonical",
+      },
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "preview-session",
+        preview: true,
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "Widget preview not found",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not let a non-boolean preview marker suppress live finalization", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+      actions: [WEB_CHAT_GOAL_ACTION],
+      assistantMessageId: "assistant-message-1",
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "session-1",
+        preview: "true",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+  });
+
+  it("logs a missing assistant proof without recording or suppressing the reply", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockResolvedValue({
+      text: "Start here: https://example.com/signup",
+      knowledgeGapDetected: false,
+      conversationId: "conversation-1",
+      sourceMessageId: "customer-message-1",
+      actions: [WEB_CHAT_GOAL_ACTION],
+      assistantMessageId: null,
+    });
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "I want to sign up.",
+        sessionId: "session-1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      available: true,
+      response: "Start here: https://example.com/signup",
+    });
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[widget:chat] Goal event finalization skipped: missing assistant message proof.",
+      {
+        businessId: BUSINESS_ID,
+        conversationId: "conversation-1",
+        sourceMessageId: "customer-message-1",
+      }
+    );
+  });
+
   it("returns the cleaned chat response while launching gap capture in the background", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockResolvedValue({
@@ -566,6 +856,8 @@ describe("public widget entitlement boundaries", () => {
       knowledgeGapDetected: true,
       conversationId: "conversation-1",
       sourceMessageId: "customer-message-1",
+      actions: [],
+      assistantMessageId: "assistant-message-1",
     });
     mocks.recordKnowledgeGap.mockReturnValue(new Promise(() => undefined));
 
@@ -697,6 +989,8 @@ describe("public widget entitlement boundaries", () => {
       knowledgeGapDetected: false,
       conversationId: null,
       sourceMessageId: null,
+      actions: [],
+      assistantMessageId: null,
     });
 
     const response = await postChat(
@@ -771,6 +1065,8 @@ describe("public widget entitlement boundaries", () => {
       knowledgeGapDetected: true,
       conversationId: "conversation-1",
       sourceMessageId: "customer-message-1",
+      actions: [],
+      assistantMessageId: "assistant-message-1",
     });
     const captureError = new Error("capture failed");
     mocks.recordKnowledgeGap.mockRejectedValue(captureError);
@@ -869,6 +1165,8 @@ describe("public widget entitlement boundaries", () => {
       knowledgeGapDetected: true,
       conversationId: "conversation-1",
       sourceMessageId: "customer-message-1",
+      actions: [],
+      assistantMessageId: "assistant-message-1",
     });
 
     const response = await postChat(
@@ -906,6 +1204,8 @@ describe("public widget entitlement boundaries", () => {
       knowledgeGapDetected: true,
       conversationId: "conversation-1",
       sourceMessageId: "customer-message-1",
+      actions: [],
+      assistantMessageId: "assistant-message-1",
     });
 
     const response = await postChat(

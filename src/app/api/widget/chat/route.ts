@@ -5,6 +5,7 @@ import {
   AIProcessingStateError,
   processIncomingMessageDetailed,
 } from "@/lib/ai/engine";
+import { finalizeGoalLinkEvent } from "@/lib/ai/goalEvents";
 import { recordKnowledgeGap } from "@/lib/ai/knowledgeGaps";
 import {
   canUseFeature,
@@ -21,6 +22,7 @@ import {
   buildWebChatSessionSourceKey,
 } from "@/lib/metrics/sourceKeys.server";
 import { recordBusinessMetricEventBestEffort } from "@/lib/metrics/recording.server";
+import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,13 +37,25 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { businessId, message, sessionId, visitorEmail } = body;
+    const { businessId, message, sessionId, visitorEmail, preview } = body;
 
     if (!businessId || !message || !sessionId) {
       return NextResponse.json(
         { error: "Missing required fields: businessId, message, sessionId" },
         { status: 400, headers: corsHeaders }
       );
+    }
+
+    const verifiedPreview = preview === true;
+    if (verifiedPreview) {
+      const workspace = await requireWorkspaceRouteAccess();
+      if (!workspace.ok) return withCorsHeaders(workspace.response);
+      if (workspace.access.business.id !== businessId) {
+        return NextResponse.json(
+          { error: "Widget preview not found" },
+          { status: 404, headers: corsHeaders }
+        );
+      }
     }
 
     const { data: widgetConfig, error: widgetError } = await supabaseAdmin
@@ -129,6 +143,41 @@ export async function POST(request: NextRequest) {
       businessId
     );
     if (finalOperationalResponse) return finalOperationalResponse;
+
+    if (!verifiedPreview && result.actions.length > 0) {
+      if (!result.assistantMessageId) {
+        console.error(
+          "[widget:chat] Goal event finalization skipped: missing assistant message proof.",
+          {
+            businessId,
+            conversationId: result.conversationId,
+            sourceMessageId: result.sourceMessageId,
+          }
+        );
+      } else {
+        const goalEventOccurredAt = new Date();
+        for (const action of result.actions) {
+          try {
+            await finalizeGoalLinkEvent({
+              businessId,
+              action,
+              assistantMessageId: result.assistantMessageId,
+              occurredAt: goalEventOccurredAt,
+            });
+          } catch (error) {
+            console.error(
+              "[widget:chat] Goal event finalization failed:",
+              {
+                businessId,
+                conversationId: action.conversationId,
+                sourceMessageId: action.sourceMessageId,
+              },
+              error
+            );
+          }
+        }
+      }
+    }
 
     if (result.conversationId) {
       const occurredAt = new Date();
@@ -233,4 +282,11 @@ function retryableChatUnavailableResponse(): NextResponse {
     { error: "Service temporarily unavailable", retryable: true },
     { status: 503, headers: corsHeaders }
   );
+}
+
+function withCorsHeaders(response: NextResponse): NextResponse {
+  for (const [name, value] of Object.entries(corsHeaders)) {
+    response.headers.set(name, value);
+  }
+  return response;
 }

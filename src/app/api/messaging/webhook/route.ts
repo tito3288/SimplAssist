@@ -21,6 +21,7 @@ import {
   AIProcessingBlockedError,
   processIncomingMessageDetailed,
 } from "@/lib/ai/engine";
+import { finalizeGoalLinkEvent } from "@/lib/ai/goalEvents";
 import { recordKnowledgeGap } from "@/lib/ai/knowledgeGaps";
 import { findOrCreateContact } from "@/lib/ai/contacts";
 import {
@@ -521,13 +522,34 @@ async function processAndReply(
       metricKey: "ai_conversation_engaged",
     });
   }
-  await addMessage(
+  const assistantMessage = await addMessage(
     context.conversation.id,
     context.businessId,
     "assistant",
     finalReply,
     "sms"
   );
+  for (const action of aiResult.actions ?? []) {
+    try {
+      await finalizeGoalLinkEvent({
+        businessId: context.businessId,
+        action,
+        assistantMessageId: assistantMessage.id,
+        occurredAt,
+      });
+    } catch (error) {
+      console.error(
+        "[messaging:webhook] Goal event finalization failed:",
+        {
+          businessId: context.businessId,
+          conversationId: context.conversation.id,
+          sourceMessageId: action.sourceMessageId,
+          assistantMessageId: assistantMessage.id,
+        },
+        error
+      );
+    }
+  }
   await recordOutboundSmsUsage({
     businessId: context.businessId,
     text: finalReply,
