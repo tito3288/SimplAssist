@@ -181,7 +181,7 @@ export function mapReasonToFriendly(
     case "sample":
       return "Your example texts didn't pass review. Make sure your sample messages sound like real texts you'd send a customer, mention your business name, and at least one says 'Reply STOP to opt out.' A quick polish usually does it.";
     case "use_case":
-      return "Carriers need a clearer picture of what you'll text customers about. Rewrite your SMS description in plain terms — appointment reminders, follow-ups after missed calls, answers to customer questions. A couple of clear sentences is all it takes.";
+      return "Carriers need a clearer picture of what you'll text customers about. Rewrite your SMS description in plain terms — for example, replies to customer questions, missed-call follow-ups, service-inquiry responses, and next-step coordination. Describe only messages your assistant will actually send. A couple of clear sentences is all it takes.";
     case "content":
       return "Carriers flagged your message content as a restricted category. Review your SMS description and sample messages and remove anything related to restricted topics (like cannabis, firearms, or lending). If this looks like a mistake, contact support and we'll appeal it with you.";
     case "url":
