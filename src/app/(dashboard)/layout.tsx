@@ -91,6 +91,7 @@ export default async function DashboardLayout({
       <Sidebar
         userEmail={user.email ?? ""}
         websiteUrl={business.website_url ?? null}
+        primaryGoal={business.primary_goal}
         canUseCalendar={canUseFeature(entitlements, "calendar")}
         canUseWidget={canUseFeature(entitlements, "web_chat")}
         isPartnerManagedBilling={isPartnerManagedBilling}

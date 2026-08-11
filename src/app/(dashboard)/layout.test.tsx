@@ -44,6 +44,7 @@ import DashboardLayout from "./layout";
 const BUSINESS = {
   id: "business-1",
   website_url: "https://example.com",
+  primary_goal: null,
   deleted_at: null,
   operations_suspended_at: null,
   ai_replies_paused_at: null,
@@ -162,6 +163,30 @@ describe("DashboardLayout access gate", () => {
 
       expect(mocks.sidebar).toHaveBeenCalledWith(
         expect.objectContaining({ isPartnerManagedBilling: expected }),
+      );
+    },
+  );
+
+  it.each([null, "book", "signup", "quote", "callback"] as const)(
+    "passes primary_goal=%s through to the shared navigation",
+    async (primaryGoal) => {
+      mocks.getDashboardBusinessContext.mockResolvedValue({
+        status: "resolved",
+        supabase: {},
+        user: { id: "user-1", email: "owner@example.com" },
+        business: {
+          ...BUSINESS,
+          primary_goal: primaryGoal,
+        },
+      });
+
+      const layout = await DashboardLayout({
+        children: <div>Dashboard child</div>,
+      });
+      renderToStaticMarkup(layout);
+
+      expect(mocks.sidebar).toHaveBeenCalledWith(
+        expect.objectContaining({ primaryGoal }),
       );
     },
   );

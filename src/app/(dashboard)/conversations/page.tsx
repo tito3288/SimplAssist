@@ -11,7 +11,15 @@ export type ConversationWithContact = Conversation & {
   last_message_preview?: string;
 };
 
-export default async function ConversationsPage() {
+type ConversationsPageProps = {
+  searchParams?: {
+    conversation?: string | string[];
+  };
+};
+
+export default async function ConversationsPage({
+  searchParams,
+}: ConversationsPageProps) {
   await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === "unauthenticated") redirect("/login");
@@ -19,6 +27,11 @@ export default async function ConversationsPage() {
 
   const { supabase, business, entitlements } = context;
   const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const initialSelectedId =
+    typeof searchParams?.conversation === "string" &&
+    searchParams.conversation.length > 0
+      ? searchParams.conversation
+      : undefined;
 
   const { data: conversations } = await supabase
     .from("conversations")
@@ -64,6 +77,7 @@ export default async function ConversationsPage() {
         canUseManualSms={canUseFeature(entitlements, "manual_sms")}
         canUseAiSms={canUseFeature(entitlements, "ai_sms_conversations")}
         canUseWebChat={canUseFeature(entitlements, "web_chat")}
+        initialSelectedId={initialSelectedId}
       />
     </div>
   );

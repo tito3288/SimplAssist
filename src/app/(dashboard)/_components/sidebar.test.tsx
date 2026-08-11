@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestBrand } from "@/lib/branding/types";
+import type { PrimaryGoal } from "@/types/database";
 
 const mocks = vi.hoisted(() => ({
   pathname: "/dashboard",
@@ -89,6 +90,7 @@ const DEFAULT_REQUEST: RequestBrand = {
 
 function renderSidebar(props?: {
   activePath?: string;
+  primaryGoal?: PrimaryGoal | null;
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
   isPartnerManagedBilling?: boolean;
@@ -120,6 +122,61 @@ beforeEach(() => {
 });
 
 describe("Sidebar navigation", () => {
+  it.each([null, "book", "quote", "callback"] as const)(
+    "keeps primary_goal=%s byte-identical to the default legacy navigation",
+    (primaryGoal) => {
+      expect(renderSidebar({ primaryGoal })).toBe(renderSidebar());
+    },
+  );
+
+  it("replaces only the Calendar slot with Leads for signup businesses", () => {
+    const legacyNavSections = renderedNavSections(renderSidebar());
+    const signupNavSections = renderedNavSections(
+      renderSidebar({ primaryGoal: "signup" }),
+    );
+
+    expect(signupNavSections).toHaveLength(legacyNavSections.length);
+    signupNavSections.forEach((nav, index) => {
+      expect(renderedNavHrefs(nav)).toEqual(
+        renderedNavHrefs(legacyNavSections[index]).map((href) =>
+          href === "/calendar" ? "/leads" : href,
+        ),
+      );
+      expect(nav).toContain('href="/leads"');
+      expect(nav).toContain(">Leads</span>");
+      expect(nav).not.toContain('href="/calendar"');
+      expect(nav).not.toContain(">Calendar</span>");
+    });
+  });
+
+  it("does not apply the Calendar entitlement lock to the signup Leads slot", () => {
+    const markup = renderSidebar({
+      primaryGoal: "signup",
+      canUseCalendar: false,
+    });
+
+    expect(markup).not.toContain(
+      'aria-label="Calendar is unavailable on the current subscription"',
+    );
+    expect(markup).not.toContain(
+      'aria-label="Leads is unavailable on the current subscription"',
+    );
+  });
+
+  it("marks Leads active through the standard pathname match", () => {
+    mocks.pathname = "/leads";
+
+    const navSections = renderedNavSections(
+      renderSidebar({ primaryGoal: "signup" }),
+    );
+
+    for (const nav of navSections) {
+      const leadsLink = nav.match(/<a href="\/leads" class="([^"]+)"/);
+
+      expect(leadsLink?.[1]).toContain("bg-[var(--brand-accent-soft)]");
+    }
+  });
+
   it.each([
     ["the default", undefined],
     ["an explicit direct-business setting", false],

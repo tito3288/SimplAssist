@@ -8,6 +8,7 @@ import {
   MessageSquare,
   CircleHelp,
   Users,
+  UserPlus,
   Calendar,
   Cog,
   AppWindow,
@@ -19,6 +20,9 @@ import { BrandLogo } from "@/components/branding/BrandLogo";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { StaggeredMenuIcon } from "@/components/icons/staggered-menu-icon";
+import type { PrimaryGoal } from "@/types/database";
+
+const leadsNavItem = { href: "/leads", label: "Leads", icon: UserPlus };
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -39,6 +43,7 @@ export default function Sidebar({
   userEmail,
   websiteUrl,
   activePath,
+  primaryGoal = null,
   canUseCalendar = true,
   canUseWidget = true,
   isPartnerManagedBilling = false,
@@ -48,6 +53,7 @@ export default function Sidebar({
   /** Override the active-nav match (used by the /demo routes, whose own
   *  pathname never equals a real nav href). Real callers omit it. */
   activePath?: string;
+  primaryGoal?: PrimaryGoal | null;
   canUseCalendar?: boolean;
   canUseWidget?: boolean;
   isPartnerManagedBilling?: boolean;
@@ -56,9 +62,15 @@ export default function Sidebar({
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const supabase = createBrowserClient();
+  const goalAwareNavItems =
+    primaryGoal === "signup"
+      ? navItems.map((item) =>
+          item.href === "/calendar" ? leadsNavItem : item
+        )
+      : navItems;
   const visibleNavItems = isPartnerManagedBilling
-    ? navItems.filter((item) => item.href !== "/billing")
-    : navItems;
+    ? goalAwareNavItems.filter((item) => item.href !== "/billing")
+    : goalAwareNavItems;
 
   async function handleSignOut() {
     // Global scope (the default) is deliberate: it is the customer's only

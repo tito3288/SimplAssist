@@ -42,6 +42,7 @@ const USER = { id: "user-1", email: "owner@example.com" };
 const BUSINESS = {
   id: "business-1",
   name: "Example Business",
+  primary_goal: null,
   deleted_at: null,
   operations_suspended_at: null,
   ai_replies_paused_at: null,
@@ -128,6 +129,7 @@ describe("dashboard request context", () => {
     expect(mocks.maybeSingle).toHaveBeenCalledOnce();
     expect(mocks.eq).toHaveBeenCalledWith("owner_id", USER.id);
     const projection = mocks.select.mock.calls[0]?.[0] as string;
+    expect(projection).toContain("primary_goal");
     expect(projection).toContain("website_url");
     expect(projection).toContain("operations_suspended_at");
     expect(projection).toContain("ai_replies_paused_at");
