@@ -12,6 +12,7 @@ const REQUIRED_ROUTES: RouteInventory[] = [
   { path: "./billing/checkout/route.ts", methods: ["POST"] },
   { path: "./billing/finalize/route.ts", methods: ["POST"] },
   { path: "./billing/portal/route.ts", methods: ["POST"] },
+  { path: "./booking-requests/[id]/handle/route.ts", methods: ["POST"] },
   {
     path: "./calendar/events/route.ts",
     methods: ["GET", "POST", "PATCH", "DELETE"],

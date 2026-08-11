@@ -22,6 +22,13 @@ describe("Calendar loading state", () => {
     const html = renderToStaticMarkup(<Loading />);
 
     expect(html).toContain('data-skeleton-section="calendar-header"');
+    expect(html).toContain(
+      'data-skeleton-section="appointment-requests"'
+    );
+    expect(html).toContain(
+      'data-skeleton-section="appointment-request-count"'
+    );
+    expect(html.match(/data-skeleton-request="true"/g)).toHaveLength(2);
     expect(html).toContain('data-skeleton-section="calendar-view"');
     expect(html).toContain('data-skeleton-section="calendar-controls"');
     expect(html).toContain('data-skeleton-section="calendar-month-grid"');
@@ -31,6 +38,20 @@ describe("Calendar loading state", () => {
     expect(html.match(/data-skeleton-event="true"/g)).toHaveLength(3);
     expect(html).toContain("rounded-[28px]");
     expect(html).toContain("rounded-[22px]");
+  });
+
+  it("places a responsive request queue before the Calendar skeleton", () => {
+    const html = renderToStaticMarkup(<Loading />);
+
+    expect(html.indexOf('data-skeleton-section="calendar-header"')).toBeLessThan(
+      html.indexOf('data-skeleton-section="appointment-requests"')
+    );
+    expect(
+      html.indexOf('data-skeleton-section="appointment-requests"')
+    ).toBeLessThan(html.indexOf('data-skeleton-section="calendar-view"'));
+    expect(html).toContain("sm:flex-row");
+    expect(html).toContain("xl:grid-cols-2");
+    expect(html).toContain("max-w-full");
   });
 
   it("stays inert and inside the dashboard content area", () => {
