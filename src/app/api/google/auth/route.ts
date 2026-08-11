@@ -20,6 +20,14 @@ import {
 export async function GET(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
   if (!workspace.ok) return secureGoogleOAuthResponse(workspace.response);
+  if (workspace.access.business.primary_goal === "signup") {
+    return secureGoogleOAuthResponse(
+      NextResponse.json(
+        { error: "goal_unavailable", feature: "calendar" },
+        { status: 403 },
+      ),
+    );
+  }
 
   const access = await requireAuthenticatedFeature("calendar");
   if (!access.ok) return secureGoogleOAuthResponse(access.response);

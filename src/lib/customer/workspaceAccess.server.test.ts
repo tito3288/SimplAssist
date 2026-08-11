@@ -102,7 +102,12 @@ beforeEach(() => {
     error: null,
   });
   mocks.businessResult = {
-    data: { id: BUSINESS_ID, partner_id: null, billing_mode: "stripe" },
+    data: {
+      id: BUSINESS_ID,
+      partner_id: null,
+      billing_mode: "stripe",
+      primary_goal: null,
+    },
     error: null,
   };
   mocks.businessThrows = false;
@@ -122,6 +127,7 @@ describe("getWorkspaceAccess", () => {
         id: BUSINESS_ID,
         partner_id: null,
         billing_mode: "stripe",
+        primary_goal: null,
       },
       hostKind: "canonical",
     });
@@ -135,10 +141,33 @@ describe("getWorkspaceAccess", () => {
       expectedName: "Partner A",
     });
     expect(mocks.customerSelects).toEqual([
-      "id, partner_id, billing_mode",
-      "id, partner_id, billing_mode",
+      "id, partner_id, billing_mode, primary_goal",
+      "id, partner_id, billing_mode, primary_goal",
     ]);
   });
+
+  it.each([null, "book", "signup", "quote", "callback"] as const)(
+    "accepts primary_goal=%s in the owner-client workspace projection",
+    async (primaryGoal) => {
+      mocks.businessResult = {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "stripe",
+          primary_goal: primaryGoal,
+        },
+        error: null,
+      };
+
+      await expect(getWorkspaceAccess()).resolves.toMatchObject({
+        status: "resolved",
+        business: { primary_goal: primaryGoal },
+      });
+      expect(mocks.customerSelects).toEqual([
+        "id, partner_id, billing_mode, primary_goal",
+      ]);
+    },
+  );
 
   it.each([
     [
@@ -170,6 +199,7 @@ describe("getWorkspaceAccess", () => {
           id: BUSINESS_ID,
           partner_id: null,
           billing_mode: "stripe",
+          primary_goal: null,
           ...operationalFields,
         },
         error: null,
@@ -182,11 +212,12 @@ describe("getWorkspaceAccess", () => {
           id: BUSINESS_ID,
           partner_id: null,
           billing_mode: "stripe",
+          primary_goal: null,
         },
         hostKind: "canonical",
       });
       expect(mocks.customerSelects).toEqual([
-        "id, partner_id, billing_mode",
+        "id, partner_id, billing_mode, primary_goal",
       ]);
     },
   );
@@ -197,6 +228,7 @@ describe("getWorkspaceAccess", () => {
         id: BUSINESS_ID,
         partner_id: PARTNER_A_ID,
         billing_mode: "invoiced",
+        primary_goal: null,
         operations_suspended_at: "2026-08-04T12:00:00.000Z",
         ai_replies_paused_at: "2026-08-04T12:01:00.000Z",
         texting_paused_at: "2026-08-04T12:02:00.000Z",
@@ -211,7 +243,9 @@ describe("getWorkspaceAccess", () => {
       expectedOrigin: "https://partner-a.example",
       expectedName: "Partner A",
     });
-    expect(mocks.customerSelects).toEqual(["id, partner_id, billing_mode"]);
+    expect(mocks.customerSelects).toEqual([
+      "id, partner_id, billing_mode, primary_goal",
+    ]);
   });
 
   it("uses the customer channel and returns unauthenticated without tenant reads", async () => {
@@ -231,7 +265,9 @@ describe("getWorkspaceAccess", () => {
     await expect(getWorkspaceAccess()).resolves.toEqual({
       status: "business_not_found",
     });
-    expect(mocks.customerSelects).toEqual(["id, partner_id, billing_mode"]);
+    expect(mocks.customerSelects).toEqual([
+      "id, partner_id, billing_mode, primary_goal",
+    ]);
     expect(mocks.customerFilters).toEqual([["owner_id", USER_ID]]);
   });
 
@@ -278,7 +314,12 @@ describe("getWorkspaceAccess", () => {
     [
       "malformed business id",
       {
-        data: { id: "bad", partner_id: null, billing_mode: "stripe" },
+        data: {
+          id: "bad",
+          partner_id: null,
+          billing_mode: "stripe",
+          primary_goal: null,
+        },
         error: null,
       },
     ],
@@ -289,6 +330,7 @@ describe("getWorkspaceAccess", () => {
           id: BUSINESS_ID,
           partner_id: "bad",
           billing_mode: "stripe",
+          primary_goal: null,
         },
         error: null,
       },
@@ -300,6 +342,30 @@ describe("getWorkspaceAccess", () => {
           id: BUSINESS_ID,
           partner_id: null,
           billing_mode: "free",
+          primary_goal: null,
+        },
+        error: null,
+      },
+    ],
+    [
+      "missing primary goal",
+      {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "stripe",
+        },
+        error: null,
+      },
+    ],
+    [
+      "malformed primary goal",
+      {
+        data: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          billing_mode: "stripe",
+          primary_goal: "purchase",
         },
         error: null,
       },
@@ -600,6 +666,7 @@ function setBusinessPartner(partnerId: string | null): void {
       id: BUSINESS_ID,
       partner_id: partnerId,
       billing_mode: partnerId ? "invoiced" : "stripe",
+      primary_goal: null,
     },
     error: null,
   };

@@ -16,12 +16,13 @@ import {
 import { normalizeHostHeader } from "@/lib/branding/hostname";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { BillingMode } from "@/types/database";
+import type { BillingMode, PrimaryGoal } from "@/types/database";
 
 export type CustomerBusiness = {
   id: string;
   partner_id: string | null;
   billing_mode: BillingMode;
+  primary_goal: PrimaryGoal | null;
 };
 
 export type ResolvedWorkspaceAccess = {
@@ -65,7 +66,8 @@ type PartnerLookup =
   | { status: "missing" }
   | { status: "failed" };
 
-const CUSTOMER_BUSINESS_COLUMNS = "id, partner_id, billing_mode";
+const CUSTOMER_BUSINESS_COLUMNS =
+  "id, partner_id, billing_mode, primary_goal";
 const PARTNER_TENANCY_COLUMNS =
   "id, name, custom_domain, status, domain_status";
 const UUID =
@@ -180,10 +182,12 @@ function parseCustomerBusiness(value: unknown): CustomerBusiness | null {
   if (!isUuid(row.id)) return null;
   if (row.partner_id !== null && !isUuid(row.partner_id)) return null;
   if (!isBillingMode(row.billing_mode)) return null;
+  if (!isPrimaryGoal(row.primary_goal)) return null;
   return {
     id: row.id,
     partner_id: row.partner_id,
     billing_mode: row.billing_mode,
+    primary_goal: row.primary_goal,
   };
 }
 
@@ -301,6 +305,16 @@ function isUuid(value: unknown): value is string {
 
 function isBillingMode(value: unknown): value is BillingMode {
   return value === "stripe" || value === "invoiced" || value === "comped";
+}
+
+function isPrimaryGoal(value: unknown): value is PrimaryGoal | null {
+  return (
+    value === null ||
+    value === "book" ||
+    value === "signup" ||
+    value === "quote" ||
+    value === "callback"
+  );
 }
 
 function isUnauthenticatedAuthError(error: unknown): boolean {

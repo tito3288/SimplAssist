@@ -488,6 +488,62 @@ describe("database adapter contracts", () => {
     }
   });
 
+  it("maps only the migration 053 goal guard to a fixed private-safe error", async () => {
+    mocks.rpcResults.complete_google_calendar_oauth_connection = {
+      data: null,
+      error: {
+        code: "55000",
+        message:
+          "google_calendar_goal_unavailable access=super-secret customer@example.com",
+        details: "private business row",
+      },
+    };
+
+    try {
+      await completeGoogleCalendarOAuthConnection({
+        attemptId: ATTEMPT_ID,
+        identity: canonicalIdentity,
+        accessToken: "google-access-token",
+        refreshToken: "google-refresh-token",
+        tokenExpiry: "2026-08-04T13:00:00.000Z",
+        googleEmail: "client@example.com",
+      });
+      throw new Error("Expected the signup-goal guard to reject completion");
+    } catch (error) {
+      expectAttemptError(error, "goal_unavailable", 403);
+      const serialized = JSON.stringify(error);
+      expect(serialized).not.toContain("super-secret");
+      expect(serialized).not.toContain("customer@example.com");
+      expect(serialized).not.toContain("private business row");
+    }
+
+    for (const databaseError of [
+      {
+        code: "XX000",
+        message: "google_calendar_goal_unavailable",
+      },
+      {
+        code: "55000",
+        message: "google_calendar_goal_unavailable_suffix",
+      },
+    ]) {
+      mocks.rpcResults.complete_google_calendar_oauth_connection = {
+        data: null,
+        error: databaseError,
+      };
+      await expect(
+        completeGoogleCalendarOAuthConnection({
+          attemptId: ATTEMPT_ID,
+          identity: canonicalIdentity,
+          accessToken: "google-access-token",
+          refreshToken: "google-refresh-token",
+          tokenExpiry: "2026-08-04T13:00:00.000Z",
+          googleEmail: null,
+        }),
+      ).rejects.toMatchObject({ code: "service_unavailable", status: 503 });
+    }
+  });
+
   it("rejects widened composite rows instead of exposing unknown fields", async () => {
     mocks.rpcResults.claim_google_calendar_oauth_handoff = {
       data: {

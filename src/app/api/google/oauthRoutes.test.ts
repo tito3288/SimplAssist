@@ -96,20 +96,35 @@ const STATE = "A".repeat(43);
 const ORIGIN_VERIFIER = "B".repeat(43);
 const HANDOFF = "C".repeat(43);
 const OTHER_TOKEN = "D".repeat(43);
+type PrimaryGoal = "book" | "signup" | "quote" | "callback" | null;
 
 const CANONICAL_ACCESS = {
   status: "resolved" as const,
   user: { id: USER_ID },
-  business: { id: BUSINESS_ID, partner_id: null },
+  business: { id: BUSINESS_ID, partner_id: null, primary_goal: null },
   hostKind: "canonical" as const,
 };
 
 const PARTNER_ACCESS = {
   status: "resolved" as const,
   user: { id: USER_ID },
-  business: { id: BUSINESS_ID, partner_id: PARTNER_ID },
+  business: {
+    id: BUSINESS_ID,
+    partner_id: PARTNER_ID,
+    primary_goal: null,
+  },
   hostKind: "partner" as const,
 };
+
+function accessWithGoal<Access extends typeof CANONICAL_ACCESS | typeof PARTNER_ACCESS>(
+  access: Access,
+  primaryGoal: PrimaryGoal,
+): Access {
+  return {
+    ...access,
+    business: { ...access.business, primary_goal: primaryGoal },
+  } as Access;
+}
 
 const CANONICAL_IDENTITY = {
   businessId: BUSINESS_ID,
@@ -302,6 +317,68 @@ describe("Google Calendar OAuth start", () => {
         originVerifier: ORIGIN_VERIFIER,
       });
       expectVerifierCookie(response, ORIGIN_VERIFIER, 600);
+      expectSecureResponse(response);
+    },
+  );
+
+  it.each([null, "book", "quote", "callback"] as const)(
+    "keeps the existing provider redirect and attempt contract for primary_goal=%s",
+    async (primaryGoal) => {
+      const access = accessWithGoal(CANONICAL_ACCESS, primaryGoal);
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access });
+
+      const response = await beginOAuth(requestFor("/api/google/auth"));
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        "https://accounts.google.test/o/oauth2/auth",
+      );
+      expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith(
+        "calendar",
+      );
+      expect(mocks.resolveGoogleOAuthWorkspaceIdentity).toHaveBeenCalledWith(
+        access,
+        "app.example.test",
+      );
+      expect(mocks.generateAuthUrl).toHaveBeenCalledWith(STATE);
+      expect(mocks.createGoogleCalendarOAuthAttempt).toHaveBeenCalledWith({
+        identity: CANONICAL_IDENTITY,
+        state: STATE,
+        originVerifier: ORIGIN_VERIFIER,
+      });
+      expectVerifierCookie(response, ORIGIN_VERIFIER, 600);
+      expectSecureResponse(response);
+    },
+  );
+
+  it.each([
+    ["canonical", CANONICAL_ORIGIN, CANONICAL_ACCESS],
+    ["partner", PARTNER_ORIGIN, PARTNER_ACCESS],
+  ] as const)(
+    "rejects a signup-goal %s workspace before entitlement, attempt, or Google work",
+    async (_kind, origin, baseAccess) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: true,
+        access: accessWithGoal(baseAccess, "signup"),
+      });
+
+      const response = await beginOAuth(
+        requestFor("/api/google/auth", origin),
+      );
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "goal_unavailable",
+        feature: "calendar",
+      });
+      expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+      expect(mocks.getCanonicalGoogleRedirectUri).not.toHaveBeenCalled();
+      expect(mocks.resolveGoogleOAuthWorkspaceIdentity).not.toHaveBeenCalled();
+      expect(mocks.requireGoogleCalendarSettings).not.toHaveBeenCalled();
+      expect(mocks.createGoogleOAuthOpaqueToken).not.toHaveBeenCalled();
+      expect(mocks.createGoogleCalendarOAuthAttempt).not.toHaveBeenCalled();
+      expect(mocks.generateAuthUrl).not.toHaveBeenCalled();
+      expect(response.headers.get("set-cookie")).toBeNull();
       expectSecureResponse(response);
     },
   );
@@ -534,6 +611,57 @@ describe("Google Calendar OAuth original-host completion", () => {
   );
 
   it.each([
+    ["canonical", CANONICAL_ORIGIN, CANONICAL_ACCESS, CANONICAL_IDENTITY, ""],
+    [
+      "canonical",
+      CANONICAL_ORIGIN,
+      CANONICAL_ACCESS,
+      CANONICAL_IDENTITY,
+      "handoff=bad",
+    ],
+    ["partner", PARTNER_ORIGIN, PARTNER_ACCESS, PARTNER_IDENTITY, ""],
+    [
+      "partner",
+      PARTNER_ORIGIN,
+      PARTNER_ACCESS,
+      PARTNER_IDENTITY,
+      "handoff=bad",
+    ],
+  ] as const)(
+    "redirects a signup-goal %s completion with missing or malformed handoff to the trusted unavailable state",
+    async (_kind, origin, baseAccess, identity, query) => {
+      const access = accessWithGoal(baseAccess, "signup");
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access });
+      mocks.resolveGoogleOAuthWorkspaceIdentity.mockResolvedValue(identity);
+
+      const response = await completeOAuth(
+        completeRequest(query, ORIGIN_VERIFIER, origin),
+      );
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        `${origin}/settings?calendar=unavailable`,
+      );
+      expect(mocks.resolveGoogleOAuthWorkspaceIdentity).toHaveBeenCalledWith(
+        access,
+        new URL(origin).host,
+      );
+      expect(mocks.parseGoogleOAuthOpaqueToken).not.toHaveBeenCalled();
+      expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+      expect(mocks.requireGoogleCalendarSettings).not.toHaveBeenCalled();
+      expect(mocks.claimGoogleCalendarOAuthHandoff).not.toHaveBeenCalled();
+      expect(mocks.getGoogleOAuth2Client).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.requireFreshWorkspaceRouteAccess).not.toHaveBeenCalled();
+      expect(
+        mocks.completeGoogleCalendarOAuthConnection,
+      ).not.toHaveBeenCalled();
+      expectVerifierCookie(response, "", 0);
+      expectSecureResponse(response);
+    },
+  );
+
+  it.each([
     ["missing handoff", "", ORIGIN_VERIFIER],
     [
       "duplicate handoff",
@@ -658,6 +786,42 @@ describe("Google Calendar OAuth original-host completion", () => {
     expectSecureResponse(response);
   });
 
+  it.each([null, "book", "quote", "callback"] as const)(
+    "keeps the existing connected completion contract for primary_goal=%s",
+    async (primaryGoal) => {
+      const access = accessWithGoal(CANONICAL_ACCESS, primaryGoal);
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access });
+      mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+        ok: true,
+        access,
+      });
+
+      const response = await completeOAuth(completeRequest());
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        `${CANONICAL_ORIGIN}/settings?calendar=connected`,
+      );
+      expect(mocks.claimGoogleCalendarOAuthHandoff).toHaveBeenCalledWith({
+        identity: CANONICAL_IDENTITY,
+        handoff: HANDOFF,
+        originVerifier: ORIGIN_VERIFIER,
+      });
+      expect(mocks.getToken).toHaveBeenCalledWith("oauth-code");
+      expect(mocks.requireFreshWorkspaceRouteAccess).toHaveBeenCalledOnce();
+      expect(mocks.completeGoogleCalendarOAuthConnection).toHaveBeenCalledWith({
+        attemptId: ATTEMPT_ID,
+        identity: CANONICAL_IDENTITY,
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenExpiry: expect.any(String),
+        googleEmail: "owner@example.test",
+      });
+      expectVerifierCookie(response, "", 0);
+      expectSecureResponse(response);
+    },
+  );
+
   it("uses the exact partner origin for a partner completion redirect", async () => {
     mocks.requireWorkspaceRouteAccess.mockResolvedValue({
       ok: true,
@@ -778,6 +942,33 @@ describe("Google Calendar OAuth original-host completion", () => {
     },
   );
 
+  it("redirects a stale book-started handoff when the fresh workspace goal is signup", async () => {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: accessWithGoal(CANONICAL_ACCESS, "book"),
+    });
+    mocks.requireFreshWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: accessWithGoal(CANONICAL_ACCESS, "signup"),
+    });
+
+    const response = await completeOAuth(completeRequest());
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `${CANONICAL_ORIGIN}/settings?calendar=unavailable`,
+    );
+    expect(mocks.claimGoogleCalendarOAuthHandoff).toHaveBeenCalledOnce();
+    expect(mocks.getToken).toHaveBeenCalledOnce();
+    expect(mocks.requireFreshWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.requireGoogleCalendarSettings).toHaveBeenCalledOnce();
+    expect(
+      mocks.completeGoogleCalendarOAuthConnection,
+    ).not.toHaveBeenCalled();
+    expectVerifierCookie(response, "", 0);
+    expectSecureResponse(response);
+  });
+
   it("rejects an identity change after token exchange", async () => {
     mocks.resolveGoogleOAuthWorkspaceIdentity
       .mockResolvedValueOnce(CANONICAL_IDENTITY)
@@ -812,6 +1003,22 @@ describe("Google Calendar OAuth original-host completion", () => {
     expect(mocks.requireGoogleCalendarSettings).toHaveBeenCalledTimes(2);
     expect(mocks.completeGoogleCalendarOAuthConnection).not.toHaveBeenCalled();
     expectVerifierCookie(response, "", 0);
+  });
+
+  it("translates the database goal guard into the friendly unavailable state", async () => {
+    mocks.completeGoogleCalendarOAuthConnection.mockRejectedValue(
+      new mocks.GoogleOAuthAttemptError("goal_unavailable", 403),
+    );
+
+    const response = await completeOAuth(completeRequest());
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `${CANONICAL_ORIGIN}/settings?calendar=unavailable`,
+    );
+    expect(mocks.completeGoogleCalendarOAuthConnection).toHaveBeenCalledOnce();
+    expectVerifierCookie(response, "", 0);
+    expectSecureResponse(response);
   });
 
   it.each([

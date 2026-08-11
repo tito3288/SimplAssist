@@ -33,6 +33,7 @@ const resolved: WorkspaceAccess = {
     id: "20000000-0000-4000-a000-000000000001",
     partner_id: null,
     billing_mode: "stripe",
+    primary_goal: null,
   },
   hostKind: "canonical",
 };
@@ -47,6 +48,7 @@ const passwordSetupRequired: WorkspaceAccess = {
     id: "20000000-0000-4000-a000-000000000001",
     partner_id: null,
     billing_mode: "stripe",
+    primary_goal: null,
   },
   hostKind: "canonical",
 };

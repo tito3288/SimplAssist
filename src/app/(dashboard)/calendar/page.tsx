@@ -24,6 +24,8 @@ export default async function CalendarPage() {
   if (context.status !== "resolved") redirect("/onboarding");
 
   const { supabase, business, entitlements } = context;
+  if (business.primary_goal === "signup") redirect("/dashboard");
+
   const planActive = entitlements.active;
 
   const [{ data: calendarToken }, { data: aiSettings }] = await Promise.all([

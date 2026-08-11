@@ -89,6 +89,7 @@ export type GoogleOAuthAttemptErrorCode =
   | "workspace_changed"
   | "attempt_invalid_or_expired"
   | "handoff_invalid_or_expired"
+  | "goal_unavailable"
   | "configuration_error"
   | "service_unavailable";
 
@@ -494,6 +495,11 @@ function mapClaimError(error: unknown): GoogleOAuthAttemptError {
 }
 
 function mapCompleteError(error: unknown): GoogleOAuthAttemptError {
+  if (
+    databaseErrorIs(error, "55000", "google_calendar_goal_unavailable")
+  ) {
+    return new GoogleOAuthAttemptError("goal_unavailable", 403);
+  }
   if (databaseErrorIs(error, "55000", "oauth_workspace_changed")) {
     return workspaceChanged();
   }

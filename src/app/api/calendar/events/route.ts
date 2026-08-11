@@ -161,6 +161,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
   if (!workspace.ok) return workspace.response;
+  if (workspace.access.business.primary_goal === "signup") {
+    return calendarGoalUnavailableResponse();
+  }
 
   let body: { title?: string; description?: string; startTime?: string; endTime?: string };
   try {
@@ -297,6 +300,9 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
   if (!workspace.ok) return workspace.response;
+  if (workspace.access.business.primary_goal === "signup") {
+    return calendarGoalUnavailableResponse();
+  }
 
   let body: {
     eventId?: string;
@@ -443,6 +449,9 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
   if (!workspace.ok) return workspace.response;
+  if (workspace.access.business.primary_goal === "signup") {
+    return calendarGoalUnavailableResponse();
+  }
 
   const { searchParams } = request.nextUrl;
   const eventId = searchParams.get("eventId");
@@ -554,6 +563,13 @@ function workspaceChangedResponse(): NextResponse {
   return NextResponse.json(
     { error: "workspace_access_unavailable", retryable: true },
     { status: 503 }
+  );
+}
+
+function calendarGoalUnavailableResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "goal_unavailable", feature: "calendar" },
+    { status: 403 }
   );
 }
 

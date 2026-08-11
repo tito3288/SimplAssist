@@ -85,9 +85,11 @@ function dashboardContext({
   calendarToken = { google_email: "owner@example.com" } as {
     google_email: string;
   } | null,
+  primaryGoal = null,
 }: {
   bookingEnabled?: boolean;
   calendarToken?: { google_email: string } | null;
+  primaryGoal?: "book" | "signup" | "quote" | "callback" | null;
 } = {}) {
   const from = vi.fn((table: string) => {
     const query = {
@@ -109,7 +111,7 @@ function dashboardContext({
   return {
     status: "resolved",
     supabase: { from },
-    business: { id: BUSINESS_ID },
+    business: { id: BUSINESS_ID, primary_goal: primaryGoal },
     entitlements: { active: true, plan: "sms_and_chat" },
   };
 }
@@ -124,6 +126,44 @@ beforeEach(() => {
   mocks.getDashboardEntitledContext.mockResolvedValue(dashboardContext());
   mocks.canUseFeature.mockReturnValue(true);
   mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
+});
+
+describe("Calendar page primary-goal boundary", () => {
+  it("redirects signup-goal businesses before token, settings, feature, or operational reads", async () => {
+    const context = dashboardContext({ primaryGoal: "signup" });
+    mocks.getDashboardEntitledContext.mockResolvedValueOnce(context);
+
+    await expect(CalendarPage()).rejects.toThrow("redirect:/dashboard");
+
+    expect(context.supabase.from).not.toHaveBeenCalled();
+    expect(mocks.getRequestBrand).toHaveBeenCalledOnce();
+    expect(mocks.canUseFeature).not.toHaveBeenCalled();
+    expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "book", "quote", "callback"] as const)(
+    "preserves the existing Calendar path for primary_goal=%s",
+    async (primaryGoal) => {
+      const context = dashboardContext({ primaryGoal });
+      mocks.getDashboardEntitledContext.mockResolvedValueOnce(context);
+
+      const html = renderToStaticMarkup(await CalendarPage());
+
+      expect(html).toContain("Calendar");
+      expect(context.supabase.from.mock.calls.map(([table]) => table)).toEqual([
+        "google_calendar_tokens",
+        "ai_settings",
+      ]);
+      expect(mocks.getRequestBrand).toHaveBeenCalledOnce();
+      expect(mocks.canUseFeature).toHaveBeenCalledWith(
+        context.entitlements,
+        "calendar"
+      );
+      expect(mocks.assertBookingOperationallyAllowed).toHaveBeenCalledWith(
+        BUSINESS_ID
+      );
+    }
+  );
 });
 
 describe("Calendar page Google Calendar connection prompt", () => {

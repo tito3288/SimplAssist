@@ -261,7 +261,11 @@ beforeEach(() => {
     access: {
       status: "resolved",
       user: { id: "00000000-0000-4000-8000-000000000002" },
-      business: { id: BUSINESS_ID, partner_id: null },
+      business: {
+        id: BUSINESS_ID,
+        partner_id: null,
+        primary_goal: null,
+      },
       hostKind: "canonical",
     },
   });
@@ -432,6 +436,147 @@ describe("Calendar event entitlement boundary", () => {
       expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
       expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
       expect(mocks.getCalendarService).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe("Calendar event primary-goal boundary", () => {
+  function setWorkspacePrimaryGoal(
+    primaryGoal: "book" | "signup" | "quote" | "callback" | null
+  ) {
+    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+      ok: true,
+      access: {
+        status: "resolved",
+        user: { id: "00000000-0000-4000-8000-000000000002" },
+        business: {
+          id: BUSINESS_ID,
+          partner_id: null,
+          primary_goal: primaryGoal,
+        },
+        hostKind: "canonical",
+      },
+    });
+  }
+
+  function expectNoCalendarMutationWork() {
+    expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
+    expect(mocks.assertBookingOperationallyAllowed).not.toHaveBeenCalled();
+    expect(mocks.accessFrom).not.toHaveBeenCalled();
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.getCalendarService).not.toHaveBeenCalled();
+    expect(mocks.calendarInsert).not.toHaveBeenCalled();
+    expect(mocks.calendarPatch).not.toHaveBeenCalled();
+    expect(mocks.calendarDelete).not.toHaveBeenCalled();
+    expect(mocks.buildDashboardBookingSourceKey).not.toHaveBeenCalled();
+    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+  }
+
+  it.each([
+    {
+      method: "POST",
+      invoke: (request: NextRequest) => POST(request),
+      bodyKind: "malformed",
+      jsonImplementation: () => ({}),
+    },
+    {
+      method: "POST",
+      invoke: (request: NextRequest) => POST(request),
+      bodyKind: "unparseable",
+      jsonImplementation: () => {
+        throw new SyntaxError("invalid JSON");
+      },
+    },
+    {
+      method: "PATCH",
+      invoke: (request: NextRequest) => PATCH(request),
+      bodyKind: "malformed",
+      jsonImplementation: () => ({}),
+    },
+    {
+      method: "PATCH",
+      invoke: (request: NextRequest) => PATCH(request),
+      bodyKind: "unparseable",
+      jsonImplementation: () => {
+        throw new SyntaxError("invalid JSON");
+      },
+    },
+  ])(
+    "$method returns the fixed signup-goal denial before a $bodyKind body can produce 400",
+    async ({ invoke, jsonImplementation }) => {
+      setWorkspacePrimaryGoal("signup");
+      const json = vi.fn(jsonImplementation);
+
+      const response = await invoke({ json } as unknown as NextRequest);
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "goal_unavailable",
+        feature: "calendar",
+      });
+      expect(json).not.toHaveBeenCalled();
+      expectNoCalendarMutationWork();
+    }
+  );
+
+  it("returns the fixed signup-goal denial before DELETE eventId validation", async () => {
+    setWorkspacePrimaryGoal("signup");
+    const nextUrl = vi.fn(() => {
+      throw new Error("query parameters were inspected");
+    });
+    const request = Object.create(null) as NextRequest;
+    Object.defineProperty(request, "nextUrl", { get: nextUrl });
+
+    const response = await DELETE(request);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "goal_unavailable",
+      feature: "calendar",
+    });
+    expect(nextUrl).not.toHaveBeenCalled();
+    expectNoCalendarMutationWork();
+  });
+
+  it("leaves GET unchanged for signup-goal workspaces", async () => {
+    setWorkspacePrimaryGoal("signup");
+
+    const response = await operations[0].invoke();
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith("calendar");
+    expect(mocks.calendarList).toHaveBeenCalledOnce();
+  });
+
+  it.each(
+    ([null, "book", "quote", "callback"] as const).flatMap(
+      (primaryGoal) => [
+        { primaryGoal, method: "POST", invoke: () => POST(postRequest()) },
+        { primaryGoal, method: "PATCH", invoke: () => PATCH(patchRequest()) },
+        {
+          primaryGoal,
+          method: "DELETE",
+          invoke: () => DELETE(deleteRequest()),
+        },
+      ]
+    )
+  )(
+    "preserves $method for primary_goal=$primaryGoal",
+    async ({ primaryGoal, method, invoke }) => {
+      setWorkspacePrimaryGoal(primaryGoal);
+
+      const response = await invoke();
+
+      expect(response.status).toBe(200);
+      expect(mocks.requireAuthenticatedFeature).toHaveBeenCalledWith("calendar");
+      if (method === "POST") {
+        expect(mocks.calendarInsert).toHaveBeenCalledOnce();
+      } else if (method === "PATCH") {
+        expect(mocks.calendarPatch).toHaveBeenCalledOnce();
+      } else {
+        expect(mocks.calendarDelete).toHaveBeenCalledOnce();
+      }
     }
   );
 });

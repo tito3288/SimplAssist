@@ -35,6 +35,17 @@ const googleEmailSchema = z.string().email().max(254);
 export async function GET(request: NextRequest) {
   const workspace = await requireWorkspaceRouteAccess();
   if (!workspace.ok) return finish(workspace.response);
+  if (workspace.access.business.primary_goal === "signup") {
+    try {
+      const identity = await resolveGoogleOAuthWorkspaceIdentity(
+        workspace.access,
+        request.headers.get("host"),
+      );
+      return finish(settingsRedirect(identity, "unavailable"));
+    } catch (error) {
+      return finish(attemptErrorResponse(error));
+    }
+  }
 
   const handoffs = request.nextUrl.searchParams.getAll("handoff");
   const verifierCookies = request.cookies.getAll(GOOGLE_OAUTH_ORIGIN_COOKIE);
@@ -147,6 +158,9 @@ export async function GET(request: NextRequest) {
   if (!sameIdentity(identity, freshIdentity)) {
     return finish(workspaceChangedResponse());
   }
+  if (freshWorkspace.access.business.primary_goal === "signup") {
+    return finish(settingsRedirect(freshIdentity, "unavailable"));
+  }
 
   try {
     // The completion RPC updates an existing settings row. Re-prove it after
@@ -161,8 +175,16 @@ export async function GET(request: NextRequest) {
       tokenExpiry,
       googleEmail,
     });
-  } catch {
-    return finish(settingsRedirect(freshIdentity, "failed"));
+  } catch (error) {
+    return finish(
+      settingsRedirect(
+        freshIdentity,
+        error instanceof GoogleOAuthAttemptError &&
+          error.code === "goal_unavailable"
+          ? "unavailable"
+          : "failed",
+      ),
+    );
   }
 
   return finish(settingsRedirect(freshIdentity, "connected"));
@@ -170,7 +192,7 @@ export async function GET(request: NextRequest) {
 
 function settingsRedirect(
   identity: GoogleOAuthWorkspaceIdentity,
-  result: "connected" | "denied" | "failed",
+  result: "connected" | "denied" | "failed" | "unavailable",
 ): NextResponse {
   const destination = new URL("/settings", identity.origin);
   destination.searchParams.set("calendar", result);
