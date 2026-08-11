@@ -197,6 +197,29 @@ function voicemailState(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function forwardingInboundState(overrides: Record<string, unknown> = {}) {
+  return voicemailState({
+    callControlId: ATTEMPT.inbound_call_control_id,
+    callForwardingEnabled: true,
+    forwardToNumber: ATTEMPT.forward_to_number,
+    telnyxVoiceApplicationId: "voice_app_1",
+    ...overrides,
+  });
+}
+
+function forwardTargetState(overrides: Record<string, unknown> = {}) {
+  return encodeState({
+    callControlId: ATTEMPT.inbound_call_control_id,
+    businessId: ATTEMPT.business_id,
+    from: ATTEMPT.caller_phone,
+    businessName: "Test Biz",
+    forwardingRole: "forward_target",
+    forwardingAttemptId: ATTEMPT.id,
+    outboundCallControlId: ATTEMPT.outbound_call_control_id,
+    ...overrides,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -734,9 +757,10 @@ describe("POST /api/messaging/voice", () => {
     expect(mocks.bridge).not.toHaveBeenCalled();
   });
 
-  it("does not start ringback for a forwarding target answer", async () => {
+  it("returns early for a forwarding target answer without marking connected", async () => {
     const state = voicemailState({
       forwardingRole: "forward_target",
+      forwardingAttemptId: ATTEMPT.id,
     });
     mocks.unwrap.mockResolvedValue(
       voiceEvent("call.answered", {
@@ -750,7 +774,12 @@ describe("POST /api/messaging/voice", () => {
     expect(response.status).toBe(200);
     expect(mocks.startPlayback).not.toHaveBeenCalled();
     expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.startRecording).not.toHaveBeenCalled();
     expect(mocks.dial).not.toHaveBeenCalled();
+    expect(mocks.bridge).not.toHaveBeenCalled();
+    expect(mocks.hangup).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1998,7 +2027,7 @@ describe("POST /api/messaging/voice", () => {
       }, // createForwardingAttempt
       { error: null }, // updateForwardingAttemptOutbound
       { data: ATTEMPT, error: null }, // pre-bridge fallback check
-      { data: { ...ATTEMPT, status: "connected" }, error: null } // target answered before final attempt-state fence
+      { data: ATTEMPT, error: null } // attempt remains dialing until call.bridged
     );
 
     const answeredResponse = await voiceWebhook(request());
@@ -2067,7 +2096,253 @@ describe("POST /api/messaging/voice", () => {
     ]);
   });
 
-  it("sends the fallback SMS and keeps the claim on success", async () => {
+  it.each([
+    {
+      failure: "the dial command rejects",
+      behavior: "rejects" as const,
+      reason: "dial unavailable",
+    },
+    {
+      failure: "the dial response has no outbound ID",
+      behavior: "missing_id" as const,
+      reason: "Telnyx dial returned no outbound call_control_id",
+    },
+  ])(
+    "sends one missed-call SMS when owner dialing fails with $failure",
+    async ({ behavior, reason }) => {
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent(
+          "call.answered",
+          {
+            call_control_id: ATTEMPT.inbound_call_control_id,
+            call_leg_id: "leg_inbound",
+            call_session_id: ATTEMPT.call_session_id,
+            client_state: forwardingInboundState(),
+          },
+          `evt_voice_dial_failure_${behavior}`
+        )
+      );
+      if (behavior === "rejects") {
+        mocks.dial.mockRejectedValueOnce(new Error(reason));
+      } else {
+        mocks.dial.mockResolvedValueOnce({
+          data: { call_leg_id: "leg_outbound" },
+        });
+      }
+      queueResults(
+        {
+          data: { ...ATTEMPT, outbound_call_control_id: null },
+          error: null,
+        },
+        {
+          data: {
+            ...ATTEMPT,
+            outbound_call_control_id: null,
+            status: "error",
+            fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+            error_message: reason,
+          },
+          error: null,
+        }
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(chains).toHaveLength(2);
+      expect(chains[1].update).toHaveBeenCalledWith({
+        status: "error",
+        fallback_triggered_at: expect.any(String),
+        error_message: reason,
+      });
+      expect(chains[1].is).toHaveBeenCalledWith(
+        "fallback_triggered_at",
+        null
+      );
+      expect(chains[1].in).toHaveBeenCalledWith("status", [
+        "dialing",
+        "error",
+      ]);
+      expect(mocks.bridge).not.toHaveBeenCalled();
+      expect(mocks.hangup).toHaveBeenCalledOnce();
+      expect(mocks.hangup).toHaveBeenCalledWith(
+        ATTEMPT.inbound_call_control_id,
+        {}
+      );
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+        ATTEMPT.caller_phone,
+        ATTEMPT.business_id,
+        ATTEMPT.call_session_id
+      );
+      expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("sends one missed-call SMS when owner answer arrives before a rejected bridge", async () => {
+    const bridgeGate = deferred<void>();
+    mocks.bridge.mockImplementationOnce(async () => {
+      await bridgeGate.promise;
+      throw new Error("bridge rejected");
+    });
+    mocks.dial.mockResolvedValueOnce({
+      data: {
+        call_control_id: ATTEMPT.outbound_call_control_id,
+        call_leg_id: "leg_outbound",
+      },
+    });
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: ATTEMPT.inbound_call_control_id,
+          call_leg_id: "leg_inbound",
+          call_session_id: ATTEMPT.call_session_id,
+          client_state: forwardingInboundState(),
+        },
+        "evt_voice_bridge_rejected_inbound_answer"
+      )
+    );
+    queueResults(
+      {
+        data: { ...ATTEMPT, outbound_call_control_id: null },
+        error: null,
+      },
+      { error: null },
+      { data: ATTEMPT, error: null },
+      { data: ATTEMPT, error: null },
+      {
+        data: {
+          ...ATTEMPT,
+          status: "error",
+          fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+          error_message: "bridge rejected",
+        },
+        error: null,
+      }
+    );
+
+    const inboundResponsePromise = voiceWebhook(request());
+    await vi.waitFor(() => expect(mocks.bridge).toHaveBeenCalledOnce());
+
+    const ownerState = mocks.dial.mock.calls[0][0].client_state as string;
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          client_state: ownerState,
+        },
+        "evt_voice_bridge_rejected_owner_answer"
+      )
+    );
+    const ownerResponse = await voiceWebhook(request());
+
+    bridgeGate.resolve(undefined);
+    const inboundResponse = await inboundResponsePromise;
+
+    expect(ownerResponse.status).toBe(200);
+    expect(inboundResponse.status).toBe(200);
+    expect(chains).toHaveLength(5);
+    expect(chains[4].update).toHaveBeenCalledWith({
+      status: "error",
+      fallback_triggered_at: expect.any(String),
+      error_message: "bridge rejected",
+    });
+    expect(chains[4].is).toHaveBeenCalledWith("fallback_triggered_at", null);
+    expect(chains[4].in).toHaveBeenCalledWith("status", ["dialing", "error"]);
+    for (const chain of chains) {
+      expect(chain.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: "connected" })
+      );
+    }
+    expect(mocks.hangup).toHaveBeenCalledTimes(2);
+    expect(mocks.hangup).toHaveBeenNthCalledWith(
+      1,
+      ATTEMPT.outbound_call_control_id,
+      {}
+    );
+    expect(mocks.hangup).toHaveBeenNthCalledWith(
+      2,
+      ATTEMPT.inbound_call_control_id,
+      {}
+    );
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      ATTEMPT.call_session_id
+    );
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { cause: "user_busy" },
+    { cause: "timeout" },
+    { cause: "network_congestion" },
+  ])(
+    "sends one missed-call SMS when an unbridged owner leg ends with $cause",
+    async ({ cause }) => {
+      const targetState = forwardTargetState();
+      mocks.unwrap.mockResolvedValue(
+        voiceEvent(
+          "call.hangup",
+          {
+            call_control_id: ATTEMPT.outbound_call_control_id,
+            client_state: targetState,
+            hangup_cause: cause,
+          },
+          `evt_voice_owner_hangup_${cause}`
+        )
+      );
+      queueResults(
+        { data: ATTEMPT, error: null },
+        {
+          data: {
+            ...ATTEMPT,
+            status: "fallback_triggered",
+            fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+            error_message: `owner_hangup_before_bridge:${cause}`,
+          },
+          error: null,
+        }
+      );
+
+      const response = await voiceWebhook(request());
+
+      expect(response.status).toBe(200);
+      expect(chains).toHaveLength(2);
+      expect(chains[1].update).toHaveBeenCalledWith({
+        status: "fallback_triggered",
+        fallback_triggered_at: expect.any(String),
+        error_message: `owner_hangup_before_bridge:${cause}`,
+      });
+      expect(chains[1].is).toHaveBeenCalledWith(
+        "fallback_triggered_at",
+        null
+      );
+      expect(chains[1].in).toHaveBeenCalledWith("status", [
+        "dialing",
+        "error",
+      ]);
+      expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledOnce();
+      expect(mocks.hangup).toHaveBeenCalledOnce();
+      expect(mocks.hangup).toHaveBeenCalledWith(
+        ATTEMPT.inbound_call_control_id,
+        {}
+      );
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+        ATTEMPT.caller_phone,
+        ATTEMPT.business_id,
+        ATTEMPT.call_session_id
+      );
+      expect(mocks.dial).not.toHaveBeenCalled();
+      expect(mocks.bridge).not.toHaveBeenCalled();
+    }
+  );
+
+  it("sends one fallback SMS when the caller abandons while the owner rings", async () => {
     mocks.unwrap.mockResolvedValue(
       voiceEvent("call.hangup", {
         call_control_id: "cc_inbound",
@@ -2077,12 +2352,429 @@ describe("POST /api/messaging/voice", () => {
     );
     queueResults(
       { data: ATTEMPT, error: null }, // getForwardingAttemptById
-      { data: { ...ATTEMPT, status: "abandoned" }, error: null } // fallback claim
+      {
+        data: {
+          ...ATTEMPT,
+          status: "abandoned",
+          fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+        },
+        error: null,
+      } // fallback claim
     );
 
     const response = await voiceWebhook(request());
 
     expect(response.status).toBe(200);
+    expect(chains[1].update).toHaveBeenCalledWith({
+      status: "abandoned",
+      fallback_triggered_at: expect.any(String),
+      abandoned_at: expect.any(String),
+      error_message: "caller_hangup_before_bridge:originator_cancel",
+    });
+    expect(chains[1].eq).toHaveBeenCalledWith("id", ATTEMPT.id);
+    expect(chains[1].is).toHaveBeenCalledWith("fallback_triggered_at", null);
+    expect(chains[1].in).toHaveBeenCalledWith("status", ["dialing", "error"]);
+    expect(mocks.hangup).toHaveBeenCalledOnce();
+    expect(mocks.hangup).toHaveBeenCalledWith(
+      ATTEMPT.outbound_call_control_id,
+      {}
+    );
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      ATTEMPT.call_session_id
+    );
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      leg: "inbound",
+      callControlId: ATTEMPT.inbound_call_control_id,
+      cause: "originator_cancel",
+      status: "abandoned",
+      reason: "caller_hangup_before_bridge:originator_cancel",
+      cleanupCallControlId: ATTEMPT.outbound_call_control_id,
+    },
+    {
+      leg: "outbound",
+      callControlId: ATTEMPT.outbound_call_control_id,
+      cause: "user_busy",
+      status: "fallback_triggered",
+      reason: "owner_hangup_before_bridge:user_busy",
+      cleanupCallControlId: ATTEMPT.inbound_call_control_id,
+    },
+  ])(
+    "sends one missed-call SMS when the $leg leg dies after bridge acceptance but before call.bridged",
+    async ({
+      leg,
+      callControlId,
+      cause,
+      status,
+      reason,
+      cleanupCallControlId,
+    }) => {
+      mocks.dial.mockResolvedValueOnce({
+        data: {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          call_leg_id: "leg_outbound",
+        },
+      });
+      mocks.unwrap.mockResolvedValueOnce(
+        voiceEvent(
+          "call.answered",
+          {
+            call_control_id: ATTEMPT.inbound_call_control_id,
+            call_leg_id: "leg_inbound",
+            call_session_id: ATTEMPT.call_session_id,
+            client_state: forwardingInboundState(),
+          },
+          `evt_voice_bridge_accepted_${leg}`
+        )
+      );
+      const claimedAttempt = {
+        ...ATTEMPT,
+        status,
+        fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+        error_message: reason,
+        ...(status === "abandoned"
+          ? { abandoned_at: "2026-08-11T12:00:00.000Z" }
+          : {}),
+      };
+      queueResults(
+        {
+          data: { ...ATTEMPT, outbound_call_control_id: null },
+          error: null,
+        },
+        { error: null },
+        { data: ATTEMPT, error: null },
+        { data: ATTEMPT, error: null },
+        { data: ATTEMPT, error: null },
+        { data: claimedAttempt, error: null }
+      );
+
+      const answeredResponse = await voiceWebhook(request());
+
+      expect(answeredResponse.status).toBe(200);
+      expect(mocks.bridge).toHaveBeenCalledOnce();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+      const hangupState =
+        leg === "inbound"
+          ? (mocks.bridge.mock.calls[0][1].client_state as string)
+          : (mocks.dial.mock.calls[0][0].client_state as string);
+      mocks.unwrap.mockResolvedValueOnce(
+        voiceEvent(
+          "call.hangup",
+          {
+            call_control_id: callControlId,
+            client_state: hangupState,
+            hangup_cause: cause,
+          },
+          `evt_voice_pre_bridged_${leg}_hangup`
+        )
+      );
+
+      const hangupResponse = await voiceWebhook(request());
+
+      expect(hangupResponse.status).toBe(200);
+      expect(chains).toHaveLength(6);
+      expect(chains[5].update).toHaveBeenCalledWith({
+        status,
+        fallback_triggered_at: expect.any(String),
+        error_message: reason,
+        ...(status === "abandoned"
+          ? { abandoned_at: expect.any(String) }
+          : {}),
+      });
+      expect(chains[5].is).toHaveBeenCalledWith(
+        "fallback_triggered_at",
+        null
+      );
+      expect(chains[5].in).toHaveBeenCalledWith("status", [
+        "dialing",
+        "error",
+      ]);
+      for (const chain of chains) {
+        expect(chain.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({ status: "connected" })
+        );
+      }
+      expect(mocks.hangup).toHaveBeenCalledOnce();
+      expect(mocks.hangup).toHaveBeenCalledWith(cleanupCallControlId, {});
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+      expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+        ATTEMPT.caller_phone,
+        ATTEMPT.business_id,
+        ATTEMPT.call_session_id
+      );
+      expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rescues a dial-failure fallback-claim error from a later inbound hangup", async () => {
+    const answeredEvent = voiceEvent(
+      "call.answered",
+      {
+        call_control_id: ATTEMPT.inbound_call_control_id,
+        call_leg_id: "leg_inbound",
+        call_session_id: ATTEMPT.call_session_id,
+        client_state: forwardingInboundState(),
+      },
+      "evt_voice_dial_claim_error"
+    );
+    const hangupEvent = voiceEvent(
+      "call.hangup",
+      {
+        call_control_id: ATTEMPT.inbound_call_control_id,
+        client_state: HANGUP_STATE,
+        hangup_cause: "originator_cancel",
+      },
+      "evt_voice_dial_claim_error_inbound_hangup"
+    );
+    mocks.unwrap
+      .mockResolvedValueOnce(answeredEvent)
+      .mockResolvedValueOnce(hangupEvent);
+    mocks.dial.mockRejectedValueOnce(new Error("dial unavailable"));
+    const dialingAttemptWithoutOwner = {
+      ...ATTEMPT,
+      outbound_call_control_id: null,
+      status: "dialing",
+      fallback_triggered_at: null,
+    };
+    queueResults(
+      { data: dialingAttemptWithoutOwner, error: null },
+      { data: null, error: { message: "connection reset" } },
+      { data: dialingAttemptWithoutOwner, error: null },
+      {
+        data: {
+          ...dialingAttemptWithoutOwner,
+          status: "abandoned",
+          fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+          abandoned_at: "2026-08-11T12:00:00.000Z",
+          error_message: "caller_hangup_before_bridge:originator_cancel",
+        },
+        error: null,
+      }
+    );
+
+    const answeredResponse = await voiceWebhook(request());
+
+    expect(answeredResponse.status).toBe(200);
+    expect(chains).toHaveLength(2);
+    expect(chains[1].update).toHaveBeenCalledWith({
+      status: "error",
+      fallback_triggered_at: expect.any(String),
+      error_message: "dial unavailable",
+    });
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+    expect(mocks.hangup).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+
+    const hangupResponse = await voiceWebhook(request());
+
+    expect(hangupResponse.status).toBe(200);
+    expect(chains).toHaveLength(4);
+    expect(chains[3].update).toHaveBeenCalledWith({
+      status: "abandoned",
+      fallback_triggered_at: expect.any(String),
+      abandoned_at: expect.any(String),
+      error_message: "caller_hangup_before_bridge:originator_cancel",
+    });
+    expect(chains[3].is).toHaveBeenCalledWith(
+      "fallback_triggered_at",
+      null
+    );
+    expect(chains[3].in).toHaveBeenCalledWith("status", [
+      "dialing",
+      "error",
+    ]);
+    expect(
+      chains.filter((chain) => chain.insert.mock.calls.length > 0)
+    ).toHaveLength(1);
+    expect(mocks.hangup).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      ATTEMPT.call_session_id
+    );
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("rescues a bridge-failure fallback-claim error from a later outbound hangup", async () => {
+    mocks.dial.mockResolvedValueOnce({
+      data: {
+        call_control_id: ATTEMPT.outbound_call_control_id,
+        call_leg_id: "leg_outbound",
+      },
+    });
+    mocks.bridge.mockRejectedValueOnce(new Error("bridge rejected"));
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: ATTEMPT.inbound_call_control_id,
+          call_leg_id: "leg_inbound",
+          call_session_id: ATTEMPT.call_session_id,
+          client_state: forwardingInboundState(),
+        },
+        "evt_voice_bridge_claim_error"
+      )
+    );
+    queueResults(
+      {
+        data: { ...ATTEMPT, outbound_call_control_id: null },
+        error: null,
+      },
+      { error: null },
+      { data: ATTEMPT, error: null },
+      { data: ATTEMPT, error: null },
+      { data: null, error: { message: "connection reset" } },
+      { data: ATTEMPT, error: null },
+      {
+        data: {
+          ...ATTEMPT,
+          status: "fallback_triggered",
+          fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+          error_message: "owner_hangup_before_bridge:user_busy",
+        },
+        error: null,
+      }
+    );
+
+    const answeredResponse = await voiceWebhook(request());
+
+    expect(answeredResponse.status).toBe(200);
+    expect(chains).toHaveLength(5);
+    expect(chains[4].update).toHaveBeenCalledWith({
+      status: "error",
+      fallback_triggered_at: expect.any(String),
+      error_message: "bridge rejected",
+    });
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+    expect(mocks.hangup).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+
+    const targetState = mocks.dial.mock.calls[0][0].client_state as string;
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.hangup",
+        {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          client_state: targetState,
+          hangup_cause: "user_busy",
+        },
+        "evt_voice_bridge_claim_error_outbound_hangup"
+      )
+    );
+    const hangupResponse = await voiceWebhook(request());
+
+    expect(hangupResponse.status).toBe(200);
+    expect(chains).toHaveLength(7);
+    expect(chains[6].update).toHaveBeenCalledWith({
+      status: "fallback_triggered",
+      fallback_triggered_at: expect.any(String),
+      error_message: "owner_hangup_before_bridge:user_busy",
+    });
+    expect(chains[6].is).toHaveBeenCalledWith(
+      "fallback_triggered_at",
+      null
+    );
+    expect(chains[6].in).toHaveBeenCalledWith("status", [
+      "dialing",
+      "error",
+    ]);
+    expect(
+      chains.filter((chain) => chain.insert.mock.calls.length > 0)
+    ).toHaveLength(1);
+    expect(mocks.hangup).toHaveBeenCalledOnce();
+    expect(mocks.hangup).toHaveBeenCalledWith(
+      ATTEMPT.inbound_call_control_id,
+      {}
+    );
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
+      ATTEMPT.caller_phone,
+      ATTEMPT.business_id,
+      ATTEMPT.call_session_id
+    );
+    expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+  });
+
+  it("preserves a claimed fallback across late owner-answer and call.bridged events", async () => {
+    const targetState = forwardTargetState();
+    const fallbackAttempt = {
+      ...ATTEMPT,
+      status: "fallback_triggered",
+      fallback_triggered_at: "2026-08-11T12:00:00.000Z",
+      error_message: "owner_hangup_before_bridge:user_busy",
+    };
+    queueResults(
+      { data: ATTEMPT, error: null },
+      { data: fallbackAttempt, error: null },
+      { data: fallbackAttempt, error: null },
+      { data: null, error: null }
+    );
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.hangup",
+        {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          client_state: targetState,
+          hangup_cause: "user_busy",
+        },
+        "evt_voice_late_events_fallback"
+      )
+    );
+
+    const fallbackResponse = await voiceWebhook(request());
+
+    expect(fallbackResponse.status).toBe(200);
+    expect(chains).toHaveLength(2);
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.answered",
+        {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          client_state: targetState,
+        },
+        "evt_voice_late_events_owner_answer"
+      )
+    );
+    const ownerAnswerResponse = await voiceWebhook(request());
+    const chainsAfterOwnerAnswer = chains.length;
+
+    mocks.unwrap.mockResolvedValueOnce(
+      voiceEvent(
+        "call.bridged",
+        {
+          call_control_id: ATTEMPT.outbound_call_control_id,
+          client_state: targetState,
+        },
+        "evt_voice_late_events_bridged"
+      )
+    );
+    const bridgedResponse = await voiceWebhook(request());
+
+    expect(ownerAnswerResponse.status).toBe(200);
+    expect(bridgedResponse.status).toBe(200);
+    expect(chainsAfterOwnerAnswer).toBe(2);
+    expect(chains).toHaveLength(4);
+    expect(chains[3].update).toHaveBeenCalledWith({
+      status: "connected",
+      connected_at: expect.any(String),
+    });
+    expect(chains[3].eq).toHaveBeenCalledWith("status", "dialing");
+    expect(chains[3].is).toHaveBeenCalledWith("fallback_triggered_at", null);
+    expect(mocks.hangup).toHaveBeenCalledOnce();
+    expect(mocks.hangup).toHaveBeenCalledWith(
+      ATTEMPT.inbound_call_control_id,
+      {}
+    );
+    expect(mocks.sendMissedCallSMS).toHaveBeenCalledOnce();
     expect(mocks.sendMissedCallSMS).toHaveBeenCalledWith(
       ATTEMPT.caller_phone,
       ATTEMPT.business_id,
@@ -2344,6 +3036,80 @@ describe("POST /api/messaging/voice", () => {
     );
   });
 
+  it.each([
+    {
+      leg: "inbound",
+      callControlId: ATTEMPT.inbound_call_control_id,
+      state: HANGUP_STATE,
+    },
+    {
+      leg: "outbound",
+      callControlId: ATTEMPT.outbound_call_control_id,
+      state: forwardTargetState(),
+    },
+  ])(
+    "ends a successfully bridged call without missed-call SMS when the $leg leg hangs up first",
+    async ({ leg, callControlId, state }) => {
+      const connectedAttempt = {
+        ...ATTEMPT,
+        status: "connected",
+        connected_at: "2026-08-11T12:00:00.000Z",
+      };
+      mocks.unwrap
+        .mockResolvedValueOnce(
+          voiceEvent(
+            "call.bridged",
+            {
+              call_control_id: ATTEMPT.outbound_call_control_id,
+              client_state: forwardTargetState(),
+            },
+            `evt_voice_success_bridged_${leg}`
+          )
+        )
+        .mockResolvedValueOnce(
+          voiceEvent(
+            "call.hangup",
+            {
+              call_control_id: callControlId,
+              client_state: state,
+              hangup_cause: "normal_clearing",
+            },
+            `evt_voice_success_hangup_${leg}`
+          )
+        );
+      queueResults(
+        { data: ATTEMPT, error: null },
+        { data: { id: ATTEMPT.id }, error: null },
+        { data: connectedAttempt, error: null },
+        { error: null }
+      );
+
+      const bridgedResponse = await voiceWebhook(request());
+      const hangupResponse = await voiceWebhook(request());
+
+      expect(bridgedResponse.status).toBe(200);
+      expect(hangupResponse.status).toBe(200);
+      expect(chains).toHaveLength(4);
+      expect(chains[1].update).toHaveBeenCalledWith({
+        status: "connected",
+        connected_at: expect.any(String),
+      });
+      expect(chains[1].eq).toHaveBeenCalledWith("status", "dialing");
+      expect(chains[1].is).toHaveBeenCalledWith(
+        "fallback_triggered_at",
+        null
+      );
+      expect(chains[3].update).toHaveBeenCalledWith({
+        status: "ended",
+        ended_at: expect.any(String),
+      });
+      expect(chains[3].eq).toHaveBeenCalledWith("status", "connected");
+      expect(mocks.hangup).not.toHaveBeenCalled();
+      expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
+      expect(mocks.releaseProcessedEvent).not.toHaveBeenCalled();
+    }
+  );
+
   it("honors RetryableWebhookError from a non-durable event type (bridged connected-mark failure)", async () => {
     // Durability is a property of the side effect: call.bridged is not in
     // DURABLE_EVENT_TYPES, but a failed connected-mark must retry (a lost
@@ -2377,5 +3143,12 @@ describe("POST /api/messaging/voice", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.dial).not.toHaveBeenCalled();
+    expect(mocks.bridge).not.toHaveBeenCalled();
+    expect(mocks.hangup).not.toHaveBeenCalled();
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
+    expect(mocks.speak).not.toHaveBeenCalled();
+    expect(mocks.startRecording).not.toHaveBeenCalled();
+    expect(mocks.sendMissedCallSMS).not.toHaveBeenCalled();
   });
 });

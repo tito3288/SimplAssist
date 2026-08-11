@@ -311,11 +311,8 @@ async function handleCallAnswered(payload: Record<string, unknown>) {
 
   if (state.forwardingRole === "forward_target") {
     console.log(
-      `[messaging:voice] forward target answered attempt=${state.forwardingAttemptId}`
+      `[messaging:voice] forward target answered attempt=${state.forwardingAttemptId}; awaiting call.bridged`
     );
-    if (state.forwardingAttemptId) {
-      await markForwardingConnected(state.forwardingAttemptId, "target_answered");
-    }
     return;
   }
 
