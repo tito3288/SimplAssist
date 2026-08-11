@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
+import { readFileSync } from "node:fs";
 import type { RequestBrand } from "@/lib/branding/types";
+import { PRIMARY_GOAL_COPY } from "@/lib/goals/primaryGoal";
 
 vi.mock("@/components/onboarding/PlanSelectionOption", () => ({
   PlanSelectionOption: ({ plan }: { plan: { features: string[] } }) => (
@@ -103,6 +105,8 @@ const baseProps: ReviewProps = {
     businessHours: [],
     servicesCount: 1,
     faqsCount: 1,
+    primaryGoal: null,
+    goalUrl: null,
     aiSettings: {
       tone: "balanced",
       business_voice: "we",
@@ -140,6 +144,33 @@ function renderReview(
       <ReviewAndLaunch {...props} />
     </BrandProvider>
   );
+}
+
+function renderGoalReview(
+  primaryGoal: ReviewProps["data"]["primaryGoal"],
+  goalUrl: string | null
+): string {
+  return renderReview(DEFAULT_REQUEST_BRAND, {
+    ...baseProps,
+    data: {
+      ...baseProps.data,
+      primaryGoal,
+      goalUrl,
+    },
+  });
+}
+
+const GOAL_ROW_PATTERN =
+  /<div\b(?=[^>]*data-primary-goal-review-row="true")[^>]*>[\s\S]*?<\/div>/;
+
+function goalRow(markup: string): string {
+  const row = markup.match(GOAL_ROW_PATTERN)?.[0];
+  if (!row) throw new Error("missing Goal review row");
+  return row;
+}
+
+function withoutGoalRow(markup: string): string {
+  return markup.replace(GOAL_ROW_PATTERN, "");
 }
 
 describe("ReviewAndLaunch visible brand copy", () => {
@@ -336,6 +367,73 @@ describe("buildOnboardingLaunchRequest", () => {
       expect(fetcher).not.toHaveBeenCalledWith(
         expect.stringContaining("checkout"),
         expect.anything()
+      );
+    }
+  );
+});
+
+describe("ReviewAndLaunch goal row", () => {
+  it("shows the exact book label without the retained URL", () => {
+    const retainedUrl = "https://example.com/Retained?Camp=Summer#Form";
+    const markup = renderGoalReview("book", retainedUrl);
+    const row = goalRow(markup);
+
+    expect(row).toContain(">Goal</span>");
+    expect(row).toContain(PRIMARY_GOAL_COPY.options.book);
+    expect(row).not.toContain(retainedUrl);
+    expect(markup).not.toContain(retainedUrl);
+  });
+
+  it("shows the exact signup label with the raw saved URL directly beneath it", () => {
+    const savedUrl = "https://example.com/Path?Camp=Summer#SignUp";
+    const row = goalRow(renderGoalReview("signup", savedUrl));
+
+    expect(row).toContain(PRIMARY_GOAL_COPY.options.signup);
+    expect(row).toContain(savedUrl);
+    expect(row.indexOf(PRIMARY_GOAL_COPY.options.signup)).toBeLessThan(
+      row.indexOf(savedUrl)
+    );
+  });
+
+  it("places Goal before Tone and keeps the AI Personality edit target at step 4", () => {
+    const markup = renderGoalReview("book", null);
+    const row = goalRow(markup);
+    const source = readFileSync(
+      new URL("./ReviewAndLaunch.tsx", import.meta.url),
+      "utf8"
+    );
+
+    expect(markup.indexOf(row)).toBeLessThan(markup.indexOf(">Tone</span>"));
+    expect(source).toContain(
+      '<Section title="AI Personality" onEdit={() => onEditStep(4)}>'
+    );
+  });
+
+  it.each([
+    ["book", "https://example.com/retained"],
+    ["signup", "https://example.com/signup"],
+  ] as const)(
+    "changes only the new Goal row for %s review markup",
+    (primaryGoal, goalUrl) => {
+      const nullMarkup = renderGoalReview(null, null);
+      const goalMarkup = renderGoalReview(primaryGoal, goalUrl);
+
+      expect(withoutGoalRow(goalMarkup)).toBe(nullMarkup);
+    }
+  );
+
+  it.each(["quote", "callback"] as const)(
+    "keeps legacy %s review markup byte-identical to NULL",
+    (primaryGoal) => {
+      const nullMarkup = renderGoalReview(null, null);
+      const legacyMarkup = renderGoalReview(
+        primaryGoal,
+        "https://example.com/legacy"
+      );
+
+      expect(legacyMarkup).toBe(nullMarkup);
+      expect(legacyMarkup).not.toContain(
+        'data-primary-goal-review-row="true"'
       );
     }
   );

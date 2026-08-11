@@ -18,6 +18,10 @@ import { partnerManagedBillingMessage } from "@/lib/billing/partnerManagedBillin
 import { SETUP_FEE_EXPLAINER_PATH } from "@/lib/support/constants";
 import { tile, statusSuccess, statusWarning, statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
+import {
+  PRIMARY_GOAL_COPY,
+  isEditablePrimaryGoal,
+} from "@/lib/goals/primaryGoal";
 
 const RECOMMENDED_PLAN: SubscriptionPlan = 'sms_and_chat';
 const SETUP_FEE = SETUP_FEE_CENTS / 100;
@@ -71,6 +75,8 @@ interface ReviewData {
   }[];
   servicesCount: number;
   faqsCount: number;
+  primaryGoal: OnboardingState["primaryGoal"];
+  goalUrl: OnboardingState["goalUrl"];
   aiSettings: {
     tone: string;
     business_voice: string;
@@ -422,6 +428,10 @@ export default function ReviewAndLaunch({
 
       {/* AI Settings */}
       <Section title="AI Personality" onEdit={() => onEditStep(4)}>
+        <GoalSummaryRow
+          primaryGoal={data.primaryGoal}
+          goalUrl={data.goalUrl}
+        />
         <SummaryRow label="Tone" value={TONE_LABELS[data.aiSettings.tone] || data.aiSettings.tone} />
         <SummaryRow label="Voice" value={data.aiSettings.business_voice === 'we' ? '"We"' : 'Business name'} />
         <SummaryRow label="Language" value={LANGUAGE_LABELS[data.aiSettings.language] || data.aiSettings.language} />
@@ -668,6 +678,28 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between text-sm">
       <span className="text-stone-500 dark:text-[#bdbdbf]">{label}</span>
       <span className="text-stone-900 dark:text-[#f5f5f5] font-medium">{value}</span>
+    </div>
+  );
+}
+
+function GoalSummaryRow({
+  primaryGoal,
+  goalUrl,
+}: Pick<ReviewData, "primaryGoal" | "goalUrl">) {
+  if (!isEditablePrimaryGoal(primaryGoal)) return null;
+
+  return (
+    <div
+      data-primary-goal-review-row="true"
+      className="flex justify-between text-sm"
+    >
+      <span className="text-stone-500 dark:text-[#bdbdbf]">Goal</span>
+      <span className="text-right text-stone-900 dark:text-[#f5f5f5] font-medium">
+        <span className="block">{PRIMARY_GOAL_COPY.options[primaryGoal]}</span>
+        {primaryGoal === "signup" && (
+          <span className="block">{goalUrl}</span>
+        )}
+      </span>
     </div>
   );
 }

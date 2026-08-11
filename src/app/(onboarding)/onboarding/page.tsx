@@ -322,6 +322,8 @@ export default function OnboardingPage() {
               businessHours: state.businessHours,
               servicesCount: contentQuality.validServiceCount,
               faqsCount: contentQuality.validFaqCount,
+              primaryGoal: state.primaryGoal,
+              goalUrl: state.goalUrl,
               aiSettings: state.aiSettings ?? {
                 tone: 'balanced',
                 business_voice: 'we',
