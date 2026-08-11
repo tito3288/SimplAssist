@@ -47,8 +47,8 @@ export default async function DashboardPage() {
         .from('contacts')
         .select('*')
         .eq('business_id', business.id)
-        .gte('lead_score', 7)
-        .order('lead_score', { ascending: false })
+        .eq('lead_status', 'hot')
+        .order('lead_status_updated_at', { ascending: false })
         .limit(10),
       supabase
         .from('phone_numbers')

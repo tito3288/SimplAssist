@@ -239,7 +239,7 @@ export default function DashboardOverview({
               </Link>
             </div>
             {hotLeads.length === 0 ? (
-              <p className={`text-sm p-4 ${body}`}>No hot leads yet. Contacts with a lead score of 7+ will appear here.</p>
+              <p className={`text-sm p-4 ${body}`}>No hot leads yet. Contacts classified as hot will appear here.</p>
             ) : (
               <div className="divide-y divide-[#ece4d8] dark:divide-white/[0.06]">
                 {hotLeads.map((lead) => (
@@ -250,10 +250,9 @@ export default function DashboardOverview({
                         Last contact: {formatDate(new Date(lead.last_contacted_at), 'MMM d, yyyy')}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Flame className="w-3 h-3 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]" />
-                      <span className="text-sm font-bold text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]">{lead.lead_score}</span>
-                    </div>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${statusSuccess}`}>
+                      <Flame className="w-3 h-3" /> Hot
+                    </span>
                   </div>
                 ))}
               </div>

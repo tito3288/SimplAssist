@@ -30,6 +30,14 @@ interface ContactDetailProps {
   onDeleted: (contactId: string) => void;
 }
 
+type LeadStatus = Contact["lead_status"];
+
+const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  normal: "Normal",
+  warm: "Warm",
+  hot: "Hot",
+};
+
 function relativeTime(date: string): string {
   const now = new Date();
   const d = new Date(date);
@@ -44,20 +52,17 @@ function relativeTime(date: string): string {
   return formatDate(date, "PP");
 }
 
-function LeadBadge({ score }: { score: number }) {
+function LeadBadge({ status }: { status: LeadStatus }) {
   let color = statusNeutral;
-  let label = "Cold";
-  if (score >= 7) {
+  if (status === "hot") {
     color = statusSuccess;
-    label = "Hot";
-  } else if (score >= 4) {
+  } else if (status === "warm") {
     color = statusWarning;
-    label = "Warm";
   }
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
-      {score >= 7 && <Flame className="h-3 w-3" />}
-      {label} ({score})
+      {status === "hot" && <Flame className="h-3 w-3" />}
+      {LEAD_STATUS_LABEL[status]}
     </span>
   );
 }
@@ -245,7 +250,7 @@ export default function ContactDetail({
             )}
           </div>
 
-          {/* Channel & Lead Score */}
+          {/* Channel & Lead status */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
             <div>
               <label className="text-xs font-medium uppercase text-stone-500 dark:text-[#bdbdbf]">
@@ -262,10 +267,10 @@ export default function ContactDetail({
             </div>
             <div>
               <label className="text-xs font-medium uppercase text-stone-500 dark:text-[#bdbdbf]">
-                Lead Score
+                Lead status
               </label>
               <div className="mt-1">
-                <LeadBadge score={contact.lead_score} />
+                <LeadBadge status={contact.lead_status} />
               </div>
             </div>
           </div>

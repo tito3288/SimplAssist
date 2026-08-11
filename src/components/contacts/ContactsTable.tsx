@@ -21,7 +21,20 @@ import {
 } from "@/lib/theme-v2/theme";
 
 type Filter = "all" | "sms" | "web_chat" | "hot";
-type Sort = "recent" | "score" | "name";
+type Sort = "recent" | "status" | "name";
+type LeadStatus = Contact["lead_status"];
+
+const LEAD_STATUS_RANK: Record<LeadStatus, number> = {
+  normal: 0,
+  warm: 1,
+  hot: 2,
+};
+
+const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  normal: "Normal",
+  warm: "Warm",
+  hot: "Hot",
+};
 
 interface ContactWithCount extends Contact {
   conversation_count: number;
@@ -47,22 +60,19 @@ function relativeTime(date: string): string {
   return `${diffMonths}mo ago`;
 }
 
-function LeadBadge({ score }: { score: number }) {
+function LeadBadge({ status }: { status: LeadStatus }) {
   let color = statusNeutral;
-  let label = "Cold";
-  if (score >= 7) {
+  if (status === "hot") {
     color = statusSuccess;
-    label = "Hot";
-  } else if (score >= 4) {
+  } else if (status === "warm") {
     color = statusWarning;
-    label = "Warm";
   }
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${color}`}
     >
-      {score >= 7 && <Flame className="h-3 w-3" />}
-      {label} ({score})
+      {status === "hot" && <Flame className="h-3 w-3" />}
+      {LEAD_STATUS_LABEL[status]}
     </span>
   );
 }
@@ -99,13 +109,22 @@ export default function ContactsTable({
     // Filter
     if (filter === "sms") result = result.filter((c) => c.source_channel === "sms");
     if (filter === "web_chat") result = result.filter((c) => c.source_channel === "web_chat");
-    if (filter === "hot") result = result.filter((c) => c.lead_score >= 7);
+    if (filter === "hot") result = result.filter((c) => c.lead_status === "hot");
 
     // Sort
     result = [...result].sort((a, b) => {
       if (sort === "recent")
         return new Date(b.last_contacted_at).getTime() - new Date(a.last_contacted_at).getTime();
-      if (sort === "score") return b.lead_score - a.lead_score;
+      if (sort === "status") {
+        const rankDifference =
+          LEAD_STATUS_RANK[b.lead_status] - LEAD_STATUS_RANK[a.lead_status];
+        if (rankDifference !== 0) return rankDifference;
+
+        const updatedAtDifference =
+          new Date(b.lead_status_updated_at).getTime() -
+          new Date(a.lead_status_updated_at).getTime();
+        if (updatedAtDifference !== 0) return updatedAtDifference;
+      }
       return (a.name ?? "").localeCompare(b.name ?? "");
     });
 
@@ -149,7 +168,7 @@ export default function ContactsTable({
 
   const sorts: { key: Sort; label: string }[] = [
     { key: "recent", label: "Most Recent" },
-    { key: "score", label: "Highest Score" },
+    { key: "status", label: "Lead status" },
     { key: "name", label: "Name A-Z" },
   ];
 
@@ -222,7 +241,7 @@ export default function ContactsTable({
                 <th className="px-6 py-3 hidden sm:table-cell">Phone</th>
                 <th className="px-6 py-3 hidden md:table-cell">Email</th>
                 <th className="px-6 py-3">Channel</th>
-                <th className="px-6 py-3">Lead Score</th>
+                <th className="px-6 py-3">Lead status</th>
                 <th className="px-6 py-3 hidden lg:table-cell">Conversations</th>
                 <th className="px-6 py-3 hidden lg:table-cell">Last Contact</th>
               </tr>
@@ -253,7 +272,7 @@ export default function ContactsTable({
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <LeadBadge score={contact.lead_score} />
+                    <LeadBadge status={contact.lead_status} />
                   </td>
                   <td className={`hidden px-6 py-4 text-sm lg:table-cell ${body}`}>
                     {contact.conversation_count}

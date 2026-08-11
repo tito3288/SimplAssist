@@ -84,6 +84,7 @@ interface FeatureStatusBannerProps {
 interface DashboardOverviewProps {
   billingMode: "stripe" | "invoiced" | "comped";
   isPartnerManagedBilling: boolean;
+  hotLeads: Array<Record<string, unknown>>;
 }
 
 beforeEach(() => {
@@ -117,6 +118,56 @@ function queryThenable(result: Promise<unknown>) {
   return query;
 }
 
+function statusAwareContactsQuery(rows: Array<Record<string, unknown>>) {
+  const filters: Array<[string, unknown]> = [];
+  let order: [string, { ascending: boolean }] | null = null;
+  let limit: number | null = null;
+  const query: Record<string, unknown> = {};
+
+  query.select = vi.fn(() => query);
+  query.eq = vi.fn((column: string, value: unknown) => {
+    filters.push([column, value]);
+    return query;
+  });
+  query.gte = vi.fn(() => query);
+  query.order = vi.fn(
+    (column: string, options: { ascending: boolean }) => {
+      order = [column, options];
+      return query;
+    },
+  );
+  query.limit = vi.fn((value: number) => {
+    limit = value;
+    return query;
+  });
+
+  const resolveResult = () => {
+    let data = rows.filter((row) =>
+      filters.every(([column, value]) => row[column] === value),
+    );
+    if (order) {
+      const [column, options] = order;
+      data = [...data].sort((left, right) => {
+        const comparison = String(left[column]).localeCompare(
+          String(right[column]),
+        );
+        return options.ascending ? comparison : -comparison;
+      });
+    }
+    if (limit !== null) data = data.slice(0, limit);
+    return Promise.resolve({ data });
+  };
+
+  query.then = (
+    onFulfilled: (value: { data: Array<Record<string, unknown>> }) => unknown,
+    onRejected?: (reason: unknown) => unknown,
+  ) => resolveResult().then(onFulfilled, onRejected);
+  query.catch = (onRejected: (reason: unknown) => unknown) =>
+    resolveResult().catch(onRejected);
+
+  return query;
+}
+
 function configureResolvedDashboardWithSavedGuardrails({
   partnerId = null,
   billingMode = "stripe",
@@ -124,6 +175,7 @@ function configureResolvedDashboardWithSavedGuardrails({
   calendarConnected = false,
   bookingEnabled = false,
   canUseCalendar = true,
+  hotLeadRows = [],
 }: {
   partnerId?: string | null;
   billingMode?: "stripe" | "invoiced" | "comped";
@@ -131,8 +183,14 @@ function configureResolvedDashboardWithSavedGuardrails({
   calendarConnected?: boolean;
   bookingEnabled?: boolean;
   canUseCalendar?: boolean;
+  hotLeadRows?: Array<Record<string, unknown>>;
 } = {}) {
   const tableCalls = new Map<string, number>();
+  const queries: Array<{
+    table: string;
+    call: number;
+    query: Record<string, unknown>;
+  }> = [];
 
   mocks.from.mockImplementation((table: string) => {
     const call = (tableCalls.get(table) ?? 0) + 1;
@@ -165,7 +223,12 @@ function configureResolvedDashboardWithSavedGuardrails({
       result = Promise.resolve({ data: null });
     }
 
-    return queryThenable(result);
+    const query =
+      table === "contacts" && call === 2
+        ? statusAwareContactsQuery(hotLeadRows)
+        : queryThenable(result);
+    queries.push({ table, call, query });
+    return query;
   });
 
   mocks.getDashboardBusinessContext.mockResolvedValue({
@@ -197,6 +260,8 @@ function configureResolvedDashboardWithSavedGuardrails({
   );
   mocks.getFirstNameFromAuthMetadata.mockReturnValue("Owner");
   mocks.shouldShowCallForwardingNudge.mockReturnValue(false);
+
+  return queries;
 }
 
 async function renderedFeatureStatusBannerProps() {
@@ -291,6 +356,56 @@ describe("DashboardPage query scheduling", () => {
 
     preview.resolve({ data: [{ content: "Latest message" }] });
     await expect(page).resolves.toBeDefined();
+  });
+});
+
+describe("DashboardPage hot-lead classification", () => {
+  it("queries the authoritative hot status and ignores legacy numeric-score divergence", async () => {
+    const statusHotScoreZero = {
+      id: "contact-hot",
+      business_id: BUSINESS_ID,
+      name: "Status Hot",
+      phone_number: "+13175550101",
+      email: null,
+      session_id: null,
+      source_channel: "sms",
+      lead_score: 0,
+      lead_status: "hot",
+      lead_status_updated_at: "2026-08-11T15:00:00.000Z",
+      notes: null,
+      created_at: "2026-08-10T15:00:00.000Z",
+      last_contacted_at: "2026-08-11T15:00:00.000Z",
+    };
+    const statusNormalScoreNine = {
+      ...statusHotScoreZero,
+      id: "contact-normal",
+      name: "Legacy Score Nine",
+      lead_score: 9,
+      lead_status: "normal",
+      lead_status_updated_at: "2026-08-11T16:00:00.000Z",
+    };
+    const queries = configureResolvedDashboardWithSavedGuardrails({
+      hotLeadRows: [statusNormalScoreNine, statusHotScoreZero],
+    });
+
+    const overviewProps = await renderedDashboardOverviewProps();
+    const hotLeadQuery = queries.find(
+      ({ table, call }) => table === "contacts" && call === 2,
+    )?.query as Record<string, ReturnType<typeof vi.fn>>;
+
+    expect(hotLeadQuery.select).toHaveBeenCalledOnce();
+    expect(hotLeadQuery.select).toHaveBeenCalledWith("*");
+    expect(hotLeadQuery.eq.mock.calls).toEqual([
+      ["business_id", BUSINESS_ID],
+      ["lead_status", "hot"],
+    ]);
+    expect(hotLeadQuery.gte).not.toHaveBeenCalled();
+    expect(hotLeadQuery.order.mock.calls).toEqual([
+      ["lead_status_updated_at", { ascending: false }],
+    ]);
+    expect(hotLeadQuery.limit.mock.calls).toEqual([[10]]);
+    expect(overviewProps?.hotLeads).toEqual([statusHotScoreZero]);
+    expect(overviewProps?.hotLeads).not.toContainEqual(statusNormalScoreNine);
   });
 });
 

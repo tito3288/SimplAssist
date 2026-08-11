@@ -514,6 +514,8 @@ export interface Contact {
   session_id: string | null;
   source_channel: Channel;
   lead_score: number;
+  lead_status: "normal" | "warm" | "hot";
+  lead_status_updated_at: string;
   notes: string | null;
   created_at: string;
   last_contacted_at: string;

@@ -47,6 +47,10 @@ vi.mock("@/components/dashboard/CallForwardingNudge", () => ({
 import { BrandProvider } from "@/components/branding/BrandProvider";
 import DashboardOverview from "./DashboardOverview";
 
+type DashboardHotLead = React.ComponentProps<
+  typeof DashboardOverview
+>["hotLeads"][number];
+
 const DEFAULT_REQUEST_BRAND: RequestBrand = {
   source: "default",
   isPreview: false,
@@ -103,6 +107,8 @@ function renderOverview(args: {
   billingMode?: "stripe" | "invoiced" | "comped";
   isPartnerManagedBilling?: boolean;
   stateValues?: unknown[];
+  totalContacts?: number;
+  hotLeads?: DashboardHotLead[];
 }): string {
   mocks.stateIndex = 0;
   mocks.stateValues = args.stateValues ?? [];
@@ -113,11 +119,11 @@ function renderOverview(args: {
         stats={{
           totalConversations: 0,
           activeConversations: 0,
-          totalContacts: 0,
+          totalContacts: args.totalContacts ?? args.hotLeads?.length ?? 0,
           messagesThisWeek: 0,
         }}
         recentConversations={[]}
-        hotLeads={[]}
+        hotLeads={args.hotLeads ?? []}
         phoneNumber={args.phoneNumber}
         a2pStatus={a2pStatus}
         showCallForwardingNudge={false}
@@ -127,6 +133,54 @@ function renderOverview(args: {
     </BrandProvider>
   );
 }
+
+describe("DashboardOverview hot-lead classification", () => {
+  it("explains an empty authoritative-status result without score language", () => {
+    const html = renderOverview({
+      requestBrand: DEFAULT_REQUEST_BRAND,
+      phoneNumber: null,
+      totalContacts: 1,
+    });
+
+    expect(html).toContain(
+      "No hot leads yet. Contacts classified as hot will appear here.",
+    );
+    expect(html).not.toContain("lead score of 7+");
+  });
+
+  it("renders a status-hot score-zero contact with a categorical Hot badge only", () => {
+    const statusHotScoreZero = {
+      id: "contact-hot",
+      business_id: "business-1",
+      name: "Status Hot Score Zero",
+      phone_number: "+13175550101",
+      email: null,
+      session_id: null,
+      source_channel: "sms",
+      lead_score: 0,
+      lead_status: "hot",
+      lead_status_updated_at: "2026-08-11T15:00:00.000Z",
+      notes: null,
+      created_at: "2026-08-10T15:00:00.000Z",
+      last_contacted_at: "2026-08-11T15:00:00.000Z",
+    } satisfies DashboardHotLead;
+    const html = renderOverview({
+      requestBrand: DEFAULT_REQUEST_BRAND,
+      phoneNumber: null,
+      hotLeads: [statusHotScoreZero],
+    });
+    const hotLeadsSection = html.slice(
+      html.indexOf("Hot Leads"),
+      html.indexOf("Quick Actions"),
+    );
+
+    expect(hotLeadsSection).toContain("Status Hot Score Zero");
+    expect(hotLeadsSection).toMatch(/Hot<\/span>/);
+    expect(hotLeadsSection).not.toContain(">0</span>");
+    expect(hotLeadsSection).not.toContain("Cold");
+    expect(hotLeadsSection).not.toContain("Lead Score");
+  });
+});
 
 describe("DashboardOverview visible brand copy", () => {
   it("preserves the default account name", () => {

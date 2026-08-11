@@ -18,7 +18,7 @@ export default function ContactStats({ contacts }: ContactStatsProps) {
     (c) => new Date(c.created_at) >= oneWeekAgo
   ).length;
 
-  const hotLeads = contacts.filter((c) => c.lead_score >= 7).length;
+  const hotLeads = contacts.filter((c) => c.lead_status === "hot").length;
 
   const smsCount = contacts.filter((c) => c.source_channel === "sms").length;
   const webChatCount = contacts.filter(
