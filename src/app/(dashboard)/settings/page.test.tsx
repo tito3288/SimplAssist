@@ -1,0 +1,325 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  redirect: vi.fn(),
+  requireWorkspacePageAccess: vi.fn(),
+  getDashboardEntitledContext: vi.fn(),
+  canUseFeature: vi.fn(),
+  isPlanAvailable: vi.fn(),
+  from: vi.fn(),
+  aiSettingsForm: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
+vi.mock('@/lib/customer/workspaceRouteResponse.server', () => ({
+  requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
+}));
+vi.mock('@/lib/dashboard/context', () => ({
+  getDashboardEntitledContext: mocks.getDashboardEntitledContext,
+}));
+vi.mock('@/lib/billing/entitlements', () => ({
+  canUseFeature: mocks.canUseFeature,
+}));
+vi.mock('@/lib/billing/planAvailability', () => ({
+  isPlanAvailable: mocks.isPlanAvailable,
+}));
+vi.mock('@/components/settings/AISettingsForm', () => ({
+  default: (props: unknown) => {
+    mocks.aiSettingsForm(props);
+    return <div>AI settings form</div>;
+  },
+}));
+vi.mock('@/components/settings/ServicesManager', () => ({
+  default: () => <div>Services manager</div>,
+}));
+vi.mock('@/components/settings/FAQManager', () => ({
+  default: () => <div>FAQ manager</div>,
+}));
+vi.mock('@/components/settings/BusinessHoursEditor', () => ({
+  default: () => <div>Business hours editor</div>,
+}));
+vi.mock('@/components/settings/BusinessInfoEditor', () => ({
+  default: () => <div>Business info editor</div>,
+}));
+vi.mock('@/components/settings/PhoneNumberSection', () => ({
+  default: () => <div>Phone number section</div>,
+}));
+vi.mock('@/components/settings/BusinessEmailForm', () => ({
+  default: () => <div>Business email form</div>,
+}));
+vi.mock('@/components/settings/TimezoneSelector', () => ({
+  default: () => <div>Timezone selector</div>,
+}));
+vi.mock('@/components/settings/CompliancePanel', () => ({
+  default: () => <div>Compliance panel</div>,
+}));
+vi.mock('@/components/settings/DangerZone', () => ({
+  default: () => <div>Danger zone</div>,
+}));
+vi.mock('@/components/entitlements/LockedFeatureCard', () => ({
+  LockedFeatureCard: () => <div>Locked feature</div>,
+}));
+
+import SettingsPage from './page';
+
+const BUSINESS_ID = '00000000-0000-4000-8000-000000000001';
+const ENTITLEMENTS = {
+  active: true,
+  plan: 'sms_and_chat',
+};
+const AI_SETTINGS = {
+  id: 'settings-1',
+  business_id: BUSINESS_ID,
+  language: 'en',
+};
+const CALENDAR_TOKEN = {
+  business_id: BUSINESS_ID,
+  google_email: 'owner@example.com',
+};
+
+type PrimaryGoal = 'book' | 'signup' | 'quote' | 'callback' | null;
+
+interface QueryResult {
+  data: unknown;
+  error: null;
+}
+
+interface QueryRecorder {
+  select: ReturnType<typeof vi.fn>;
+  eq: ReturnType<typeof vi.fn>;
+  order: ReturnType<typeof vi.fn>;
+  single: ReturnType<typeof vi.fn>;
+}
+
+const queryRecorders = new Map<string, QueryRecorder>();
+let tableData: Record<string, unknown>;
+
+function resolvedContext(primaryGoal: PrimaryGoal = null) {
+  return {
+    status: 'resolved',
+    supabase: { from: mocks.from },
+    user: { id: 'user-1' },
+    business: {
+      id: BUSINESS_ID,
+      primary_goal: primaryGoal,
+      name: 'Example Business',
+      call_forwarding_enabled: false,
+      forward_to_number: null,
+      email: 'business@example.com',
+      slug: 'example-business',
+      phone_number: '+13175550123',
+      address: '123 Main Street',
+      city: 'Indianapolis',
+      state: 'IN',
+      zip: '46204',
+      opt_in_description: 'Customers opt in on the website.',
+      privacy_terms_mode: 'hosted',
+      privacy_url_override: null,
+      terms_url_override: null,
+      timezone: 'America/Indiana/Indianapolis',
+    },
+    entitlements: ENTITLEMENTS,
+  };
+}
+
+function makeQuery(table: string): QueryRecorder {
+  const result = (): QueryResult => ({ data: tableData[table], error: null });
+  const query = {} as QueryRecorder;
+  query.select = vi.fn(() => query);
+  query.eq = vi.fn(() => query);
+  query.order = vi.fn(async () => result());
+  query.single = vi.fn(async () => result());
+  queryRecorders.set(table, query);
+  return query;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  queryRecorders.clear();
+  tableData = {
+    ai_settings: AI_SETTINGS,
+    services: [{ id: 'service-1' }],
+    faqs: [{ id: 'faq-1' }],
+    business_hours: [{ id: 'hours-1' }],
+    phone_numbers: {
+      phone_number: '+13175550123',
+      is_active: true,
+    },
+    google_calendar_tokens: CALENDAR_TOKEN,
+  };
+  mocks.from.mockImplementation((table: string) => makeQuery(table));
+  mocks.requireWorkspacePageAccess.mockResolvedValue(undefined);
+  mocks.getDashboardEntitledContext.mockResolvedValue(resolvedContext());
+  mocks.canUseFeature.mockReturnValue(true);
+  mocks.isPlanAvailable.mockReturnValue(true);
+  mocks.redirect.mockImplementation((path: string) => {
+    throw new Error(`redirect:${path}`);
+  });
+});
+
+describe('SettingsPage access and owner reads', () => {
+  it('redirects unauthenticated users before settings queries', async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue({
+      status: 'unauthenticated',
+      supabase: { from: mocks.from },
+      user: null,
+    });
+
+    await expect(SettingsPage({})).rejects.toThrow('redirect:/login');
+
+    expect(mocks.requireWorkspacePageAccess).toHaveBeenCalledOnce();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('redirects unresolved business state before settings queries', async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue({
+      status: 'business_not_found',
+      supabase: { from: mocks.from },
+      user: { id: 'user-1' },
+    });
+
+    await expect(SettingsPage({})).rejects.toThrow('redirect:/onboarding');
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('keeps the six existing reads on the resolved owner client and business', async () => {
+    await SettingsPage({});
+
+    expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
+      'ai_settings',
+      'services',
+      'faqs',
+      'business_hours',
+      'phone_numbers',
+      'google_calendar_tokens',
+    ]);
+    queryRecorders.forEach((query) => {
+      expect(query.select).toHaveBeenCalledWith('*');
+      expect(query.eq).toHaveBeenCalledWith('business_id', BUSINESS_ID);
+    });
+    expect(queryRecorders.get('services')?.order).toHaveBeenCalledWith('name');
+    expect(queryRecorders.get('faqs')?.order).toHaveBeenCalledWith('question');
+    expect(queryRecorders.get('business_hours')?.order).toHaveBeenCalledWith(
+      'day_of_week'
+    );
+    expect(queryRecorders.get('phone_numbers')?.eq.mock.calls).toEqual([
+      ['business_id', BUSINESS_ID],
+      ['is_active', true],
+    ]);
+  });
+
+  it('preserves the onboarding redirect when AI settings are missing', async () => {
+    tableData.ai_settings = null;
+
+    await expect(SettingsPage({})).rejects.toThrow('redirect:/onboarding');
+
+    expect(mocks.from).toHaveBeenCalledTimes(6);
+    expect(mocks.aiSettingsForm).not.toHaveBeenCalled();
+  });
+});
+
+describe('SettingsPage primary-goal presentation', () => {
+  it('passes false while preserving saved token state for signup mode', async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue(
+      resolvedContext('signup')
+    );
+
+    renderToStaticMarkup(await SettingsPage({}));
+
+    expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: BUSINESS_ID,
+        calendarGoalAvailable: false,
+        calendarEmail: CALENDAR_TOKEN.google_email,
+        calendarConnected: true,
+        canUseCalendar: true,
+      })
+    );
+    expect(mocks.from).toHaveBeenCalledWith('google_calendar_tokens');
+  });
+
+  it.each([null, 'book', 'quote', 'callback'] as const)(
+    'passes true and preserves current markup/query behavior for primary_goal=%s',
+    async (primaryGoal) => {
+      mocks.getDashboardEntitledContext.mockResolvedValue(
+        resolvedContext(primaryGoal)
+      );
+
+      const markup = renderToStaticMarkup(await SettingsPage({}));
+
+      expect(markup).toContain('Settings');
+      expect(markup).toContain('AI settings form');
+      expect(mocks.from).toHaveBeenCalledTimes(6);
+      expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          calendarGoalAvailable: true,
+          calendarEmail: CALENDAR_TOKEN.google_email,
+          calendarConnected: true,
+        })
+      );
+    }
+  );
+});
+
+describe('SettingsPage Calendar status parsing', () => {
+  it('shows the friendly status only for an exact scalar unavailable value in signup mode', async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue(
+      resolvedContext('signup')
+    );
+
+    const markup = renderToStaticMarkup(
+      await SettingsPage({ searchParams: { calendar: 'unavailable' } })
+    );
+
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain(
+      'Google Calendar isn’t used for the signup-link goal.'
+    );
+    expect(markup).toContain(
+      'Your assistant can keep sending your configured link, and sent links appear in Leads.'
+    );
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['other', 'connected'],
+    ['repeated', ['unavailable', 'unavailable']],
+    ['single-item array', ['unavailable']],
+  ] as const)(
+    'ignores the %s Calendar query state',
+    async (_scenario, calendar) => {
+      mocks.getDashboardEntitledContext.mockResolvedValue(
+        resolvedContext('signup')
+      );
+
+      const markup = renderToStaticMarkup(
+        await SettingsPage({
+          searchParams: {
+            calendar: calendar as string | string[] | undefined,
+          },
+        })
+      );
+
+      expect(markup).not.toContain('role="status"');
+      expect(markup).not.toContain(
+        'Google Calendar isn’t used for the signup-link goal.'
+      );
+    }
+  );
+
+  it('ignores the friendly state for a book-compatible goal', async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue(
+      resolvedContext('book')
+    );
+
+    const markup = renderToStaticMarkup(
+      await SettingsPage({ searchParams: { calendar: 'unavailable' } })
+    );
+
+    expect(markup).not.toContain('role="status"');
+    expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
+      expect.objectContaining({ calendarGoalAvailable: true })
+    );
+  });
+});

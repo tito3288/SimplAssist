@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PrimaryGoal } from "@/types/database";
 
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
@@ -26,7 +27,15 @@ vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspacePageAccess: mocks.requireWorkspacePageAccess,
 }));
-vi.mock("next/link", () => ({ default: () => null }));
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
+}));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,
   getDashboardEntitlements: mocks.getDashboardEntitlements,
@@ -111,9 +120,17 @@ function queryThenable(result: Promise<unknown>) {
 function configureResolvedDashboardWithSavedGuardrails({
   partnerId = null,
   billingMode = "stripe",
+  primaryGoal = null,
+  calendarConnected = false,
+  bookingEnabled = false,
+  canUseCalendar = true,
 }: {
   partnerId?: string | null;
   billingMode?: "stripe" | "invoiced" | "comped";
+  primaryGoal?: PrimaryGoal | null;
+  calendarConnected?: boolean;
+  bookingEnabled?: boolean;
+  canUseCalendar?: boolean;
 } = {}) {
   const tableCalls = new Map<string, number>();
 
@@ -135,10 +152,14 @@ function configureResolvedDashboardWithSavedGuardrails({
     } else if (table === "ai_settings") {
       result = Promise.resolve({
         data: {
-          booking_enabled: false,
+          booking_enabled: bookingEnabled,
           booking_mode: "collect_info",
           guardrails: ["Never promise a fixed price"],
         },
+      });
+    } else if (table === "google_calendar_tokens") {
+      result = Promise.resolve({
+        data: calendarConnected ? { id: "calendar-token-1" } : null,
       });
     } else {
       result = Promise.resolve({ data: null });
@@ -157,6 +178,7 @@ function configureResolvedDashboardWithSavedGuardrails({
       call_forwarding_nudge_resolved_at: null,
       partner_id: partnerId,
       billing_mode: billingMode,
+      primary_goal: primaryGoal,
     },
   });
   mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
@@ -168,8 +190,10 @@ function configureResolvedDashboardWithSavedGuardrails({
     phoneNumber: "+13175550123",
   });
   mocks.canUseFeature.mockImplementation(
-    (_entitlements: unknown, feature: string) =>
-      feature !== "advanced_guardrails"
+    (_entitlements: unknown, feature: string) => {
+      if (feature === "calendar") return canUseCalendar;
+      return feature !== "advanced_guardrails";
+    },
   );
   mocks.getFirstNameFromAuthMetadata.mockReturnValue("Owner");
   mocks.shouldShowCallForwardingNudge.mockReturnValue(false);
@@ -237,6 +261,7 @@ describe("DashboardPage query scheduling", () => {
         call_forwarding_nudge_resolved_at: null,
         partner_id: null,
         billing_mode: "stripe",
+        primary_goal: null,
       },
     });
     mocks.getDashboardEntitlements.mockReturnValue(entitlements.promise);
@@ -290,6 +315,71 @@ describe("DashboardPage partner-managed billing presentation", () => {
         isPartnerManagedBilling: expected,
       });
     }
+  );
+});
+
+describe("DashboardPage goal-aware Calendar presentation", () => {
+  it.each([
+    [null, true],
+    ["book", true],
+    ["quote", true],
+    ["callback", true],
+    ["signup", false],
+  ] as const)(
+    "renders the existing Calendar invitation for primary_goal=%s: %s",
+    async (primaryGoal, shouldRenderInvitation) => {
+      configureResolvedDashboardWithSavedGuardrails({ primaryGoal });
+
+      const html = renderToStaticMarkup(await DashboardPage());
+      const invitationCopy = [
+        "Google Calendar not connected",
+        "Connect your Google Calendar to let your AI check availability and book appointments for customers automatically.",
+        "Connect Now",
+      ];
+
+      for (const copy of invitationCopy) {
+        if (shouldRenderInvitation) expect(html).toContain(copy);
+        else expect(html).not.toContain(copy);
+      }
+      expect(mocks.canUseFeature).toHaveBeenCalledWith(
+        ENTITLEMENTS,
+        "calendar",
+      );
+      expect(mocks.from).toHaveBeenCalledWith("google_calendar_tokens");
+      expect(mocks.from).toHaveBeenCalledTimes(10);
+    },
+  );
+
+  it.each([
+    [null, true],
+    ["book", true],
+    ["quote", true],
+    ["callback", true],
+    ["signup", false],
+  ] as const)(
+    "keeps Calendar paused-feature wording for primary_goal=%s: %s",
+    async (primaryGoal, shouldIncludeCalendarWording) => {
+      configureResolvedDashboardWithSavedGuardrails({
+        primaryGoal,
+        calendarConnected: true,
+        bookingEnabled: true,
+        canUseCalendar: false,
+      });
+
+      const bannerProps = await renderedFeatureStatusBannerProps();
+
+      expect(bannerProps?.pausedFeatures).toEqual(
+        shouldIncludeCalendarWording
+          ? ["Google Calendar and AI booking", "Advanced AI guardrails"]
+          : ["Advanced AI guardrails"],
+      );
+      expect(mocks.canUseFeature).toHaveBeenCalledWith(
+        ENTITLEMENTS,
+        "calendar",
+      );
+      expect(mocks.from).toHaveBeenCalledWith("google_calendar_tokens");
+      expect(mocks.from).toHaveBeenCalledTimes(10);
+    },
   );
 });
 

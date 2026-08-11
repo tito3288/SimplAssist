@@ -45,6 +45,7 @@ interface AISettingsFormProps {
   businessId?: string;
   canCustomizeAi?: boolean;
   canUseCalendar?: boolean;
+  calendarGoalAvailable?: boolean;
   canUseGuardrails?: boolean;
   planActive?: boolean;
   fullSuiteAvailable: boolean;
@@ -71,6 +72,44 @@ function UpgradeNotice({
   );
 }
 
+export function buildAISettingsUpdates(
+  data: AISettingsData,
+  {
+    guardrails,
+    canCustomizeAi,
+    canUseCalendar,
+    calendarGoalAvailable = true,
+    canUseGuardrails,
+  }: {
+    guardrails: string[];
+    canCustomizeAi: boolean;
+    canUseCalendar: boolean;
+    calendarGoalAvailable?: boolean;
+    canUseGuardrails: boolean;
+  }
+): Partial<AISettings> {
+  const updates: Partial<AISettings> = {
+    language: data.language,
+  };
+  if (canCustomizeAi) {
+    Object.assign(updates, {
+      tone: data.tone,
+      business_voice: data.business_voice,
+      sms_response_delay_seconds: data.sms_response_delay_seconds,
+    });
+  }
+  if (canUseCalendar && calendarGoalAvailable) {
+    Object.assign(updates, {
+      booking_enabled: data.booking_enabled,
+      booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
+    });
+  }
+  if (canUseGuardrails) {
+    updates.guardrails = guardrails;
+  }
+  return updates;
+}
+
 export default function AISettingsForm({
   settings,
   businessName,
@@ -79,6 +118,7 @@ export default function AISettingsForm({
   businessId,
   canCustomizeAi = true,
   canUseCalendar = true,
+  calendarGoalAvailable = true,
   canUseGuardrails = true,
   planActive = true,
   fullSuiteAvailable,
@@ -136,25 +176,13 @@ export default function AISettingsForm({
     setSuccess(false);
     try {
       const supabase = createClient();
-      const updates: Partial<AISettings> = {
-        language: data.language,
-      };
-      if (canCustomizeAi) {
-        Object.assign(updates, {
-          tone: data.tone,
-          business_voice: data.business_voice,
-          sms_response_delay_seconds: data.sms_response_delay_seconds,
-        });
-      }
-      if (canUseCalendar) {
-        Object.assign(updates, {
-          booking_enabled: data.booking_enabled,
-          booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
-        });
-      }
-      if (canUseGuardrails) {
-        updates.guardrails = guardrails;
-      }
+      const updates = buildAISettingsUpdates(data, {
+        guardrails,
+        canCustomizeAi,
+        canUseCalendar,
+        calendarGoalAvailable,
+        canUseGuardrails,
+      });
 
       const { error } = await supabase
         .from('ai_settings')
@@ -298,7 +326,8 @@ export default function AISettingsForm({
       </section>
 
       {/* Section 4: Booking */}
-      <section className={`${tile} p-5 sm:p-6`} data-booking-card="true">
+      {calendarGoalAvailable && (
+        <section className={`${tile} p-5 sm:p-6`} data-booking-card="true">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#ece4d8] bg-white dark:border-white/[0.12] dark:bg-white/[0.08]">
@@ -405,7 +434,8 @@ export default function AISettingsForm({
             />
           </div>
         )}
-      </section>
+        </section>
+      )}
 
       {/* Section 5: Guardrails */}
       <section>

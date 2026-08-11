@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/client", () => ({
   createClient: vi.fn(),
 }));
 
-import AISettingsForm from "./AISettingsForm";
+import AISettingsForm, { buildAISettingsUpdates } from "./AISettingsForm";
 
 const SETTINGS: AISettings = {
   id: "settings-1",
@@ -26,6 +26,101 @@ const SETTINGS: AISettings = {
 };
 
 describe("AISettingsForm Google Calendar connection state", () => {
+  it("omits the entire booking and Google Calendar card when the goal does not use Calendar", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={{
+          ...SETTINGS,
+          booking_enabled: true,
+          booking_mode: "schedule_direct",
+        }}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarEmail="owner@example.test"
+        calendarConnected
+        canUseCalendar
+        calendarGoalAvailable={false}
+        fullSuiteAvailable={false}
+      />
+    );
+
+    expect(html).not.toContain('data-booking-card="true"');
+    expect(html).not.toContain("Enable Appointment Booking");
+    expect(html).not.toContain("Google Calendar");
+    expect(html).not.toContain("Connect Google Calendar");
+    expect(html).not.toContain("Disconnect");
+    expect(html).toContain("Tone &amp; Voice");
+    expect(html).toContain("Response Behavior");
+    expect(html).toContain("Guardrails");
+  });
+
+  it("keeps default and explicit goal-available markup identical", () => {
+    const defaultMarkup = renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        businessId="business-1"
+        fullSuiteAvailable={false}
+      />
+    );
+    const explicitMarkup = renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        businessId="business-1"
+        calendarGoalAvailable
+        fullSuiteAvailable={false}
+      />
+    );
+
+    expect(explicitMarkup).toBe(defaultMarkup);
+    expect(defaultMarkup).toContain('data-booking-card="true"');
+    expect(defaultMarkup).toContain("Enable Appointment Booking");
+  });
+
+  it("excludes only booking fields from signup-goal saves", () => {
+    const data: Parameters<typeof buildAISettingsUpdates>[0] = {
+      tone: "professional",
+      business_voice: "business_name",
+      language: "both",
+      sms_response_delay_seconds: 15,
+      guardrails_text: "",
+      booking_enabled: true,
+      booking_mode: "schedule_direct",
+    };
+    const commonPolicy = {
+      guardrails: ["Never promise a fixed price"],
+      canCustomizeAi: true,
+      canUseCalendar: true,
+      canUseGuardrails: true,
+    };
+
+    const signupUpdates = buildAISettingsUpdates(data, {
+      ...commonPolicy,
+      calendarGoalAvailable: false,
+    });
+
+    expect(signupUpdates).toEqual({
+      language: "both",
+      tone: "professional",
+      business_voice: "business_name",
+      sms_response_delay_seconds: 15,
+      guardrails: ["Never promise a fixed price"],
+    });
+    expect(signupUpdates).not.toHaveProperty("booking_enabled");
+    expect(signupUpdates).not.toHaveProperty("booking_mode");
+
+    expect(buildAISettingsUpdates(data, commonPolicy)).toEqual({
+      language: "both",
+      tone: "professional",
+      business_voice: "business_name",
+      sms_response_delay_seconds: 15,
+      booking_enabled: true,
+      booking_mode: "schedule_direct",
+      guardrails: ["Never promise a fixed price"],
+    });
+  });
+
   it("presents booking as a dedicated card with the existing Google Calendar icon", () => {
     const html = renderToStaticMarkup(
       <AISettingsForm

@@ -22,6 +22,7 @@ export default async function DashboardPage() {
 
   const { supabase, user, business } = context;
   const isPartnerManagedBilling = business.partner_id !== null;
+  const signupMode = business.primary_goal === 'signup';
 
   // Calculate date for "this week" queries
   const now = new Date();
@@ -110,7 +111,9 @@ export default async function DashboardPage() {
     widgetConfig?.is_active && !canUseFeature(entitlements, 'web_chat')
       ? 'Website chat widget'
       : null,
-    (calendarToken || aiSettings?.booking_enabled) && !canUseCalendar
+    !signupMode &&
+      (calendarToken || aiSettings?.booking_enabled) &&
+      !canUseCalendar
       ? 'Google Calendar and AI booking'
       : null,
     fullSuiteAvailable &&
@@ -138,7 +141,7 @@ export default async function DashboardPage() {
       />
 
       {/* Calendar connection warning */}
-      {canUseCalendar && !calendarToken && (
+      {!signupMode && canUseCalendar && !calendarToken && (
         <div className={`p-4 ${card} border-amber-200 dark:border-amber-500/30`}>
           <div className="flex items-center gap-3">
             <div className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />

@@ -16,13 +16,22 @@ import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
-export default async function SettingsPage() {
+type SettingsPageProps = {
+  searchParams?: {
+    calendar?: string | string[];
+  };
+};
+
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   await requireWorkspacePageAccess();
   const context = await getDashboardEntitledContext();
   if (context.status === 'unauthenticated') redirect('/login');
   if (context.status !== 'resolved') redirect('/onboarding');
 
   const { supabase, business, entitlements } = context;
+  const signupMode = business.primary_goal === 'signup';
+  const showCalendarUnavailableStatus =
+    signupMode && searchParams?.calendar === 'unavailable';
   const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
   const canUseGuardrails = canUseFeature(entitlements, 'advanced_guardrails');
@@ -52,6 +61,16 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Settings</h1>
         <p className="mt-1 text-stone-500 dark:text-[#bdbdbf]">Configure how your AI assistant behaves and communicates.</p>
       </div>
+
+      {showCalendarUnavailableStatus && (
+        <div
+          role="status"
+          className="rounded-2xl border border-[#e3dacc] bg-[#faf7f2] px-4 py-3 text-sm text-stone-700 dark:border-white/[0.12] dark:bg-white/[0.06] dark:text-[#d7d7da]"
+        >
+          Google Calendar isn’t used for the signup-link goal. Your assistant
+          can keep sending your configured link, and sent links appear in Leads.
+        </div>
+      )}
 
       {/* Phone Number */}
       <div className={`p-6 ${card}`}>
@@ -112,6 +131,7 @@ export default async function SettingsPage() {
           businessId={business.id}
           canCustomizeAi={canCustomizeAi}
           canUseCalendar={canUseCalendar}
+          calendarGoalAvailable={!signupMode}
           canUseGuardrails={canUseGuardrails}
           planActive={entitlements.active}
           fullSuiteAvailable={fullSuiteAvailable}
