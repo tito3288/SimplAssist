@@ -42,7 +42,8 @@ const USER = { id: "user-1", email: "owner@example.com" };
 const BUSINESS = {
   id: "business-1",
   name: "Example Business",
-  primary_goal: null,
+  primary_goal: "book",
+  goal_url: "https://example.com/retained",
   deleted_at: null,
   operations_suspended_at: null,
   ai_replies_paused_at: null,
@@ -130,6 +131,43 @@ describe("dashboard request context", () => {
     expect(mocks.eq).toHaveBeenCalledWith("owner_id", USER.id);
     const projection = mocks.select.mock.calls[0]?.[0] as string;
     expect(projection).toContain("primary_goal");
+    expect(projection).toContain("goal_url");
+    expect(projection.replace(", goal_url", "")).toBe(
+      [
+        "id",
+        "name",
+        "primary_goal",
+        "website_url",
+        "deleted_at",
+        "call_forwarding_enabled",
+        "forward_to_number",
+        "call_forwarding_nudge_resolved_at",
+        "operations_suspended_at",
+        "ai_replies_paused_at",
+        "texting_paused_at",
+        "bookings_paused_at",
+        "brand_status",
+        "brand_status_updated_at",
+        "brand_rejection_reason",
+        "campaign_status",
+        "campaign_status_updated_at",
+        "campaign_rejection_reason",
+        "slug",
+        "phone_number",
+        "email",
+        "address",
+        "city",
+        "state",
+        "zip",
+        "opt_in_description",
+        "privacy_terms_mode",
+        "privacy_url_override",
+        "terms_url_override",
+        "timezone",
+        "partner_id",
+        "billing_mode",
+      ].join(", ")
+    );
     expect(projection).toContain("website_url");
     expect(projection).toContain("operations_suspended_at");
     expect(projection).toContain("ai_replies_paused_at");

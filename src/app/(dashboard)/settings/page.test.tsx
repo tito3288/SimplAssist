@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   canUseFeature: vi.fn(),
   isPlanAvailable: vi.fn(),
   from: vi.fn(),
+  goalSettingsForm: vi.fn(),
   aiSettingsForm: vi.fn(),
 }));
 
@@ -28,6 +29,12 @@ vi.mock('@/components/settings/AISettingsForm', () => ({
   default: (props: unknown) => {
     mocks.aiSettingsForm(props);
     return <div>AI settings form</div>;
+  },
+}));
+vi.mock('@/components/settings/GoalSettingsForm', () => ({
+  default: (props: unknown) => {
+    mocks.goalSettingsForm(props);
+    return <div data-goal-settings-form>Goal settings form</div>;
   },
 }));
 vi.mock('@/components/settings/ServicesManager', () => ({
@@ -77,6 +84,16 @@ const CALENDAR_TOKEN = {
   business_id: BUSINESS_ID,
   google_email: 'owner@example.com',
 };
+const RETAINED_GOAL_URL = 'https://example.com/retained';
+const SIGNUP_GOAL_URL = 'https://example.com/signup';
+const SETTINGS_TABLES = [
+  'ai_settings',
+  'services',
+  'faqs',
+  'business_hours',
+  'phone_numbers',
+  'google_calendar_tokens',
+] as const;
 
 type PrimaryGoal = 'book' | 'signup' | 'quote' | 'callback' | null;
 
@@ -95,7 +112,10 @@ interface QueryRecorder {
 const queryRecorders = new Map<string, QueryRecorder>();
 let tableData: Record<string, unknown>;
 
-function resolvedContext(primaryGoal: PrimaryGoal = null) {
+function resolvedContext(
+  primaryGoal: PrimaryGoal = 'book',
+  goalUrl: string | null = RETAINED_GOAL_URL
+) {
   return {
     status: 'resolved',
     supabase: { from: mocks.from },
@@ -103,6 +123,7 @@ function resolvedContext(primaryGoal: PrimaryGoal = null) {
     business: {
       id: BUSINESS_ID,
       primary_goal: primaryGoal,
+      goal_url: goalUrl,
       name: 'Example Business',
       call_forwarding_enabled: false,
       forward_to_number: null,
@@ -121,6 +142,13 @@ function resolvedContext(primaryGoal: PrimaryGoal = null) {
     },
     entitlements: ENTITLEMENTS,
   };
+}
+
+function stripGoalSettingsForm(markup: string): string {
+  return markup.replace(
+    '<div data-goal-settings-form="true">Goal settings form</div>',
+    ''
+  );
 }
 
 function makeQuery(table: string): QueryRecorder {
@@ -187,12 +215,7 @@ describe('SettingsPage access and owner reads', () => {
     await SettingsPage({});
 
     expect(mocks.from.mock.calls.map(([table]) => table)).toEqual([
-      'ai_settings',
-      'services',
-      'faqs',
-      'business_hours',
-      'phone_numbers',
-      'google_calendar_tokens',
+      ...SETTINGS_TABLES,
     ]);
     queryRecorders.forEach((query) => {
       expect(query.select).toHaveBeenCalledWith('*');
@@ -215,6 +238,7 @@ describe('SettingsPage access and owner reads', () => {
     await expect(SettingsPage({})).rejects.toThrow('redirect:/onboarding');
 
     expect(mocks.from).toHaveBeenCalledTimes(6);
+    expect(mocks.goalSettingsForm).not.toHaveBeenCalled();
     expect(mocks.aiSettingsForm).not.toHaveBeenCalled();
   });
 });
@@ -222,10 +246,19 @@ describe('SettingsPage access and owner reads', () => {
 describe('SettingsPage primary-goal presentation', () => {
   it('passes false while preserving saved token state for signup mode', async () => {
     mocks.getDashboardEntitledContext.mockResolvedValue(
-      resolvedContext('signup')
+      resolvedContext('signup', SIGNUP_GOAL_URL)
     );
 
-    renderToStaticMarkup(await SettingsPage({}));
+    const markup = renderToStaticMarkup(await SettingsPage({}));
+
+    expect(mocks.goalSettingsForm).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      initialPrimaryGoal: 'signup',
+      initialGoalUrl: SIGNUP_GOAL_URL,
+    });
+    expect(markup.indexOf('Goal settings form')).toBeLessThan(
+      markup.indexOf('AI settings form')
+    );
 
     expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -239,7 +272,7 @@ describe('SettingsPage primary-goal presentation', () => {
     expect(mocks.from).toHaveBeenCalledWith('google_calendar_tokens');
   });
 
-  it.each([null, 'book', 'quote', 'callback'] as const)(
+  it.each(['book', 'quote', 'callback'] as const)(
     'passes true and preserves current markup/query behavior for primary_goal=%s',
     async (primaryGoal) => {
       mocks.getDashboardEntitledContext.mockResolvedValue(
@@ -251,6 +284,11 @@ describe('SettingsPage primary-goal presentation', () => {
       expect(markup).toContain('Settings');
       expect(markup).toContain('AI settings form');
       expect(mocks.from).toHaveBeenCalledTimes(6);
+      expect(mocks.goalSettingsForm).toHaveBeenCalledWith({
+        businessId: BUSINESS_ID,
+        initialPrimaryGoal: primaryGoal,
+        initialGoalUrl: RETAINED_GOAL_URL,
+      });
       expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
         expect.objectContaining({
           calendarGoalAvailable: true,
@@ -258,6 +296,29 @@ describe('SettingsPage primary-goal presentation', () => {
           calendarConnected: true,
         })
       );
+    }
+  );
+
+  it.each(['quote', 'callback'] as const)(
+    'keeps primary_goal=%s legacy Settings markup and query calls byte-identical to book after stripping only the goal form',
+    async (primaryGoal) => {
+      mocks.getDashboardEntitledContext
+        .mockResolvedValueOnce(resolvedContext('book'))
+        .mockResolvedValueOnce(resolvedContext(primaryGoal));
+
+      const bookMarkup = renderToStaticMarkup(await SettingsPage({}));
+      const legacyMarkup = renderToStaticMarkup(await SettingsPage({}));
+      const tableCalls = mocks.from.mock.calls.map(([table]) => table);
+
+      expect(stripGoalSettingsForm(legacyMarkup)).toBe(
+        stripGoalSettingsForm(bookMarkup)
+      );
+      expect(tableCalls.slice(0, SETTINGS_TABLES.length)).toEqual([
+        ...SETTINGS_TABLES,
+      ]);
+      expect(tableCalls.slice(SETTINGS_TABLES.length)).toEqual([
+        ...SETTINGS_TABLES,
+      ]);
     }
   );
 });

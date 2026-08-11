@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import AISettingsForm from '@/components/settings/AISettingsForm';
+import GoalSettingsForm from '@/components/settings/GoalSettingsForm';
 import ServicesManager from '@/components/settings/ServicesManager';
 import FAQManager from '@/components/settings/FAQManager';
 import BusinessHoursEditor from '@/components/settings/BusinessHoursEditor';
@@ -123,6 +124,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
       {/* AI Settings */}
       <div className={`p-6 ${card}`}>
+        <GoalSettingsForm
+          businessId={business.id}
+          initialPrimaryGoal={business.primary_goal}
+          initialGoalUrl={business.goal_url}
+        />
         <AISettingsForm
           settings={aiSettings}
           businessName={business.name}

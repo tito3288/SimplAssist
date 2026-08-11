@@ -17,6 +17,7 @@ export type DashboardBusiness = Pick<
   | "id"
   | "name"
   | "primary_goal"
+  | "goal_url"
   | "website_url"
   | "call_forwarding_enabled"
   | "forward_to_number"
@@ -83,6 +84,7 @@ const DASHBOARD_BUSINESS_SELECT = [
   "id",
   "name",
   "primary_goal",
+  "goal_url",
   "website_url",
   "deleted_at",
   "call_forwarding_enabled",
