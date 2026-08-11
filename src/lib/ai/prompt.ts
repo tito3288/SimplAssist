@@ -214,7 +214,13 @@ export function buildSystemPrompt(
     } else if (aiSettings.booking_enabled) {
       if (aiSettings.booking_mode === "collect_info") {
         sections.push(
-          "When a customer wants to book, collect their name, preferred date/time, and service needed. Let them know someone will confirm their appointment."
+          "When a customer clearly wants an appointment, treat it as an appointment request for owner review, never as a confirmed booking.\n" +
+          "1. Gather the service they want, their requested date/time in their own words, and any customer-provided name, phone, or email.\n" +
+          "2. Copy the customer's requested-time wording verbatim into requested_time_text. Do not parse, normalize, reformat, or infer a date/time, and do not claim availability.\n" +
+          "3. If the service or a usable requested time is missing, make at most one follow-up ask total for the missing detail. If it is still missing after that one ask, do not lose the request: use requested_service=\"not specified\" and/or requested_time_text=\"not specified\" for each missing value while preserving everything else known.\n" +
+          "4. As soon as the service and requested time are known, or after the one allowed ask with any missing value set to \"not specified\", call record_booking_request exactly once for the current customer request.\n" +
+          "5. Only after record_booking_request succeeds, tell the customer their appointment request was recorded and the owner will confirm it. Never say or imply that it is booked or confirmed.\n" +
+          "If record_booking_request does not succeed, do not say the request was recorded or that the owner will confirm it."
         );
       } else if (calendarConnected) {
         sections.push(

@@ -17,6 +17,42 @@ export const signupGoalTools: Anthropic.Tool[] = [
   },
 ];
 
+export const bookingRequestTools: Anthropic.Tool[] = [
+  {
+    name: "record_booking_request",
+    description:
+      "Record a customer's appointment request for the business owner to review. This records a request only; it does not create, book, or confirm an appointment. Use it after gathering the service, the customer's own requested-time words, and any available customer identity.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        requested_service: {
+          type: "string",
+          description:
+            'The requested service in the customer\'s own words. If a usable service is still missing after one ask, use exactly "not specified".',
+        },
+        requested_time_text: {
+          type: "string",
+          description:
+            'The customer\'s requested time in the customer\'s own words. Copy those words verbatim; do not parse, normalize, infer, or reformat them as a date or time. If a usable time is still missing after one ask, use exactly "not specified".',
+        },
+        customer_name: {
+          type: "string",
+          description: "The customer-provided name, if available",
+        },
+        customer_phone: {
+          type: "string",
+          description: "The customer-provided phone number, if available",
+        },
+        customer_email: {
+          type: "string",
+          description: "The customer-provided email address, if available",
+        },
+      },
+      required: ["requested_service", "requested_time_text"],
+    },
+  },
+];
+
 export const calendarTools: Anthropic.Tool[] = [
   {
     name: "check_availability",
@@ -81,5 +117,16 @@ export function shouldIncludeCalendarTools(
     aiSettings.booking_enabled &&
     aiSettings.booking_mode === "schedule_direct" &&
     hasCalendarConnected
+  );
+}
+
+export function shouldIncludeBookingRequestTools(
+  aiSettings: AISettings,
+  bookingOperationallyAvailable: boolean = true
+): boolean {
+  return (
+    bookingOperationallyAvailable &&
+    aiSettings.booking_enabled &&
+    aiSettings.booking_mode === "collect_info"
   );
 }

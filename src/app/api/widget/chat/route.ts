@@ -111,7 +111,8 @@ export async function POST(request: NextRequest) {
         visitorEmail || null,
         message,
         "web_chat",
-        sessionId || null
+        sessionId || null,
+        { persistBookingRequests: !verifiedPreview }
       );
     } catch (error) {
       // Re-checks inside the AI engine close the race where a downgrade or DB

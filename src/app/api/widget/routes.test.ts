@@ -642,7 +642,15 @@ describe("public widget entitlement boundaries", () => {
       sessionId: "public-session",
     });
     expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
-    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      null,
+      null,
+      "Can you help?",
+      "web_chat",
+      "public-session",
+      { persistBookingRequests: true }
+    );
   });
 
   it("awaits and logs a failed live finalizer without retrying or suppressing the persisted reply", async () => {
@@ -693,7 +701,7 @@ describe("public widget entitlement boundaries", () => {
     );
   });
 
-  it("keeps a verified same-business preview live while skipping only goal-event finalization", async () => {
+  it("keeps a verified same-business preview live while suppressing booking-request persistence and goal-event finalization", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockResolvedValue({
       text: "Start here: https://example.com/signup",
@@ -719,7 +727,15 @@ describe("public widget entitlement boundaries", () => {
       response: "Start here: https://example.com/signup",
     });
     expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
-    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      null,
+      null,
+      "I want to sign up.",
+      "web_chat",
+      "preview-session",
+      { persistBookingRequests: false }
+    );
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
     expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
     expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
@@ -811,6 +827,15 @@ describe("public widget entitlement boundaries", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      null,
+      null,
+      "I want to sign up.",
+      "web_chat",
+      "session-1",
+      { persistBookingRequests: true }
+    );
     expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
   });
 

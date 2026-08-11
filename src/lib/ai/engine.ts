@@ -25,8 +25,11 @@ import {
 } from "./knowledgeGapSignal";
 import type { ParsedKnowledgeGapSignal } from "./knowledgeGapSignal";
 import { buildSystemPrompt, buildConversationMessages } from "./prompt";
+import { recordBookingRequest } from "./bookingRequests";
 import {
+  bookingRequestTools,
   calendarTools,
+  shouldIncludeBookingRequestTools,
   shouldIncludeCalendarTools,
   signupGoalTools,
 } from "./tools";
@@ -52,6 +55,15 @@ const FALLBACK_MESSAGE =
 
 const BOOKING_UNAVAILABLE_TOOL_RESULT =
   "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.";
+
+const BOOKING_REQUEST_RECORDED_TOOL_RESULT =
+  "Appointment request recorded for owner review. It is not a booked or confirmed appointment.";
+
+const BOOKING_REQUEST_PREVIEW_TOOL_RESULT =
+  "Preview only: no appointment request was created. Do not say it was recorded, booked, or confirmed.";
+
+const BOOKING_REQUEST_UNAVAILABLE_TOOL_RESULT =
+  "Appointment-request recording is not enabled for this business right now. Do not say a request was recorded, booked, or confirmed.";
 
 const GOAL_LINK_IDEMPOTENCY_NAMESPACE = "goal-link-offered:v1";
 
@@ -113,9 +125,11 @@ function rethrowTypedAIProcessingError(error: unknown): void {
 
 export interface ProcessIncomingMessageOptions {
   persistAssistant?: boolean;
+  /** Set false only for an authenticated, same-business widget preview. */
+  persistBookingRequests?: boolean;
   /** Set false only when the caller has already durably stored this message. */
   persistCustomer?: boolean;
-  /** Required with persistCustomer=false so direct bookings remain retry-stable. */
+  /** Required with persistCustomer=false so booking actions remain retry-stable. */
   sourceMessageId?: string;
   contact?: Contact;
   conversation?: Conversation;
@@ -335,6 +349,222 @@ async function executeCalendarTool(
     console.error(`[calendar-tool] Error executing ${toolName}:`, error);
     return "Calendar is temporarily unavailable. Please collect the customer's booking details instead and let them know someone will confirm.";
   }
+}
+
+interface BookingRequestContactSnapshot {
+  id: string;
+  business_id: string;
+  name: string | null;
+  phone_number: string | null;
+  provided_phone_number: string | null;
+  email: string | null;
+}
+
+interface BookingRequestToolExecutionResult {
+  content: string;
+  suppressCollectForFollowup: boolean;
+}
+
+function nonBlankToolText(
+  value: unknown,
+  fieldName: string
+): string {
+  if (typeof value !== "string" || !/\S/.test(value)) {
+    throw new AIProcessingStateError(
+      `Booking request tool returned invalid ${fieldName}.`
+    );
+  }
+  return value;
+}
+
+function optionalNonBlankText(value: unknown): string | null {
+  return typeof value === "string" && /\S/.test(value) ? value : null;
+}
+
+async function executeBookingRequestTool(args: {
+  businessId: string;
+  contactId: string;
+  conversationId: string;
+  sourceMessageId: string | null;
+  toolInput: Record<string, unknown>;
+  toolWasExposed: boolean;
+  persistBookingRequests: boolean;
+  channel: Channel;
+}): Promise<BookingRequestToolExecutionResult> {
+  const {
+    businessId,
+    contactId,
+    conversationId,
+    sourceMessageId,
+    toolInput,
+    toolWasExposed,
+    persistBookingRequests,
+    channel,
+  } = args;
+
+  let operationalControls;
+  try {
+    operationalControls = await assertAIProcessingOperationallyAllowed(
+      businessId,
+      channel
+    );
+  } catch (error) {
+    if (
+      error instanceof AIProcessingBlockedError ||
+      error instanceof AIProcessingStateError
+    ) {
+      throw error;
+    }
+    throw new AIProcessingStateError(
+      `Could not recheck booking-request operational controls for business ${businessId}.`,
+      { cause: error }
+    );
+  }
+
+  let businessResult;
+  let aiSettingsResult;
+  try {
+    [businessResult, aiSettingsResult] = await Promise.all([
+      supabaseAdmin
+        .from("businesses")
+        .select("primary_goal")
+        .eq("id", businessId)
+        .single(),
+      supabaseAdmin
+        .from("ai_settings")
+        .select("booking_enabled,booking_mode")
+        .eq("business_id", businessId)
+        .single(),
+    ]);
+  } catch (error) {
+    throw new AIProcessingStateError(
+      `Could not recheck booking-request configuration for business ${businessId}.`,
+      { cause: error }
+    );
+  }
+
+  if (businessResult.error || aiSettingsResult.error) {
+    throw new AIProcessingStateError(
+      `Could not recheck booking-request configuration for business ${businessId}.`,
+      { cause: businessResult.error ?? aiSettingsResult.error }
+    );
+  }
+
+  const freshBusiness = businessResult.data as Pick<Business, "primary_goal"> | null;
+  const freshAiSettings = aiSettingsResult.data as AISettings | null;
+  if (!freshBusiness || !freshAiSettings) {
+    throw new AIProcessingStateError(
+      `Business ${businessId} is missing booking-request configuration.`
+    );
+  }
+
+  const bookingRequestOperationallyAvailable =
+    operationalControls.bookingsPausedAt === null;
+  const freshBookingRequestToolAvailable =
+    freshBusiness.primary_goal !== "signup" &&
+    shouldIncludeBookingRequestTools(
+      freshAiSettings,
+      bookingRequestOperationallyAvailable
+    );
+  if (!toolWasExposed || !freshBookingRequestToolAvailable) {
+    return {
+      content: BOOKING_REQUEST_UNAVAILABLE_TOOL_RESULT,
+      // If this turn really advertised collect-mode recording, do not
+      // re-advertise stale collect prompt/tool state after a fresh rejection.
+      // The turn-start goal/mode remains authoritative for all other surfaces.
+      suppressCollectForFollowup:
+        toolWasExposed && !freshBookingRequestToolAvailable,
+    };
+  }
+
+  if (!sourceMessageId) {
+    throw new AIProcessingStateError(
+      "Appointment-request recording requires a durably persisted source message."
+    );
+  }
+
+  const requestedService = nonBlankToolText(
+    toolInput.requested_service,
+    "requested_service"
+  );
+  const requestedTimeText = nonBlankToolText(
+    toolInput.requested_time_text,
+    "requested_time_text"
+  );
+
+  // Authenticated widget previews exercise the same prompt/tool contract but
+  // deliberately stop before reading snapshots or creating a durable row.
+  if (!persistBookingRequests) {
+    return {
+      content: BOOKING_REQUEST_PREVIEW_TOOL_RESULT,
+      suppressCollectForFollowup: false,
+    };
+  }
+
+  let contactResult;
+  try {
+    contactResult = await supabaseAdmin
+      .from("contacts")
+      .select(
+        "id,business_id,name,phone_number,provided_phone_number,email"
+      )
+      .eq("id", contactId)
+      .eq("business_id", businessId)
+      .single();
+  } catch (error) {
+    throw new AIProcessingStateError(
+      `Could not load the booking-request contact for business ${businessId}.`,
+      { cause: error }
+    );
+  }
+
+  const freshContact = contactResult.data as BookingRequestContactSnapshot | null;
+  if (
+    contactResult.error ||
+    !freshContact ||
+    freshContact.id !== contactId ||
+    freshContact.business_id !== businessId
+  ) {
+    throw new AIProcessingStateError(
+      `Could not load the booking-request contact for business ${businessId}.`,
+      { cause: contactResult.error ?? undefined }
+    );
+  }
+
+  const customerName =
+    optionalNonBlankText(toolInput.customer_name) ??
+    optionalNonBlankText(freshContact.name);
+  const customerPhone =
+    optionalNonBlankText(toolInput.customer_phone) ??
+    optionalNonBlankText(freshContact.provided_phone_number) ??
+    optionalNonBlankText(freshContact.phone_number);
+  const customerEmail =
+    optionalNonBlankText(toolInput.customer_email) ??
+    optionalNonBlankText(freshContact.email);
+
+  try {
+    await recordBookingRequest({
+      businessId,
+      contactId,
+      conversationId,
+      sourceMessageId,
+      requestedService,
+      requestedTimeText,
+      customerName,
+      customerPhone,
+      customerEmail,
+    });
+  } catch (error) {
+    throw new AIProcessingStateError(
+      `Could not record the appointment request for business ${businessId}.`,
+      { cause: error }
+    );
+  }
+
+  return {
+    content: BOOKING_REQUEST_RECORDED_TOOL_RESULT,
+    suppressCollectForFollowup: false,
+  };
 }
 
 export async function processIncomingMessage(
@@ -593,6 +823,13 @@ export async function processIncomingMessageDetailed(
       if (isSignupGoal) {
         requestTools.push(...signupGoalTools);
       } else if (
+        shouldIncludeBookingRequestTools(
+          aiSettings as AISettings,
+          bookingAvailable
+        )
+      ) {
+        requestTools.push(...bookingRequestTools);
+      } else if (
         shouldIncludeCalendarTools(
           aiSettings as AISettings,
           hasCalendar,
@@ -629,6 +866,7 @@ export async function processIncomingMessageDetailed(
     let loopCount = 0;
     const maxLoops = 3;
     let goalLinkToolUsed = false;
+    let suppressCollectForFollowup = false;
 
     // Tool-calling loop
     while (response.stop_reason === "tool_use" && loopCount < maxLoops) {
@@ -664,6 +902,21 @@ export async function processIncomingMessageDetailed(
               `Offer this exact link in your direct reply to the customer's current message: ${signupGoalUrl} ` +
               "Do not promise a callback, booking, follow-up, or any other action beyond providing the link.";
           }
+        } else if (toolUseBlock.name === "record_booking_request") {
+          const bookingRequestResult = await executeBookingRequestTool({
+            businessId,
+            contactId: contact.id,
+            conversationId: conversation.id,
+            sourceMessageId,
+            toolInput: toolUseBlock.input as Record<string, unknown>,
+            toolWasExposed: enabledToolNames.has(toolUseBlock.name),
+            persistBookingRequests:
+              options.persistBookingRequests !== false,
+            channel,
+          });
+          toolResult = bookingRequestResult.content;
+          suppressCollectForFollowup ||=
+            bookingRequestResult.suppressCollectForFollowup;
         } else if (
           toolUseBlock.name === "check_availability" ||
           toolUseBlock.name === "create_booking"
@@ -711,7 +964,8 @@ export async function processIncomingMessageDetailed(
       const followupOperationalControls =
         await assertAIProcessingOperationallyAllowed(businessId, channel);
       const followupModelSurface = buildModelSurface(
-        followupOperationalControls.bookingsPausedAt === null
+        followupOperationalControls.bookingsPausedAt === null &&
+          !suppressCollectForFollowup
       );
       enabledToolNames = new Set(
         followupModelSurface.tools.map((tool) => tool.name)

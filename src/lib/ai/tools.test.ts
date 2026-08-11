@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AISettings } from "@/types/database";
 import {
+  bookingRequestTools,
   calendarTools,
   CREATE_BOOKING_START_TIME_CONTRACT,
+  shouldIncludeBookingRequestTools,
   shouldIncludeCalendarTools,
   signupGoalTools,
 } from "./tools";
@@ -10,6 +12,11 @@ import {
 const directSettings = {
   booking_enabled: true,
   booking_mode: "schedule_direct",
+} as AISettings;
+
+const collectSettings = {
+  booking_enabled: true,
+  booking_mode: "collect_info",
 } as AISettings;
 
 describe("shouldIncludeCalendarTools", () => {
@@ -54,6 +61,70 @@ describe("calendarTools booking timestamp contract", () => {
     expect(inputSchema?.properties?.start_time?.description).toBe(
       CREATE_BOOKING_START_TIME_CONTRACT
     );
+  });
+});
+
+describe("shouldIncludeBookingRequestTools", () => {
+  it.each([
+    [true, collectSettings, true],
+    [false, collectSettings, false],
+    [false, { ...collectSettings, booking_enabled: false }, true],
+    [false, directSettings, true],
+    [false, { ...directSettings, booking_enabled: false }, true],
+  ])(
+    "returns %s for booking configuration %#",
+    (expected, settings, operationallyAvailable) => {
+      expect(
+        shouldIncludeBookingRequestTools(
+          settings as AISettings,
+          operationallyAvailable
+        )
+      ).toBe(expected);
+    }
+  );
+
+  it("defaults the operational availability fence to enabled", () => {
+    expect(shouldIncludeBookingRequestTools(collectSettings)).toBe(true);
+  });
+});
+
+describe("bookingRequestTools", () => {
+  it("exposes only the request-recording tool with required service and verbatim requested time", () => {
+    expect(bookingRequestTools).toEqual([
+      {
+        name: "record_booking_request",
+        description:
+          "Record a customer's appointment request for the business owner to review. This records a request only; it does not create, book, or confirm an appointment. Use it after gathering the service, the customer's own requested-time words, and any available customer identity.",
+        input_schema: {
+          type: "object",
+          properties: {
+            requested_service: {
+              type: "string",
+              description:
+                'The requested service in the customer\'s own words. If a usable service is still missing after one ask, use exactly "not specified".',
+            },
+            requested_time_text: {
+              type: "string",
+              description:
+                'The customer\'s requested time in the customer\'s own words. Copy those words verbatim; do not parse, normalize, infer, or reformat them as a date or time. If a usable time is still missing after one ask, use exactly "not specified".',
+            },
+            customer_name: {
+              type: "string",
+              description: "The customer-provided name, if available",
+            },
+            customer_phone: {
+              type: "string",
+              description: "The customer-provided phone number, if available",
+            },
+            customer_email: {
+              type: "string",
+              description: "The customer-provided email address, if available",
+            },
+          },
+          required: ["requested_service", "requested_time_text"],
+        },
+      },
+    ]);
   });
 });
 

@@ -59,6 +59,8 @@ const mocks = vi.hoisted(() => ({
   buildSystemPrompt: vi.fn(),
   buildConversationMessages: vi.fn(),
   parseKnowledgeGapSignal: vi.fn(),
+  recordBookingRequest: vi.fn(),
+  shouldIncludeBookingRequestTools: vi.fn(),
   shouldIncludeCalendarTools: vi.fn(),
   checkAvailability: vi.fn(),
   createBooking: vi.fn(),
@@ -136,12 +138,32 @@ vi.mock("./knowledgeGapSignal", async (importOriginal) => {
     parseKnowledgeGapSignal: mocks.parseKnowledgeGapSignal,
   };
 });
+vi.mock("./bookingRequests", () => ({
+  recordBookingRequest: mocks.recordBookingRequest,
+}));
 vi.mock("./tools", () => ({
   signupGoalTools: [
     {
       name: "offer_goal_link",
       description: "signup",
       input_schema: { type: "object", properties: {}, required: [] },
+    },
+  ],
+  bookingRequestTools: [
+    {
+      name: "record_booking_request",
+      description: "request",
+      input_schema: {
+        type: "object",
+        properties: {
+          requested_service: { type: "string" },
+          requested_time_text: { type: "string" },
+          customer_name: { type: "string" },
+          customer_phone: { type: "string" },
+          customer_email: { type: "string" },
+        },
+        required: ["requested_service", "requested_time_text"],
+      },
     },
   ],
   calendarTools: [
@@ -156,6 +178,8 @@ vi.mock("./tools", () => ({
       input_schema: { type: "object", properties: {} },
     },
   ],
+  shouldIncludeBookingRequestTools:
+    mocks.shouldIncludeBookingRequestTools,
   shouldIncludeCalendarTools: mocks.shouldIncludeCalendarTools,
 }));
 vi.mock("@/lib/google/calendar", () => ({
@@ -187,6 +211,12 @@ import { KNOWLEDGE_GAP_SIGNAL } from "./knowledgeGapSignal";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const BOOKING_UNAVAILABLE_TOOL_RESULT_FOR_TEST =
   "Booking is currently unavailable. Do not check availability, create an appointment, or collect booking details. Let the customer know booking is unavailable.";
+const BOOKING_REQUEST_RECORDED_TOOL_RESULT_FOR_TEST =
+  "Appointment request recorded for owner review. It is not a booked or confirmed appointment.";
+const BOOKING_REQUEST_PREVIEW_TOOL_RESULT_FOR_TEST =
+  "Preview only: no appointment request was created. Do not say it was recorded, booked, or confirmed.";
+const BOOKING_REQUEST_UNAVAILABLE_TOOL_RESULT_FOR_TEST =
+  "Appointment-request recording is not enabled for this business right now. Do not say a request was recorded, booked, or confirmed.";
 const CONTACT = {
   id: "00000000-0000-4000-8000-000000000002",
   business_id: BUSINESS_ID,
@@ -249,6 +279,21 @@ const EXPECTED_CONTACT_TOOLS = [
     },
   },
 ] as const;
+const EXPECTED_BOOKING_REQUEST_TOOL = {
+  name: "record_booking_request",
+  description: "request",
+  input_schema: {
+    type: "object",
+    properties: {
+      requested_service: { type: "string" },
+      requested_time_text: { type: "string" },
+      customer_name: { type: "string" },
+      customer_phone: { type: "string" },
+      customer_email: { type: "string" },
+    },
+    required: ["requested_service", "requested_time_text"],
+  },
+} as const;
 
 function operationalControls(
   overrides: Partial<{
@@ -297,6 +342,17 @@ function setAiData() {
   tableResults.set("business_hours", { data: [], error: null });
   tableResults.set("google_calendar_tokens", {
     data: { id: "calendar_1" },
+    error: null,
+  });
+  tableResults.set("contacts", {
+    data: {
+      id: CONTACT.id,
+      business_id: BUSINESS_ID,
+      name: "Stored Pat",
+      phone_number: "+15745550100",
+      provided_phone_number: "+15745550199",
+      email: "stored@example.com",
+    },
     error: null,
   });
 }
@@ -415,6 +471,15 @@ beforeEach(() => {
       bookingOperationallyAvailable: boolean = true
     ) => hasCalendar && bookingOperationallyAvailable
   );
+  mocks.shouldIncludeBookingRequestTools.mockImplementation(
+    (
+      settings: { booking_enabled: boolean; booking_mode: string },
+      bookingOperationallyAvailable: boolean = true
+    ) =>
+      bookingOperationallyAvailable &&
+      settings.booking_enabled &&
+      settings.booking_mode === "collect_info"
+  );
   mocks.anthropicCreate.mockResolvedValue({
     stop_reason: "end_turn",
     content: [{ type: "text", text: "Absolutely." }],
@@ -426,6 +491,7 @@ beforeEach(() => {
     endTime: "2026-08-01T10:30:00",
   });
   mocks.incrementLeadScore.mockResolvedValue(undefined);
+  mocks.recordBookingRequest.mockResolvedValue("inserted");
   setAiData();
 });
 
@@ -1547,6 +1613,7 @@ describe("processIncomingMessage operational controls", () => {
       expect(mocks.anthropicCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           tools: expect.not.arrayContaining([
+            expect.objectContaining({ name: "record_booking_request" }),
             expect.objectContaining({ name: "check_availability" }),
             expect.objectContaining({ name: "create_booking" }),
           ]),
@@ -2039,6 +2106,553 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
   });
 });
 
+describe("processIncomingMessage collect-mode request persistence", () => {
+  const requestInput = {
+    requested_service: "  Kitchen estimate  ",
+    requested_time_text: "next Tuesday after lunch",
+    customer_name: " Tool Pat ",
+    customer_phone: "   ",
+  };
+
+  function queueRequestTool(
+    input: Record<string, unknown> = requestInput,
+    finalText = "The owner will review your appointment request."
+  ) {
+    queueRequestToolOnly(input);
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: finalText }],
+      });
+  }
+
+  function queueRequestToolOnly(
+    input: Record<string, unknown> = requestInput
+  ) {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "request_tool_1",
+          name: "record_booking_request",
+          input,
+        },
+      ],
+    });
+  }
+
+  function lastToolResultContent(): string | undefined {
+    const followupParams = mocks.anthropicCreate.mock.calls[1]?.[0] as
+      | { messages?: Array<{ content?: Array<{ content?: string }> }> }
+      | undefined;
+    const messages = followupParams?.messages ?? [];
+    return messages[messages.length - 1]?.content?.[0]?.content;
+  }
+
+  beforeEach(() => {
+    setBusinessGoal("book");
+    setAiSettings({
+      booking_enabled: true,
+      booking_mode: "collect_info",
+    });
+  });
+
+  it("writes at tool time with raw request text and explicit-then-fresh snapshot fallbacks", async () => {
+    queueRequestTool();
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request a kitchen estimate.",
+        "sms"
+      )
+    ).resolves.toBe("The owner will review your appointment request.");
+
+    expect(mocks.recordBookingRequest).toHaveBeenCalledOnce();
+    expect(mocks.recordBookingRequest).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      contactId: CONTACT.id,
+      conversationId: CONVERSATION.id,
+      sourceMessageId: "message_1",
+      requestedService: "  Kitchen estimate  ",
+      requestedTimeText: "next Tuesday after lunch",
+      customerName: " Tool Pat ",
+      customerPhone: "+15745550199",
+      customerEmail: "stored@example.com",
+    });
+    expect(lastToolResultContent()).toBe(
+      BOOKING_REQUEST_RECORDED_TOOL_RESULT_FOR_TEST
+    );
+    expect(mocks.anthropicCreate.mock.calls[1]?.[0].tools).toEqual([
+      ...EXPECTED_CONTACT_TOOLS,
+      EXPECTED_BOOKING_REQUEST_TOOL,
+    ]);
+    expect(
+      mocks.recordBookingRequest.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.anthropicCreate.mock.invocationCallOrder[1]);
+    expect(
+      mocks.anthropicCreate.mock.invocationCallOrder[1]
+    ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[1]);
+  });
+
+  it("uses the caller-owned durable SMS source without reinserting the inbound message", async () => {
+    const sourceMessageId = "provider-message-request-1";
+    queueRequestTool();
+
+    await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please request a kitchen estimate.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        sourceMessageId,
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordBookingRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactId: CONTACT.id,
+        conversationId: CONVERSATION.id,
+        sourceMessageId,
+      })
+    );
+  });
+
+  it("uses the web widget message persisted by the engine as request provenance", async () => {
+    const webConversation = { ...CONVERSATION, channel: "web_chat" };
+    mocks.getOrCreateConversation.mockResolvedValue(webConversation);
+    queueRequestTool();
+
+    await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      null,
+      "pat@example.com",
+      "Please request a kitchen estimate.",
+      "web_chat",
+      "widget-session"
+    );
+
+    expect(mocks.addMessage).toHaveBeenNthCalledWith(
+      1,
+      webConversation.id,
+      BUSINESS_ID,
+      "customer",
+      "Please request a kitchen estimate.",
+      "web_chat"
+    );
+    expect(mocks.recordBookingRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactId: CONTACT.id,
+        conversationId: webConversation.id,
+        sourceMessageId: "message_1",
+      })
+    );
+  });
+
+  it("treats a duplicate writer result as successful without claiming a booking", async () => {
+    mocks.recordBookingRequest.mockResolvedValueOnce("duplicate");
+    queueRequestTool({
+      requested_service: "not specified",
+      requested_time_text: "not specified",
+    });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "I still need an appointment.",
+        "sms"
+      )
+    ).resolves.toBe("The owner will review your appointment request.");
+
+    expect(mocks.recordBookingRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedService: "not specified",
+        requestedTimeText: "not specified",
+      })
+    );
+    expect(lastToolResultContent()).toBe(
+      BOOKING_REQUEST_RECORDED_TOOL_RESULT_FOR_TEST
+    );
+  });
+
+  it("runs the realistic tool in authenticated preview without reading snapshots or writing a row", async () => {
+    queueRequestTool();
+
+    await expect(
+      processIncomingMessageDetailed(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request a kitchen estimate.",
+        "sms",
+        null,
+        { persistBookingRequests: false }
+      )
+    ).resolves.toMatchObject({
+      text: "The owner will review your appointment request.",
+      sourceMessageId: "message_1",
+    });
+
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(
+      mocks.from.mock.calls.filter(([table]) => table === "contacts")
+    ).toHaveLength(0);
+    expect(lastToolResultContent()).toBe(
+      BOOKING_REQUEST_PREVIEW_TOOL_RESULT_FOR_TEST
+    );
+  });
+
+  it("rejects a request tool call without durable source-message provenance", async () => {
+    queueRequestToolOnly();
+
+    const processing = processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please request a kitchen estimate.",
+      "sms",
+      null,
+      {
+        persistCustomer: false,
+        persistAssistant: false,
+        contact: CONTACT as never,
+        conversation: CONVERSATION as never,
+      }
+    );
+
+    await expect(processing).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message:
+        "Appointment-request recording requires a durably persisted source message.",
+    });
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "disabled",
+      arrange: () =>
+        setAiSettings({
+          booking_enabled: false,
+          booking_mode: "collect_info",
+        }),
+    },
+    {
+      label: "schedule-direct",
+      arrange: () =>
+        setAiSettings({
+          booking_enabled: true,
+          booking_mode: "schedule_direct",
+        }),
+    },
+    {
+      label: "signup",
+      arrange: () => setBusinessGoal("signup", "https://example.com/signup"),
+    },
+    {
+      label: "booking-paused",
+      arrange: () =>
+        mocks.resolveBusinessOperationalControls.mockResolvedValue(
+          operationalControls({
+            bookingsPausedAt: "2026-08-11T12:00:00.000Z",
+          })
+        ),
+    },
+    {
+      label: "unexposed",
+      arrange: () =>
+        mocks.shouldIncludeBookingRequestTools.mockReturnValue(false),
+    },
+  ])("rejects a forced $label request tool without writing", async ({ arrange }) => {
+    arrange();
+    queueRequestTool();
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please request an appointment.",
+      "sms"
+    );
+
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(
+      mocks.from.mock.calls.filter(([table]) => table === "contacts")
+    ).toHaveLength(0);
+    expect(lastToolResultContent()).toBe(
+      BOOKING_REQUEST_UNAVAILABLE_TOOL_RESULT_FOR_TEST
+    );
+  });
+
+  it.each([
+    {
+      label: "mode changes",
+      mutate: () =>
+        setAiSettings({
+          booking_enabled: true,
+          booking_mode: "schedule_direct",
+        }),
+    },
+    {
+      label: "goal changes to signup",
+      mutate: () =>
+        setBusinessGoal("signup", "https://example.com/signup"),
+    },
+    {
+      label: "bookings pause",
+      mutate: () =>
+        mocks.resolveBusinessOperationalControls.mockResolvedValue(
+          operationalControls({
+            bookingsPausedAt: "2026-08-11T12:00:00.000Z",
+          })
+        ),
+    },
+  ])("rechecks fresh controls before writing when $label", async ({ mutate }) => {
+    mocks.anthropicCreate
+      .mockImplementationOnce(async () => {
+        mutate();
+        return {
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "request_tool_1",
+              name: "record_booking_request",
+              input: requestInput,
+            },
+          ],
+        };
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "I cannot record that request." }],
+      });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please request an appointment.",
+      "sms"
+    );
+
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(lastToolResultContent()).toBe(
+      BOOKING_REQUEST_UNAVAILABLE_TOOL_RESULT_FOR_TEST
+    );
+    expect(mocks.anthropicCreate.mock.calls[1]?.[0].tools).toEqual(
+      EXPECTED_CONTACT_TOOLS
+    );
+    expect(mocks.buildSystemPrompt).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      true,
+      "sms",
+      false
+    );
+  });
+
+  it("fails closed when the fresh booking configuration cannot be read", async () => {
+    mocks.anthropicCreate.mockImplementationOnce(async () => {
+      tableResults.set("ai_settings", {
+        data: null,
+        error: { message: "configuration unavailable" },
+      });
+      return {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "request_tool_1",
+            name: "record_booking_request",
+            input: requestInput,
+          },
+        ],
+      };
+    });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message: `Could not recheck booking-request configuration for business ${BUSINESS_ID}.`,
+    });
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns tool-time operational uncertainty into a retryable AI state failure", async () => {
+    const resolutionError = new OperationalControlsResolutionError({
+      code: "business_lookup_failed",
+      businessId: BUSINESS_ID,
+      message: "operational controls unavailable",
+    });
+    mocks.resolveBusinessOperationalControls
+      .mockResolvedValueOnce(ACTIVE_CONTROLS)
+      .mockResolvedValueOnce(ACTIVE_CONTROLS)
+      .mockRejectedValueOnce(resolutionError);
+    queueRequestToolOnly();
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message: `Could not recheck booking-request operational controls for business ${BUSINESS_ID}.`,
+      cause: resolutionError,
+    });
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the freshly linked contact cannot be read", async () => {
+    mocks.anthropicCreate.mockImplementationOnce(async () => {
+      tableResults.set("contacts", {
+        data: null,
+        error: { message: "contact unavailable" },
+      });
+      return {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "request_tool_1",
+            name: "record_booking_request",
+            input: requestInput,
+          },
+        ],
+      };
+    });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message: `Could not load the booking-request contact for business ${BUSINESS_ID}.`,
+    });
+    expect(mocks.recordBookingRequest).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns writer and invariant failures into retryable AI state failures", async () => {
+    const collision = new Error("immutable collision");
+    mocks.recordBookingRequest.mockRejectedValueOnce(collision);
+    queueRequestToolOnly();
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message: `Could not record the appointment request for business ${BUSINESS_ID}.`,
+      cause: collision,
+    });
+    expect(mocks.recordBookingRequest).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the tool-time row when the follow-up model call fails", async () => {
+    const followupFailure = new Error("follow-up unavailable");
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "request_tool_1",
+            name: "record_booking_request",
+            input: requestInput,
+          },
+        ],
+      })
+      .mockRejectedValueOnce(followupFailure);
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).resolves.toContain("brief technical issue");
+
+    expect(mocks.recordBookingRequest).toHaveBeenCalledOnce();
+    expect(
+      mocks.recordBookingRequest.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.anthropicCreate.mock.invocationCallOrder[1]);
+    expect(mocks.addMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the tool-time row when later assistant persistence fails", async () => {
+    const assistantWriteFailure = new Error("assistant insert unavailable");
+    mocks.addMessage
+      .mockResolvedValueOnce({ id: "message_1" })
+      .mockRejectedValueOnce(assistantWriteFailure);
+    queueRequestTool();
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please request an appointment.",
+        "sms"
+      )
+    ).rejects.toMatchObject({
+      name: "AIProcessingStateError",
+      message: `Could not persist the assistant message for conversation ${CONVERSATION.id}.`,
+      cause: assistantWriteFailure,
+    });
+
+    expect(mocks.recordBookingRequest).toHaveBeenCalledOnce();
+    expect(
+      mocks.recordBookingRequest.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.addMessage.mock.invocationCallOrder[1]);
+  });
+});
+
 describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
   it("returns gap metadata and persists only the cleaned response", async () => {
     mocks.anthropicCreate.mockResolvedValue({
@@ -2257,18 +2871,81 @@ describe("processIncomingMessageDetailed goal-aware behavior", () => {
     expect(result.assistantMessageId).toBe("message_1");
   });
 
+  it("adds only the appointment-request tool when collect-info booking is active", async () => {
+    setBusinessGoal("book");
+    const aiSettings = setAiSettings({
+      booking_enabled: true,
+      booking_mode: "collect_info",
+    });
+
+    const result = await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Can I book?",
+      "sms"
+    );
+
+    expect(mocks.shouldIncludeBookingRequestTools).toHaveBeenCalledOnce();
+    expect(mocks.shouldIncludeBookingRequestTools).toHaveBeenCalledWith(
+      aiSettings,
+      true
+    );
+    expect(mocks.shouldIncludeCalendarTools).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate.mock.calls[0]?.[0]).toEqual({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 500,
+      system: "SYSTEM PROMPT",
+      messages: [{ role: "user", content: "Can I book?" }],
+      tools: [...EXPECTED_CONTACT_TOOLS, EXPECTED_BOOKING_REQUEST_TOOL],
+    });
+    expect(result).toEqual({
+      text: "Absolutely.",
+      knowledgeGapDetected: false,
+      conversationId: CONVERSATION.id,
+      sourceMessageId: "message_1",
+      actions: [],
+      assistantMessageId: "message_1",
+    });
+  });
+
+  it("keeps disconnected schedule-direct booking on the exact contact-only tool surface", async () => {
+    setBusinessGoal("book");
+    const aiSettings = setAiSettings({
+      booking_enabled: true,
+      booking_mode: "schedule_direct",
+    });
+    tableResults.set("google_calendar_tokens", {
+      data: null,
+      error: null,
+    });
+
+    await processIncomingMessageDetailed(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Can I book?",
+      "sms"
+    );
+
+    expect(mocks.shouldIncludeBookingRequestTools).toHaveBeenCalledWith(
+      aiSettings,
+      true
+    );
+    expect(mocks.shouldIncludeCalendarTools).toHaveBeenCalledWith(
+      aiSettings,
+      false,
+      true
+    );
+    expect(mocks.anthropicCreate.mock.calls[0]?.[0].tools).toEqual(
+      EXPECTED_CONTACT_TOOLS
+    );
+  });
+
   it.each([
     {
-      label: "collect-info booking is active",
-      settings: {
-        booking_enabled: true,
-        booking_mode: "collect_info",
-      },
-      controls: ACTIVE_CONTROLS,
-      bookingOperationallyAvailable: true,
-    },
-    {
-      label: "booking is disabled",
+      label: "booking is disabled with schedule-direct saved",
       settings: {
         booking_enabled: false,
         booking_mode: "schedule_direct",
@@ -2277,7 +2954,16 @@ describe("processIncomingMessageDetailed goal-aware behavior", () => {
       bookingOperationallyAvailable: true,
     },
     {
-      label: "booking is operationally paused",
+      label: "booking is disabled with collect-info saved",
+      settings: {
+        booking_enabled: false,
+        booking_mode: "collect_info",
+      },
+      controls: ACTIVE_CONTROLS,
+      bookingOperationallyAvailable: true,
+    },
+    {
+      label: "booking is operationally paused with schedule-direct saved",
       settings: {
         booking_enabled: true,
         booking_mode: "schedule_direct",
@@ -2287,10 +2973,21 @@ describe("processIncomingMessageDetailed goal-aware behavior", () => {
       }),
       bookingOperationallyAvailable: false,
     },
+    {
+      label: "booking is operationally paused with collect-info saved",
+      settings: {
+        booking_enabled: true,
+        booking_mode: "collect_info",
+      },
+      controls: operationalControls({
+        bookingsPausedAt: "2026-08-10T12:00:00.000Z",
+      }),
+      bookingOperationallyAvailable: false,
+    },
   ] as const)(
     "assembles the exact legacy non-calendar request when $label",
     async (scenario) => {
-      // Exact prompt bytes for these three paths are independently frozen in
+      // Exact prompt bytes for these paths are independently frozen in
       // prompt.test.ts. Keep the engine mock fixed so this assertion isolates
       // model parameters, tool order, visible output, and persistence.
       setBusinessGoal("book");

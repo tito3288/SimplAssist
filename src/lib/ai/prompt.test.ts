@@ -126,7 +126,7 @@ const CONTACT_CASES = [
 ] as const;
 
 // Frozen before production edits from clean origin/main
-// 9472d9f3c9c2417be56958bdabaab7121457c87b at the fixed time below.
+// 3d7ea01ef5f8140864298d4512f1467d95c96a19 at the fixed time below.
 const LEGACY_GOLDEN_BUSINESS = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "Golden Plumbing",
@@ -174,7 +174,7 @@ const LEGACY_GOLDEN_HOURS = [
   },
 ] as BusinessHours[];
 
-const LEGACY_GOLDEN_SCENARIOS = [
+const LEGACY_NON_COLLECT_GOLDEN_SCENARIOS = [
   {
     label: "sms_direct",
     expected:
@@ -194,19 +194,25 @@ const LEGACY_GOLDEN_SCENARIOS = [
     bookingOperationallyAvailable: true,
   },
   {
-    label: "sms_collect",
+    label: "sms_direct_disconnected",
     expected:
       "d7fbcfcf91a8a3bfbb78ee8576e3b6564b21d47a119a8a07b604e6d281755d3a",
-    settings: {
-      ...LEGACY_GOLDEN_SETTINGS,
-      booking_mode: "collect_info",
-    } as AISettings,
+    settings: LEGACY_GOLDEN_SETTINGS,
     calendarConnected: false,
     channel: "sms",
     bookingOperationallyAvailable: true,
   },
   {
-    label: "sms_disabled",
+    label: "web_direct_disconnected",
+    expected:
+      "83c2429dd9830344752d1858fc4ceb1d211b27faf74bec3731650f337705b1e2",
+    settings: LEGACY_GOLDEN_SETTINGS,
+    calendarConnected: false,
+    channel: "web_chat",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "sms_disabled_direct_saved",
     expected:
       "1741572b06d78d39f98a591948a0dcc41385ab7713a4363dc41b94dd1d16acb2",
     settings: {
@@ -218,13 +224,114 @@ const LEGACY_GOLDEN_SCENARIOS = [
     bookingOperationallyAvailable: true,
   },
   {
-    label: "sms_paused",
+    label: "sms_disabled_collect_saved",
+    expected:
+      "1741572b06d78d39f98a591948a0dcc41385ab7713a4363dc41b94dd1d16acb2",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_enabled: false,
+      booking_mode: "collect_info",
+    } as AISettings,
+    calendarConnected: false,
+    channel: "sms",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "web_disabled_direct_saved",
+    expected:
+      "c9b76a928997bffa462b0648ace77c203a6b0dbd0798ba7c00b80c0ac8828626",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_enabled: false,
+    } as AISettings,
+    calendarConnected: false,
+    channel: "web_chat",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "web_disabled_collect_saved",
+    expected:
+      "c9b76a928997bffa462b0648ace77c203a6b0dbd0798ba7c00b80c0ac8828626",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_enabled: false,
+      booking_mode: "collect_info",
+    } as AISettings,
+    calendarConnected: false,
+    channel: "web_chat",
+    bookingOperationallyAvailable: true,
+  },
+  {
+    label: "sms_paused_direct_saved",
     expected:
       "972d3449bd13f540fd65bc8917a8f6608f57d911bc5b9f28ac0fcb0fcb2eefaa",
     settings: LEGACY_GOLDEN_SETTINGS,
     calendarConnected: true,
     channel: "sms",
     bookingOperationallyAvailable: false,
+  },
+  {
+    label: "sms_paused_collect_saved",
+    expected:
+      "972d3449bd13f540fd65bc8917a8f6608f57d911bc5b9f28ac0fcb0fcb2eefaa",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_mode: "collect_info",
+    } as AISettings,
+    calendarConnected: true,
+    channel: "sms",
+    bookingOperationallyAvailable: false,
+  },
+  {
+    label: "web_paused_direct_saved",
+    expected:
+      "c358646747a40a4f6371cfcefeb59898b83fb5d1ae5a5556b9ddaf2cff5784bf",
+    settings: LEGACY_GOLDEN_SETTINGS,
+    calendarConnected: true,
+    channel: "web_chat",
+    bookingOperationallyAvailable: false,
+  },
+  {
+    label: "web_paused_collect_saved",
+    expected:
+      "c358646747a40a4f6371cfcefeb59898b83fb5d1ae5a5556b9ddaf2cff5784bf",
+    settings: {
+      ...LEGACY_GOLDEN_SETTINGS,
+      booking_mode: "collect_info",
+    } as AISettings,
+    calendarConnected: true,
+    channel: "web_chat",
+    bookingOperationallyAvailable: false,
+  },
+] as const;
+
+const ACTIVE_COLLECT_GOLDEN_SCENARIOS = [
+  {
+    label: "sms_collect_v1",
+    expected:
+      "5245a3b98dafd87edc820f46e1993accccd0b8808fb5fdae6c17db74897bd9ac",
+    channel: "sms",
+  },
+  {
+    label: "web_collect_v1",
+    expected:
+      "74db7908567b544aa251cdb1c527f20f53def7c89c99c2b0c76e9b690cadab99",
+    channel: "web_chat",
+  },
+] as const;
+
+const SIGNUP_GOLDEN_SCENARIOS = [
+  {
+    label: "sms_signup",
+    expected:
+      "47eaaa7b1035adf052f5eabd1a5b3a9955fc93d4c642d5aa3b8a899d790addc9",
+    channel: "sms",
+  },
+  {
+    label: "web_signup",
+    expected:
+      "1e1802782f63d398b4bf3227654dbbafbc2d4ae83b44b42db03cade596ca9676",
+    channel: "web_chat",
   },
 ] as const;
 
@@ -317,7 +424,7 @@ describe("buildSystemPrompt legacy byte-for-byte goldens", () => {
               primary_goal: value,
             } as Business);
 
-      for (const scenario of LEGACY_GOLDEN_SCENARIOS) {
+      for (const scenario of LEGACY_NON_COLLECT_GOLDEN_SCENARIOS) {
         const prompt = buildSystemPrompt(
           goldenBusiness,
           scenario.settings,
@@ -332,6 +439,60 @@ describe("buildSystemPrompt legacy byte-for-byte goldens", () => {
 
         expect(digest, scenario.label).toBe(scenario.expected);
       }
+    }
+  );
+
+  it.each(LEGACY_GOAL_CASES)(
+    "freezes the intentional active collect prompt for the $label legacy goal",
+    ({ value }) => {
+      const goldenBusiness =
+        value === "omitted"
+          ? ({ ...LEGACY_GOLDEN_BUSINESS } as Business)
+          : ({
+              ...LEGACY_GOLDEN_BUSINESS,
+              primary_goal: value,
+            } as Business);
+
+      for (const scenario of ACTIVE_COLLECT_GOLDEN_SCENARIOS) {
+        const prompt = buildSystemPrompt(
+          goldenBusiness,
+          {
+            ...LEGACY_GOLDEN_SETTINGS,
+            booking_mode: "collect_info",
+          },
+          LEGACY_GOLDEN_SERVICES,
+          LEGACY_GOLDEN_FAQS,
+          LEGACY_GOLDEN_HOURS,
+          false,
+          scenario.channel,
+          true
+        );
+        const digest = createHash("sha256").update(prompt).digest("hex");
+
+        expect(digest, scenario.label).toBe(scenario.expected);
+      }
+    }
+  );
+
+  it.each(SIGNUP_GOLDEN_SCENARIOS)(
+    "keeps the $label goal prompt byte-identical",
+    (scenario) => {
+      const prompt = buildSystemPrompt(
+        {
+          ...LEGACY_GOLDEN_BUSINESS,
+          primary_goal: "signup",
+        } as Business,
+        LEGACY_GOLDEN_SETTINGS,
+        LEGACY_GOLDEN_SERVICES,
+        LEGACY_GOLDEN_FAQS,
+        LEGACY_GOLDEN_HOURS,
+        true,
+        scenario.channel,
+        true
+      );
+      const digest = createHash("sha256").update(prompt).digest("hex");
+
+      expect(digest, scenario.label).toBe(scenario.expected);
     }
   );
 });
@@ -407,6 +568,52 @@ describe("buildSystemPrompt signup goal", () => {
     expect(prompt).not.toContain("Booking is currently unavailable");
     expect(prompt).not.toContain("Booking confirmation:");
   });
+});
+
+describe("buildSystemPrompt active collect-mode request contract", () => {
+  it.each(["sms", "web_chat"] as const)(
+    "records an honest partial-information request for %s",
+    (channel) => {
+      const prompt = buildSystemPrompt(
+        business({ phone_number: PHONE_NUMBER, email: EMAIL }),
+        AI_SETTINGS,
+        SERVICES,
+        FAQS,
+        [],
+        true,
+        channel,
+        true
+      );
+
+      expect(prompt).toContain(
+        "treat it as an appointment request for owner review, never as a confirmed booking"
+      );
+      expect(prompt).toContain(
+        "Copy the customer's requested-time wording verbatim into requested_time_text. Do not parse, normalize, reformat, or infer a date/time"
+      );
+      expect(prompt).toContain(
+        "make at most one follow-up ask total for the missing detail"
+      );
+      expect(prompt).toContain(
+        'use requested_service="not specified" and/or requested_time_text="not specified" for each missing value'
+      );
+      expect(prompt).toContain(
+        'after the one allowed ask with any missing value set to "not specified", call record_booking_request exactly once for the current customer request'
+      );
+      expect(prompt).toContain(
+        "Only after record_booking_request succeeds, tell the customer their appointment request was recorded and the owner will confirm it."
+      );
+      expect(prompt).toContain(
+        "Never say or imply that it is booked or confirmed."
+      );
+      expect(prompt).toContain(
+        "If record_booking_request does not succeed, do not say the request was recorded or that the owner will confirm it."
+      );
+      expect(prompt).not.toContain(
+        "collect their name, preferred date/time, and service needed"
+      );
+    }
+  );
 });
 
 describe("buildSystemPrompt booking operational availability", () => {
@@ -566,7 +773,7 @@ describe.each(CHANNEL_CASES)(
       );
       expect(prompt).toContain("- DO NOT promise fixed pricing");
       expect(prompt).toContain(
-        "When a customer wants to book, collect their name, preferred date/time, and service needed."
+        "When a customer clearly wants an appointment, treat it as an appointment request for owner review, never as a confirmed booking."
       );
       expect(prompt).toContain(
         "- Starter Plan: Routine plumbing maintenance ($49)"
