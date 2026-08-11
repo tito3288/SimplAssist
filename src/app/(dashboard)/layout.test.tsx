@@ -44,7 +44,7 @@ import DashboardLayout from "./layout";
 const BUSINESS = {
   id: "business-1",
   website_url: "https://example.com",
-  primary_goal: null,
+  primary_goal: "book",
   deleted_at: null,
   operations_suspended_at: null,
   ai_replies_paused_at: null,
@@ -167,7 +167,7 @@ describe("DashboardLayout access gate", () => {
     },
   );
 
-  it.each([null, "book", "signup", "quote", "callback"] as const)(
+  it.each(["book", "signup", "quote", "callback"] as const)(
     "passes primary_goal=%s through to the shared navigation",
     async (primaryGoal) => {
       mocks.getDashboardBusinessContext.mockResolvedValue({
@@ -190,6 +190,49 @@ describe("DashboardLayout access gate", () => {
       );
     },
   );
+
+  it.each(["quote", "callback"] as const)(
+    "keeps primary_goal=%s dashboard markup byte-identical to book",
+    async (primaryGoal) => {
+      const renderForGoal = async (
+        goal: "book" | "quote" | "callback",
+      ) => {
+        mocks.getDashboardBusinessContext.mockResolvedValueOnce({
+          status: "resolved",
+          supabase: {},
+          user: { id: "user-1", email: "owner@example.com" },
+          business: { ...BUSINESS, primary_goal: goal },
+        });
+
+        const layout = await DashboardLayout({
+          children: <div>Dashboard child</div>,
+        });
+        return renderToStaticMarkup(layout);
+      };
+
+      const bookMarkup = await renderForGoal("book");
+      const legacyMarkup = await renderForGoal(primaryGoal);
+
+      expect(legacyMarkup).toBe(bookMarkup);
+    },
+  );
+
+  it("redirects a NULL-goal business before readiness and entitlement reads", async () => {
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: {},
+      user: { id: "user-1", email: "owner@example.com" },
+      business: { ...BUSINESS, primary_goal: null },
+    });
+
+    await expect(
+      DashboardLayout({ children: <div>Dashboard child</div> })
+    ).rejects.toThrow("redirect:/onboarding");
+
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getDashboardEntitlements).not.toHaveBeenCalled();
+    expect(mocks.sidebar).not.toHaveBeenCalled();
+  });
 
   it("starts readiness and entitlements together once the business is known", async () => {
     const readiness = deferred<{ smsReady: boolean }>();
@@ -274,12 +317,17 @@ describe("DashboardLayout access gate", () => {
       status: "resolved",
       supabase: {},
       user: { id: "user-1", email: "owner@example.com" },
-      business: { ...BUSINESS, deleted_at: "2026-07-28T00:00:00.000Z" },
+      business: {
+        ...BUSINESS,
+        primary_goal: null,
+        deleted_at: "2026-07-28T00:00:00.000Z",
+      },
     });
 
     await expect(
       DashboardLayout({ children: <div>Dashboard child</div> })
     ).rejects.toThrow("redirect:/account-deleted");
     expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getDashboardEntitlements).not.toHaveBeenCalled();
   });
 });

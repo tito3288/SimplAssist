@@ -45,6 +45,8 @@ function baseArgs() {
       city: "South Bend",
       state: "IN",
       zip: "46601",
+      primary_goal: "book",
+      goal_url: null,
       onboarding_completed_at: null,
       onboarding_registration_status: "not_started",
       pending_phone_number_failure_reason: null,
@@ -137,4 +139,188 @@ describe("deriveOnboardingStep 3+3 quality gate", () => {
     args.business.onboarding_completed_at = "2026-07-24T00:00:00.000Z";
     expect(deriveOnboardingStep(args)).toBe("complete");
   });
+});
+
+describe("deriveOnboardingStep explicit goal gate", () => {
+  it("preserves prerequisite order for a null goal", () => {
+    const missingBusinessInfo = baseArgs();
+    missingBusinessInfo.business.primary_goal = null;
+    missingBusinessInfo.business.name = null;
+
+    const missingHours = baseArgs();
+    missingHours.business.primary_goal = null;
+    missingHours.hours = [];
+
+    const missingContent = baseArgs();
+    missingContent.business.primary_goal = null;
+    missingContent.services = [];
+
+    expect(deriveOnboardingStep(missingBusinessInfo)).toBe("business_info");
+    expect(deriveOnboardingStep(missingHours)).toBe("business_hours");
+    expect(deriveOnboardingStep(missingContent)).toBe("services_faqs");
+  });
+
+  it.each([
+    {
+      name: "completed",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.onboarding_completed_at =
+          "2026-07-24T00:00:00.000Z";
+      },
+    },
+    {
+      name: "SMS-ready",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.smsReady = true;
+      },
+    },
+    {
+      name: "carrier-review",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.telnyx_brand_id = "brand-1";
+      },
+    },
+  ])("forces a ready $name business with a null goal to AI Settings", ({ configure }) => {
+    const args = baseArgs();
+    args.business.primary_goal = null;
+    configure(args);
+
+    expect(deriveOnboardingStep(args)).toBe("ai_settings");
+  });
+
+  it("moves a completed SMS-ready gap-window business straight from the goal question to complete", () => {
+    const args = baseArgs();
+    args.business.primary_goal = null;
+    args.business.onboarding_completed_at = "2026-07-24T00:00:00.000Z";
+    args.smsReady = true;
+
+    expect(deriveOnboardingStep(args)).toBe("ai_settings");
+
+    args.business.primary_goal = "book";
+
+    expect(deriveOnboardingStep(args)).toBe("complete");
+  });
+
+  it("moves a mid-funnel business from the goal question to its normally derived next step", () => {
+    const args = baseArgs();
+    args.business.primary_goal = null;
+    args.business.compliance_info_completed_at = null;
+
+    expect(deriveOnboardingStep(args)).toBe("ai_settings");
+
+    args.business.primary_goal = "book";
+
+    expect(deriveOnboardingStep(args)).toBe("sms_use_case");
+  });
+
+  const legacyCases = [
+    {
+      name: "completed",
+      expected: "complete",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.onboarding_completed_at =
+          "2026-07-24T00:00:00.000Z";
+      },
+    },
+    {
+      name: "SMS-ready",
+      expected: "complete",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.smsReady = true;
+      },
+    },
+    {
+      name: "carrier-review",
+      expected: "carrier_review",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.telnyx_brand_id = "brand-1";
+      },
+    },
+    {
+      name: "business info",
+      expected: "business_info",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.name = null;
+      },
+    },
+    {
+      name: "business hours",
+      expected: "business_hours",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.hours = [];
+      },
+    },
+    {
+      name: "services and FAQs",
+      expected: "services_faqs",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.services = [];
+      },
+    },
+    {
+      name: "failed phone number",
+      expected: "phone_number",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.onboarding_registration_status = "failed";
+        args.business.pending_phone_number_failure_reason =
+          "Number unavailable";
+      },
+    },
+    {
+      name: "AI settings",
+      expected: "ai_settings",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.aiSettings = null;
+      },
+    },
+    {
+      name: "legal verification",
+      expected: "legal_verification",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.has_ein = false;
+      },
+    },
+    {
+      name: "SMS use case",
+      expected: "sms_use_case",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.compliance_info_completed_at = null;
+      },
+    },
+    {
+      name: "phone number",
+      expected: "phone_number",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.phoneNumber = null;
+      },
+    },
+    {
+      name: "review",
+      expected: "review_submit",
+      configure: () => undefined,
+    },
+  ] as const;
+
+  it.each(legacyCases)(
+    "keeps the legacy $name result for an explicit book goal",
+    ({ expected, configure }) => {
+      const args = baseArgs();
+      configure(args);
+
+      expect(deriveOnboardingStep(args)).toBe(expected);
+    }
+  );
+
+  it.each(["quote", "callback"] as const)(
+    "keeps all legacy results unchanged for an explicit %s goal",
+    (primaryGoal) => {
+      for (const { expected, configure } of legacyCases) {
+        const args = baseArgs();
+        args.business.primary_goal = primaryGoal;
+        configure(args);
+
+        expect(deriveOnboardingStep(args)).toBe(expected);
+      }
+    }
+  );
 });

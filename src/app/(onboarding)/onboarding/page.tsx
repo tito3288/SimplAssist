@@ -34,6 +34,7 @@ import { tile, statusWarning } from '@/lib/theme-v2/theme';
 import { evaluateContentQuality } from '@/lib/contentQuality';
 import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import type { BusinessType } from '@/types/database';
+import { completeGoalSaveNavigation } from '@/lib/goals/primaryGoal';
 
 type StateResponse = {
   state?: OnboardingState;
@@ -257,8 +258,16 @@ export default function OnboardingPage() {
           <AIPersonalityForm
             businessId={state.businessId}
             businessName={state.businessInfo.name || 'Your Business'}
+            initialPrimaryGoal={state.primaryGoal}
+            initialGoalUrl={state.goalUrl}
             initialData={state.aiSettings || undefined}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            onNext={() =>
+              completeGoalSaveNavigation({
+                refreshState,
+                replace: (href) => router.replace(href),
+                setStep,
+              })
+            }
             onBack={() => setStep('services_faqs')}
           />
         )}

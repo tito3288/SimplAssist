@@ -13,6 +13,7 @@ import type {
   NoEinHoldStatus,
   OnboardingRegistrationStatus,
   OnboardingStep,
+  PrimaryGoal,
   RegistrationHoldReason,
   RegistrationStatus,
   SmsBlockReason,
@@ -165,6 +166,8 @@ export interface OnboardingRiskReviewSnapshot {
 
 export interface OnboardingState {
   businessId: string;
+  primaryGoal: PrimaryGoal | null;
+  goalUrl: string | null;
   currentStep: OnboardingStep;
   currentStepNumber: number;
   totalSteps: number;

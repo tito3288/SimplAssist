@@ -21,6 +21,7 @@ import type {
   NoEinHoldStatus,
   OnboardingRegistrationStatus,
   OnboardingStep,
+  PrimaryGoal,
   PrivacyTermsMode,
   RegistrationStatus,
   SubscriptionPlan,
@@ -59,6 +60,8 @@ type BusinessRow = {
   owner_id: string;
   partner_id: string | null;
   billing_mode: BillingMode;
+  primary_goal: PrimaryGoal | null;
+  goal_url: string | null;
   name: string | null;
   business_type: BusinessType | null;
   business_type_other: string | null;
@@ -196,6 +199,8 @@ async function getOnboardingStateForOwnerInternal(
         "owner_id",
         "partner_id",
         "billing_mode",
+        "primary_goal",
+        "goal_url",
         "name",
         "business_type",
         "business_type_other",
@@ -282,6 +287,8 @@ export async function getOnboardingStateForBusinessId(
         "owner_id",
         "partner_id",
         "billing_mode",
+        "primary_goal",
+        "goal_url",
         "name",
         "business_type",
         "business_type_other",
@@ -473,10 +480,13 @@ async function getOnboardingStateForBusiness(
 
   return {
     businessId: business.id,
+    primaryGoal: business.primary_goal,
+    goalUrl: business.goal_url,
     currentStep: derivedStep,
     currentStepNumber: onboardingStepNumber(derivedStep),
     totalSteps: ONBOARDING_STEPS.length,
-    dashboardReady: smsReadiness.smsReady,
+    dashboardReady:
+      smsReadiness.smsReady && business.primary_goal !== null,
     completedAt,
     lastSavedAt: business.onboarding_last_saved_at,
     businessInfo: normalizeBusinessInfo(business),
@@ -703,6 +713,13 @@ export function deriveOnboardingStep(args: {
     smsReady,
     riskCleared,
   } = args;
+
+  if (business.primary_goal === null) {
+    if (!hasBusinessInfo(business)) return "business_info";
+    if (hours.length < 7) return "business_hours";
+    if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
+    return "ai_settings";
+  }
 
   if (smsReady || business.onboarding_completed_at) return "complete";
 

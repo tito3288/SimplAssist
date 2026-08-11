@@ -37,6 +37,9 @@ export default async function DashboardLayout({
   if (business.deleted_at) {
     redirect("/account-deleted");
   }
+  if (business.primary_goal === null) {
+    redirect("/onboarding");
+  }
   const isPartnerManagedBilling = business.partner_id !== null;
 
   // Dashboard unlocks only after SMS is actually ready: approved campaign plus

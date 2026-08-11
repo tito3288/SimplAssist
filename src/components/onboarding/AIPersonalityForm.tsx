@@ -5,28 +5,104 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { AITone, Language } from '@/types/database';
+import type { AITone, Language, PrimaryGoal } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
+import { PrimaryGoalFields } from '@/components/goals/PrimaryGoalFields';
+import {
+  buildPrimaryGoalUpdate,
+  isEditablePrimaryGoal,
+  normalizeHttpsGoalUrl,
+} from '@/lib/goals/primaryGoal';
 
-const aiPersonalitySchema = z.object({
-  tone: z.enum(['friendly', 'professional', 'balanced'] as const),
-  business_voice: z.enum(['we', 'business_name'] as const),
-  language: z.enum(['en', 'es', 'both'] as const),
-  response_delay_seconds: z.number().min(0).max(60),
-  web_greeting: z.string().min(1, 'Web chat greeting is required'),
-  guardrails: z.string().optional(),
-  booking_enabled: z.boolean(),
-  booking_mode: z.enum(['collect_info', 'schedule_direct'] as const).optional(),
-});
+const aiPersonalitySchema = z
+  .object({
+    primary_goal: z.enum(['book', 'signup'] as const),
+    goal_url: z.string(),
+    tone: z.enum(['friendly', 'professional', 'balanced'] as const),
+    business_voice: z.enum(['we', 'business_name'] as const),
+    language: z.enum(['en', 'es', 'both'] as const),
+    response_delay_seconds: z.number().min(0).max(60),
+    web_greeting: z.string().min(1, 'Web chat greeting is required'),
+    guardrails: z.string().optional(),
+    booking_enabled: z.boolean(),
+    booking_mode: z.enum(['collect_info', 'schedule_direct'] as const).optional(),
+  })
+  .superRefine((data, context) => {
+    if (data.primary_goal === 'signup' && !normalizeHttpsGoalUrl(data.goal_url)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['goal_url'],
+        message: 'invalid_goal_url',
+      });
+    }
+  });
 
-type AIPersonalityData = z.infer<typeof aiPersonalitySchema>;
+export type AIPersonalityData = z.infer<typeof aiPersonalitySchema>;
+
+type SaveAIPersonalitySettingsArgs = {
+  supabase: ReturnType<typeof createClient>;
+  businessId: string;
+  data: AIPersonalityData;
+  onNext: (data: AIPersonalityData) => void | Promise<void>;
+  now?: () => string;
+};
+
+export async function saveAIPersonalitySettings({
+  supabase,
+  businessId,
+  data,
+  onNext,
+  now = () => new Date().toISOString(),
+}: SaveAIPersonalitySettingsArgs): Promise<void> {
+  const primaryGoalUpdate = buildPrimaryGoalUpdate(data);
+  if (!primaryGoalUpdate) {
+    throw new Error('invalid_primary_goal');
+  }
+
+  const guardrailLines = data.guardrails
+    ? data.guardrails.split('\n').filter((line) => line.trim())
+    : [];
+
+  const { error } = await supabase.from('ai_settings').upsert({
+    business_id: businessId,
+    tone: data.tone,
+    business_voice: data.business_voice,
+    language: data.language,
+    sms_response_delay_seconds: data.response_delay_seconds,
+    guardrails: guardrailLines,
+    booking_enabled: data.booking_enabled,
+    booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
+  }, { onConflict: 'business_id' });
+  if (error) throw error;
+
+  if (data.web_greeting.trim()) {
+    const { error: widgetError } = await supabase.from('widget_configs').upsert({
+      business_id: businessId,
+      welcome_message: data.web_greeting,
+    }, { onConflict: 'business_id' });
+    if (widgetError) {
+      console.warn('Failed to save widget welcome message:', widgetError.message);
+    }
+  }
+
+  const { error: businessError } = await supabase.from('businesses').update({
+    ...primaryGoalUpdate,
+    onboarding_step: 'legal_verification',
+    onboarding_last_saved_at: now(),
+  }).eq('id', businessId);
+  if (businessError) throw businessError;
+
+  await onNext(data);
+}
 
 interface AIPersonalityFormProps {
   businessId: string;
   businessName: string;
+  initialPrimaryGoal: PrimaryGoal | null;
+  initialGoalUrl: string | null;
   initialData?: Partial<AIPersonalityData>;
-  onNext: (data: AIPersonalityData) => void;
+  onNext: (data: AIPersonalityData) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -45,6 +121,8 @@ const LANGUAGE_OPTIONS: { value: Language; label: string }[] = [
 export default function AIPersonalityForm({
   businessId,
   businessName,
+  initialPrimaryGoal,
+  initialGoalUrl,
   initialData,
   onNext,
   onBack,
@@ -57,9 +135,14 @@ export default function AIPersonalityForm({
     control,
     handleSubmit,
     watch,
+    setValue,
   } = useForm<AIPersonalityData>({
     resolver: zodResolver(aiPersonalitySchema),
     defaultValues: {
+      primary_goal: isEditablePrimaryGoal(initialPrimaryGoal)
+        ? initialPrimaryGoal
+        : undefined,
+      goal_url: initialGoalUrl ?? '',
       tone: initialData?.tone || 'balanced',
       business_voice: initialData?.business_voice || 'we',
       language: initialData?.language || 'en',
@@ -74,51 +157,23 @@ export default function AIPersonalityForm({
   const bookingEnabled = watch('booking_enabled');
   const responseDelay = watch('response_delay_seconds');
   const selectedTone = watch('tone');
+  const primaryGoal = watch('primary_goal') ?? null;
+  const goalUrl = watch('goal_url') ?? '';
+  const goalUpdate = buildPrimaryGoalUpdate({
+    primary_goal: primaryGoal,
+    goal_url: goalUrl,
+  });
 
   const onSubmit = async (data: AIPersonalityData) => {
     setSaving(true);
     setSubmitError('');
     try {
-      const supabase = createClient();
-
-      const guardrailLines = data.guardrails
-        ? data.guardrails.split('\n').filter((line) => line.trim())
-        : [];
-
-      const { error } = await supabase.from('ai_settings').upsert({
-        business_id: businessId,
-        tone: data.tone,
-        business_voice: data.business_voice,
-        language: data.language,
-        sms_response_delay_seconds: data.response_delay_seconds,
-        guardrails: guardrailLines,
-        booking_enabled: data.booking_enabled,
-        booking_mode: data.booking_enabled ? data.booking_mode : 'collect_info',
-      }, { onConflict: 'business_id' });
-      if (error) throw error;
-
-      // Save welcome message to widget config
-      if (data.web_greeting?.trim()) {
-        const { error: widgetError } = await supabase.from('widget_configs').upsert({
-          business_id: businessId,
-          welcome_message: data.web_greeting,
-        }, { onConflict: 'business_id' });
-        if (widgetError) {
-          console.warn('Failed to save widget welcome message:', widgetError.message);
-        }
-      }
-
-      const { error: markerError } = await supabase.from('businesses').update({
-        onboarding_step: 'legal_verification',
-        onboarding_last_saved_at: new Date().toISOString(),
-      }).eq('id', businessId);
-      if (markerError) {
-        // Advisory resume marker only — the data write above succeeded, and
-        // the server re-derives the step from saved data on next load.
-        console.warn('Failed to update onboarding progress marker:', markerError.message);
-      }
-
-      onNext(data);
+      await saveAIPersonalitySettings({
+        supabase: createClient(),
+        businessId,
+        data,
+        onNext,
+      });
     } catch {
       setSubmitError('Could not save your AI settings. Please try again.');
     } finally {
@@ -134,6 +189,24 @@ export default function AIPersonalityForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <PrimaryGoalFields
+        primaryGoal={primaryGoal}
+        goalUrl={goalUrl}
+        onPrimaryGoalChange={(goal) =>
+          setValue('primary_goal', goal, {
+            shouldDirty: true,
+            shouldValidate: true,
+          })
+        }
+        onGoalUrlChange={(value) =>
+          setValue('goal_url', value, {
+            shouldDirty: true,
+            shouldValidate: true,
+          })
+        }
+        disabled={saving}
+      />
+
       <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">Customize your AI assistant</h2>
 
       {/* Tone Selector */}
@@ -306,7 +379,7 @@ export default function AIPersonalityForm({
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || !goalUpdate}
           className={primaryCtaInlineClass}
         >
           {saving ? (
