@@ -1,4 +1,4 @@
-import type { createClient } from '@/lib/supabase/client';
+import { SETTINGS_REGISTRATION_LOCK_CODE } from '@/lib/settings/registrationLockCopy';
 import { normalizeUsStateCode } from '@/lib/usStates';
 
 export interface BusinessInfoSettingsInput {
@@ -17,6 +17,15 @@ export interface BusinessInfoSettingsPayload {
   zip: string | null;
 }
 
+export type BusinessInfoPhoneSettingsInput = Pick<
+  BusinessInfoSettingsInput,
+  'phoneNumber'
+>;
+
+export type BusinessInfoSettingsRequest =
+  | BusinessInfoPhoneSettingsInput
+  | BusinessInfoSettingsInput;
+
 export type BusinessInfoSettingsErrors = Partial<
   Record<keyof BusinessInfoSettingsInput, string>
 >;
@@ -32,7 +41,62 @@ export type BusinessInfoSettingsValidation =
       errors: BusinessInfoSettingsErrors;
     };
 
-type BrowserSupabaseClient = ReturnType<typeof createClient>;
+export type BusinessContactPhoneValidation =
+  | {
+      success: true;
+      value: string;
+      payload: string | null;
+    }
+  | {
+      success: false;
+      error: string;
+    };
+
+type FetchBusinessInfoSettings = (
+  input: RequestInfo | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
+type BusinessInfoSettingsErrorBody = {
+  code?: unknown;
+  error?: unknown;
+};
+
+const BUSINESS_INFO_SAVE_FALLBACK =
+  'Could not save your business contact information. Please try again.';
+
+export class BusinessInfoSettingsSaveError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null
+  ) {
+    super(message);
+    this.name = 'BusinessInfoSettingsSaveError';
+  }
+}
+
+export function buildBusinessInfoSettingsRequest(
+  values: BusinessInfoSettingsInput,
+  registrationLocked: boolean
+): BusinessInfoSettingsRequest {
+  return registrationLocked ? { phoneNumber: values.phoneNumber } : values;
+}
+
+export function validateBusinessContactPhone(
+  phoneNumber: string
+): BusinessContactPhoneValidation {
+  const value = phoneNumber.trim();
+
+  if (value && value.length < 10) {
+    return {
+      success: false,
+      error: 'Enter a valid business contact phone number',
+    };
+  }
+
+  return { success: true, value, payload: value || null };
+}
 
 export function validateBusinessInfoSettings(
   input: BusinessInfoSettingsInput
@@ -46,8 +110,9 @@ export function validateBusinessInfoSettings(
   };
   const errors: BusinessInfoSettingsErrors = {};
 
-  if (values.phoneNumber && values.phoneNumber.length < 10) {
-    errors.phoneNumber = 'Enter a valid business contact phone number';
+  const phoneValidation = validateBusinessContactPhone(input.phoneNumber);
+  if (!phoneValidation.success) {
+    errors.phoneNumber = phoneValidation.error;
   }
 
   const hasAnyAddressPart = Boolean(
@@ -95,14 +160,40 @@ export function validateBusinessInfoSettings(
 }
 
 export async function persistBusinessInfoSettings(
-  supabase: BrowserSupabaseClient,
-  businessId: string,
-  payload: BusinessInfoSettingsPayload
+  request: BusinessInfoSettingsRequest,
+  fetchSettings: FetchBusinessInfoSettings = fetch
 ): Promise<void> {
-  const { error } = await supabase
-    .from('businesses')
-    .update(payload)
-    .eq('id', businessId);
+  const response = await fetchSettings('/api/settings/business-info', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
 
-  if (error) throw error;
+  if (response.ok) return;
+
+  const body = (await response.json().catch(() => ({}))) as BusinessInfoSettingsErrorBody;
+  const message =
+    typeof body.error === 'string' && body.error.trim()
+      ? body.error
+      : BUSINESS_INFO_SAVE_FALLBACK;
+  const code = typeof body.code === 'string' ? body.code : null;
+
+  throw new BusinessInfoSettingsSaveError(message, response.status, code);
+}
+
+export function presentBusinessInfoSettingsSaveError(
+  error: unknown,
+  refresh: () => void
+): string {
+  if (error instanceof BusinessInfoSettingsSaveError) {
+    if (
+      error.status === 403 &&
+      error.code === SETTINGS_REGISTRATION_LOCK_CODE
+    ) {
+      refresh();
+    }
+    return error.message;
+  }
+
+  return BUSINESS_INFO_SAVE_FALLBACK;
 }

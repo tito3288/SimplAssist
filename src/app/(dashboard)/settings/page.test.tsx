@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   isPlanAvailable: vi.fn(),
   from: vi.fn(),
   goalSettingsForm: vi.fn(),
+  compliancePanel: vi.fn(),
+  businessInfoEditor: vi.fn(),
   aiSettingsForm: vi.fn(),
+  isSettingsRegistrationLocked: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
@@ -24,6 +27,9 @@ vi.mock('@/lib/billing/entitlements', () => ({
 }));
 vi.mock('@/lib/billing/planAvailability', () => ({
   isPlanAvailable: mocks.isPlanAvailable,
+}));
+vi.mock('@/lib/settings/registrationLock.server', () => ({
+  isSettingsRegistrationLocked: mocks.isSettingsRegistrationLocked,
 }));
 vi.mock('@/components/settings/AISettingsForm', () => ({
   default: (props: unknown) => {
@@ -47,7 +53,10 @@ vi.mock('@/components/settings/BusinessHoursEditor', () => ({
   default: () => <div>Business hours editor</div>,
 }));
 vi.mock('@/components/settings/BusinessInfoEditor', () => ({
-  default: () => <div>Business info editor</div>,
+  default: (props: unknown) => {
+    mocks.businessInfoEditor(props);
+    return <div>Business info editor</div>;
+  },
 }));
 vi.mock('@/components/settings/PhoneNumberSection', () => ({
   default: () => <div>Phone number section</div>,
@@ -59,7 +68,10 @@ vi.mock('@/components/settings/TimezoneSelector', () => ({
   default: () => <div>Timezone selector</div>,
 }));
 vi.mock('@/components/settings/CompliancePanel', () => ({
-  default: () => <div>Compliance panel</div>,
+  default: (props: unknown) => {
+    mocks.compliancePanel(props);
+    return <div>Compliance panel</div>;
+  },
 }));
 vi.mock('@/components/settings/DangerZone', () => ({
   default: () => <div>Danger zone</div>,
@@ -97,6 +109,17 @@ const SETTINGS_TABLES = [
 
 type PrimaryGoal = 'book' | 'signup' | 'quote' | 'callback' | null;
 
+type RegistrationStateOverrides = Partial<{
+  telnyx_brand_id: string | null;
+  brand_status: string | null;
+  campaign_status: string | null;
+  onboarding_registration_status:
+    | 'not_started'
+    | 'submitting'
+    | 'failed'
+    | 'submitted';
+}>;
+
 interface QueryResult {
   data: unknown;
   error: null;
@@ -114,7 +137,8 @@ let tableData: Record<string, unknown>;
 
 function resolvedContext(
   primaryGoal: PrimaryGoal = 'book',
-  goalUrl: string | null = RETAINED_GOAL_URL
+  goalUrl: string | null = RETAINED_GOAL_URL,
+  registrationState: RegistrationStateOverrides = {}
 ) {
   return {
     status: 'resolved',
@@ -124,6 +148,10 @@ function resolvedContext(
       id: BUSINESS_ID,
       primary_goal: primaryGoal,
       goal_url: goalUrl,
+      telnyx_brand_id: null,
+      brand_status: null,
+      campaign_status: null,
+      onboarding_registration_status: 'not_started',
       name: 'Example Business',
       call_forwarding_enabled: false,
       forward_to_number: null,
@@ -139,6 +167,7 @@ function resolvedContext(
       privacy_url_override: null,
       terms_url_override: null,
       timezone: 'America/Indiana/Indianapolis',
+      ...registrationState,
     },
     entitlements: ENTITLEMENTS,
   };
@@ -181,6 +210,21 @@ beforeEach(() => {
   mocks.getDashboardEntitledContext.mockResolvedValue(resolvedContext());
   mocks.canUseFeature.mockReturnValue(true);
   mocks.isPlanAvailable.mockReturnValue(true);
+  mocks.isSettingsRegistrationLocked.mockImplementation(
+    (business: {
+      telnyx_brand_id: string | null;
+      brand_status: string | null;
+      campaign_status: string | null;
+      onboarding_registration_status: string | null;
+    }) =>
+      business.onboarding_registration_status !== 'failed' &&
+      Boolean(
+        business.telnyx_brand_id ||
+          business.brand_status ||
+          business.campaign_status ||
+          business.onboarding_registration_status === 'submitted'
+      )
+  );
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -252,9 +296,9 @@ describe('SettingsPage primary-goal presentation', () => {
     const markup = renderToStaticMarkup(await SettingsPage({}));
 
     expect(mocks.goalSettingsForm).toHaveBeenCalledWith({
-      businessId: BUSINESS_ID,
       initialPrimaryGoal: 'signup',
       initialGoalUrl: SIGNUP_GOAL_URL,
+      registrationLocked: false,
     });
     expect(markup.indexOf('Goal settings form')).toBeLessThan(
       markup.indexOf('AI settings form')
@@ -285,9 +329,9 @@ describe('SettingsPage primary-goal presentation', () => {
       expect(markup).toContain('AI settings form');
       expect(mocks.from).toHaveBeenCalledTimes(6);
       expect(mocks.goalSettingsForm).toHaveBeenCalledWith({
-        businessId: BUSINESS_ID,
         initialPrimaryGoal: primaryGoal,
         initialGoalUrl: RETAINED_GOAL_URL,
+        registrationLocked: false,
       });
       expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -319,6 +363,60 @@ describe('SettingsPage primary-goal presentation', () => {
       expect(tableCalls.slice(SETTINGS_TABLES.length)).toEqual([
         ...SETTINGS_TABLES,
       ]);
+    }
+  );
+});
+
+describe('SettingsPage registration-sensitive settings', () => {
+  it.each([
+    ['Telnyx brand id', { telnyx_brand_id: 'brand-1' }, true],
+    ['brand status', { brand_status: 'pending' }, true],
+    ['campaign status', { campaign_status: 'approved' }, true],
+    [
+      'submitted onboarding registration',
+      { onboarding_registration_status: 'submitted' as const },
+      true,
+    ],
+    ['pristine registration', {}, false],
+    [
+      'bare submitting registration',
+      { onboarding_registration_status: 'submitting' as const },
+      false,
+    ],
+    [
+      'failed registration override',
+      {
+        telnyx_brand_id: 'brand-1',
+        campaign_status: 'approved',
+        onboarding_registration_status: 'failed' as const,
+      },
+      false,
+    ],
+  ] as const)(
+    'passes the shared registration lock state for %s',
+    async (_label, registrationState, expectedLocked) => {
+      mocks.getDashboardEntitledContext.mockResolvedValue(
+        resolvedContext('book', RETAINED_GOAL_URL, registrationState)
+      );
+
+      renderToStaticMarkup(await SettingsPage({}));
+
+      expect(mocks.goalSettingsForm).toHaveBeenCalledWith({
+        initialPrimaryGoal: 'book',
+        initialGoalUrl: RETAINED_GOAL_URL,
+        registrationLocked: expectedLocked,
+      });
+      expect(mocks.businessInfoEditor).toHaveBeenCalledWith({
+        initialPhoneNumber: '+13175550123',
+        initialAddress: '123 Main Street',
+        initialCity: 'Indianapolis',
+        initialState: 'IN',
+        initialZip: '46204',
+        registrationLocked: expectedLocked,
+      });
+      expect(mocks.compliancePanel).toHaveBeenCalledWith(
+        expect.objectContaining({ registrationLocked: expectedLocked })
+      );
     }
   );
 });

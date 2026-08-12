@@ -33,7 +33,9 @@ const REQUIRED_ROUTES: RouteInventory[] = [
   { path: "./scrape/route.ts", methods: ["POST"] },
   { path: "./settings/call-forwarding/route.ts", methods: ["POST"] },
   { path: "./settings/call-forwarding/nudge/route.ts", methods: ["POST"] },
+  { path: "./settings/business-info/route.ts", methods: ["POST"] },
   { path: "./settings/compliance/route.ts", methods: ["POST"] },
+  { path: "./settings/goal/route.ts", methods: ["POST"] },
   { path: "./widget/logo/route.ts", methods: ["POST"] },
   { path: "./widget/preview-config/route.ts", methods: ["GET"] },
 ];

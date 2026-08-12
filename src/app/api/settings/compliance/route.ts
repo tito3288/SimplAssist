@@ -3,6 +3,15 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import {
+  SETTINGS_REGISTRATION_STATE_COLUMNS,
+  isSettingsRegistrationLocked,
+  registrationStateUnavailableResponse,
+  settingsRegistrationLockedResponse,
+  settingsStateChangedResponse,
+  type SettingsRegistrationState,
+} from "@/lib/settings/registrationLock.server";
+import { COMPLIANCE_LOCK_COPY } from "@/lib/settings/registrationLockCopy";
 
 /**
  * POST /api/settings/compliance — Phase 6 compliance-mode update endpoint.
@@ -17,12 +26,13 @@ import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteRespon
  *                     dashboard UX (generated copy vs. self-check checklist).
  *
  * Validation order is deliberate: cheap checks first, expensive checks last.
- *   1. Auth
+ *   1. Workspace access + auth
  *   2. JSON parse + zod schema
- *   3. Mode-specific shape (override URLs present/absent as appropriate)
- *   4. URL format (HTTPS + parseable) — fail fast on garbage
- *   5. URL reachability (HEAD then GET) — the network round-trip step
- *   6. DB update (only if every prior step passed)
+ *   3. Fresh canonical registration-state lock check
+ *   4. Mode-specific shape (override URLs present/absent as appropriate)
+ *   5. URL format (HTTPS + parseable) — fail fast on garbage
+ *   6. URL reachability (HEAD then GET) — the network round-trip step
+ *   7. Registration-state-CAS DB update
  */
 
 const ComplianceUpdateSchema = z.object({
@@ -102,6 +112,23 @@ async function checkReachable(url: string): Promise<ReachabilityResult> {
   return { ok: false, reason: `returned HTTP ${head.status}` };
 }
 
+async function loadRegistrationState(
+  businessId: string,
+  ownerId: string
+) {
+  try {
+    return await supabaseAdmin
+      .from("businesses")
+      .select(SETTINGS_REGISTRATION_STATE_COLUMNS)
+      .eq("id", businessId)
+      .eq("owner_id", ownerId)
+      .is("deleted_at", null)
+      .maybeSingle<SettingsRegistrationState>();
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
 export async function POST(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();
   if (!workspaceGate.ok) return workspaceGate.response;
@@ -132,10 +159,30 @@ export async function POST(request: NextRequest) {
   }
   const { mode, privacyUrlOverride, termsUrlOverride } = parsed.data;
 
+  // Read the canonical registration state after auth + input validation and
+  // before any customer-controlled network request. Settings that feed a filed
+  // carrier registration must not drift from the submitted provider record.
+  const businessId = workspaceGate.access.business.id;
+  const {
+    data: registrationState,
+    error: registrationStateError,
+  } = await loadRegistrationState(businessId, user.id);
+
+  if (registrationStateError || !registrationState) {
+    console.error(
+      `[settings:compliance] Failed to load registration state for business ${businessId}`
+    );
+    return registrationStateUnavailableResponse();
+  }
+
+  if (isSettingsRegistrationLocked(registrationState)) {
+    return settingsRegistrationLockedResponse(COMPLIANCE_LOCK_COPY);
+  }
+
   const trimmedPrivacy = privacyUrlOverride?.trim() ?? "";
   const trimmedTerms = termsUrlOverride?.trim() ?? "";
 
-  // 3. Mode-specific shape validation
+  // 4. Mode-specific shape validation
   if (mode === "hosted") {
     if (trimmedPrivacy.length > 0 || trimmedTerms.length > 0) {
       return NextResponse.json(
@@ -157,7 +204,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. URL format — fail fast on obvious garbage before any network call
+    // 5. URL format — fail fast on obvious garbage before any network call
     if (!parseHttpsUrl(trimmedPrivacy)) {
       return NextResponse.json(
         {
@@ -179,7 +226,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 5. Reachability — HEAD then GET on 405. See checkReachable() docstring.
+    // 6. Reachability — HEAD then GET on 405. See checkReachable() docstring.
     const privacyCheck = await checkReachable(trimmedPrivacy);
     if (!privacyCheck.ok) {
       return NextResponse.json(
@@ -204,7 +251,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 6. DB update — owner_id filter is the ownership check; supabaseAdmin
+  // 7. DB update — owner_id filter is the ownership check; supabaseAdmin
   //    bypasses RLS but the .eq("owner_id", user.id) limits the write to the
   //    requesting user's own row. Matches the brand-verification route
   //    pattern (user-context client for auth, admin client for write).
@@ -221,10 +268,33 @@ export async function POST(request: NextRequest) {
           terms_url_override: trimmedTerms,
         };
 
-  const { error: updateError } = await supabaseAdmin
+  let updateQuery = supabaseAdmin
     .from("businesses")
     .update(updateData)
-    .eq("owner_id", user.id);
+    .eq("id", businessId)
+    .eq("owner_id", user.id)
+    .is("deleted_at", null)
+    .eq(
+      "onboarding_registration_status",
+      registrationState.onboarding_registration_status
+    );
+
+  updateQuery =
+    registrationState.telnyx_brand_id === null
+      ? updateQuery.is("telnyx_brand_id", null)
+      : updateQuery.eq("telnyx_brand_id", registrationState.telnyx_brand_id);
+  updateQuery =
+    registrationState.brand_status === null
+      ? updateQuery.is("brand_status", null)
+      : updateQuery.eq("brand_status", registrationState.brand_status);
+  updateQuery =
+    registrationState.campaign_status === null
+      ? updateQuery.is("campaign_status", null)
+      : updateQuery.eq("campaign_status", registrationState.campaign_status);
+
+  const { data: updatedBusiness, error: updateError } = await updateQuery
+    .select("id")
+    .maybeSingle<{ id: string }>();
 
   if (updateError) {
     console.error(
@@ -235,6 +305,26 @@ export async function POST(request: NextRequest) {
       { error: "Failed to save compliance settings" },
       { status: 500 }
     );
+  }
+
+  if (!updatedBusiness) {
+    const {
+      data: currentRegistrationState,
+      error: currentRegistrationStateError,
+    } = await loadRegistrationState(businessId, user.id);
+
+    if (currentRegistrationStateError || !currentRegistrationState) {
+      console.error(
+        `[settings:compliance] Failed to reload registration state for business ${businessId}`
+      );
+      return registrationStateUnavailableResponse();
+    }
+
+    if (isSettingsRegistrationLocked(currentRegistrationState)) {
+      return settingsRegistrationLockedResponse(COMPLIANCE_LOCK_COPY);
+    }
+
+    return settingsStateChangedResponse();
   }
 
   return NextResponse.json({ success: true });

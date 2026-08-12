@@ -16,6 +16,7 @@ import { canUseFeature } from '@/lib/billing/entitlements';
 import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
+import { isSettingsRegistrationLocked } from '@/lib/settings/registrationLock.server';
 
 type SettingsPageProps = {
   searchParams?: {
@@ -31,6 +32,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
   const { supabase, business, entitlements } = context;
   const signupMode = business.primary_goal === 'signup';
+  const registrationLocked = isSettingsRegistrationLocked(business);
   const showCalendarUnavailableStatus =
     signupMode && searchParams?.calendar === 'unavailable';
   const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
@@ -119,15 +121,16 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           initialMode={business.privacy_terms_mode ?? 'hosted'}
           initialPrivacyUrl={business.privacy_url_override}
           initialTermsUrl={business.terms_url_override}
+          registrationLocked={registrationLocked}
         />
       </div>
 
       {/* AI Settings */}
       <div className={`p-6 ${card}`}>
         <GoalSettingsForm
-          businessId={business.id}
           initialPrimaryGoal={business.primary_goal}
           initialGoalUrl={business.goal_url}
+          registrationLocked={registrationLocked}
         />
         <AISettingsForm
           settings={aiSettings}
@@ -190,12 +193,12 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </p>
 
         <BusinessInfoEditor
-          businessId={business.id}
           initialPhoneNumber={business.phone_number}
           initialAddress={business.address}
           initialCity={business.city}
           initialState={business.state}
           initialZip={business.zip}
+          registrationLocked={registrationLocked}
         />
 
         <div className="mt-8 border-t border-[#e3dacc] pt-8 dark:border-white/[0.12]">

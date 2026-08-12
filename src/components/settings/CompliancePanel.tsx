@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ExternalLink, Copy, Check, AlertCircle } from 'lucide-react';
 import {
   buildPrivacyContent,
@@ -9,8 +10,13 @@ import {
   type LegalTemplateBusiness,
 } from '@/lib/legal/perBusinessCopy';
 import { isPendingSlug } from '@/lib/util/slug.shared';
+import {
+  COMPLIANCE_LOCK_COPY,
+  SETTINGS_REGISTRATION_LOCK_CODE,
+} from '@/lib/settings/registrationLockCopy';
+import { supportHref } from '@/lib/support/constants';
 import { primaryCtaInlineClass } from '@/lib/glass';
-import { statusWarning } from '@/lib/theme-v2/theme';
+import { inlineLink, statusWarning } from '@/lib/theme-v2/theme';
 import { cn } from '@/lib/utils';
 
 type Mode = 'hosted' | 'self_hosted' | 'existing';
@@ -43,6 +49,45 @@ interface CompliancePanelProps {
   initialMode: Mode;
   initialPrivacyUrl: string | null;
   initialTermsUrl: string | null;
+  registrationLocked: boolean;
+}
+
+type ComplianceSavePayload = {
+  mode: Mode;
+  privacyUrlOverride: string | null;
+  termsUrlOverride: string | null;
+};
+
+export async function submitComplianceSettings({
+  registrationLocked,
+  payload,
+  fetchImpl = fetch,
+}: {
+  registrationLocked: boolean;
+  payload: ComplianceSavePayload;
+  fetchImpl?: typeof fetch;
+}): Promise<Response | null> {
+  if (registrationLocked) return null;
+
+  return fetchImpl('/api/settings/compliance', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function refreshForStaleComplianceLock({
+  status,
+  code,
+  refresh,
+}: {
+  status: number;
+  code: string | undefined;
+  refresh: () => void;
+}): boolean {
+  if (status !== 403 || code !== SETTINGS_REGISTRATION_LOCK_CODE) return false;
+  refresh();
+  return true;
 }
 
 const CHECKLIST_ITEMS = [
@@ -58,7 +103,9 @@ export default function CompliancePanel({
   initialMode,
   initialPrivacyUrl,
   initialTermsUrl,
+  registrationLocked,
 }: CompliancePanelProps) {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [privacyUrl, setPrivacyUrl] = useState(initialPrivacyUrl ?? '');
   const [termsUrl, setTermsUrl] = useState(initialTermsUrl ?? '');
@@ -88,10 +135,14 @@ export default function CompliancePanel({
   const allChecked = checklist.every(Boolean);
   // Save button disabled when:
   //   - already submitting
+  //   - registration-backed settings are locked
   //   - slug is still 'pending-*' (brand verification not done — API would throw)
   //   - mode is 'existing' and not all 4 self-check boxes are ticked
   const saveDisabled =
-    submitting || pending || (mode === 'existing' && !allChecked);
+    submitting ||
+    registrationLocked ||
+    pending ||
+    (mode === 'existing' && !allChecked);
 
   const encodedSlug = encodeURIComponent(slug);
   const previewPrivacyHref = canonicalComplianceUrl(
@@ -111,6 +162,8 @@ export default function CompliancePanel({
   };
 
   const handleSave = async () => {
+    if (registrationLocked) return;
+
     setSubmitting(true);
     setErrors({});
     setSaved(false);
@@ -125,17 +178,24 @@ export default function CompliancePanel({
           };
 
     try {
-      const res = await fetch('/api/settings/compliance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const res = await submitComplianceSettings({
+        registrationLocked,
+        payload,
       });
+      if (!res) return;
+
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         field?: 'privacyUrlOverride' | 'termsUrlOverride';
+        code?: string;
       };
 
       if (!res.ok) {
+        refreshForStaleComplianceLock({
+          status: res.status,
+          code: data.code,
+          refresh: router.refresh,
+        });
         if (data.field) {
           setErrors({ [data.field]: data.error ?? 'Invalid URL' });
         } else {
@@ -155,6 +215,23 @@ export default function CompliancePanel({
 
   return (
     <div className="space-y-6">
+      {registrationLocked && (
+        <div className={cn("rounded-lg px-4 py-3 text-sm", statusWarning)}>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden />
+            <span>
+              <a
+                href={supportHref('number_registration')}
+                className={cn(inlineLink, 'font-medium underline')}
+              >
+                {COMPLIANCE_LOCK_COPY.supportText}
+              </a>
+              {COMPLIANCE_LOCK_COPY.reasonText}
+            </span>
+          </div>
+        </div>
+      )}
+
       {pending && (
         <div className={cn("rounded-lg px-4 py-3 text-sm", statusWarning)}>
           <div className="flex items-start gap-2">
@@ -167,7 +244,7 @@ export default function CompliancePanel({
         </div>
       )}
 
-      <fieldset disabled={pending} className="space-y-5">
+      <fieldset disabled={pending || registrationLocked} className="space-y-5">
         <legend className="sr-only">Privacy and Terms hosting mode</legend>
 
         {/* Mode: Hosted */}

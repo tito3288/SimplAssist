@@ -26,12 +26,14 @@ export type DashboardBusiness = Pick<
   | "ai_replies_paused_at"
   | "texting_paused_at"
   | "bookings_paused_at"
+  | "telnyx_brand_id"
   | "brand_status"
   | "brand_status_updated_at"
   | "brand_rejection_reason"
   | "campaign_status"
   | "campaign_status_updated_at"
   | "campaign_rejection_reason"
+  | "onboarding_registration_status"
   | "slug"
   | "phone_number"
   | "email"
@@ -94,12 +96,14 @@ const DASHBOARD_BUSINESS_SELECT = [
   "ai_replies_paused_at",
   "texting_paused_at",
   "bookings_paused_at",
+  "telnyx_brand_id",
   "brand_status",
   "brand_status_updated_at",
   "brand_rejection_reason",
   "campaign_status",
   "campaign_status_updated_at",
   "campaign_rejection_reason",
+  "onboarding_registration_status",
   "slug",
   "phone_number",
   "email",

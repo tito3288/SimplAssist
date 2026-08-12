@@ -100,4 +100,37 @@ describe("PrimaryGoalFields", () => {
   it("disables the complete controlled fieldset", () => {
     expect(renderFields(null, "", true)).toMatch(/^<fieldset[^>]* disabled=""/);
   });
+
+  it("can disable one option while leaving the other option enabled", () => {
+    const markup = renderToStaticMarkup(
+      <PrimaryGoalFields
+        primaryGoal="book"
+        goalUrl=""
+        onPrimaryGoalChange={vi.fn()}
+        onGoalUrlChange={vi.fn()}
+        disabledOptions={["signup"]}
+      />
+    );
+
+    expect(primaryGoalInput(markup, "book")).not.toContain('disabled=""');
+    expect(primaryGoalInput(markup, "signup")).toContain('disabled=""');
+  });
+
+  it("supports a helper override while preserving the default helper", () => {
+    const customMarkup = renderToStaticMarkup(
+      <PrimaryGoalFields
+        primaryGoal="book"
+        goalUrl=""
+        onPrimaryGoalChange={vi.fn()}
+        onGoalUrlChange={vi.fn()}
+        helper={<a href="/support">Custom helper</a>}
+      />
+    );
+
+    expect(customMarkup).toContain('<a href="/support">Custom helper</a>');
+    expect(customMarkup).not.toContain(renderedCopy(PRIMARY_GOAL_COPY.helper));
+    expect(renderFields("book")).toContain(
+      renderedCopy(PRIMARY_GOAL_COPY.helper)
+    );
+  });
 });

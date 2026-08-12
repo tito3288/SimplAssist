@@ -1,20 +1,24 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useBrand } from '@/components/branding/BrandProvider';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaInlineClass } from '@/lib/glass';
 import {
+  buildBusinessInfoSettingsRequest,
   persistBusinessInfoSettings,
+  presentBusinessInfoSettingsSaveError,
   type BusinessInfoSettingsErrors,
   type BusinessInfoSettingsInput,
   validateBusinessInfoSettings,
 } from '@/lib/settings/businessInfo';
-import { createClient } from '@/lib/supabase/client';
+import { BUSINESS_ADDRESS_LOCK_COPY } from '@/lib/settings/registrationLockCopy';
+import { supportHref } from '@/lib/support/constants';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 
 interface BusinessInfoEditorProps {
-  businessId: string;
+  registrationLocked: boolean;
   initialPhoneNumber: string | null;
   initialAddress: string | null;
   initialCity: string | null;
@@ -23,10 +27,10 @@ interface BusinessInfoEditorProps {
 }
 
 const inputClassName =
-  'w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]';
+  'w-full px-3 py-2 rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500 dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] dark:disabled:bg-white/[0.03] dark:disabled:text-[#777]';
 
 export default function BusinessInfoEditor({
-  businessId,
+  registrationLocked,
   initialPhoneNumber,
   initialAddress,
   initialCity,
@@ -34,6 +38,7 @@ export default function BusinessInfoEditor({
   initialZip,
 }: BusinessInfoEditorProps) {
   const brand = useBrand();
+  const router = useRouter();
   const [values, setValues] = useState<BusinessInfoSettingsInput>({
     phoneNumber: initialPhoneNumber ?? '',
     address: initialAddress ?? '',
@@ -61,7 +66,17 @@ export default function BusinessInfoEditor({
     setSaved(false);
     setSubmitError('');
 
-    const validation = validateBusinessInfoSettings(values);
+    const validation = validateBusinessInfoSettings(
+      registrationLocked
+        ? {
+            phoneNumber: values.phoneNumber,
+            address: '',
+            city: '',
+            state: '',
+            zip: '',
+          }
+        : values
+    );
     if (!validation.success) {
       setErrors(validation.errors);
       return;
@@ -71,15 +86,22 @@ export default function BusinessInfoEditor({
     setSaving(true);
     try {
       await persistBusinessInfoSettings(
-        createClient(),
-        businessId,
-        validation.payload
+        buildBusinessInfoSettingsRequest(
+          registrationLocked
+            ? { ...values, phoneNumber: validation.values.phoneNumber }
+            : validation.values,
+          registrationLocked
+        )
       );
-      setValues(validation.values);
+      setValues((current) =>
+        registrationLocked
+          ? { ...current, phoneNumber: validation.values.phoneNumber }
+          : validation.values
+      );
       setSaved(true);
-    } catch {
+    } catch (error) {
       setSubmitError(
-        'Could not save your business contact information. Please try again.'
+        presentBusinessInfoSettingsSaveError(error, () => router.refresh())
       );
     } finally {
       setSaving(false);
@@ -127,13 +149,34 @@ export default function BusinessInfoEditor({
         )}
       </div>
 
-      <fieldset className="space-y-3">
+      <fieldset
+        disabled={registrationLocked}
+        aria-describedby={
+          registrationLocked ? 'business-address-registration-lock' : undefined
+        }
+        className="space-y-3"
+      >
         <legend className="text-sm font-medium text-stone-700 dark:text-[#bdbdbf]">
           Business Address
         </legend>
-        <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
-          Enter a complete address, or leave all address fields blank.
-        </p>
+        {registrationLocked ? (
+          <p
+            id="business-address-registration-lock"
+            className="text-xs text-stone-500 dark:text-[#bdbdbf]"
+          >
+            <a
+              href={supportHref('number_registration')}
+              className="font-medium text-[var(--brand-accent)] underline hover:text-[var(--brand-primary-active)] dark:text-[var(--brand-accent-dark)] dark:hover:text-[var(--brand-primary-soft-dark)]"
+            >
+              {BUSINESS_ADDRESS_LOCK_COPY.supportText}
+            </a>
+            {BUSINESS_ADDRESS_LOCK_COPY.reasonText}
+          </p>
+        ) : (
+          <p className="text-xs text-stone-500 dark:text-[#bdbdbf]">
+            Enter a complete address, or leave all address fields blank.
+          </p>
+        )}
 
         <div>
           <label htmlFor="business-address" className="sr-only">
@@ -232,12 +275,12 @@ export default function BusinessInfoEditor({
               Saving…
             </>
           ) : (
-            'Save Contact & Address'
+            registrationLocked ? 'Save Contact Phone' : 'Save Contact & Address'
           )}
         </button>
         {saved && (
           <span className="text-sm font-medium text-green-600 dark:text-green-400">
-            Business information saved!
+            {registrationLocked ? 'Contact phone saved!' : 'Business information saved!'}
           </span>
         )}
         {submitError && (

@@ -5,6 +5,7 @@ import {
   PRIMARY_GOAL_OPTIONS,
   type EditablePrimaryGoal,
 } from "@/lib/goals/primaryGoal";
+import type { ReactNode } from "react";
 
 export interface PrimaryGoalFieldsProps {
   primaryGoal: EditablePrimaryGoal | null;
@@ -12,6 +13,8 @@ export interface PrimaryGoalFieldsProps {
   onPrimaryGoalChange: (primaryGoal: EditablePrimaryGoal) => void;
   onGoalUrlChange: (goalUrl: string) => void;
   disabled?: boolean;
+  disabledOptions?: readonly EditablePrimaryGoal[];
+  helper?: ReactNode;
 }
 
 export function PrimaryGoalFields({
@@ -20,6 +23,8 @@ export function PrimaryGoalFields({
   onPrimaryGoalChange,
   onGoalUrlChange,
   disabled = false,
+  disabledOptions = [],
+  helper,
 }: PrimaryGoalFieldsProps) {
   return (
     <fieldset
@@ -35,13 +40,22 @@ export function PrimaryGoalFields({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {PRIMARY_GOAL_OPTIONS.map((option) => {
           const selected = primaryGoal === option.value;
+          const optionDisabled = disabledOptions.includes(option.value);
           return (
             <label
               key={option.value}
-              className={`cursor-pointer rounded-[18px] border p-4 text-sm transition-colors ${
+              className={`rounded-[18px] border p-4 text-sm transition-colors ${
+                optionDisabled
+                  ? "cursor-not-allowed opacity-60"
+                  : "cursor-pointer"
+              } ${
                 selected
                   ? "border-[var(--brand-primary)] bg-[var(--brand-wash)] ring-2 ring-[rgb(var(--brand-primary-rgb)/.20)] dark:border-[var(--brand-primary-dark)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.11)] dark:ring-[rgb(var(--brand-primary-dark-rgb)/.20)]"
-                  : "border-[#e9e0d4] bg-white/70 hover:border-[#d8ccbc] hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.035] dark:hover:border-white/[0.17] dark:hover:bg-white/[0.055]"
+                  : `border-[#e9e0d4] bg-white/70 dark:border-white/[0.10] dark:bg-white/[0.035] ${
+                      optionDisabled
+                        ? ""
+                        : "hover:border-[#d8ccbc] hover:bg-white dark:hover:border-white/[0.17] dark:hover:bg-white/[0.055]"
+                    }`
               }`}
             >
               <input
@@ -50,6 +64,7 @@ export function PrimaryGoalFields({
                 value={option.value}
                 checked={selected}
                 onChange={() => onPrimaryGoalChange(option.value)}
+                disabled={optionDisabled}
                 className="sr-only"
               />
               <span className="font-medium text-stone-900 dark:text-[#f5f5f5]">
@@ -64,7 +79,7 @@ export function PrimaryGoalFields({
         id="primary-goal-helper"
         className="text-xs leading-relaxed text-stone-500 dark:text-[#bdbdbf]"
       >
-        {PRIMARY_GOAL_COPY.helper}
+        {helper ?? PRIMARY_GOAL_COPY.helper}
       </p>
 
       {primaryGoal === "signup" && (

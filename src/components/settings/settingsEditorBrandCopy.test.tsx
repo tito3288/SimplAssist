@@ -6,9 +6,14 @@ import BusinessInfoEditor from "./BusinessInfoEditor";
 import CallForwardingForm, {
   presentCallForwardingError,
 } from "./CallForwardingForm";
+import { BUSINESS_ADDRESS_LOCK_COPY } from "@/lib/settings/registrationLockCopy";
 
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mocks.refresh }),
 }));
 
 const DEFAULT_REQUEST_BRAND: RequestBrand = {
@@ -36,7 +41,10 @@ const DEFAULT_REQUEST_BRAND: RequestBrand = {
   },
 };
 
-function renderSettingsCopy(name: string): string {
+function renderSettingsCopy(
+  name: string,
+  registrationLocked = false
+): string {
   const requestBrand: RequestBrand = {
     ...DEFAULT_REQUEST_BRAND,
     brand: {
@@ -54,7 +62,7 @@ function renderSettingsCopy(name: string): string {
   return renderToStaticMarkup(
     <BrandProvider requestBrand={requestBrand}>
       <BusinessInfoEditor
-        businessId="business-1"
+        registrationLocked={registrationLocked}
         initialPhoneNumber={null}
         initialAddress={null}
         initialCity={null}
@@ -97,5 +105,36 @@ describe("settings editor visible brand copy", () => {
     expect(
       presentCallForwardingError(stableServerError, "Alpha Dog Agency")
     ).toBe("Forward-to number cannot be your Alpha Dog Agency number");
+  });
+
+  it("keeps contact phone editable while locking the filed address fields", () => {
+    const html = renderSettingsCopy("SimplAssist", true);
+    const visibleText = html.replace(/<[^>]+>/g, "");
+    const phoneInput = html.match(
+      /<input id="business-contact-phone"[^>]*>/
+    )?.[0];
+
+    expect(phoneInput).toBeDefined();
+    expect(phoneInput).not.toMatch(/\sdisabled=/);
+    expect(html).toContain(
+      '<fieldset disabled="" aria-describedby="business-address-registration-lock"'
+    );
+    expect(visibleText).toContain(BUSINESS_ADDRESS_LOCK_COPY.message);
+    expect(html).toContain('href="/support?category=number_registration"');
+    expect(visibleText).toContain("Business Contact Phone");
+    expect(visibleText).toContain("Business Address");
+    expect(visibleText).toContain("Save Contact Phone");
+    expect(visibleText).not.toContain("Save Contact &amp; Address");
+  });
+
+  it("leaves the complete address editor available before registration", () => {
+    const html = renderSettingsCopy("SimplAssist");
+
+    expect(html).not.toContain("<fieldset disabled");
+    expect(html).not.toContain(BUSINESS_ADDRESS_LOCK_COPY.supportText);
+    expect(html).toContain("Save Contact &amp; Address");
+    expect(html).toContain(
+      "Enter a complete address, or leave all address fields blank."
+    );
   });
 });
