@@ -363,8 +363,13 @@ export async function attemptPaidLaunch(
     }
 
     if (err instanceof CampaignRegistrationError) {
+      const isLocallyCorrectableSignupGoalError =
+        err.code === "campaign_signup_goal_url_invalid" ||
+        err.code === "campaign_signup_sample_too_long";
       const needsLinkedBrandSupport =
-        linkedExistingBrandConsumed && err.kind === "permanent";
+        linkedExistingBrandConsumed &&
+        err.kind === "permanent" &&
+        !isLocallyCorrectableSignupGoalError;
       const message = needsLinkedBrandSupport
         ? LINKED_BRAND_NEEDS_SUPPORT_MESSAGE
         : err.message;

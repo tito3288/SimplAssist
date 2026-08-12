@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { normalizeHttpsGoalUrl } from "@/lib/goals/primaryGoal";
 import { telnyx } from "@/lib/messaging/client";
 import {
   deactivateTelnyxCampaign,
@@ -17,6 +18,7 @@ import {
   hashA2pRiskInput,
 } from "./riskScreening";
 import { mapCampaignStatus } from "./statusMapper";
+import type { PrimaryGoal } from "@/types/database";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -33,6 +35,7 @@ const OPTOUT_KEYWORDS = "STOP,END,UNSUBSCRIBE,CANCEL,QUIT";
 const OPTIN_KEYWORDS = "START,SUBSCRIBE,YES";
 const CAMPAIGN_USECASE = "CUSTOMER_CARE";
 const TELNYX_BRAND_CAMPAIGN_CAP = 5;
+const TELNYX_CAMPAIGN_SAMPLE_MAX_CHARACTERS = 255;
 const TELNYX_BRAND_CAMPAIGN_CAP_MESSAGE =
   "This Telnyx brand is at Telnyx's campaign cap: it already has 5 campaigns, the maximum allowed per brand. SimplAssist cannot create the additional campaign required for this account. Use a different eligible brand or contact Telnyx Support before approving this link.";
 
@@ -45,6 +48,9 @@ export type CampaignRegistrationErrorCode =
   | "campaign_recovery_history_invalid"
   | "campaign_recovered_rejected"
   | "campaign_submit_malformed_response"
+  | "campaign_signup_goal_url_invalid"
+  | "campaign_signup_sample_too_long"
+  | "campaign_signup_sample_persist_failed"
   | "telnyx_brand_campaign_cap_reached";
 
 export type CampaignRegistrationErrorKind = "transient" | "permanent";
@@ -137,6 +143,68 @@ function campaignRecoveryError(
   message: string
 ): CampaignRegistrationError {
   return new CampaignRegistrationError({ code, kind, message });
+}
+
+function cleanBusinessName(value: string): string {
+  const cleaned = value.trim();
+  return cleaned || "Your Business";
+}
+
+function buildGoalAwareCampaignFiling(input: {
+  businessName: string;
+  primaryGoal: PrimaryGoal | null;
+  goalUrl: string | null;
+  samples: string[];
+}): {
+  samples: string[];
+  embeddedLink: boolean;
+  persistSamples: boolean;
+} {
+  if (input.primaryGoal !== "signup") {
+    return {
+      samples: input.samples,
+      embeddedLink: false,
+      persistSamples: false,
+    };
+  }
+
+  const normalizedGoalUrl = normalizeHttpsGoalUrl(input.goalUrl);
+  if (!normalizedGoalUrl) {
+    throw campaignRecoveryError(
+      "campaign_signup_goal_url_invalid",
+      "permanent",
+      "Add a valid HTTPS signup link for your primary goal before retrying SMS registration."
+    );
+  }
+
+  if (
+    input.samples
+      .slice(0, 5)
+      .some((sample) => sample.includes(normalizedGoalUrl))
+  ) {
+    return {
+      samples: input.samples,
+      embeddedLink: true,
+      persistSamples: false,
+    };
+  }
+
+  const signupSample = `Thanks for contacting ${cleanBusinessName(input.businessName)}. To sign up, visit ${normalizedGoalUrl}. Reply STOP to opt out.`;
+  if (signupSample.length > TELNYX_CAMPAIGN_SAMPLE_MAX_CHARACTERS) {
+    throw campaignRecoveryError(
+      "campaign_signup_sample_too_long",
+      "permanent",
+      "The signup link is too long for a carrier campaign sample. Add a shorter direct HTTPS signup link before retrying SMS registration."
+    );
+  }
+
+  const filingSamples = [...input.samples];
+  filingSamples[2] = signupSample;
+  return {
+    samples: filingSamples,
+    embeddedLink: true,
+    persistSamples: true,
+  };
 }
 
 function isValidCampaignId(value: unknown): value is string {
@@ -912,7 +980,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, ai_settings(language)"
+      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, primary_goal, goal_url, ai_settings(language)"
     )
     .eq("id", businessId)
     .single<{
@@ -928,6 +996,8 @@ export async function registerCampaign(businessId: string): Promise<void> {
       privacy_terms_mode: PrivacyTermsMode;
       privacy_url_override: string | null;
       terms_url_override: string | null;
+      primary_goal: PrimaryGoal | null;
+      goal_url: string | null;
       ai_settings: { language: "en" | "es" | "both" } | null;
     }>();
 
@@ -968,6 +1038,14 @@ export async function registerCampaign(businessId: string): Promise<void> {
   ) {
     return;
   }
+
+  const campaignFiling = buildGoalAwareCampaignFiling({
+    businessName: business.name,
+    primaryGoal: business.primary_goal,
+    goalUrl: business.goal_url,
+    samples,
+  });
+  const filingSamples = campaignFiling.samples;
 
   const webhookURL = `${appBaseUrl()}/api/messaging/registration/status`;
 
@@ -1018,6 +1096,21 @@ export async function registerCampaign(businessId: string): Promise<void> {
       helpMessage: complianceCopy.helpMessage,
     };
     submissionAuditSnapshot = currentSubmissionAuditSnapshot;
+
+    if (campaignFiling.persistSamples) {
+      const { error: sampleMessagesUpdateError } = await supabaseAdmin
+        .from("businesses")
+        .update({ sample_messages: filingSamples })
+        .eq("id", businessId);
+
+      if (sampleMessagesUpdateError) {
+        throw campaignRecoveryError(
+          "campaign_signup_sample_persist_failed",
+          "transient",
+          "We couldn't save the required signup-link campaign sample. No campaign was submitted; please try again."
+        );
+      }
+    }
 
     const { error: optInUpdateError } = await supabaseAdmin
       .from("businesses")
@@ -1101,11 +1194,11 @@ export async function registerCampaign(businessId: string): Promise<void> {
         brandId: business.telnyx_brand_id,
         description: business.use_case_description,
         usecase: CAMPAIGN_USECASE,
-        sample1: samples[0],
-        sample2: samples[1],
-        sample3: samples[2],
-        sample4: samples[3],
-        sample5: samples[4],
+        sample1: filingSamples[0],
+        sample2: filingSamples[1],
+        sample3: filingSamples[2],
+        sample4: filingSamples[3],
+        sample5: filingSamples[4],
         messageFlow: complianceCopy.messageFlow,
         subscriberOptin: true,
         optinKeywords: OPTIN_KEYWORDS,
@@ -1122,7 +1215,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
         privacyPolicyLink: privacyUrl,
         termsAndConditionsLink: termsUrl,
         autoRenewal: true,
-        embeddedLink: false,
+        embeddedLink: campaignFiling.embeddedLink,
         embeddedPhone: false,
         ageGated: false,
         numberPool: false,

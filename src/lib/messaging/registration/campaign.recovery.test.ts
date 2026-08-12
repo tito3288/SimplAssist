@@ -65,8 +65,14 @@ const CAMPAIGN_ID = "CMN3FR1";
 const NEW_CAMPAIGN_ID = "CMNNEW1";
 const CAP_MESSAGE =
   "This Telnyx brand is at Telnyx's campaign cap: it already has 5 campaigns, the maximum allowed per brand. SimplAssist cannot create the additional campaign required for this account. Use a different eligible brand or contact Telnyx Support before approving this link.";
+const SIGNUP_GOAL_URL_INVALID_MESSAGE =
+  "Add a valid HTTPS signup link for your primary goal before retrying SMS registration.";
+const SIGNUP_SAMPLE_TOO_LONG_MESSAGE =
+  "The signup link is too long for a carrier campaign sample. Add a shorter direct HTTPS signup link before retrying SMS registration.";
+const SIGNUP_SAMPLE_PERSIST_FAILED_MESSAGE =
+  "We couldn't save the required signup-link campaign sample. No campaign was submitted; please try again.";
 
-const business = {
+const baseBusiness = {
   id: BUSINESS_ID,
   name: "SimplAssist",
   email: "owner@example.com",
@@ -80,6 +86,18 @@ const business = {
   privacy_url_override: null,
   terms_url_override: null,
   ai_settings: { language: "en" },
+  primary_goal: "book" as
+    | "book"
+    | "signup"
+    | "quote"
+    | "callback"
+    | null,
+  goal_url: null as string | null,
+};
+
+let business = {
+  ...baseBusiness,
+  sample_messages: [...baseBusiness.sample_messages],
 };
 
 const complianceCopy = {
@@ -102,6 +120,58 @@ let archivedCampaignIds: string[];
 let campaignHistoryError: { message: string } | null;
 let campaignHistoryDataOverride: unknown;
 let selectedBusinessColumns: string[];
+let riskReviewStatus: string | null;
+let sampleMessagesUpdateError: { message: string } | null;
+let operationTrace: string[];
+
+function owns(payload: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(payload, key);
+}
+
+function submittedPayload() {
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+  return mocks.submit.mock.calls[0][0] as Record<string, unknown>;
+}
+
+function expectedCampaignPayload(
+  sampleMessages: string[],
+  embeddedLink: boolean
+): Record<string, unknown> {
+  return {
+    brandId: BRAND_ID,
+    description: business.use_case_description,
+    usecase: "CUSTOMER_CARE",
+    sample1: sampleMessages[0],
+    sample2: sampleMessages[1],
+    sample3: sampleMessages[2],
+    sample4: sampleMessages[3],
+    sample5: sampleMessages[4],
+    messageFlow: complianceCopy.messageFlow,
+    subscriberOptin: true,
+    optinKeywords: "START,SUBSCRIBE,YES",
+    optinMessage: complianceCopy.optinMessage,
+    subscriberOptout: true,
+    optoutKeywords: "STOP,END,UNSUBSCRIBE,CANCEL,QUIT",
+    optoutMessage: complianceCopy.optoutMessage,
+    subscriberHelp: true,
+    helpKeywords: "HELP,INFO",
+    helpMessage: complianceCopy.helpMessage,
+    termsAndConditions: true,
+    privacyPolicyLink: "https://app.simplassist.com/c/simplassist/privacy",
+    termsAndConditionsLink: "https://app.simplassist.com/c/simplassist/terms",
+    autoRenewal: true,
+    embeddedLink,
+    embeddedPhone: false,
+    ageGated: false,
+    numberPool: false,
+    directLending: false,
+    referenceId: BUSINESS_ID,
+    webhookURL:
+      "https://app.simplassist.com/api/messaging/registration/status",
+    webhookFailoverURL:
+      "https://app.simplassist.com/api/messaging/registration/status",
+  };
+}
 
 function asyncItems(items: unknown[]) {
   return {
@@ -148,7 +218,7 @@ function businessQuery() {
         eq: vi.fn(() => ({
           single: vi.fn(async () =>
             columns === "a2p_risk_review_status"
-              ? { data: { a2p_risk_review_status: "not_started" }, error: null }
+              ? { data: { a2p_risk_review_status: riskReviewStatus }, error: null }
               : { data: { ...business }, error: null }
           ),
         })),
@@ -157,9 +227,26 @@ function businessQuery() {
     update: vi.fn((payload: Record<string, unknown>) => {
       updates.push(payload);
       return {
-        eq: vi.fn(() =>
-          augmentPromise(
-            { data: null, error: null },
+        eq: vi.fn(() => {
+          const operation = owns(payload, "sample_messages")
+            ? "sample_messages"
+            : owns(payload, "opt_in_description")
+              ? "opt_in_description"
+              : owns(payload, "a2p_risk_review_input_hash")
+                ? "a2p_risk_review_input_hash"
+                : owns(payload, "telnyx_campaign_id")
+                  ? "telnyx_campaign_id"
+                  : "business_update";
+          operationTrace.push(operation);
+
+          return augmentPromise(
+            {
+              data: null,
+              error:
+                operation === "sample_messages"
+                  ? sampleMessagesUpdateError
+                  : null,
+            },
             {
               is: vi.fn(() => ({
                 select: vi.fn(() => ({
@@ -172,8 +259,8 @@ function businessQuery() {
                 })),
               })),
             }
-          )
-        ),
+          );
+        }),
       };
     }),
   };
@@ -185,12 +272,19 @@ beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
+  business = {
+    ...baseBusiness,
+    sample_messages: [...baseBusiness.sample_messages],
+  };
   persistenceResults = [];
   updates = [];
   archivedCampaignIds = [];
   campaignHistoryError = null;
   campaignHistoryDataOverride = undefined;
   selectedBusinessColumns = [];
+  riskReviewStatus = "not_started";
+  sampleMessagesUpdateError = null;
+  operationTrace = [];
   setCampaigns([]);
   mocks.from.mockImplementation((table: string) => {
     if (table === "businesses") return businessQuery();
@@ -220,12 +314,235 @@ beforeEach(() => {
   });
   mocks.getCost.mockResolvedValue({ monthlyCost: 1.5, upFrontCost: 15 });
   mocks.qualify.mockResolvedValue({ usecase: "CUSTOMER_CARE" });
-  mocks.submit.mockResolvedValue({ campaignId: NEW_CAMPAIGN_ID });
+  mocks.buildRiskInput.mockResolvedValue({ input: { businessId: BUSINESS_ID } });
+  mocks.hashRiskInput.mockReturnValue("risk-input-hash");
+  mocks.submit.mockImplementation(async () => {
+    operationTrace.push("submit");
+    return { campaignId: NEW_CAMPAIGN_ID };
+  });
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe("goal-aware signup campaign filing", () => {
+  const normalizedGoalUrl = "https://signup.example.com/enroll";
+  const storedSamples = [
+    "Sample one",
+    "Sample two",
+    "Sample three",
+    "Sample four",
+    "Sample five",
+  ];
+  const generatedSignupSample =
+    "Thanks for contacting Acme Camps. To sign up, visit https://signup.example.com/enroll. Reply STOP to opt out.";
+
+  it("files and persists a clean signup-link sample before submission", async () => {
+    business = {
+      ...business,
+      name: "  Acme Camps  ",
+      primary_goal: "signup",
+      goal_url: `  ${normalizedGoalUrl}  `,
+      sample_messages: [...storedSamples],
+    };
+    riskReviewStatus = "passed";
+
+    await registerCampaign(BUSINESS_ID);
+
+    expect(
+      selectedBusinessColumns.some(
+        (columns) =>
+          columns.includes("primary_goal") && columns.includes("goal_url")
+      )
+    ).toBe(true);
+    expect(submittedPayload()).toEqual(
+      expectedCampaignPayload(
+        [
+          storedSamples[0],
+          storedSamples[1],
+          generatedSignupSample,
+          storedSamples[3],
+          storedSamples[4],
+        ],
+        true
+      )
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(expect.any(Object), {
+      maxRetries: 0,
+    });
+    expect(
+      updates.filter((update) => owns(update, "sample_messages"))
+    ).toEqual([
+      {
+        sample_messages: [
+          storedSamples[0],
+          storedSamples[1],
+          generatedSignupSample,
+          storedSamples[3],
+          storedSamples[4],
+        ],
+      },
+    ]);
+    expect(operationTrace.slice(0, 4)).toEqual([
+      "sample_messages",
+      "opt_in_description",
+      "a2p_risk_review_input_hash",
+      "submit",
+    ]);
+  });
+
+  it("reuses an exact signup-link sample without modifying stored samples", async () => {
+    const linkedSamples = [
+      storedSamples[0],
+      storedSamples[1],
+      storedSamples[2],
+      `Continue here: ${normalizedGoalUrl}`,
+      storedSamples[4],
+    ];
+    business = {
+      ...business,
+      primary_goal: "signup",
+      goal_url: normalizedGoalUrl,
+      sample_messages: [...linkedSamples],
+    };
+
+    await registerCampaign(BUSINESS_ID);
+
+    expect(submittedPayload()).toEqual(
+      expectedCampaignPayload(linkedSamples, true)
+    );
+    expect(updates.some((update) => owns(update, "sample_messages"))).toBe(
+      false
+    );
+  });
+
+  it.each([
+    ["book", "book" as const],
+    ["legacy null", null],
+  ])(
+    "keeps the %s campaign payload byte-for-byte compatible",
+    async (_label, primaryGoal) => {
+      business = {
+        ...business,
+        primary_goal: primaryGoal,
+        goal_url: normalizedGoalUrl,
+        sample_messages: [...storedSamples],
+      };
+
+      await registerCampaign(BUSINESS_ID);
+
+      expect(mocks.submit).toHaveBeenCalledWith(
+        expectedCampaignPayload(storedSamples, false),
+        { maxRetries: 0 }
+      );
+      expect(updates.some((update) => owns(update, "sample_messages"))).toBe(
+        false
+      );
+    }
+  );
+
+  it.each([
+    ["missing", null],
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["http", "http://example.com/signup"],
+    ["malformed", "not a URL"],
+  ])("halts signup filing for a %s goal URL", async (_label, goalUrl) => {
+    business = {
+      ...business,
+      primary_goal: "signup",
+      goal_url: goalUrl,
+      sample_messages: [...storedSamples],
+    };
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
+      code: "campaign_signup_goal_url_invalid",
+      kind: "permanent",
+      message: SIGNUP_GOAL_URL_INVALID_MESSAGE,
+    });
+
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveLegalUrls).not.toHaveBeenCalled();
+    expect(mocks.getActiveSmsNumber).not.toHaveBeenCalled();
+    expect(mocks.buildSmsComplianceCopy).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("halts when the generated signup sample exceeds the carrier limit", async () => {
+    business = {
+      ...business,
+      primary_goal: "signup",
+      goal_url: `https://example.com/${"a".repeat(220)}`,
+      sample_messages: [...storedSamples],
+    };
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
+      code: "campaign_signup_sample_too_long",
+      kind: "permanent",
+      message: SIGNUP_SAMPLE_TOO_LONG_MESSAGE,
+    });
+
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveLegalUrls).not.toHaveBeenCalled();
+    expect(mocks.getActiveSmsNumber).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("halts before provider preflight when signup sample persistence fails", async () => {
+    business = {
+      ...business,
+      primary_goal: "signup",
+      goal_url: normalizedGoalUrl,
+      sample_messages: [...storedSamples],
+    };
+    sampleMessagesUpdateError = { message: "database unavailable" };
+
+    await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
+      code: "campaign_signup_sample_persist_failed",
+      kind: "transient",
+      message: SIGNUP_SAMPLE_PERSIST_FAILED_MESSAGE,
+    });
+
+    expect(
+      updates.filter((update) => owns(update, "sample_messages"))
+    ).toHaveLength(1);
+    expect(operationTrace).toEqual(["sample_messages"]);
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("recovers an existing campaign before validating the current signup URL", async () => {
+    business = {
+      ...business,
+      primary_goal: "signup",
+      goal_url: null,
+      sample_messages: [...storedSamples],
+    };
+    setCampaigns([campaignItem()]);
+
+    await expect(registerCampaign(BUSINESS_ID)).resolves.toBeUndefined();
+
+    expect(updates).toContainEqual(
+      expect.objectContaining({ telnyx_campaign_id: CAMPAIGN_ID })
+    );
+    expect(updates.some((update) => owns(update, "sample_messages"))).toBe(
+      false
+    );
+    expect(mocks.resolveLegalUrls).not.toHaveBeenCalled();
+    expect(mocks.getActiveSmsNumber).not.toHaveBeenCalled();
+    expect(mocks.getCost).not.toHaveBeenCalled();
+    expect(mocks.qualify).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
 });
 
 describe("registerCampaign recover-before-create", () => {

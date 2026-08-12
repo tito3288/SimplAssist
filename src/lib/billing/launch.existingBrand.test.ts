@@ -124,6 +124,8 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 import { attemptPaidLaunch } from "./launch";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000091";
+const SIGNUP_GOAL_URL_INVALID_MESSAGE =
+  "Add a valid HTTPS signup link for your primary goal before retrying SMS registration.";
 const ACTIVE_NUMBER = {
   id: "number-row-1",
   phone_number: "+15745550191",
@@ -230,6 +232,74 @@ function expectNoProviderMutation() {
   expect(mocks.attachOwnedNumber).not.toHaveBeenCalled();
   expect(mocks.purchaseNumber).not.toHaveBeenCalled();
 }
+
+function queueThroughCampaignRegistration() {
+  queueResults(
+    { data: BUSINESS, error: null },
+    { data: null, error: null },
+    { data: ACTIVE_NUMBER, error: null },
+    { data: ACTIVE_NUMBER, error: null },
+    { error: null }
+  );
+}
+
+describe("goal-aware signup campaign filing", () => {
+  function rejectInvalidSignupGoalUrl() {
+    mocks.registerCampaign.mockRejectedValue(
+      new mocks.CampaignRegistrationError({
+        code: "campaign_signup_goal_url_invalid",
+        kind: "permanent",
+        message: SIGNUP_GOAL_URL_INVALID_MESSAGE,
+      })
+    );
+  }
+
+  it("marks a normal signup configuration failure without submitting", async () => {
+    queueThroughCampaignRegistration();
+    rejectInvalidSignupGoalUrl();
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "failed",
+      message: SIGNUP_GOAL_URL_INVALID_MESSAGE,
+    });
+    expect(mocks.markFailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      SIGNUP_GOAL_URL_INVALID_MESSAGE
+    );
+    expect(mocks.ensureCampaignAssignment).not.toHaveBeenCalled();
+    expect(mocks.markSubmitted).not.toHaveBeenCalled();
+    expect(mocks.riskClearance.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claim.mock.invocationCallOrder[0]
+    );
+    expect(mocks.claim.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.registerCampaign.mock.invocationCallOrder[0]
+    );
+    expect(mocks.registerCampaign.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markFailed.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("keeps a linked-brand signup configuration failure actionable", async () => {
+    queueThroughCampaignRegistration();
+    mocks.prepareExistingBrand.mockResolvedValue({ status: "consumed" });
+    rejectInvalidSignupGoalUrl();
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "failed",
+      message: SIGNUP_GOAL_URL_INVALID_MESSAGE,
+    });
+    expect(mocks.markFailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      SIGNUP_GOAL_URL_INVALID_MESSAGE
+    );
+    expect(mocks.ensureCampaignAssignment).not.toHaveBeenCalled();
+    expect(mocks.markSubmitted).not.toHaveBeenCalled();
+  });
+});
 
 describe("attemptPaidLaunch existing-brand authorization boundary", () => {
   it("returns review-required before any provider mutation", async () => {
@@ -352,7 +422,15 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
-    expect(result.status).toBe("linked_brand_needs_support");
+    expect(result).toEqual({
+      status: "linked_brand_needs_support",
+      message:
+        "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced.",
+    });
+    expect(mocks.markFailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "Your linked Telnyx brand needs support before SMS registration can continue. Its existing Telnyx resources were not replaced."
+    );
     expect(mocks.createMessagingProfile).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.createVoiceApplication).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.purchaseNumber).not.toHaveBeenCalled();
