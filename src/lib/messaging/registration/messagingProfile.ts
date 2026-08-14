@@ -6,6 +6,7 @@ import {
   resolveProviderCreateIntents,
   type ProviderCreateIntentSpec,
 } from "./providerCreateIntent";
+import { buildProviderResourceName } from "./providerResourceName";
 
 const TELNYX_MESSAGING_PROFILE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -167,7 +168,10 @@ export async function createMessagingProfile(businessId: string): Promise<void> 
     return;
   }
 
-  const profileName = `${business.legal_business_name ?? business.name} (${businessId})`;
+  const profileName = buildProviderResourceName(
+    business.legal_business_name ?? business.name,
+    businessId
+  );
   const webhookUrl = `${appBaseUrl()}/api/messaging/webhook`;
 
   try {

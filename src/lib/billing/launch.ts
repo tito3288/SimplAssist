@@ -35,6 +35,7 @@ import {
   A2P_RISK_CUSTOMER_REVIEW_MESSAGE,
 } from "@/lib/messaging/registration/riskCategories";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
+import { buildProviderResourceName } from "@/lib/messaging/registration/providerResourceName";
 import { verifyPublishedCompliancePage } from "@/lib/messaging/registration/publicCompliancePage";
 import {
   getA2pRiskClearanceForBusiness,
@@ -107,6 +108,7 @@ interface BusinessLaunchRow {
   id: string;
   slug: string;
   name: string;
+  legal_business_name: string | null;
   has_ein: boolean | null;
   pending_phone_number: string | null;
   telnyx_submission_disabled: boolean;
@@ -215,6 +217,13 @@ export async function attemptPaidLaunch(
   let linkedExistingBrandConsumed = false;
 
   try {
+    // Preflight the shared Telnyx name invariant before any carrier mutation.
+    // The creators repeat this check against their fresh business reads.
+    buildProviderResourceName(
+      business.legal_business_name ?? business.name,
+      businessId
+    );
+
     // Paid-launch order after checkout success:
     // risk -> attempt gate -> existing-brand revalidate/consume -> rejected
     // brand cleanup -> brand -> profile -> voice -> owned attach / purchase ->
@@ -427,7 +436,7 @@ async function readLaunchBusiness(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, slug, name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, billing_mode, partner_plan, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status, ai_settings(language)"
+      "id, slug, name, legal_business_name, has_ein, pending_phone_number, telnyx_submission_disabled, telnyx_brand_id, telnyx_campaign_id, billing_pilot, billing_comped, billing_exempt, billing_mode, partner_plan, onboarding_completed_at, onboarding_registration_status, brand_status, campaign_status, ai_settings(language)"
     )
     .eq("id", businessId)
     .maybeSingle<BusinessLaunchRow>();

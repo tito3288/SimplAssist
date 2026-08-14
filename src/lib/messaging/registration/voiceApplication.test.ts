@@ -38,6 +38,8 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000371";
 const APPLICATION_ID = "12345678901";
 const SECOND_APPLICATION_ID = "12345678902";
 const INTENT_ID = "30000000-0000-4000-8000-000000000371";
+const BUSINESS_SUFFIX = `(${BUSINESS_ID})`;
+const UTF8_ENCODER = new TextEncoder();
 
 const business = {
   id: BUSINESS_ID,
@@ -79,6 +81,15 @@ function asyncItems(items: unknown[]) {
   return {
     async *[Symbol.asyncIterator]() {
       yield* items;
+    },
+  };
+}
+
+function asyncItemsThenError(items: unknown[], error: Error) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield* items;
+      throw error;
     },
   };
 }
@@ -133,6 +144,39 @@ describe("createVoiceApplication recover-before-create", () => {
     expect(mocks.resolveProviderCreateIntents).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      label: "ASCII",
+      legalBusinessName: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      expectedName: `ABCDEFGHIJKLMNOPQRSTUV... (${BUSINESS_ID})`,
+    },
+    {
+      label: "multibyte",
+      legalBusinessName: "Café Société Internationale",
+      expectedName: `Café Société Intern... (${BUSINESS_ID})`,
+    },
+  ])("clamps a long $label application name by UTF-8 bytes", async (testCase) => {
+    queueResults(
+      {
+        data: { ...business, legal_business_name: testCase.legalBusinessName },
+        error: null,
+      },
+      { data: { telnyx_voice_application_id: null }, error: null },
+      { data: { id: BUSINESS_ID }, error: null }
+    );
+
+    await createVoiceApplication(BUSINESS_ID);
+
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ application_name: testCase.expectedName }),
+      { maxRetries: 0 }
+    );
+    expect(UTF8_ENCODER.encode(testCase.expectedName).byteLength).toBeLessThanOrEqual(
+      64
+    );
+    expect(testCase.expectedName.endsWith(BUSINESS_SUFFIX)).toBe(true);
+  });
+
   it("recovers one exact business-suffixed application without a second create", async () => {
     queueResults(
       { data: business, error: null },
@@ -172,6 +216,30 @@ describe("createVoiceApplication recover-before-create", () => {
         },
       })
     );
+  });
+
+  it("recovers a clamped multibyte application name without creating again", async () => {
+    const clampedName = `Café Société Intern... (${BUSINESS_ID})`;
+    queueResults(
+      {
+        data: {
+          ...business,
+          legal_business_name: "Café Société Internationale",
+        },
+        error: null,
+      },
+      { data: { id: BUSINESS_ID }, error: null }
+    );
+    setApplications([{ id: APPLICATION_ID, application_name: clampedName }]);
+
+    await createVoiceApplication(BUSINESS_ID);
+
+    expect(mocks.beginProviderCreateIntent).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(chains[1].update).toHaveBeenCalledWith({
+      telnyx_voice_application_id: APPLICATION_ID,
+    });
+    expect(mocks.resolveProviderCreateIntents).toHaveBeenCalledTimes(1);
   });
 
   it("recovers a provider success after a local-save failure without creating twice", async () => {
@@ -286,6 +354,75 @@ describe("createVoiceApplication recover-before-create", () => {
     expect(mocks.beginProviderCreateIntent).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
   });
+
+  it("fails closed when the provider list errors before returning results", async () => {
+    queueResults({ data: business, error: null });
+    mocks.list.mockImplementation(() =>
+      asyncItemsThenError([], new Error("application list unavailable"))
+    );
+
+    await expect(createVoiceApplication(BUSINESS_ID)).rejects.toThrow(
+      "Could not check Telnyx for an existing application"
+    );
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.beginProviderCreateIntent).not.toHaveBeenCalled();
+    expect(mocks.resolveProviderCreateIntents).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a provider list errors after yielding a match", async () => {
+    queueResults({ data: business, error: null });
+    mocks.list.mockImplementation(() =>
+      asyncItemsThenError(
+        [{ id: APPLICATION_ID, application_name: `Test (${BUSINESS_ID})` }],
+        new Error("later application page unavailable")
+      )
+    );
+
+    await expect(createVoiceApplication(BUSINESS_ID)).rejects.toThrow(
+      "Could not check Telnyx for an existing application"
+    );
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.beginProviderCreateIntent).not.toHaveBeenCalled();
+    expect(mocks.resolveProviderCreateIntents).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "provider timeout",
+    "500 provider error",
+    "400 unrelated validation",
+  ])(
+    "keeps an unclassified %s attempt fenced after a complete zero-match Retry",
+    async (failureMessage) => {
+      queueResults(
+        { data: business, error: null },
+        { data: { telnyx_voice_application_id: null }, error: null }
+      );
+      mocks.create.mockRejectedValueOnce(new Error(failureMessage));
+
+      await expect(createVoiceApplication(BUSINESS_ID)).rejects.toThrow(
+        failureMessage
+      );
+      expect(mocks.resolveProviderCreateIntents).not.toHaveBeenCalled();
+
+      queueResults({ data: business, error: null });
+      setApplications([]);
+      mocks.beginProviderCreateIntent.mockRejectedValueOnce(
+        new Error("unresolved provider attempt")
+      );
+
+      await expect(createVoiceApplication(BUSINESS_ID)).rejects.toThrow(
+        "unresolved provider attempt"
+      );
+
+      expect(mocks.beginProviderCreateIntent).toHaveBeenCalledTimes(2);
+      expect(mocks.create).toHaveBeenCalledTimes(1);
+      expect(mocks.resolveProviderCreateIntents).not.toHaveBeenCalled();
+    }
+  );
 
   it("honors an unresolved-intent denial before a provider POST", async () => {
     queueResults({ data: business, error: null });

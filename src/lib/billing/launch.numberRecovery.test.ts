@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   verifyPublishedCompliancePage: vi.fn(),
   getBusinessContentQuality: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
+  buildProviderResourceName: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -75,6 +76,9 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({
 vi.mock("@/lib/messaging/registration/phoneNumberAssignment", () => ({
   ensureCampaignAssignmentForBusiness: mocks.ensureCampaignAssignmentForBusiness,
 }));
+vi.mock("@/lib/messaging/registration/providerResourceName", () => ({
+  buildProviderResourceName: mocks.buildProviderResourceName,
+}));
 vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   claimRegistrationAttempt: mocks.claimRegistrationAttempt,
   markRegistrationFailed: mocks.markRegistrationFailed,
@@ -94,6 +98,7 @@ const LAUNCH_BUSINESS = {
   id: BUSINESS_ID,
   slug: "test-business",
   name: "Test Business",
+  legal_business_name: "Test Business LLC",
   has_ein: true,
   pending_phone_number: PENDING_NUMBER,
   telnyx_submission_disabled: false,
@@ -192,6 +197,10 @@ beforeEach(() => {
   mocks.findOwnedNumberId.mockResolvedValue(null);
   mocks.getActiveSmsNumber.mockResolvedValue(PENDING_NUMBER);
   mocks.verifyPublishedCompliancePage.mockResolvedValue(undefined);
+  mocks.buildProviderResourceName.mockImplementation(
+    (leadingName: string, businessId: string) =>
+      `${leadingName} (${businessId})`
+  );
   mocks.prepareExistingTelnyxBrandLinkForLaunch.mockResolvedValue({
     status: "not_requested",
   });
@@ -537,6 +546,18 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     expect(chains[0].select).toHaveBeenCalledWith(
       expect.stringContaining("ai_settings(language)")
     );
+    expect(chains[0].select).toHaveBeenCalledWith(
+      expect.stringContaining("legal_business_name")
+    );
+    expect(mocks.buildProviderResourceName).toHaveBeenCalledWith(
+      LAUNCH_BUSINESS.legal_business_name,
+      BUSINESS_ID
+    );
+    expect(
+      mocks.buildProviderResourceName.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.prepareExistingTelnyxBrandLinkForLaunch.mock.invocationCallOrder[0]
+    );
     expect(
       mocks.prepareExistingTelnyxBrandLinkForLaunch.mock.invocationCallOrder[0]
     ).toBeLessThan(
@@ -577,6 +598,62 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
   });
 
+  it("fails before every provider mutation when the name preflight fails", async () => {
+    queueHappyPathThrough();
+    mocks.buildProviderResourceName.mockImplementationOnce(() => {
+      throw new Error("provider resource-name invariant failed");
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.buildProviderResourceName).toHaveBeenCalledWith(
+      LAUNCH_BUSINESS.legal_business_name,
+      BUSINESS_ID
+    );
+    expect(mocks.markRegistrationFailed).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      expect.stringContaining("Couldn't submit your SMS registration")
+    );
+    expect(
+      mocks.prepareExistingTelnyxBrandLinkForLaunch
+    ).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedBrand).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+    expect(mocks.createVoiceApplication).not.toHaveBeenCalled();
+    expect(mocks.attachOwnedNumberToCustomerProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the business name during provider-name preflight", async () => {
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, legal_business_name: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: null, error: null }
+    );
+    mocks.buildProviderResourceName.mockImplementationOnce(() => {
+      throw new Error("provider resource-name invariant failed");
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.buildProviderResourceName).toHaveBeenCalledWith(
+      LAUNCH_BUSINESS.name,
+      BUSINESS_ID
+    );
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+  });
+
   it("fails before campaign cleanup or submission when the strict active number disappears", async () => {
     queueHappyPathThrough(
       { data: null, error: null },
@@ -613,10 +690,10 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
   });
 
-  it("stops before voice, number, page, and campaign work when profile setup fails", async () => {
+  it("keeps launch closed after a messaging-profile provider-list failure", async () => {
     queueHappyPathThrough();
     mocks.createMessagingProfile.mockRejectedValue(
-      new Error("profile reconciliation required")
+      new Error("Could not check Telnyx for an existing profile")
     );
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
@@ -627,6 +704,9 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
     expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
     expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).toHaveBeenCalled();
   });
 
   it("stops before number, page, and campaign work when voice setup fails", async () => {

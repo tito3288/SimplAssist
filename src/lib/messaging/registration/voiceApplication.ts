@@ -6,6 +6,7 @@ import {
   resolveProviderCreateIntents,
   type ProviderCreateIntentSpec,
 } from "./providerCreateIntent";
+import { buildProviderResourceName } from "./providerResourceName";
 
 const TELNYX_VOICE_APPLICATION_ID_PATTERN = /^[0-9]+$/;
 const VOICE_APPLICATION_CREATE_INTENT = {
@@ -159,7 +160,10 @@ export async function createVoiceApplication(businessId: string): Promise<void> 
     return;
   }
 
-  const applicationName = `${business.legal_business_name ?? business.name} (${businessId})`;
+  const applicationName = buildProviderResourceName(
+    business.legal_business_name ?? business.name,
+    businessId
+  );
   const webhookEventUrl = `${appBaseUrl()}/api/messaging/voice`;
 
   try {
