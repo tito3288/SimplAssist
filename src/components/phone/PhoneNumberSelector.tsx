@@ -38,37 +38,72 @@ interface PurchasedNumber {
 
 interface PhoneNumberSelectorProps {
   initialPhoneNumber?: string | null;
+  initialPhoneNumberPending?: boolean;
   initialConsentAgreed?: boolean;
   initialFailureReason?: string | null;
   onConsentChange?: (agreed: boolean) => void;
   onNumberPurchased?: (phoneNumber: string) => void;
+  onReplacementModeChange?: (replacing: boolean) => void;
+}
+
+export function shouldDisablePhoneNumberNext(args: {
+  phoneNumber: string | null;
+  pendingSelection: boolean;
+  pendingFailureReason: string | null;
+  replacingNumber: boolean;
+}): boolean {
+  return Boolean(
+    !args.phoneNumber ||
+      args.replacingNumber ||
+      (args.pendingSelection && args.pendingFailureReason)
+  );
 }
 
 export default function PhoneNumberSelector({
   initialPhoneNumber,
+  initialPhoneNumberPending = false,
   initialConsentAgreed = false,
   initialFailureReason = null,
   onConsentChange,
   onNumberPurchased,
+  onReplacementModeChange,
 }: PhoneNumberSelectorProps) {
   const brand = useBrand();
   const [areaCode, setAreaCode] = useState("");
   const [numbers, setNumbers] = useState<AvailableNumber[]>([]);
   const [searching, setSearching] = useState(false);
   const [purchasing, setPurchasing] = useState<string | null>(null);
-  const [purchased, setPurchased] = useState<PurchasedNumber | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [consented, setConsented] = useState(false);
+  const [purchased, setPurchased] = useState<PurchasedNumber | null>(() =>
+    initialPhoneNumber
+      ? {
+          phone_number: initialPhoneNumber,
+          pending: initialPhoneNumberPending,
+        }
+      : null
+  );
+  const [error, setError] = useState<string | null>(initialFailureReason);
+  const [consented, setConsented] = useState(initialConsentAgreed);
 
   useEffect(() => {
     if (initialPhoneNumber) {
-      setPurchased({ phone_number: initialPhoneNumber, pending: true });
+      setPurchased({
+        phone_number: initialPhoneNumber,
+        pending: initialPhoneNumberPending,
+      });
+    } else {
+      setPurchased(null);
     }
 
     setConsented(initialConsentAgreed);
     setError(initialFailureReason);
     onConsentChange?.(initialConsentAgreed);
-  }, [initialPhoneNumber, initialConsentAgreed, initialFailureReason, onConsentChange]);
+  }, [
+    initialPhoneNumber,
+    initialPhoneNumberPending,
+    initialConsentAgreed,
+    initialFailureReason,
+    onConsentChange,
+  ]);
 
   function handleConsentToggle(checked: boolean) {
     setConsented(checked);
@@ -126,6 +161,7 @@ export default function PhoneNumberSelector({
       }
 
       setPurchased(data.number);
+      onReplacementModeChange?.(false);
       onNumberPurchased?.(data.number.phone_number);
       setNumbers([]);
     } catch {
@@ -133,6 +169,16 @@ export default function PhoneNumberSelector({
     } finally {
       setPurchasing(null);
     }
+  }
+
+  function handleChangeNumber() {
+    // This is intentionally local-only. The old pending preference remains in
+    // the database until a replacement selection succeeds, so abandoning this
+    // search cannot erase the customer's last saved choice.
+    setPurchased(null);
+    setNumbers([]);
+    setError(null);
+    onReplacementModeChange?.(true);
   }
 
   if (purchased) {
@@ -145,12 +191,23 @@ export default function PhoneNumberSelector({
           {purchased.phone_number}
         </p>
         <p className="mt-1 text-sm text-green-600">
-          We will activate this number after checkout. If it becomes unavailable, you can choose another number without paying again.
+          {purchased.pending === true
+            ? "We will activate this number after checkout. If it becomes unavailable, you can choose another number without paying again."
+            : "This number is already active."}
         </p>
         {error && (
           <p className="mt-3 text-sm text-red-600">
             {replaceDefaultBrandName(error, brand.name)}
           </p>
+        )}
+        {purchased.pending === true && (
+          <button
+            type="button"
+            onClick={handleChangeNumber}
+            className="mt-4 rounded-md border border-green-300 bg-white px-4 py-2 text-sm font-medium text-green-800 hover:bg-green-100"
+          >
+            Change number
+          </button>
         )}
       </div>
     );

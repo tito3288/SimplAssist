@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { searchAvailableNumbers } from "@/lib/messaging/numbers";
+import {
+  isNanpTollFreeNumber,
+  searchAvailableNumbers,
+} from "@/lib/messaging/numbers";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function GET(request: NextRequest) {
@@ -12,6 +15,20 @@ export async function GET(request: NextRequest) {
   if (!areaCode || !/^\d{3}$/.test(areaCode)) {
     return NextResponse.json(
       { error: "Area code must be 3 digits" },
+      { status: 400 }
+    );
+  }
+
+  // This picker provisions a local number for a 10DLC campaign. Reject
+  // toll-free NPAs at the route boundary as well as filtering them from the
+  // Telnyx inventory request so a stale or custom client cannot bypass the UI.
+  if (isNanpTollFreeNumber(`+1${areaCode}0000000`)) {
+    return NextResponse.json(
+      {
+        error:
+          "Toll-free area codes are not supported for 10DLC registration. Enter a local area code.",
+        code: "toll_free_not_supported",
+      },
       { status: 400 }
     );
   }

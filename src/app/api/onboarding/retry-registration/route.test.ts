@@ -181,6 +181,26 @@ describe("POST /api/onboarding/retry-registration rejection guard", () => {
     }
   );
 
+  it("returns a number-unavailable retry to the phone-number step", async () => {
+    queueResults({ data: business(), error: null });
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "number_unavailable",
+      message: "That number is no longer available. Choose another number.",
+    });
+    mocks.getOnboardingStateForBusinessId.mockResolvedValue({
+      currentStep: "phone_number",
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "That number is no longer available. Choose another number.",
+      code: "phone_number_unavailable",
+      state: { currentStep: "phone_number" },
+    });
+  });
+
   it("still requires completed brand verification info first", async () => {
     queueResults({
       data: business({ compliance_info_completed_at: null }),

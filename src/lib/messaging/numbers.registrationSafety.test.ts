@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   listPhoneNumbers: vi.fn(),
+  listAvailablePhoneNumbers: vi.fn(),
   createNumberOrder: vi.fn(),
   updatePhoneNumber: vi.fn(),
   updatePhoneMessaging: vi.fn(),
@@ -19,7 +20,7 @@ vi.mock("@/lib/messaging/client", () => ({
       messaging: { update: mocks.updatePhoneMessaging },
     },
     numberOrders: { create: mocks.createNumberOrder },
-    availablePhoneNumbers: { list: vi.fn() },
+    availablePhoneNumbers: { list: mocks.listAvailablePhoneNumbers },
   },
 }));
 vi.mock("@/lib/supabase/admin", () => ({
@@ -33,9 +34,13 @@ vi.mock("@/lib/messaging/registration/providerCreateIntent", () => ({
 import {
   attachOwnedNumberToCustomerProfile,
   findOwnedNumberId,
+  isNanpTollFreeNumber,
   normalizeTelnyxPhoneNumberResourceId,
+  NumberUnavailableError,
   purchaseNumber,
   PurchasedNumberResolutionError,
+  searchAvailableNumbers,
+  TollFreeNumberUnsupportedError,
 } from "./numbers";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000381";
@@ -119,6 +124,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   setBusiness();
   mocks.listPhoneNumbers.mockResolvedValue(phoneNumberList([]));
+  mocks.listAvailablePhoneNumbers.mockResolvedValue({ data: [] });
   mocks.createNumberOrder.mockResolvedValue({
     data: {
       id: NUMBER_ORDER_ID,
@@ -138,6 +144,46 @@ beforeEach(() => {
     "c0000000-0000-4000-8000-000000000381"
   );
   mocks.resolveProviderCreateIntent.mockResolvedValue(undefined);
+});
+
+describe("local number inventory", () => {
+  it.each(["800", "833", "844", "855", "866", "877", "888"])(
+    "recognizes NANP %s numbers as toll-free",
+    (areaCode) => {
+      expect(isNanpTollFreeNumber(`+1${areaCode}5550381`)).toBe(true);
+      expect(isNanpTollFreeNumber(`1 (${areaCode}) 555-0381`)).toBe(true);
+    }
+  );
+
+  it.each(["+15745550381", "574-555-0381", "+442071838750", "1800555038"])(
+    "does not classify %s as a NANP toll-free number",
+    (phoneNumber) => {
+      expect(isNanpTollFreeNumber(phoneNumber)).toBe(false);
+    }
+  );
+
+  it("requests local, non-best-effort inventory and drops a defensive toll-free response", async () => {
+    mocks.listAvailablePhoneNumbers.mockResolvedValue({
+      data: [
+        { phone_number: "+15745550381", vanity_format: "574-555-0381" },
+        { phone_number: "+18885550381", vanity_format: "888-555-0381" },
+      ],
+    });
+
+    await expect(searchAvailableNumbers("574")).resolves.toEqual([
+      { phoneNumber: "+15745550381", friendlyName: "574-555-0381" },
+    ]);
+    expect(mocks.listAvailablePhoneNumbers).toHaveBeenCalledWith({
+      filter: {
+        country_code: "US",
+        national_destination_code: "574",
+        phone_number_type: "local",
+        features: ["sms", "voice"],
+        best_effort: false,
+        limit: 10,
+      },
+    });
+  });
 });
 
 describe("managed phone-number resource IDs", () => {
@@ -276,6 +322,20 @@ describe("owned-number lookup", () => {
 });
 
 describe("number purchase ID provenance", () => {
+  it.each(["+18005550381", "+18335550381", "+18885550381"])(
+    "rejects toll-free selection %s before any intent or paid provider POST",
+    async (phoneNumber) => {
+      await expect(purchaseNumber(phoneNumber, BUSINESS_ID)).rejects.toBeInstanceOf(
+        TollFreeNumberUnsupportedError
+      );
+
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.beginProviderCreateIntent).not.toHaveBeenCalled();
+      expect(mocks.createNumberOrder).not.toHaveBeenCalled();
+      expect(mocks.listPhoneNumbers).not.toHaveBeenCalled();
+    }
+  );
+
   it("places one scoped order, then returns only the exhausted owned-list ID as the managed resource ID", async () => {
     setOwnedNumberList();
 
@@ -444,9 +504,13 @@ describe("number purchase ID provenance", () => {
       data: { status: "failure", phone_numbers: [] },
     });
 
-    await expect(purchaseNumber(PHONE_NUMBER, BUSINESS_ID)).rejects.toThrow(
-      "Telnyx number order failed"
+    const error = await purchaseNumber(PHONE_NUMBER, BUSINESS_ID).catch(
+      (cause: unknown) => cause
     );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(NumberUnavailableError);
+    expect((error as Error).message).toContain("Telnyx number order failed");
     expect(mocks.listPhoneNumbers).not.toHaveBeenCalled();
     expect(mocks.resolveProviderCreateIntent).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -484,15 +548,14 @@ describe("number purchase ID provenance", () => {
     expect(mocks.resolveProviderCreateIntent).not.toHaveBeenCalled();
   });
 
-  it("resolves only the exact intent for the proven Telnyx 422/10027 rejection", async () => {
+  it("resolves only the exact intent before typing the proven Telnyx 422/10027 rejection as unavailable", async () => {
     const definiteRejection = {
       status: 422,
       error: {
         errors: [
           {
             code: "10027",
-            detail:
-              "We don't recognize the number(s) ['+18886951631']. Did you first search for the number(s)?",
+            detail: `We don't recognize the number(s) ['${PHONE_NUMBER}']. Did you first search for the number(s)?`,
             source: { pointer: "/" },
           },
         ],
@@ -500,9 +563,13 @@ describe("number purchase ID provenance", () => {
     };
     mocks.createNumberOrder.mockRejectedValue(definiteRejection);
 
-    await expect(purchaseNumber(PHONE_NUMBER, BUSINESS_ID)).rejects.toBe(
-      definiteRejection
+    const error = await purchaseNumber(PHONE_NUMBER, BUSINESS_ID).catch(
+      (cause: unknown) => cause
     );
+
+    expect(error).toBeInstanceOf(NumberUnavailableError);
+    expect(error).toMatchObject({ phoneNumber: PHONE_NUMBER });
+    expect((error as Error).cause).toBe(definiteRejection);
 
     expect(mocks.resolveProviderCreateIntent).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
@@ -514,6 +581,33 @@ describe("number purchase ID provenance", () => {
     });
   });
 
+  it("does not expose a recoverable unavailable state unless exact intent resolution succeeds", async () => {
+    const definiteRejection = {
+      status: 422,
+      error: {
+        errors: [
+          {
+            code: "10027",
+            detail: `We don't recognize the number(s) ['${PHONE_NUMBER}']. Did you first search for the number(s)?`,
+            source: { pointer: "/" },
+          },
+        ],
+      },
+    };
+    mocks.createNumberOrder.mockRejectedValue(definiteRejection);
+    mocks.resolveProviderCreateIntent.mockRejectedValue(
+      new Error("intent resolution unavailable")
+    );
+
+    const error = await purchaseNumber(PHONE_NUMBER, BUSINESS_ID).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(error).not.toBeInstanceOf(NumberUnavailableError);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("intent resolution unavailable");
+  });
+
   it.each([
     { status: 500, error: { errors: [{ code: "10007" }] } },
     {
@@ -523,6 +617,43 @@ describe("number purchase ID provenance", () => {
           {
             code: "different-code",
             detail: "different validation response",
+            source: { pointer: "/" },
+          },
+        ],
+      },
+    },
+    {
+      status: 500,
+      error: {
+        errors: [
+          {
+            code: "10027",
+            detail: `We don't recognize the number(s) ['${PHONE_NUMBER}']. Did you first search for the number(s)?`,
+            source: { pointer: "/" },
+          },
+        ],
+      },
+    },
+    {
+      status: 422,
+      error: {
+        errors: [
+          {
+            code: "10027",
+            detail: `We don't recognize the number(s) ['${PHONE_NUMBER}']. Did you first search for the number(s)?`,
+            source: { pointer: "/phone_numbers" },
+          },
+        ],
+      },
+    },
+    {
+      status: 422,
+      error: {
+        errors: [
+          {
+            code: "10027",
+            detail:
+              "We don't recognize the number(s) ['+15745550999']. Did you first search for the number(s)?",
             source: { pointer: "/" },
           },
         ],

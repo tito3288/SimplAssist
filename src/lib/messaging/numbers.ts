@@ -10,6 +10,16 @@ const TELNYX_NUMBER_ORDER_ID_PATTERN =
 
 const TELNYX_PHONE_NUMBER_RESOURCE_ID_PATTERN = /^[0-9]+$/;
 
+const NANP_TOLL_FREE_AREA_CODES = new Set([
+  "800",
+  "833",
+  "844",
+  "855",
+  "866",
+  "877",
+  "888",
+]);
+
 export const NUMBER_ORDER_CREATE_INTENT_SPEC = {
   eventType: "phone_number_order_create_intent",
   resourceType: "phone_number",
@@ -50,6 +60,22 @@ export interface AvailableNumber {
   friendlyName: string;
 }
 
+/**
+ * Return whether a US/Canadian NANP number uses a currently assigned
+ * toll-free NPA. Accept common display punctuation, but require an exact
+ * 10-digit national number (optionally prefixed by country code 1).
+ */
+export function isNanpTollFreeNumber(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  const nationalNumber =
+    digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+
+  return (
+    nationalNumber.length === 10 &&
+    NANP_TOLL_FREE_AREA_CODES.has(nationalNumber.slice(0, 3))
+  );
+}
+
 export async function searchAvailableNumbers(
   areaCode: string
 ): Promise<AvailableNumber[]> {
@@ -57,7 +83,9 @@ export async function searchAvailableNumbers(
     filter: {
       country_code: "US",
       national_destination_code: areaCode,
+      phone_number_type: "local",
       features: ["sms", "voice"],
+      best_effort: false,
       limit: 10,
     },
   });
@@ -65,7 +93,8 @@ export async function searchAvailableNumbers(
   return (
     result.data
       ?.filter((n): n is { phone_number: string; vanity_format?: string } =>
-        typeof n.phone_number === "string"
+        typeof n.phone_number === "string" &&
+        !isNanpTollFreeNumber(n.phone_number)
       )
       .map((n) => ({
         phoneNumber: n.phone_number,
@@ -154,6 +183,37 @@ export class NumberTakenError extends Error {
   }
 }
 
+/**
+ * The selected inventory item was synchronously rejected by Telnyx as no
+ * longer orderable. This type is constructed only after the exact provider
+ * rejection is proven and its matching pre-POST intent is resolved.
+ */
+export class NumberUnavailableError extends Error {
+  readonly phoneNumber: string;
+
+  constructor(phoneNumber: string, cause: unknown) {
+    super(
+      `[messaging:numbers] Number ${phoneNumber} is no longer available to order`,
+      { cause }
+    );
+    this.name = "NumberUnavailableError";
+    this.phoneNumber = phoneNumber;
+  }
+}
+
+/** A toll-free number cannot enter this local-number + 10DLC launch path. */
+export class TollFreeNumberUnsupportedError extends Error {
+  readonly phoneNumber: string;
+
+  constructor(phoneNumber: string) {
+    super(
+      `[messaging:numbers] Toll-free number ${phoneNumber} is not supported by the local 10DLC registration flow`
+    );
+    this.name = "TollFreeNumberUnsupportedError";
+    this.phoneNumber = phoneNumber;
+  }
+}
+
 // Recovery lookup for the purchase-save gap: did THIS BUSINESS already
 // purchase this exact number? Scoped by customer_reference (stamped on
 // every order) — on a single Telnyx account, matching by phone number alone
@@ -229,6 +289,13 @@ export async function purchaseNumber(
   phoneNumber: string,
   businessId: string
 ): Promise<PurchasedNumber> {
+  // Defense in depth: search requests local inventory and filters toll-free
+  // responses, but a stale client or direct request must still be rejected
+  // before the durable intent or paid Telnyx POST.
+  if (isNanpTollFreeNumber(phoneNumber)) {
+    throw new TollFreeNumberUnsupportedError(phoneNumber);
+  }
+
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select("telnyx_messaging_profile_id, telnyx_voice_application_id")
@@ -277,12 +344,13 @@ export async function purchaseNumber(
       { maxRetries: 0 }
     );
   } catch (cause) {
-    if (isDefiniteNumberOrderRejection(cause)) {
+    if (isDefiniteNumberUnavailableRejection(cause, phoneNumber)) {
       await resolveProviderCreateIntent({
         businessId,
         spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
         intentId: providerCreateIntentId,
       });
+      throw new NumberUnavailableError(phoneNumber, cause);
     }
     throw cause;
   }
@@ -338,7 +406,10 @@ export async function purchaseNumber(
   };
 }
 
-function isDefiniteNumberOrderRejection(error: unknown): boolean {
+function isDefiniteNumberUnavailableRejection(
+  error: unknown,
+  requestedPhoneNumber: string
+): boolean {
   if (!error || typeof error !== "object") return false;
   const providerError = error as {
     status?: unknown;
@@ -352,14 +423,14 @@ function isDefiniteNumberOrderRejection(error: unknown): boolean {
   };
   if (providerError.status !== 422) return false;
 
+  const expectedDetail = `We don't recognize the number(s) ['${requestedPhoneNumber}']. Did you first search for the number(s)?`;
+
   return Boolean(
     providerError.error?.errors?.some(
       (item) =>
         String(item.code) === "10027" &&
         item.source?.pointer === "/" &&
-        typeof item.detail === "string" &&
-        item.detail.includes("We don't recognize the number(s)") &&
-        item.detail.includes("Did you first search for the number(s)?")
+        item.detail === expectedDetail
     )
   );
 }

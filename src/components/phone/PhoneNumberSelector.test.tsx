@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BrandProvider } from "@/components/branding/BrandProvider";
 import type { RequestBrand } from "@/lib/branding/types";
-import PhoneNumberSelector, { canonicalLegalUrl } from "./PhoneNumberSelector";
+import PhoneNumberSelector, {
+  canonicalLegalUrl,
+  shouldDisablePhoneNumberNext,
+} from "./PhoneNumberSelector";
 
 const DEFAULT_REQUEST_BRAND: RequestBrand = {
   source: "default",
@@ -29,10 +32,12 @@ const DEFAULT_REQUEST_BRAND: RequestBrand = {
   },
 };
 
-function renderPhoneNumberSelector(): string {
+function renderPhoneNumberSelector(
+  props: React.ComponentProps<typeof PhoneNumberSelector> = {}
+): string {
   return renderToStaticMarkup(
     <BrandProvider requestBrand={DEFAULT_REQUEST_BRAND}>
-      <PhoneNumberSelector />
+      <PhoneNumberSelector {...props} />
     </BrandProvider>,
   );
 }
@@ -73,5 +78,61 @@ describe("PhoneNumberSelector canonical legal links", () => {
     expect(markup).toContain("hover:text-[var(--brand-primary-soft-dark)]");
     expect(markup).toContain("focus:border-[var(--brand-primary-dark)]");
     expect(markup).toContain("bg-[var(--brand-primary-alt)]");
+  });
+});
+
+describe("PhoneNumberSelector pending-number replacement", () => {
+  it("keeps Next disabled until a failed pending number is replaced", () => {
+    expect(
+      shouldDisablePhoneNumberNext({
+        phoneNumber: "+18885550123",
+        pendingSelection: true,
+        pendingFailureReason: "That number is no longer available",
+        replacingNumber: false,
+      })
+    ).toBe(true);
+
+    expect(
+      shouldDisablePhoneNumberNext({
+        phoneNumber: "+15745550123",
+        pendingSelection: true,
+        pendingFailureReason: null,
+        replacingNumber: false,
+      })
+    ).toBe(false);
+  });
+
+  it("keeps Next disabled while replacement search is active", () => {
+    expect(
+      shouldDisablePhoneNumberNext({
+        phoneNumber: "+15745550123",
+        pendingSelection: true,
+        pendingFailureReason: null,
+        replacingNumber: true,
+      })
+    ).toBe(true);
+  });
+
+  it("offers Change number for a pending, unpurchased selection", () => {
+    const markup = renderPhoneNumberSelector({
+      initialPhoneNumber: "+15745550123",
+      initialPhoneNumberPending: true,
+      initialConsentAgreed: true,
+    });
+
+    expect(markup).toContain("Number Selected");
+    expect(markup).toContain("+15745550123");
+    expect(markup).toContain("Change number");
+  });
+
+  it("never offers Change number for an active purchased number", () => {
+    const markup = renderPhoneNumberSelector({
+      initialPhoneNumber: "+15745550123",
+      initialPhoneNumberPending: false,
+      initialConsentAgreed: true,
+    });
+
+    expect(markup).toContain("+15745550123");
+    expect(markup).not.toContain("Change number");
   });
 });

@@ -87,6 +87,7 @@ function baseArgs() {
       booking_mode: "collect_info",
     },
     phoneNumber: "+15745550101",
+    activePhoneNumber: null,
     smsReady: false,
     riskCleared: true,
   } as unknown as Parameters<typeof deriveOnboardingStep>[0];
@@ -131,6 +132,71 @@ describe("deriveOnboardingStep 3+3 quality gate", () => {
     args.business.telnyx_brand_id = "brand-1";
     expect(deriveOnboardingStep(args)).toBe("carrier_review");
   });
+
+  it("keeps a submitted approved brand in carrier review without a number failure", () => {
+    const args = baseArgs();
+    args.business.telnyx_brand_id = "brand-1";
+    args.business.brand_status = "approved";
+    args.business.onboarding_registration_status = "submitted";
+
+    expect(deriveOnboardingStep(args)).toBe("carrier_review");
+  });
+
+  it("keeps an approved-brand technical failure in carrier review without a number failure reason", () => {
+    const args = baseArgs();
+    args.business.telnyx_brand_id = "brand-1";
+    args.business.brand_status = "approved";
+    args.business.onboarding_registration_status = "failed";
+
+    expect(deriveOnboardingStep(args)).toBe("carrier_review");
+  });
+
+  it("returns an approved-brand number failure to the phone-number picker", () => {
+    const args = baseArgs();
+    args.business.telnyx_brand_id = "brand-1";
+    args.business.brand_status = "approved";
+    args.business.onboarding_registration_status = "failed";
+    args.business.pending_phone_number_failure_reason = "Number unavailable";
+
+    expect(deriveOnboardingStep(args)).toBe("phone_number");
+  });
+
+  it("does not pull an active purchased number back into the picker", () => {
+    const args = baseArgs();
+    args.business.telnyx_brand_id = "brand-1";
+    args.business.brand_status = "approved";
+    args.business.onboarding_registration_status = "failed";
+    args.business.pending_phone_number_failure_reason = "Stale number failure";
+    args.activePhoneNumber = "+15745550101";
+
+    expect(deriveOnboardingStep(args)).toBe("carrier_review");
+  });
+
+  it.each([
+    {
+      name: "SMS-ready",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.smsReady = true;
+      },
+    },
+    {
+      name: "completed",
+      configure: (args: ReturnType<typeof baseArgs>) => {
+        args.business.onboarding_completed_at = "2026-07-24T00:00:00.000Z";
+      },
+    },
+  ])(
+    "keeps a $name business complete despite a stale number failure",
+    ({ configure }) => {
+      const args = baseArgs();
+      args.business.telnyx_brand_id = "brand-1";
+      args.business.onboarding_registration_status = "failed";
+      args.business.pending_phone_number_failure_reason = "Stale number failure";
+      configure(args);
+
+      expect(deriveOnboardingStep(args)).toBe("complete");
+    }
+  );
 
   it("keeps completed customers ahead of the gate", () => {
     const args = baseArgs();

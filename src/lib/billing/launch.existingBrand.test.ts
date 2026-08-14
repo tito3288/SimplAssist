@@ -87,8 +87,10 @@ vi.mock("@/lib/messaging/numbers", () => ({
     resourceType: "phone_number",
   },
   NumberTakenError: class extends Error {},
+  NumberUnavailableError: class extends Error {},
   PurchasedNumberResolutionError: class extends Error {},
   PurchasedNumberSaveError: class extends Error {},
+  TollFreeNumberUnsupportedError: class extends Error {},
   normalizeTelnyxPhoneNumberResourceId: (value: unknown) => {
     if (typeof value !== "string" || !/^[0-9]+$/.test(value.trim())) {
       throw new Error("invalid managed phone-number resource id");

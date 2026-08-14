@@ -11,7 +11,9 @@ import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
 import BrandVerificationForm from '@/components/onboarding/BrandVerificationForm';
 import SmsUseCaseForm from '@/components/onboarding/SmsUseCaseForm';
 import ReviewAndLaunch from '@/components/onboarding/ReviewAndLaunch';
-import PhoneNumberSelector from '@/components/phone/PhoneNumberSelector';
+import PhoneNumberSelector, {
+  shouldDisablePhoneNumberNext,
+} from '@/components/phone/PhoneNumberSelector';
 import { useBrand } from '@/components/branding/BrandProvider';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { Badge } from '@/components/ui/Badge';
@@ -426,6 +428,19 @@ function PhoneNumberStep({
   onPurchased: () => void;
   onNext: () => void;
 }) {
+  const [replacingNumber, setReplacingNumber] = useState(false);
+  const pendingSelection = Boolean(
+    state.pendingPhoneNumber &&
+      !state.activePhoneNumber &&
+      state.phoneNumber === state.pendingPhoneNumber
+  );
+  const nextDisabled = shouldDisablePhoneNumberNext({
+    phoneNumber: state.phoneNumber,
+    pendingSelection,
+    pendingFailureReason: state.pendingPhoneNumberFailureReason,
+    replacingNumber,
+  });
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -440,9 +455,14 @@ function PhoneNumberStep({
 
       <PhoneNumberSelector
         initialPhoneNumber={state.phoneNumber}
+        initialPhoneNumberPending={pendingSelection}
         initialConsentAgreed={state.smsConsentAgreed}
         initialFailureReason={state.pendingPhoneNumberFailureReason}
-        onNumberPurchased={onPurchased}
+        onNumberPurchased={() => {
+          setReplacingNumber(false);
+          onPurchased();
+        }}
+        onReplacementModeChange={setReplacingNumber}
       />
 
       <div className="flex justify-between pt-4">
@@ -456,7 +476,7 @@ function PhoneNumberStep({
         <button
           type="button"
           onClick={onNext}
-          disabled={!state.phoneNumber}
+          disabled={nextDisabled}
           className="py-2 px-6 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] dark:bg-[var(--brand-primary-dark)] dark:text-[#16100b] dark:hover:bg-[var(--brand-primary-hover-dark)] text-white font-medium rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Next

@@ -460,6 +460,7 @@ async function getOnboardingStateForBusiness(
     faqs: normalizedFaqs,
     aiSettings: normalizedAiSettings,
     phoneNumber: phone,
+    activePhoneNumber: activePhone,
     smsReady: smsReadiness.smsReady,
     riskCleared:
       riskReview.status === "passed" || riskReview.status === "admin_approved",
@@ -700,6 +701,7 @@ export function deriveOnboardingStep(args: {
   faqs: OnboardingFaq[];
   aiSettings: OnboardingAiSettings | null;
   phoneNumber: string | null;
+  activePhoneNumber: string | null;
   smsReady: boolean;
   riskCleared: boolean;
 }): OnboardingStep {
@@ -710,6 +712,7 @@ export function deriveOnboardingStep(args: {
     faqs,
     aiSettings,
     phoneNumber,
+    activePhoneNumber,
     smsReady,
     riskCleared,
   } = args;
@@ -723,17 +726,26 @@ export function deriveOnboardingStep(args: {
 
   if (smsReady || business.onboarding_completed_at) return "complete";
 
-  if (registrationHasStarted(business)) {
+  // A failed pre-purchase selection must route back to the number picker even
+  // when an earlier launch attempt already saved/approved the brand. Without
+  // this exception, the saved brand makes registrationHasStarted true and the
+  // carrier-review shortcut hides the only corrective action. An active owned
+  // number is different: its lifecycle is already provider-managed, so a stale
+  // pending-number failure must never pull it back into the pre-purchase picker.
+  const hasPendingNumberFailure = Boolean(
+    !activePhoneNumber &&
+      business.onboarding_registration_status === "failed" &&
+      business.pending_phone_number_failure_reason
+  );
+
+  if (registrationHasStarted(business) && !hasPendingNumberFailure) {
     return "carrier_review";
   }
 
   if (!hasBusinessInfo(business)) return "business_info";
   if (hours.length < 7) return "business_hours";
   if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
-  if (
-    business.onboarding_registration_status === "failed" &&
-    business.pending_phone_number_failure_reason
-  ) {
+  if (hasPendingNumberFailure) {
     return "phone_number";
   }
   if (!aiSettings) return "ai_settings";

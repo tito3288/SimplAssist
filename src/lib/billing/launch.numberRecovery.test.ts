@@ -97,7 +97,11 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 }));
 
 import { attemptPaidLaunch } from "./launch";
-import { PurchasedNumberResolutionError } from "@/lib/messaging/numbers";
+import {
+  NumberUnavailableError,
+  PurchasedNumberResolutionError,
+  TollFreeNumberUnsupportedError,
+} from "@/lib/messaging/numbers";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-00000000b1z1";
 const PENDING_NUMBER = "+15745550300";
@@ -1252,9 +1256,12 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     expect(result.message).toContain("try again or contact support");
   });
 
-  it("still classifies genuine Telnyx order failures as unavailable", async () => {
+  it("classifies only a typed, reconciled Telnyx rejection as unavailable", async () => {
     mocks.purchaseNumber.mockRejectedValue(
-      new Error(`Telnyx number order failed for ${PENDING_NUMBER}: {"status":"failure"}`)
+      new NumberUnavailableError(PENDING_NUMBER, {
+        status: 422,
+        error: { errors: [{ code: "10027" }] },
+      })
     );
     queueHappyPathThrough(
       { data: null, error: null }, // step-1 collision check
@@ -1264,5 +1271,101 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
     expect(result.status).toBe("number_unavailable");
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(
+      chains.some((chain) =>
+        chain.update.mock.calls.some(([value]) =>
+          expect.objectContaining({
+            onboarding_registration_status: "failed",
+            onboarding_registration_error: expect.any(String),
+            pending_phone_number_failure_reason: expect.any(String),
+            onboarding_step: "phone_number",
+          }).asymmetricMatch(value)
+        )
+      )
+    ).toBe(true);
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
+  it("does not report a recoverable picker state when persisting the number failure fails", async () => {
+    mocks.purchaseNumber.mockRejectedValue(
+      new NumberUnavailableError(PENDING_NUMBER, {
+        status: 422,
+        error: { errors: [{ code: "10027" }] },
+      })
+    );
+    queueHappyPathThrough(
+      { data: null, error: null }, // step-1 collision check
+      { error: { message: "database unavailable" } } // atomic failure-state update
+    );
+
+    await expect(
+      attemptPaidLaunch(BUSINESS_ID, "onboarding_retry")
+    ).rejects.toThrow("Failed to persist number failure");
+
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("routes a typed toll-free defense back to number selection", async () => {
+    mocks.purchaseNumber.mockRejectedValue(
+      new TollFreeNumberUnsupportedError("+18885550300")
+    );
+    queueHappyPathThrough(
+      { data: null, error: null }, // step-1 collision check
+      { error: null } // persistNumberFailure update
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("number_unavailable");
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit provider order failure generic after its intent is safely resolved", async () => {
+    mocks.purchaseNumber.mockRejectedValue(
+      new Error(`Telnyx number order failed for ${PENDING_NUMBER}: {"status":"failure"}`)
+    );
+    queueHappyPathThrough(
+      { data: null, error: null } // step-1 collision check
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("try again or contact support");
+    expect(
+      chains.some((chain) =>
+        chain.update.mock.calls.some(([value]) =>
+          Object.prototype.hasOwnProperty.call(
+            value as Record<string, unknown>,
+            "pending_phone_number_failure_reason"
+          )
+        )
+      )
+    ).toBe(false);
+  });
+
+  it("does not classify a raw or unrelated 10027 response by code or message text", async () => {
+    mocks.purchaseNumber.mockRejectedValue({
+      status: 422,
+      error: {
+        errors: [
+          {
+            code: "10027",
+            detail: "Different validation failure: number unavailable",
+            source: { pointer: "/phone_numbers" },
+          },
+        ],
+      },
+    });
+    queueHappyPathThrough(
+      { data: null, error: null } // step-1 collision check
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("try again or contact support");
   });
 });

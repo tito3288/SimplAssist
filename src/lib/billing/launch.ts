@@ -10,9 +10,11 @@ import {
   normalizeTelnyxPhoneNumberResourceId,
   NUMBER_ORDER_CREATE_INTENT_SPEC,
   NumberTakenError,
+  NumberUnavailableError,
   PurchasedNumberResolutionError,
   PurchasedNumberSaveError,
   purchaseNumber,
+  TollFreeNumberUnsupportedError,
 } from "@/lib/messaging/numbers";
 import { getActiveSmsNumberForBusiness } from "@/lib/messaging/phoneNumberLookup";
 import {
@@ -438,9 +440,12 @@ export async function attemptPaidLaunch(
       return { status: "failed", message: NUMBER_SAVE_RETRY_MESSAGE };
     }
 
-    if (err instanceof NumberTakenError) {
+    if (
+      err instanceof NumberTakenError ||
+      err instanceof NumberUnavailableError ||
+      err instanceof TollFreeNumberUnsupportedError
+    ) {
       await persistNumberFailure(businessId, PAID_NUMBER_FAILED_MESSAGE);
-      await markRegistrationFailed(businessId, PAID_NUMBER_FAILED_MESSAGE);
       return {
         status: "number_unavailable",
         message: PAID_NUMBER_FAILED_MESSAGE,
@@ -740,18 +745,11 @@ async function purchasePendingNumber(
   // Step 3: fresh purchase.
   let purchased: Awaited<ReturnType<typeof purchaseNumber>>;
   try {
-    // This legacy provider-message classifier is intentionally limited to
-    // the fresh Telnyx order call. Local reads/saves, owned-number recovery,
-    // attachment, routing, and all later launch work remain generic or use
-    // their own typed errors, so an already-owned number is never discarded.
     purchased = await purchaseNumber(pendingPhoneNumber, businessId);
   } catch (error) {
     if (error instanceof PurchasedNumberResolutionError) {
       await savePurchasedNumberResolutionFence(businessId, error);
       throw error;
-    }
-    if (isLikelyNumberUnavailable(error)) {
-      throw new NumberTakenError(pendingPhoneNumber);
     }
     throw error;
   }
@@ -860,6 +858,9 @@ async function persistNumberFailure(
   const { error } = await supabaseAdmin
     .from("businesses")
     .update({
+      onboarding_registration_status: "failed",
+      onboarding_registration_error: message,
+      onboarding_registration_submitted_at: null,
       pending_phone_number_failure_reason: message,
       onboarding_step: "phone_number",
       onboarding_last_saved_at: new Date().toISOString(),
@@ -867,9 +868,8 @@ async function persistNumberFailure(
     .eq("id", businessId);
 
   if (error) {
-    console.error(
-      `[billing:launch] Failed to persist number failure for ${businessId}:`,
-      error
+    throw new Error(
+      `[billing:launch] Failed to persist number failure for ${businessId}: ${error.message}`
     );
   }
 }
@@ -932,20 +932,4 @@ async function releaseClaimToRiskReview(
       `[billing:launch] Failed to release claim to risk review for ${businessId}: ${error.message}`
     );
   }
-}
-
-function isLikelyNumberUnavailable(err: unknown): boolean {
-  const text =
-    err instanceof Error
-      ? `${err.message} ${JSON.stringify((err as Error & { cause?: unknown }).cause ?? "")}`
-      : JSON.stringify(err);
-
-  // NOTE: the former `phone_number` token is deliberately gone — it matched
-  // the phone_numbers RELATION NAME inside any Postgres error on that
-  // table, misclassifying save failures as "unavailable". Save failures
-  // are now typed (PurchasedNumberSaveError) and never reach this sniffer.
-  return (
-    /already|unavailable|not available|taken|number order failed/i.test(text) ||
-    /"code"\s*:\s*"10027"/.test(text)
-  );
 }

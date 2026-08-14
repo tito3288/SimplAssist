@@ -104,4 +104,23 @@ describe("POST /api/onboarding/submit-registration neutral errors", () => {
       );
     }
   );
+
+  it("returns a number-unavailable submission to the phone-number step", async () => {
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "number_unavailable",
+      message: "That number is no longer available. Choose another number.",
+    });
+    mocks.getOnboardingStateForBusinessId.mockResolvedValue({
+      currentStep: "phone_number",
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "That number is no longer available. Choose another number.",
+      code: "phone_number_unavailable",
+      state: { currentStep: "phone_number" },
+    });
+  });
 });

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isNanpTollFreeNumber } from "@/lib/messaging/numbers";
 import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+
+const CANONICAL_US_E164_PATTERN = /^\+1\d{10}$/;
 
 export async function POST(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();
@@ -17,6 +20,52 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let requestBody: unknown;
+  try {
+    requestBody = await request.json();
+  } catch {
+    return NextResponse.json(
+      {
+        error: "Phone number must be in +1 followed by 10 digits format",
+        code: "invalid_phone_number",
+      },
+      { status: 400 }
+    );
+  }
+
+  const phoneNumber =
+    typeof requestBody === "object" && requestBody !== null
+      ? (requestBody as { phoneNumber?: unknown }).phoneNumber
+      : undefined;
+
+  if (typeof phoneNumber !== "string" || phoneNumber.length === 0) {
+    return NextResponse.json(
+      { error: "Phone number is required", code: "invalid_phone_number" },
+      { status: 400 }
+    );
+  }
+
+  if (!CANONICAL_US_E164_PATTERN.test(phoneNumber)) {
+    return NextResponse.json(
+      {
+        error: "Phone number must be in +1 followed by 10 digits format",
+        code: "invalid_phone_number",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (isNanpTollFreeNumber(phoneNumber)) {
+    return NextResponse.json(
+      {
+        error:
+          "Toll-free numbers are not supported for 10DLC registration. Choose a local U.S. number.",
+        code: "toll_free_not_supported",
+      },
+      { status: 400 }
+    );
+  }
+
   const { data: business, error: bizError } = await supabase
     .from("businesses")
     .select("id, compliance_info_completed_at")
@@ -27,15 +76,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Business not found" },
       { status: 404 }
-    );
-  }
-
-  const { phoneNumber } = await request.json();
-
-  if (!phoneNumber) {
-    return NextResponse.json(
-      { error: "Phone number is required" },
-      { status: 400 }
     );
   }
 
@@ -98,7 +138,7 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const areaCode = phoneNumber.replace(/^\+?1?/, "").slice(0, 3);
+    const areaCode = phoneNumber.slice(2, 5);
     const { data: record, error: updateError } = await supabase
       .from("businesses")
       .update({
