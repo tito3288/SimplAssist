@@ -753,7 +753,7 @@ INSERT INTO public.phone_numbers (
   '20000000-0000-4000-a034-000000000001',
   '10000000-0000-4000-a034-000000000001',
   '+13175550001',
-  '03400000-0000-4000-a001-000000000001',
+  '1293384261075734001',
   true
 );
 
@@ -773,7 +773,7 @@ INSERT INTO public.telnyx_managed_resources (
   '10000000-0000-4000-a034-000000000001',
   '20000000-0000-4000-a034-000000000001',
   'phone_number',
-  '03400000-0000-4000-a001-000000000001',
+  '1293384261075734001',
   '+13175550001',
   'created_by_simplassist',
   'managed_releaseable',
@@ -914,7 +914,7 @@ INSERT INTO public.phone_numbers (
   '20000000-0000-4000-a034-000000000002',
   '10000000-0000-4000-a034-000000000002',
   '+13175550002',
-  '03400000-0000-4000-a002-000000000002',
+  '1293384261075734002',
   true
 );
 
@@ -934,7 +934,7 @@ INSERT INTO public.telnyx_managed_resources (
   '10000000-0000-4000-a034-000000000002',
   '20000000-0000-4000-a034-000000000002',
   'phone_number',
-  '03400000-0000-4000-a002-000000000002',
+  '1293384261075734002',
   '+13175550002',
   'created_by_simplassist',
   'managed_releaseable',
@@ -1073,7 +1073,7 @@ INSERT INTO public.phone_numbers (
   '20000000-0000-4000-a034-000000000003',
   '10000000-0000-4000-a034-000000000003',
   '+13175550003',
-  '03400000-0000-4000-a003-000000000003',
+  '1293384261075734003',
   true
 );
 
@@ -1093,7 +1093,7 @@ INSERT INTO public.telnyx_managed_resources (
   '10000000-0000-4000-a034-000000000003',
   '20000000-0000-4000-a034-000000000003',
   'phone_number',
-  '03400000-0000-4000-a003-000000000003',
+  '1293384261075734003',
   '+13175550003',
   'created_by_simplassist',
   'managed_releaseable',
@@ -1304,7 +1304,7 @@ SELECT ok(
        AND business.telnyx_resource_state = 'parked'
        AND phone.resource_status = 'parked'
        AND phone.telnyx_phone_number_id =
-             '03400000-0000-4000-a003-000000000003'
+             '1293384261075734003'
     FROM public.account_deletion_stripe_actions AS action
     JOIN public.businesses AS business
       ON business.id = action.business_id
@@ -1400,7 +1400,7 @@ INSERT INTO public.phone_numbers (
   '20000000-0000-4000-a034-000000000006',
   '10000000-0000-4000-a034-000000000006',
   '+13175550006',
-  '03400000-0000-4000-a006-000000000006',
+  '1293384261075734006',
   true
 );
 
@@ -1420,7 +1420,7 @@ INSERT INTO public.telnyx_managed_resources (
   '10000000-0000-4000-a034-000000000006',
   '20000000-0000-4000-a034-000000000006',
   'phone_number',
-  '03400000-0000-4000-a006-000000000006',
+  '1293384261075734006',
   '+13175550006',
   'created_by_simplassist',
   'managed_releaseable',
@@ -1520,7 +1520,7 @@ SELECT ok(
        AND run.checkout_reservation_expires_at > now()
        AND phone.resource_status = 'parked'
        AND phone.telnyx_phone_number_id =
-             '03400000-0000-4000-a006-000000000006'
+             '1293384261075734006'
     FROM public.businesses AS business
     JOIN public.telnyx_resource_release_runs AS run
       ON run.id = business.active_telnyx_release_run_id
@@ -1552,7 +1552,7 @@ INSERT INTO public.phone_numbers (
   '20000000-0000-4000-a034-000000000007',
   '10000000-0000-4000-a034-000000000007',
   '+13175550007',
-  '03400000-0000-4000-a007-000000000007',
+  '1293384261075734007',
   true
 );
 
@@ -1572,7 +1572,7 @@ INSERT INTO public.telnyx_managed_resources (
   '10000000-0000-4000-a034-000000000007',
   '20000000-0000-4000-a034-000000000007',
   'phone_number',
-  '03400000-0000-4000-a007-000000000007',
+  '1293384261075734007',
   '+13175550007',
   'created_by_simplassist',
   'managed_releaseable',
@@ -1649,7 +1649,7 @@ SELECT ok(
        AND reason.status = 'active'
        AND phone.resource_status = 'parked'
        AND phone.telnyx_phone_number_id =
-             '03400000-0000-4000-a007-000000000007'
+             '1293384261075734007'
     FROM public.businesses AS business
     JOIN public.telnyx_resource_release_runs AS run
       ON run.id = business.active_telnyx_release_run_id
@@ -1744,7 +1744,7 @@ INSERT INTO public.telnyx_managed_resources (
   '30000000-0000-4000-a034-000000000010',
   '10000000-0000-4000-a034-000000000010',
   'phone_number',
-  '03400000-0000-4000-a010-000000000012',
+  '1293384261075734012',
   '+13175550010',
   'created_by_simplassist',
   'released',
@@ -1780,7 +1780,7 @@ SELECT lives_ok(
       '20000000-0000-4000-a034-000000000011',
       '10000000-0000-4000-a034-000000000004',
       '+13175550010',
-      '03400000-0000-4000-a010-000000000012',
+      '1293384261075734012',
       true
     )
   $$,
@@ -1805,7 +1805,7 @@ SELECT lives_ok(
       '10000000-0000-4000-a034-000000000004',
       '20000000-0000-4000-a034-000000000011',
       'phone_number',
-      '03400000-0000-4000-a010-000000000012',
+      '1293384261075734012',
       '+13175550010',
       'created_by_simplassist',
       'managed_releaseable',
@@ -2154,13 +2154,13 @@ SELECT throws_ok(
       '20000000-0000-4000-a034-000000000022',
       '10000000-0000-4000-a034-000000000005',
       '+13175559992',
-      '03400000-0000-4000-A010-000000000012',
+      '1293384261075734012',
       true
     )
   $$,
   '23505',
   'duplicate key value violates unique constraint "phone_numbers_telnyx_id_lower_unique"',
-  'a second active phone cannot claim the same provider ID case-insensitively'
+  'a second active phone cannot claim the same provider resource ID'
 );
 
 SELECT throws_ok(
@@ -2179,7 +2179,7 @@ SELECT throws_ok(
       '30000000-0000-4000-a034-000000000021',
       '10000000-0000-4000-a034-000000000005',
       'phone_number',
-      '03400000-0000-4000-A010-000000000012',
+      '1293384261075734012',
       '+13175559993',
       'created_by_simplassist',
       'managed_releaseable',
@@ -2208,7 +2208,7 @@ SELECT throws_ok(
       '30000000-0000-4000-a034-000000000022',
       '10000000-0000-4000-a034-000000000005',
       'phone_number',
-      '03400000-0000-4000-a022-000000000022',
+      '1293384261075734022',
       '+13175550010',
       'created_by_simplassist',
       'managed_releaseable',

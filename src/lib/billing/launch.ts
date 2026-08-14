@@ -7,7 +7,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   attachOwnedNumberToCustomerProfile,
   findOwnedNumberId,
+  normalizeTelnyxPhoneNumberResourceId,
+  NUMBER_ORDER_CREATE_INTENT_SPEC,
   NumberTakenError,
+  PurchasedNumberResolutionError,
   PurchasedNumberSaveError,
   purchaseNumber,
 } from "@/lib/messaging/numbers";
@@ -36,6 +39,10 @@ import {
 } from "@/lib/messaging/registration/riskCategories";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 import { buildProviderResourceName } from "@/lib/messaging/registration/providerResourceName";
+import {
+  readProviderCreateIntentForPayload,
+  resolveProviderCreateIntent,
+} from "@/lib/messaging/registration/providerCreateIntent";
 import { verifyPublishedCompliancePage } from "@/lib/messaging/registration/publicCompliancePage";
 import {
   getA2pRiskClearanceForBusiness,
@@ -297,11 +304,31 @@ export async function attemptPaidLaunch(
 
     const latestNumber = await readActiveNumber(businessId);
     if (latestNumber) {
+      const providerCreateIntentId =
+        await readProviderCreateIntentForPayload({
+          businessId,
+          spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+          expectedPayload: {
+            version: 1,
+            phoneNumber: latestNumber.phone_number,
+          },
+        });
+      const phoneNumberResourceId = await resolveActiveNumberResourceId(
+        businessId,
+        latestNumber
+      );
       await attachOwnedNumberToCustomerProfile(
         businessId,
-        latestNumber.telnyx_phone_number_id
+        phoneNumberResourceId
       );
       await clearPendingPhoneNumber(businessId);
+      if (providerCreateIntentId) {
+        await resolveProviderCreateIntent({
+          businessId,
+          spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+          intentId: providerCreateIntentId,
+        });
+      }
     } else {
       await purchasePendingNumber(businessId, business.pending_phone_number);
     }
@@ -394,7 +421,10 @@ export async function attemptPaidLaunch(
       };
     }
 
-    if (err instanceof PurchasedNumberSaveError) {
+    if (
+      err instanceof PurchasedNumberSaveError ||
+      err instanceof PurchasedNumberResolutionError
+    ) {
       // The number IS purchased and owned — never route to re-pick, never
       // claim "not charged" is a fresh start. pending_phone_number is
       // deliberately kept: Retry re-enters purchasePendingNumber, finds
@@ -467,6 +497,69 @@ async function readActiveNumber(
     );
   }
   return data ?? null;
+}
+
+async function resolveActiveNumberResourceId(
+  businessId: string,
+  row: ActiveNumberRow
+): Promise<string> {
+  let invalidStoredId: unknown;
+  try {
+    return normalizeTelnyxPhoneNumberResourceId(
+      row.telnyx_phone_number_id,
+      `stored for business ${businessId}`
+    );
+  } catch (error) {
+    invalidStoredId = error;
+    // Older launches stored the UUID of the number-order line item in this
+    // column. That UUID belongs to /number_order_phone_numbers and must never
+    // be sent to /phone_numbers/{id}. Resolve the exact owned resource under
+    // this business's customer_reference, then repair the local row and its
+    // cancellation ledger atomically before any provider mutation.
+  }
+
+  // Only the exact known legacy shape is eligible for automatic repair.
+  // Arbitrary/corrupt identifiers remain fail-closed and do not even trigger
+  // a provider ownership lookup.
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      row.telnyx_phone_number_id
+    )
+  ) {
+    throw invalidStoredId;
+  }
+
+  const resolvedResourceId = await findOwnedNumberId(
+    row.phone_number,
+    businessId
+  );
+  if (!resolvedResourceId) {
+    throw new Error(
+      `[billing:launch] Could not resolve the owned Telnyx phone-number resource for ${row.phone_number} (${businessId})`
+    );
+  }
+
+  const { data: repaired, error: repairError } = await supabaseAdmin.rpc(
+    "repair_telnyx_phone_number_resource_id",
+    {
+      p_business_id: businessId,
+      p_phone_number_id: row.id,
+      p_phone_number: row.phone_number,
+      p_expected_legacy_id: row.telnyx_phone_number_id,
+      p_resolved_resource_id: resolvedResourceId,
+    }
+  );
+
+  if (repairError || repaired !== true) {
+    throw new Error(
+      `[billing:launch] Failed to persist the owned Telnyx phone-number resource for ${row.phone_number} (${businessId}): ${repairError?.message ?? "guarded repair returned false"}`
+    );
+  }
+
+  console.warn(
+    `[billing:launch] Reconciled legacy Telnyx number-order id for ${businessId} (phone row=${row.id})`
+  );
+  return resolvedResourceId;
 }
 
 async function isBillingReady(
@@ -570,11 +663,11 @@ async function purchasePendingNumber(
   // are structurally possible and must not wedge this read.
   const { data: existingRow, error: rowError } = await supabaseAdmin
     .from("phone_numbers")
-    .select("business_id, telnyx_phone_number_id")
+    .select("id, business_id, phone_number, telnyx_phone_number_id")
     .eq("phone_number", pendingPhoneNumber)
     .eq("is_active", true)
     .limit(1)
-    .maybeSingle<{ business_id: string; telnyx_phone_number_id: string }>();
+    .maybeSingle<ActiveNumberRow & { business_id: string }>();
 
   if (rowError) {
     throw new Error(
@@ -583,11 +676,31 @@ async function purchasePendingNumber(
   }
   if (existingRow) {
     if (existingRow.business_id === businessId) {
+      const providerCreateIntentId =
+        await readProviderCreateIntentForPayload({
+          businessId,
+          spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+          expectedPayload: {
+            version: 1,
+            phoneNumber: existingRow.phone_number,
+          },
+        });
+      const phoneNumberResourceId = await resolveActiveNumberResourceId(
+        businessId,
+        existingRow
+      );
       await attachOwnedNumberToCustomerProfile(
         businessId,
-        existingRow.telnyx_phone_number_id
+        phoneNumberResourceId
       );
       await clearPendingPhoneNumber(businessId);
+      if (providerCreateIntentId) {
+        await resolveProviderCreateIntent({
+          businessId,
+          spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+          intentId: providerCreateIntentId,
+        });
+      }
       return;
     }
     throw new NumberTakenError(pendingPhoneNumber);
@@ -597,17 +710,30 @@ async function purchasePendingNumber(
   // this number but the save failed (PurchasedNumberSaveError path); the
   // lookup is customer_reference-scoped so another business's purchase can
   // never be seized. Complete the save and re-assert routing; no second
-  // charge. (A stale-empty list within Telnyx's read-after-write window
-  // falls through to step 3, where re-ordering an owned number is rejected
-  // by Telnyx — re-pick path, never a double charge; retries here are
-  // human-speed, so the window is theoretical.)
+  // charge. A complete zero-match result authorizes the first order below.
+  // After that charged POST, purchaseNumber must resolve the owned numeric
+  // resource ID or return typed order provenance, which is persisted as a
+  // no-second-order fence before the launch fails closed.
   const ownedId = await findOwnedNumberId(pendingPhoneNumber, businessId);
   if (ownedId) {
     console.warn(
       `[billing:launch] Recovering purchased-but-unsaved number for ${businessId} (telnyx id=${ownedId})`
     );
+    const providerCreateIntentId =
+      await readProviderCreateIntentForPayload({
+        businessId,
+        spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+        expectedPayload: { version: 1, phoneNumber: pendingPhoneNumber },
+      });
     await savePurchasedNumber(businessId, pendingPhoneNumber, ownedId);
     await attachOwnedNumberToCustomerProfile(businessId, ownedId);
+    if (providerCreateIntentId) {
+      await resolveProviderCreateIntent({
+        businessId,
+        spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+        intentId: providerCreateIntentId,
+      });
+    }
     return;
   }
 
@@ -620,6 +746,10 @@ async function purchasePendingNumber(
     // their own typed errors, so an already-owned number is never discarded.
     purchased = await purchaseNumber(pendingPhoneNumber, businessId);
   } catch (error) {
+    if (error instanceof PurchasedNumberResolutionError) {
+      await savePurchasedNumberResolutionFence(businessId, error);
+      throw error;
+    }
     if (isLikelyNumberUnavailable(error)) {
       throw new NumberTakenError(pendingPhoneNumber);
     }
@@ -628,19 +758,30 @@ async function purchasePendingNumber(
   await savePurchasedNumber(
     businessId,
     purchased.phoneNumber,
-    purchased.phoneNumberId
+    purchased.phoneNumberId,
+    purchased.numberOrderPhoneNumberId,
+    purchased.numberOrderId
   );
+  await resolveProviderCreateIntent({
+    businessId,
+    spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+    intentId: purchased.providerCreateIntentId,
+  });
 }
 
 async function savePurchasedNumber(
   businessId: string,
   phoneNumber: string,
-  telnyxPhoneNumberId: string
+  telnyxPhoneNumberId: string,
+  telnyxNumberOrderPhoneNumberId: string | null = null,
+  telnyxNumberOrderId: string | null = null
 ): Promise<void> {
   const { error: insertError } = await supabaseAdmin.from("phone_numbers").insert({
     business_id: businessId,
     phone_number: phoneNumber,
     telnyx_phone_number_id: telnyxPhoneNumberId,
+    telnyx_number_order_phone_number_id: telnyxNumberOrderPhoneNumberId,
+    telnyx_number_order_id: telnyxNumberOrderId,
     is_active: true,
   });
 
@@ -657,6 +798,41 @@ async function savePurchasedNumber(
   }
 
   await clearPendingPhoneNumber(businessId);
+}
+
+async function savePurchasedNumberResolutionFence(
+  businessId: string,
+  error: PurchasedNumberResolutionError
+): Promise<void> {
+  const durableOrderId =
+    error.numberOrderPhoneNumberId ?? error.numberOrderId;
+  if (!durableOrderId) {
+    // The pre-POST provider-create intent is the authoritative no-second-order
+    // fence even when Telnyx's response omitted both order UUIDs. With no
+    // endpoint-provenance ID, do not invent a local phone resource pointer.
+    return;
+  }
+
+  const { error: insertError } = await supabaseAdmin.from("phone_numbers").insert({
+    business_id: businessId,
+    phone_number: error.phoneNumber,
+    // Transitional no-second-order fence for an already-paid order. This is
+    // deliberately never sent to Telnyx: every active-row path validates a
+    // numeric owned resource ID and reconciles this UUID first.
+    telnyx_phone_number_id: durableOrderId,
+    telnyx_number_order_phone_number_id:
+      error.numberOrderPhoneNumberId ?? null,
+    telnyx_number_order_id: error.numberOrderId ?? null,
+    is_active: true,
+  });
+
+  if (insertError) {
+    throw new PurchasedNumberSaveError({
+      phoneNumber: error.phoneNumber,
+      telnyxPhoneNumberId: durableOrderId,
+      cause: insertError,
+    });
+  }
 }
 
 async function clearPendingPhoneNumber(businessId: string): Promise<void> {
@@ -768,5 +944,8 @@ function isLikelyNumberUnavailable(err: unknown): boolean {
   // the phone_numbers RELATION NAME inside any Postgres error on that
   // table, misclassifying save failures as "unavailable". Save failures
   // are now typed (PurchasedNumberSaveError) and never reach this sniffer.
-  return /already|unavailable|not available|taken|number order failed/i.test(text);
+  return (
+    /already|unavailable|not available|taken|number order failed/i.test(text) ||
+    /"code"\s*:\s*"10027"/.test(text)
+  );
 }

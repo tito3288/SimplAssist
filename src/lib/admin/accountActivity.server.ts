@@ -701,6 +701,7 @@ const REGISTRATION_TITLES: Readonly<Record<string, string>> = {
   messaging_profile_create_intent: "Messaging-profile creation intent recorded",
   voice_application_created: "Voice-application creation attempt recorded",
   voice_application_create_intent: "Voice-application creation intent recorded",
+  phone_number_order_create_intent: "Phone-number order intent recorded",
   campaign_preflight_checked: "Campaign preflight check recorded",
   phone_number_assignment_started: "Phone-number assignment start recorded",
   phone_number_assignment_status_changed:

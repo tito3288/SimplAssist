@@ -1,17 +1,48 @@
 import { telnyx } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  beginProviderCreateIntent,
+  resolveProviderCreateIntent,
+} from "@/lib/messaging/registration/providerCreateIntent";
 
-const TELNYX_PHONE_NUMBER_ID_PATTERN =
+const TELNYX_NUMBER_ORDER_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function normalizeTelnyxPhoneNumberId(value: unknown, context: string): string {
+const TELNYX_PHONE_NUMBER_RESOURCE_ID_PATTERN = /^[0-9]+$/;
+
+export const NUMBER_ORDER_CREATE_INTENT_SPEC = {
+  eventType: "phone_number_order_create_intent",
+  resourceType: "phone_number",
+} as const;
+
+/**
+ * Normalize the ID accepted by Telnyx's managed `/phone_numbers/{id}` APIs.
+ *
+ * This ID is a decimal string, not the UUID returned for a
+ * `number_order_phone_number` child. Keep it as a string because current
+ * Telnyx IDs exceed JavaScript's safe-integer range.
+ */
+export function normalizeTelnyxPhoneNumberResourceId(
+  value: unknown,
+  context: string
+): string {
   if (
     typeof value !== "string" ||
-    !TELNYX_PHONE_NUMBER_ID_PATTERN.test(value.trim())
+    !TELNYX_PHONE_NUMBER_RESOURCE_ID_PATTERN.test(value.trim())
   ) {
-    throw new Error(`[messaging:numbers] Invalid Telnyx phone number id ${context}`);
+    throw new Error(
+      `[messaging:numbers] Invalid Telnyx phone number resource id ${context}`
+    );
   }
-  return value.trim().toLowerCase();
+  return value.trim();
+}
+
+function normalizeOptionalNumberOrderId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return TELNYX_NUMBER_ORDER_ID_PATTERN.test(trimmed)
+    ? trimmed.toLowerCase()
+    : undefined;
 }
 
 export interface AvailableNumber {
@@ -45,9 +76,45 @@ export async function searchAvailableNumbers(
 
 export interface PurchasedNumber {
   phoneNumber: string;
-  // Telnyx phone_number_id (UUID). Stored in phone_numbers.telnyx_phone_number_id.
+  // Managed /phone_numbers resource ID (decimal string). Stored in
+  // phone_numbers.telnyx_phone_number_id and used for routing updates.
   phoneNumberId: string;
+  // Provenance only. Neither UUID is valid for /phone_numbers/{id}.
+  numberOrderId?: string;
+  numberOrderPhoneNumberId?: string;
+  providerCreateIntentId: string;
   status: "pending" | "success" | "failure" | undefined;
+}
+
+// Thrown after Telnyx has accepted a potentially charged number order but a
+// complete owned-number listing cannot prove the one managed /phone_numbers
+// resource ID. Retry must recover ownership; it must not place another order.
+export class PurchasedNumberResolutionError extends Error {
+  readonly phoneNumber: string;
+  readonly numberOrderId?: string;
+  readonly numberOrderPhoneNumberId?: string;
+  readonly status: PurchasedNumber["status"];
+  readonly providerCreateIntentId: string;
+
+  constructor(args: {
+    phoneNumber: string;
+    numberOrderId?: string;
+    numberOrderPhoneNumberId?: string;
+    status: PurchasedNumber["status"];
+    providerCreateIntentId: string;
+    cause: unknown;
+  }) {
+    super(
+      `[messaging:numbers] Number order accepted for ${args.phoneNumber}, but the managed Telnyx phone number resource id could not be resolved`,
+      { cause: args.cause }
+    );
+    this.name = "PurchasedNumberResolutionError";
+    this.phoneNumber = args.phoneNumber;
+    this.numberOrderId = args.numberOrderId;
+    this.numberOrderPhoneNumberId = args.numberOrderPhoneNumberId;
+    this.status = args.status;
+    this.providerCreateIntentId = args.providerCreateIntentId;
+  }
 }
 
 // Thrown when a number was PURCHASED at Telnyx but the local phone_numbers
@@ -89,14 +156,10 @@ export class NumberTakenError extends Error {
 
 // Recovery lookup for the purchase-save gap: did THIS BUSINESS already
 // purchase this exact number? Scoped by customer_reference (stamped on
-// every order) — on a single Telnyx account, matching by phone number
-// alone would let business B "recover" a number business A just paid for.
-// Used BEFORE purchasing so a retry after a failed save completes setup
-// without charging again. Throws on lookup failure; NOTE the honest limit:
-// a successful-but-stale list (Telnyx read-after-write lag) returns null
-// and the caller re-purchases — backstopped by Telnyx rejecting orders for
-// already-owned numbers (routing to re-pick, never a double charge) and by
-// retries here being human-speed (launch failures are not webhook-looped).
+// every order) — on a single Telnyx account, matching by phone number alone
+// would let business B "recover" a number business A just paid for. The
+// iterator must finish before any match is trusted: a later page can reveal a
+// duplicate, and a mid-pagination failure makes the result ambiguous.
 export async function findOwnedNumberId(
   phoneNumber: string,
   businessId: string
@@ -112,13 +175,33 @@ export async function findOwnedNumberId(
     filter: { phone_number: digitsOnly, customer_reference: businessId },
   });
 
-  const owned = result.data?.find((n) => n.phone_number === phoneNumber);
-  return owned
-    ? normalizeTelnyxPhoneNumberId(
-        owned.id,
-        `returned while recovering ${phoneNumber} for business ${businessId}`
-      )
-    : null;
+  const exactMatches: Array<{
+    id?: string;
+    phone_number?: string;
+    customer_reference?: string | null;
+    record_type?: string;
+  }> = [];
+  for await (const candidate of result) {
+    if (
+      candidate.phone_number === phoneNumber &&
+      candidate.customer_reference === businessId &&
+      candidate.record_type === "phone_number"
+    ) {
+      exactMatches.push(candidate);
+    }
+  }
+
+  if (exactMatches.length === 0) return null;
+  if (exactMatches.length !== 1) {
+    throw new Error(
+      `[messaging:numbers] Ambiguous Telnyx ownership lookup for ${phoneNumber} and business ${businessId}: found ${exactMatches.length} exact matches`
+    );
+  }
+
+  return normalizeTelnyxPhoneNumberResourceId(
+    exactMatches[0].id,
+    `returned while recovering ${phoneNumber} for business ${businessId}`
+  );
 }
 
 export async function getActivePhoneNumberForBusiness(
@@ -170,51 +253,125 @@ export async function purchaseNumber(
     );
   }
 
-  const order = await telnyx.numberOrders.create(
-    {
-      phone_numbers: [{ phone_number: phoneNumber }],
-      connection_id: business.telnyx_voice_application_id,
-      messaging_profile_id: business.telnyx_messaging_profile_id,
-      customer_reference: businessId,
-    },
-    // Avoid an unkeyed automatic second order after an ambiguous transport
-    // failure. Retry recovers this exact business-scoped owned number before
-    // it can place another order.
-    { maxRetries: 0 }
-  );
+  // Persist the ambiguity fence before the paid POST. If the request reaches
+  // Telnyx but its response is lost, Retry must recover this exact owned
+  // number (or require reconciliation); it may never authorize another order
+  // from a temporarily empty provider list.
+  const providerCreateIntentId = await beginProviderCreateIntent({
+    businessId,
+    spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+    rawPayload: { phoneNumber },
+  });
+
+  let order: Awaited<ReturnType<typeof telnyx.numberOrders.create>>;
+  try {
+    order = await telnyx.numberOrders.create(
+      {
+        phone_numbers: [{ phone_number: phoneNumber }],
+        connection_id: business.telnyx_voice_application_id,
+        messaging_profile_id: business.telnyx_messaging_profile_id,
+        customer_reference: businessId,
+      },
+      // Avoid an automatic second paid request. The durable intent above
+      // also blocks a later user Retry after an ambiguous transport outcome.
+      { maxRetries: 0 }
+    );
+  } catch (cause) {
+    if (isDefiniteNumberOrderRejection(cause)) {
+      await resolveProviderCreateIntent({
+        businessId,
+        spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+        intentId: providerCreateIntentId,
+      });
+    }
+    throw cause;
+  }
 
   if (order.data?.status === "failure") {
+    // This is an explicit provider response saying the order failed, not an
+    // ambiguous transport outcome. No number was created by this attempt.
+    await resolveProviderCreateIntent({
+      businessId,
+      spec: NUMBER_ORDER_CREATE_INTENT_SPEC,
+      intentId: providerCreateIntentId,
+    });
     throw new Error(
       `Telnyx number order failed for ${phoneNumber}: ${JSON.stringify(order.data)}`
     );
   }
 
-  const purchased = order.data?.phone_numbers?.[0];
-  if (!purchased?.id || !purchased?.phone_number) {
-    throw new Error(
-      `Telnyx number order returned no phone_numbers entry for ${phoneNumber}`
-    );
-  }
-  const phoneNumberId = normalizeTelnyxPhoneNumberId(
-    purchased.id,
-    `returned by the number order for business ${businessId}`
+  const numberOrderId = normalizeOptionalNumberOrderId(order.data?.id);
+  const orderPhoneNumber = order.data?.phone_numbers?.find(
+    (candidate) => candidate.phone_number === phoneNumber
+  );
+  const numberOrderPhoneNumberId = normalizeOptionalNumberOrderId(
+    orderPhoneNumber?.id
   );
 
+  let phoneNumberId: string;
+  try {
+    const ownedId = await findOwnedNumberId(phoneNumber, businessId);
+    if (!ownedId) {
+      throw new Error(
+        `[messaging:numbers] Complete Telnyx ownership lookup returned no exact match for ${phoneNumber} and business ${businessId}`
+      );
+    }
+    phoneNumberId = ownedId;
+  } catch (cause) {
+    throw new PurchasedNumberResolutionError({
+      phoneNumber,
+      numberOrderId,
+      numberOrderPhoneNumberId,
+      status: order.data?.status,
+      providerCreateIntentId,
+      cause,
+    });
+  }
+
   return {
-    phoneNumber: purchased.phone_number,
+    phoneNumber,
     phoneNumberId,
+    ...(numberOrderId ? { numberOrderId } : {}),
+    ...(numberOrderPhoneNumberId ? { numberOrderPhoneNumberId } : {}),
+    providerCreateIntentId,
     status: order.data?.status,
   };
+}
+
+function isDefiniteNumberOrderRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const providerError = error as {
+    status?: unknown;
+    error?: {
+      errors?: Array<{
+        code?: unknown;
+        detail?: unknown;
+        source?: { pointer?: unknown };
+      }>;
+    };
+  };
+  if (providerError.status !== 422) return false;
+
+  return Boolean(
+    providerError.error?.errors?.some(
+      (item) =>
+        String(item.code) === "10027" &&
+        item.source?.pointer === "/" &&
+        typeof item.detail === "string" &&
+        item.detail.includes("We don't recognize the number(s)") &&
+        item.detail.includes("Did you first search for the number(s)?")
+    )
+  );
 }
 
 export async function attachOwnedNumberToCustomerProfile(
   businessId: string,
   phoneNumberId: string
 ): Promise<void> {
-  // Migration 034 deliberately preserves one protected legacy non-UUID row
-  // for manual cleanup, but that stale value must never be trusted or sent to
-  // Telnyx. Validate before any provider-facing routing update.
-  const normalizedPhoneNumberId = normalizeTelnyxPhoneNumberId(
+  // A legacy row may contain a number-order child UUID. That identifier must
+  // never be trusted or sent to managed /phone_numbers endpoints. Validate
+  // before any database read or provider-facing routing update.
+  const normalizedPhoneNumberId = normalizeTelnyxPhoneNumberResourceId(
     phoneNumberId,
     `stored for business ${businessId}`
   );

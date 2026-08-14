@@ -10,10 +10,16 @@ export type ProviderCreateIntentSpec =
   | {
       eventType: "voice_application_create_intent";
       resourceType: "voice_application";
+    }
+  | {
+      eventType: "phone_number_order_create_intent";
+      resourceType: "phone_number";
     };
 
 interface ProviderCreateIntentRow {
   id: string;
+  raw_payload?: unknown;
+  status?: string;
 }
 
 /**
@@ -35,9 +41,11 @@ export class ProviderCreateReconciliationRequiredError extends Error {
 export async function beginProviderCreateIntent({
   businessId,
   spec,
+  rawPayload,
 }: {
   businessId: string;
   spec: ProviderCreateIntentSpec;
+  rawPayload?: Record<string, unknown>;
 }): Promise<string> {
   const { data: existing, error: existingError } = await supabaseAdmin
     .from("telnyx_registration_events")
@@ -68,7 +76,7 @@ export async function beginProviderCreateIntent({
       event_type: spec.eventType,
       telnyx_resource_type: spec.resourceType,
       status: "started",
-      raw_payload: { version: 1 },
+      raw_payload: { ...rawPayload, version: 1 },
     })
     .select("id")
     .single<ProviderCreateIntentRow>();
@@ -127,4 +135,134 @@ export async function resolveProviderCreateIntents({
       `[registration:providerCreateIntent] Could not resolve ${spec.resourceType} create intent for business ${businessId}: ${error.message}`
     );
   }
+}
+
+export async function resolveProviderCreateIntent({
+  businessId,
+  spec,
+  intentId,
+}: {
+  businessId: string;
+  spec: ProviderCreateIntentSpec;
+  intentId: string;
+}): Promise<void> {
+  const { data: resolved, error } = await supabaseAdmin
+    .from("telnyx_registration_events")
+    .update({ status: "resolved" })
+    .eq("id", intentId)
+    .eq("business_id", businessId)
+    .eq("event_type", spec.eventType)
+    .eq("telnyx_resource_type", spec.resourceType)
+    .eq("status", "started")
+    .select("id")
+    .maybeSingle<ProviderCreateIntentRow>();
+
+  if (error) {
+    throw new Error(
+      `[registration:providerCreateIntent] Could not resolve exact ${spec.resourceType} create intent ${intentId} for business ${businessId}: ${error.message}`
+    );
+  }
+  if (resolved) return;
+
+  // A concurrent recovery may have resolved the same exact intent after our
+  // read. Proceed only when a fresh read proves that id is already resolved;
+  // a silent zero-row update must never let launch continue with an active or
+  // missing ambiguity fence.
+  const { data: existing, error: verifyError } = await supabaseAdmin
+    .from("telnyx_registration_events")
+    .select("id, status")
+    .eq("id", intentId)
+    .eq("business_id", businessId)
+    .eq("event_type", spec.eventType)
+    .eq("telnyx_resource_type", spec.resourceType)
+    .maybeSingle<ProviderCreateIntentRow>();
+
+  if (verifyError || existing?.status !== "resolved") {
+    throw new Error(
+      `[registration:providerCreateIntent] Could not verify exact ${spec.resourceType} create intent ${intentId} as resolved for business ${businessId}: ${verifyError?.message ?? "intent was not resolved"}`
+    );
+  }
+}
+
+/**
+ * Resolve a recovered create only when the one active intent carries the
+ * exact durable payload that was just proven provider-side. A phone-number
+ * lookup for selection B must never clear an ambiguous order for selection A.
+ */
+export async function resolveProviderCreateIntentForPayload({
+  businessId,
+  spec,
+  expectedPayload,
+}: {
+  businessId: string;
+  spec: ProviderCreateIntentSpec;
+  expectedPayload: Record<string, unknown>;
+}): Promise<void> {
+  const intentId = await readProviderCreateIntentForPayload({
+    businessId,
+    spec,
+    expectedPayload,
+  });
+  if (!intentId) return;
+
+  await resolveProviderCreateIntent({ businessId, spec, intentId });
+}
+
+/**
+ * Validate and capture the one active intent before any recovered-resource
+ * mutation. The caller resolves this exact id only after its local/provider
+ * recovery work succeeds.
+ */
+export async function readProviderCreateIntentForPayload({
+  businessId,
+  spec,
+  expectedPayload,
+}: {
+  businessId: string;
+  spec: ProviderCreateIntentSpec;
+  expectedPayload: Record<string, unknown>;
+}): Promise<string | null> {
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from("telnyx_registration_events")
+    .select("id, raw_payload")
+    .eq("business_id", businessId)
+    .eq("event_type", spec.eventType)
+    .eq("telnyx_resource_type", spec.resourceType)
+    .eq("status", "started")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle<ProviderCreateIntentRow>();
+
+  if (existingError) {
+    throw new Error(
+      `[registration:providerCreateIntent] Could not read recoverable ${spec.resourceType} create intent for business ${businessId}: ${existingError.message}`
+    );
+  }
+  if (!existing) return null;
+
+  if (!payloadContains(existing.raw_payload, expectedPayload)) {
+    throw new ProviderCreateReconciliationRequiredError(
+      businessId,
+      spec.resourceType
+    );
+  }
+
+  return existing.id;
+}
+
+function payloadContains(
+  rawPayload: unknown,
+  expectedPayload: Record<string, unknown>
+): boolean {
+  if (
+    !rawPayload ||
+    typeof rawPayload !== "object" ||
+    Array.isArray(rawPayload)
+  ) {
+    return false;
+  }
+  const payload = rawPayload as Record<string, unknown>;
+  return Object.entries(expectedPayload).every(
+    ([key, value]) => payload[key] === value
+  );
 }

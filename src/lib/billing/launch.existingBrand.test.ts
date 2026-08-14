@@ -63,6 +63,8 @@ const mocks = vi.hoisted(() => {
     verifyPublishedCompliancePage: vi.fn(),
     getBusinessContentQuality: vi.fn(),
     resolveBusinessOperationalControls: vi.fn(),
+    resolveProviderCreateIntent: vi.fn(),
+  readProviderCreateIntentForPayload: vi.fn(),
   };
 });
 
@@ -80,11 +82,27 @@ vi.mock("@/lib/messaging/registration/publicCompliancePage", () => ({
   verifyPublishedCompliancePage: mocks.verifyPublishedCompliancePage,
 }));
 vi.mock("@/lib/messaging/numbers", () => ({
+  NUMBER_ORDER_CREATE_INTENT_SPEC: {
+    eventType: "phone_number_order_create_intent",
+    resourceType: "phone_number",
+  },
   NumberTakenError: class extends Error {},
+  PurchasedNumberResolutionError: class extends Error {},
   PurchasedNumberSaveError: class extends Error {},
+  normalizeTelnyxPhoneNumberResourceId: (value: unknown) => {
+    if (typeof value !== "string" || !/^[0-9]+$/.test(value.trim())) {
+      throw new Error("invalid managed phone-number resource id");
+    }
+    return value.trim();
+  },
   attachOwnedNumberToCustomerProfile: mocks.attachOwnedNumber,
   purchaseNumber: mocks.purchaseNumber,
   findOwnedNumberId: mocks.findOwnedNumberId,
+}));
+vi.mock("@/lib/messaging/registration/providerCreateIntent", () => ({
+  resolveProviderCreateIntent: mocks.resolveProviderCreateIntent,
+  readProviderCreateIntentForPayload:
+    mocks.readProviderCreateIntentForPayload,
 }));
 vi.mock("@/lib/messaging/registration", () => ({
   registerBrand: mocks.registerBrand,
@@ -129,7 +147,7 @@ const SIGNUP_GOAL_URL_INVALID_MESSAGE =
 const ACTIVE_NUMBER = {
   id: "number-row-1",
   phone_number: "+15745550191",
-  telnyx_phone_number_id: "telnyx-number-1",
+  telnyx_phone_number_id: "3026446889630303191",
 };
 const BUSINESS = {
   id: BUSINESS_ID,
@@ -214,6 +232,8 @@ beforeEach(() => {
     mocks.createMessagingProfile,
     mocks.createVoiceApplication,
     mocks.attachOwnedNumber,
+    mocks.resolveProviderCreateIntent,
+    mocks.readProviderCreateIntentForPayload,
     mocks.ensureCampaignAssignment,
     mocks.markFailed,
     mocks.markSubmitted,

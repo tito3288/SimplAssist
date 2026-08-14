@@ -209,6 +209,7 @@ export const TELNYX_EVENT_TYPES = [
   "messaging_profile_create_intent",
   "voice_application_created",
   "voice_application_create_intent",
+  "phone_number_order_create_intent",
   "campaign_preflight_checked",
   "phone_number_assignment_started",
   "phone_number_assignment_status_changed",
@@ -221,6 +222,7 @@ export type TelnyxResourceType =
   | "campaign"
   | "messaging_profile"
   | "voice_application"
+  | "phone_number"
   | "phone_number_assignment";
 
 export interface Partner {
@@ -564,7 +566,9 @@ export interface PhoneNumber {
   id: string;
   business_id: string;
   phone_number: string;
-  telnyx_phone_number_id: string;
+  telnyx_phone_number_id: string | null;
+  telnyx_number_order_id: string | null;
+  telnyx_number_order_phone_number_id: string | null;
   telnyx_campaign_assignment_status: CampaignAssignmentStatus;
   telnyx_campaign_assignment_task_id: string | null;
   telnyx_campaign_assignment_campaign_id: string | null;

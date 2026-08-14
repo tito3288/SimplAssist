@@ -12,6 +12,8 @@ vi.mock("@/lib/supabase/admin", () => ({
 import {
   beginProviderCreateIntent,
   ProviderCreateReconciliationRequiredError,
+  resolveProviderCreateIntent,
+  resolveProviderCreateIntentForPayload,
   resolveProviderCreateIntents,
 } from "./providerCreateIntent";
 
@@ -21,6 +23,11 @@ const OTHER_INTENT_ID = "20000000-0000-4000-8000-000000000351";
 const SPEC = {
   eventType: "messaging_profile_create_intent",
   resourceType: "messaging_profile",
+} as const;
+const PHONE_NUMBER = "+15749318431";
+const PHONE_SPEC = {
+  eventType: "phone_number_order_create_intent",
+  resourceType: "phone_number",
 } as const;
 
 type QueryChain = Record<string, ReturnType<typeof vi.fn>>;
@@ -135,5 +142,131 @@ describe("provider create intent fence", () => {
     expect(chains[0].eq).toHaveBeenNthCalledWith(1, "business_id", BUSINESS_ID);
     expect(chains[0].eq).toHaveBeenNthCalledWith(2, "event_type", SPEC.eventType);
     expect(chains[0].eq).toHaveBeenNthCalledWith(3, "status", "started");
+  });
+
+  it("stores exact phone-number order payload before authorizing a paid POST", async () => {
+    queueResults(
+      { data: null, error: null },
+      { data: { id: INTENT_ID }, error: null },
+      { data: { id: INTENT_ID }, error: null }
+    );
+
+    await beginProviderCreateIntent({
+      businessId: BUSINESS_ID,
+      spec: PHONE_SPEC,
+      rawPayload: { phoneNumber: PHONE_NUMBER },
+    });
+
+    expect(chains[1].insert).toHaveBeenCalledWith({
+      business_id: BUSINESS_ID,
+      event_type: PHONE_SPEC.eventType,
+      telnyx_resource_type: PHONE_SPEC.resourceType,
+      status: "started",
+      raw_payload: { phoneNumber: PHONE_NUMBER, version: 1 },
+    });
+  });
+
+  it("resolves a definite provider rejection by exact intent id", async () => {
+    queueResults({ data: { id: INTENT_ID }, error: null });
+
+    await resolveProviderCreateIntent({
+      businessId: BUSINESS_ID,
+      spec: PHONE_SPEC,
+      intentId: INTENT_ID,
+    });
+
+    expect(chains[0].update).toHaveBeenCalledWith({ status: "resolved" });
+    expect(chains[0].eq).toHaveBeenNthCalledWith(1, "id", INTENT_ID);
+    expect(chains[0].eq).toHaveBeenNthCalledWith(2, "business_id", BUSINESS_ID);
+    expect(chains[0].eq).toHaveBeenNthCalledWith(
+      3,
+      "event_type",
+      PHONE_SPEC.eventType
+    );
+    expect(chains[0].eq).toHaveBeenNthCalledWith(
+      4,
+      "telnyx_resource_type",
+      PHONE_SPEC.resourceType
+    );
+    expect(chains[0].eq).toHaveBeenNthCalledWith(5, "status", "started");
+  });
+
+  it("resolves recovered ownership only for an intent carrying the same phone number", async () => {
+    queueResults(
+      {
+        data: {
+          id: INTENT_ID,
+          raw_payload: { version: 1, phoneNumber: PHONE_NUMBER },
+        },
+        error: null,
+      },
+      { data: { id: INTENT_ID }, error: null }
+    );
+
+    await resolveProviderCreateIntentForPayload({
+      businessId: BUSINESS_ID,
+      spec: PHONE_SPEC,
+      expectedPayload: { version: 1, phoneNumber: PHONE_NUMBER },
+    });
+
+    expect(mocks.from).toHaveBeenCalledTimes(2);
+    expect(chains[1].eq).toHaveBeenNthCalledWith(1, "id", INTENT_ID);
+  });
+
+  it.each([
+    { version: 1, phoneNumber: "+15745559999" },
+    { phoneNumber: PHONE_NUMBER },
+    { version: 2, phoneNumber: PHONE_NUMBER },
+  ])("keeps a mismatched or unclassified intent fail-closed", async (rawPayload) => {
+    queueResults({
+      data: {
+        id: INTENT_ID,
+        raw_payload: rawPayload,
+      },
+      error: null,
+    });
+
+    await expect(
+      resolveProviderCreateIntentForPayload({
+        businessId: BUSINESS_ID,
+        spec: PHONE_SPEC,
+        expectedPayload: { version: 1, phoneNumber: PHONE_NUMBER },
+      })
+    ).rejects.toBeInstanceOf(ProviderCreateReconciliationRequiredError);
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(chains[0].update).not.toHaveBeenCalled();
+  });
+
+  it("accepts a concurrent exact resolution only after proving the row is resolved", async () => {
+    queueResults(
+      { data: null, error: null },
+      { data: { id: INTENT_ID, status: "resolved" }, error: null }
+    );
+
+    await expect(
+      resolveProviderCreateIntent({
+        businessId: BUSINESS_ID,
+        spec: PHONE_SPEC,
+        intentId: INTENT_ID,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(chains[1].select).toHaveBeenCalledWith("id, status");
+  });
+
+  it("fails closed when an exact resolve updates no row and cannot prove resolution", async () => {
+    queueResults(
+      { data: null, error: null },
+      { data: { id: INTENT_ID, status: "started" }, error: null }
+    );
+
+    await expect(
+      resolveProviderCreateIntent({
+        businessId: BUSINESS_ID,
+        spec: PHONE_SPEC,
+        intentId: INTENT_ID,
+      })
+    ).rejects.toThrow("intent was not resolved");
   });
 });

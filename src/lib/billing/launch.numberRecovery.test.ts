@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
   purchaseNumber: vi.fn(),
   findOwnedNumberId: vi.fn(),
   attachOwnedNumberToCustomerProfile: vi.fn(),
@@ -23,11 +24,13 @@ const mocks = vi.hoisted(() => ({
   getBusinessContentQuality: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
   buildProviderResourceName: vi.fn(),
+  resolveProviderCreateIntent: vi.fn(),
+  readProviderCreateIntentForPayload: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
 }));
 vi.mock("@/lib/account/operationalControls.server", () => ({
   resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
@@ -79,6 +82,11 @@ vi.mock("@/lib/messaging/registration/phoneNumberAssignment", () => ({
 vi.mock("@/lib/messaging/registration/providerResourceName", () => ({
   buildProviderResourceName: mocks.buildProviderResourceName,
 }));
+vi.mock("@/lib/messaging/registration/providerCreateIntent", () => ({
+  resolveProviderCreateIntent: mocks.resolveProviderCreateIntent,
+  readProviderCreateIntentForPayload:
+    mocks.readProviderCreateIntentForPayload,
+}));
 vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   claimRegistrationAttempt: mocks.claimRegistrationAttempt,
   markRegistrationFailed: mocks.markRegistrationFailed,
@@ -89,10 +97,14 @@ vi.mock("@/lib/onboarding/contentQuality.server", () => ({
 }));
 
 import { attemptPaidLaunch } from "./launch";
+import { PurchasedNumberResolutionError } from "@/lib/messaging/numbers";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-00000000b1z1";
 const PENDING_NUMBER = "+15745550300";
-const TELNYX_NUMBER_ID = "tn_number_uuid_1";
+const TELNYX_NUMBER_ID = "3026446889630303742";
+const LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID =
+  "5ace1547-124f-475a-95fe-ea5e374325e9";
+const NUMBER_ORDER_ID = "1e91cdc9-a293-431d-a4a8-20ead763ac0b";
 
 const LAUNCH_BUSINESS = {
   id: BUSINESS_ID,
@@ -191,10 +203,13 @@ beforeEach(() => {
     mocks.markRegistrationFailed,
     mocks.markRegistrationSubmitted,
     mocks.attachOwnedNumberToCustomerProfile,
+    mocks.resolveProviderCreateIntent,
+    mocks.readProviderCreateIntentForPayload,
   ]) {
     fn.mockResolvedValue(undefined);
   }
   mocks.findOwnedNumberId.mockResolvedValue(null);
+  mocks.rpc.mockResolvedValue({ data: true, error: null });
   mocks.getActiveSmsNumber.mockResolvedValue(PENDING_NUMBER);
   mocks.verifyPublishedCompliancePage.mockResolvedValue(undefined);
   mocks.buildProviderResourceName.mockImplementation(
@@ -207,6 +222,9 @@ beforeEach(() => {
   mocks.purchaseNumber.mockResolvedValue({
     phoneNumber: PENDING_NUMBER,
     phoneNumberId: TELNYX_NUMBER_ID,
+    numberOrderPhoneNumberId: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    numberOrderId: NUMBER_ORDER_ID,
+    providerCreateIntentId: "c0000000-0000-4000-8000-00000000b1c1",
     status: "success",
   });
 });
@@ -543,6 +561,15 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       PENDING_NUMBER,
       BUSINESS_ID
     );
+    expect(chains[5].insert).toHaveBeenCalledWith({
+      business_id: BUSINESS_ID,
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: TELNYX_NUMBER_ID,
+      telnyx_number_order_phone_number_id:
+        LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+      telnyx_number_order_id: NUMBER_ORDER_ID,
+      is_active: true,
+    });
     expect(chains[0].select).toHaveBeenCalledWith(
       expect.stringContaining("ai_settings(language)")
     );
@@ -779,6 +806,216 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     );
   });
 
+  it("repairs a legacy order-line UUID before reattaching an active number", async () => {
+    const legacyActiveNumber = {
+      id: "phone-row-legacy-order-id",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    const providerCreateIntentId =
+      "c0000000-0000-4000-8000-00000000b1c2";
+    mocks.readProviderCreateIntentForPayload.mockResolvedValueOnce(
+      providerCreateIntentId
+    );
+    mocks.findOwnedNumberId.mockResolvedValue(TELNYX_NUMBER_ID);
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: legacyActiveNumber, error: null },
+      { data: legacyActiveNumber, error: null },
+      { error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("submitted");
+    expect(mocks.findOwnedNumberId).toHaveBeenCalledWith(
+      PENDING_NUMBER,
+      BUSINESS_ID
+    );
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "repair_telnyx_phone_number_resource_id",
+      {
+        p_business_id: BUSINESS_ID,
+        p_phone_number_id: legacyActiveNumber.id,
+        p_phone_number: PENDING_NUMBER,
+        p_expected_legacy_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+        p_resolved_resource_id: TELNYX_NUMBER_ID,
+      }
+    );
+    expect(mocks.attachOwnedNumberToCustomerProfile).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      TELNYX_NUMBER_ID
+    );
+    expect(
+      mocks.readProviderCreateIntentForPayload.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.rpc.mock.invocationCallOrder[0]);
+    expect(mocks.rpc.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.attachOwnedNumberToCustomerProfile.mock.invocationCallOrder[0]
+    );
+    expect(mocks.resolveProviderCreateIntent).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      spec: {
+        eventType: "phone_number_order_create_intent",
+        resourceType: "phone_number",
+      },
+      intentId: providerCreateIntentId,
+    });
+    expect(
+      mocks.attachOwnedNumberToCustomerProfile.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.resolveProviderCreateIntent.mock.invocationCallOrder[0]);
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+  });
+
+  it("rejects an intent mismatch before legacy repair or routing mutations", async () => {
+    const legacyActiveNumber = {
+      id: "phone-row-intent-mismatch",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    mocks.readProviderCreateIntentForPayload.mockRejectedValueOnce(
+      new Error("provider intent belongs to a different phone number")
+    );
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: legacyActiveNumber, error: null },
+      { data: legacyActiveNumber, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.findOwnedNumberId).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.attachOwnedNumberToCustomerProfile).not.toHaveBeenCalled();
+    expect(mocks.resolveProviderCreateIntent).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without a provider lookup for an unknown stored ID shape", async () => {
+    const corruptActiveNumber = {
+      id: "phone-row-corrupt-provider-id",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: "not-an-endpoint-provenance-id",
+    };
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: corruptActiveNumber, error: null },
+      { data: corruptActiveNumber, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.findOwnedNumberId).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.attachOwnedNumberToCustomerProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("repairs a same-business legacy row found in the purchase race window", async () => {
+    const legacyExistingRow = {
+      id: "phone-row-race-window",
+      business_id: BUSINESS_ID,
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    mocks.findOwnedNumberId.mockResolvedValue(TELNYX_NUMBER_ID);
+    queueHappyPathThrough(
+      { data: legacyExistingRow, error: null },
+      { error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("submitted");
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "repair_telnyx_phone_number_resource_id",
+      expect.objectContaining({
+        p_phone_number_id: legacyExistingRow.id,
+        p_expected_legacy_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+        p_resolved_resource_id: TELNYX_NUMBER_ID,
+      })
+    );
+    expect(mocks.attachOwnedNumberToCustomerProfile).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      TELNYX_NUMBER_ID
+    );
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a legacy active number cannot be resolved completely", async () => {
+    const legacyActiveNumber = {
+      id: "phone-row-unresolved",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    mocks.findOwnedNumberId.mockResolvedValue(null);
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: legacyActiveNumber, error: null },
+      { data: legacyActiveNumber, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.attachOwnedNumberToCustomerProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the guarded legacy-ID repair is rejected", async () => {
+    const legacyActiveNumber = {
+      id: "phone-row-repair-race",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    mocks.findOwnedNumberId.mockResolvedValue(TELNYX_NUMBER_ID);
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "repair precondition changed" },
+    });
+    queueResults(
+      {
+        data: { ...LAUNCH_BUSINESS, pending_phone_number: null },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: legacyActiveNumber, error: null },
+      { data: legacyActiveNumber, error: null }
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.attachOwnedNumberToCustomerProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
   it("retries a purchase-save failure by recovering ownership and never orders twice", async () => {
     mocks.findOwnedNumberId
       .mockResolvedValueOnce(null)
@@ -811,6 +1048,96 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       TELNYX_NUMBER_ID
     );
     expect(mocks.registerCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences an accepted order with delayed resource visibility and never orders twice", async () => {
+    const resolutionError = new PurchasedNumberResolutionError({
+      phoneNumber: PENDING_NUMBER,
+      numberOrderId: NUMBER_ORDER_ID,
+      numberOrderPhoneNumberId: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+      status: "success",
+      providerCreateIntentId: "c0000000-0000-4000-8000-00000000b1c1",
+      cause: new Error("owned number not visible yet"),
+    });
+    const fencedActiveNumber = {
+      id: "phone-row-resolution-fence",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+    };
+    mocks.purchaseNumber.mockRejectedValueOnce(resolutionError);
+    mocks.findOwnedNumberId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(TELNYX_NUMBER_ID);
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+      { error: null },
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: fencedActiveNumber, error: null },
+      { data: fencedActiveNumber, error: null },
+      { error: null }
+    );
+
+    const first = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(first.status).toBe("failed");
+    expect(first.message).toContain("number was reserved");
+    expect(chains[5].insert).toHaveBeenCalledWith({
+      business_id: BUSINESS_ID,
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+      telnyx_number_order_phone_number_id:
+        LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+      telnyx_number_order_id: NUMBER_ORDER_ID,
+      is_active: true,
+    });
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+
+    const second = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(second.status).toBe("submitted");
+    expect(mocks.purchaseNumber).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "repair_telnyx_phone_number_resource_id",
+      expect.objectContaining({
+        p_phone_number_id: fencedActiveNumber.id,
+        p_expected_legacy_id: LEGACY_NUMBER_ORDER_PHONE_NUMBER_ID,
+        p_resolved_resource_id: TELNYX_NUMBER_ID,
+      })
+    );
+    expect(mocks.attachOwnedNumberToCustomerProfile).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      TELNYX_NUMBER_ID
+    );
+    expect(mocks.registerCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses only the provider intent when an accepted order has no UUID provenance", async () => {
+    const resolutionError = new PurchasedNumberResolutionError({
+      phoneNumber: PENDING_NUMBER,
+      status: "success",
+      providerCreateIntentId: "c0000000-0000-4000-8000-00000000b1c1",
+      cause: new Error("owned number not visible yet"),
+    });
+    mocks.purchaseNumber.mockRejectedValueOnce(resolutionError);
+    queueHappyPathThrough({ data: null, error: null });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("number was reserved");
+    expect(chains).toHaveLength(5);
+    expect(chains.every((chain) => chain.insert.mock.calls.length === 0)).toBe(
+      true
+    );
+    expect(mocks.resolveProviderCreateIntent).not.toHaveBeenCalled();
+    expect(mocks.verifyPublishedCompliancePage).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
   });
 
   it("retries a failed page check using the saved active number without re-purchasing or early campaign cleanup", async () => {
