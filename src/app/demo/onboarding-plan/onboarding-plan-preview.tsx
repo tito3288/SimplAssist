@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import StepProgress from "@/components/onboarding/StepProgress";
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { CUSTOMER_VISIBLE_PLAN_ORDER } from "@/lib/billing/planAvailability";
 import { SETUP_FEE_EXPLAINER_PATH } from "@/lib/support/constants";
 import { statusNeutral, tile } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
@@ -51,12 +52,8 @@ export function OnboardingPlanPreview() {
           <fieldset className="space-y-3">
             <legend className="sr-only">Choose a SimplAssist plan</legend>
 
-            {(
-              Object.entries(SUBSCRIPTION_PLANS) as [
-                SubscriptionPlan,
-                (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan],
-              ][]
-            ).map(([key, plan]) => {
+            {CUSTOMER_VISIBLE_PLAN_ORDER.map((key) => {
+              const plan = SUBSCRIPTION_PLANS[key];
               const selected = selectedPlan === key;
               const recommended = key === RECOMMENDED_PLAN;
 

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   retrieveCheckoutSession: vi.fn(),
   syncCheckoutSession: vi.fn(),
-  attemptPaidLaunch: vi.fn(),
+  finalizePaidCheckout: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
   resolveAssignedPartnerName: vi.fn(),
   requireWorkspaceRouteAccess: vi.fn(),
@@ -26,8 +26,8 @@ vi.mock("@/lib/stripe/client", () => ({
 vi.mock("@/lib/stripe/subscriptionSync", () => ({
   syncCheckoutSession: mocks.syncCheckoutSession,
 }));
-vi.mock("@/lib/billing/launch", () => ({
-  attemptPaidLaunch: mocks.attemptPaidLaunch,
+vi.mock("@/lib/billing/finalizePaidCheckout.server", () => ({
+  finalizePaidCheckout: mocks.finalizePaidCheckout,
 }));
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForBusinessId: mocks.getOnboardingStateForBusinessId,
@@ -118,7 +118,7 @@ beforeEach(() => {
     subscriptionId: "sub_finalize_1",
     plan: "sms_and_chat",
   });
-  mocks.attemptPaidLaunch.mockResolvedValue({ status: "submitted" });
+  mocks.finalizePaidCheckout.mockResolvedValue({ status: "submitted" });
   mocks.getOnboardingStateForBusinessId.mockResolvedValue({
     currentStep: "carrier_review",
   });
@@ -139,23 +139,26 @@ describe("POST /api/billing/finalize billing authority", () => {
     [401, { error: "Unauthorized" }],
     [403, { error: "workspace_access_denied" }],
     [503, { error: "workspace_access_unavailable", retryable: true }],
-  ])("returns workspace %i before parsing or Stripe work", async (status, body) => {
-    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json(body, { status }),
-    });
-    const guardedRequest = request();
-    const json = vi.spyOn(guardedRequest, "json");
+  ])(
+    "returns workspace %i before parsing or Stripe work",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
+      const guardedRequest = request();
+      const json = vi.spyOn(guardedRequest, "json");
 
-    const response = await POST(guardedRequest);
+      const response = await POST(guardedRequest);
 
-    expect(response.status).toBe(status);
-    expect(json).not.toHaveBeenCalled();
-    expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(status);
+      expect(json).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
+      expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["partner-1", "Alpha Dog Agency"],
@@ -183,9 +186,9 @@ describe("POST /api/billing/finalize billing authority", () => {
       expect(mocks.resolveAssignedPartnerName).toHaveBeenCalledWith(partnerId);
       expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
       expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-      expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
       expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("uses the exact external-billing fallback for an orphaned comped business", async () => {
@@ -204,7 +207,7 @@ describe("POST /api/billing/finalize billing authority", () => {
     expect(mocks.resolveAssignedPartnerName).toHaveBeenCalledWith(null);
     expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
   });
 
   it("rejects a stale Checkout after partner assignment and before local synchronization or launch", async () => {
@@ -217,7 +220,7 @@ describe("POST /api/billing/finalize billing authority", () => {
           billing_mode: "invoiced",
         },
         error: null,
-      }
+      },
     );
     mocks.resolveAssignedPartnerName.mockResolvedValue("Alpha Dog Agency");
 
@@ -230,14 +233,14 @@ describe("POST /api/billing/finalize billing authority", () => {
     });
     expect(mocks.retrieveCheckoutSession).toHaveBeenCalledWith(SESSION.id);
     expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
     expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
   });
 
   it("preserves Stripe finalization and launch after both authority checks", async () => {
     queueBusinessResults(
       { data: BUSINESS, error: null },
-      { data: BUSINESS, error: null }
+      { data: BUSINESS, error: null },
     );
 
     const response = await POST(request());
@@ -248,15 +251,56 @@ describe("POST /api/billing/finalize billing authority", () => {
       state: { currentStep: "carrier_review" },
     });
     expect(mocks.from.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.retrieveCheckoutSession.mock.invocationCallOrder[0]
+      mocks.retrieveCheckoutSession.mock.invocationCallOrder[0],
     );
     expect(mocks.syncCheckoutSession).toHaveBeenCalledWith(SESSION);
-    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
-      BUSINESS.id,
-      "stripe_finalize"
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      {
+        businessId: BUSINESS.id,
+        customerId: "cus_finalize_1",
+        subscriptionId: "sub_finalize_1",
+        plan: "sms_and_chat",
+      },
+      "stripe_finalize",
     );
     expect(mocks.getOnboardingStateForBusinessId).toHaveBeenCalledWith(
-      BUSINESS.id
+      BUSINESS.id,
+    );
+  });
+
+  it("accepts idempotent Chat Only core completion from both browser retries", async () => {
+    queueBusinessResults(
+      { data: BUSINESS, error: null },
+      { data: BUSINESS, error: null },
+      { data: BUSINESS, error: null },
+      { data: BUSINESS, error: null },
+    );
+    const synced = {
+      businessId: BUSINESS.id,
+      customerId: "cus_chat_finalize",
+      subscriptionId: "sub_chat_finalize",
+      plan: "chat_only",
+    };
+    mocks.syncCheckoutSession.mockResolvedValue(synced);
+    mocks.finalizePaidCheckout.mockResolvedValue({ status: "completed" });
+
+    const first = await POST(request());
+    const second = await POST(request());
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({ success: true });
+    await expect(second.json()).resolves.toMatchObject({ success: true });
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledTimes(2);
+    expect(mocks.finalizePaidCheckout).toHaveBeenNthCalledWith(
+      1,
+      synced,
+      "stripe_finalize",
+    );
+    expect(mocks.finalizePaidCheckout).toHaveBeenNthCalledWith(
+      2,
+      synced,
+      "stripe_finalize",
     );
   });
 
@@ -265,9 +309,9 @@ describe("POST /api/billing/finalize billing authority", () => {
     async (status, message) => {
       queueBusinessResults(
         { data: BUSINESS, error: null },
-        { data: BUSINESS, error: null }
+        { data: BUSINESS, error: null },
       );
-      mocks.attemptPaidLaunch.mockResolvedValue({ status, message });
+      mocks.finalizePaidCheckout.mockResolvedValue({ status, message });
 
       const response = await POST(request());
       const text = await response.text();
@@ -279,13 +323,13 @@ describe("POST /api/billing/finalize billing authority", () => {
         state: { currentStep: "carrier_review" },
       });
       expect(text).not.toContain("SimplAssist");
-    }
+    },
   );
 
   it("does not launch when the guarded database sync rejects a final assignment race", async () => {
     queueBusinessResults(
       { data: BUSINESS, error: null },
-      { data: BUSINESS, error: null }
+      { data: BUSINESS, error: null },
     );
     mocks.syncCheckoutSession.mockResolvedValue(null);
 
@@ -295,7 +339,7 @@ describe("POST /api/billing/finalize billing authority", () => {
     expect(await response.json()).toEqual({
       error: "Checkout session could not be finalized",
     });
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
     expect(mocks.getOnboardingStateForBusinessId).not.toHaveBeenCalled();
   });
 
@@ -310,7 +354,7 @@ describe("POST /api/billing/finalize billing authority", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
   });
 
   it("rejects malformed session ids after authority resolution but before Stripe work", async () => {
@@ -322,7 +366,7 @@ describe("POST /api/billing/finalize billing authority", () => {
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
   });
 
   it("preserves the unauthenticated response before all billing work", async () => {
@@ -337,6 +381,6 @@ describe("POST /api/billing/finalize billing authority", () => {
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.retrieveCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.syncCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
   });
 });

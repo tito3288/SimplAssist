@@ -374,6 +374,7 @@ DECLARE
   v_integer integer;
   v_bigint bigint;
   v_payload jsonb;
+  v_cancel_first_release_at timestamptz;
 BEGIN
   PERFORM pg_advisory_xact_lock(
     hashtextextended('test_034_cancellation_concurrency', 0)
@@ -402,7 +403,8 @@ BEGIN
     $remote_setup$
       DO $fixture$
       DECLARE
-        v_triggered_at timestamptz := now() - interval '30 days 1 second';
+        v_cancel_first_release_at timestamptz;
+        v_claim_first_release_at timestamptz;
       BEGIN
         CREATE TEMP TABLE cancellation_034_original_release_config
         ON COMMIT PRESERVE ROWS
@@ -629,11 +631,19 @@ BEGIN
             now()
           );
 
+        -- Assign the deadlines only after the heavier fixture work so the
+        -- cancel-first transaction has a reliable pre-deadline window even
+        -- on a slower disposable database.
+        v_cancel_first_release_at :=
+          clock_timestamp() + interval '5 seconds';
+        v_claim_first_release_at :=
+          clock_timestamp() - interval '1 second';
+
         PERFORM public.ensure_telnyx_release_reason(
           '10000000-0000-4000-a034-000000000091',
           'subscription_ended',
-          v_triggered_at,
-          v_triggered_at + interval '30 days',
+          v_cancel_first_release_at - interval '30 days',
+          v_cancel_first_release_at,
           'sub_034_cancel_first',
           'evt_034_cancel_first',
           'test_034_concurrency'
@@ -641,8 +651,8 @@ BEGIN
         PERFORM public.ensure_telnyx_release_reason(
           '10000000-0000-4000-a034-000000000092',
           'subscription_ended',
-          v_triggered_at,
-          v_triggered_at + interval '30 days',
+          v_claim_first_release_at - interval '30 days',
+          v_claim_first_release_at,
           'sub_034_claim_first',
           'evt_034_claim_first',
           'test_034_concurrency'
@@ -671,9 +681,25 @@ BEGIN
     $remote_setup$
   );
 
-  -- Commit order A: cancellation owns the business row lock first.
+  SELECT result
+  INTO v_cancel_first_release_at
+  FROM extensions.dblink(
+    'test_034_setup',
+    $cancel_first_release_at_sql$
+      SELECT run.effective_release_at
+      FROM public.telnyx_resource_release_runs AS run
+      WHERE run.business_id =
+              '10000000-0000-4000-a034-000000000091'
+      ORDER BY run.generation DESC
+      LIMIT 1
+    $cancel_first_release_at_sql$
+  ) AS cancel_first_release_at(result timestamptz);
+
+  -- Commit order A: cancellation starts before the deadline and owns the
+  -- business row lock. The claimant starts only after the wall clock crosses
+  -- that deadline, so it sees due committed work and must recheck after the
+  -- cancellation commits.
   PERFORM extensions.dblink_exec('test_034_cancel_first', 'BEGIN');
-  PERFORM extensions.dblink_exec('test_034_claim_after_cancel', 'BEGIN');
 
   SELECT result
   INTO v_boolean
@@ -690,6 +716,17 @@ BEGIN
 
   INSERT INTO cancellation_034_concurrency_state (name, payload)
   VALUES ('cancel_first_result', jsonb_build_object('result', v_boolean));
+
+  PERFORM pg_sleep(
+    GREATEST(
+      EXTRACT(EPOCH FROM (
+        v_cancel_first_release_at - clock_timestamp()
+      ))::double precision + 0.1,
+      0.0
+    )
+  );
+
+  PERFORM extensions.dblink_exec('test_034_claim_after_cancel', 'BEGIN');
 
   v_integer := extensions.dblink_send_query(
     'test_034_claim_after_cancel',

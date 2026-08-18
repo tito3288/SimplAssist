@@ -109,6 +109,7 @@ function renderOverview(args: {
   stateValues?: unknown[];
   totalContacts?: number;
   hotLeads?: DashboardHotLead[];
+  smsEnabled?: boolean;
 }): string {
   mocks.stateIndex = 0;
   mocks.stateValues = args.stateValues ?? [];
@@ -129,6 +130,7 @@ function renderOverview(args: {
         showCallForwardingNudge={false}
         billingMode={args.billingMode ?? "stripe"}
         isPartnerManagedBilling={args.isPartnerManagedBilling}
+        smsEnabled={args.smsEnabled}
       />
     </BrandProvider>
   );
@@ -183,6 +185,25 @@ describe("DashboardOverview hot-lead classification", () => {
 });
 
 describe("DashboardOverview visible brand copy", () => {
+  it("uses widget-first Chat Only copy without phone, carrier, or texting controls", () => {
+    const html = renderOverview({
+      requestBrand: DEFAULT_REQUEST_BRAND,
+      phoneNumber: "+13175550123",
+      smsEnabled: false,
+      stateValues: [true, false],
+    });
+
+    expect(html).toContain("Web Messages");
+    expect(html).toContain("Install your website widget and start a test chat.");
+    expect(html).toContain(
+      "Manage your widget, AI answers, business details, hours, and calendar connection."
+    );
+    expect(html).not.toContain("Set Up Phone Number");
+    expect(html).not.toContain("Your SimplAssist Number");
+    expect(html).not.toContain("Customers can’t text");
+    expect(html).not.toContain("Phone number selector");
+  });
+
   it("preserves the default account name", () => {
     const html = renderOverview({
       requestBrand: DEFAULT_REQUEST_BRAND,

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getA2pRiskClearanceForBusiness: vi.fn(),
   isNanpTollFreeNumber: vi.fn(),
+  resolveSmsProvisioningAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
@@ -21,6 +22,9 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({
 }));
 vi.mock("@/lib/messaging/numbers", () => ({
   isNanpTollFreeNumber: mocks.isNanpTollFreeNumber,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
 }));
 
 import { POST } from "./route";
@@ -120,6 +124,11 @@ beforeEach(() => {
   mocks.isNanpTollFreeNumber.mockImplementation((value: string) =>
     /^\+1(?:800|833|844|855|866|877|888)\d{7}$/.test(value)
   );
+  mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+    allowed: true,
+    source: "direct_precheckout",
+    plan: null,
+  });
 });
 
 describe("POST /api/messaging/numbers/purchase", () => {
@@ -191,6 +200,46 @@ describe("POST /api/messaging/numbers/purchase", () => {
     expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
   });
 
+  it.each(["subscription", "partner_billing", "direct_precheckout"] as const)(
+    "blocks a %s chat-only account before risk checks or SMS state mutation",
+    async (source) => {
+      const { businessTable } = setDatabase();
+      mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source,
+        plan: "chat_only",
+      });
+
+      const response = await POST(request({ phoneNumber: LOCAL_NUMBER }));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "SMS provisioning is not available on the current plan",
+      });
+      expect(businessTable.update).not.toHaveBeenCalled();
+      expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails retryably on uncertain billing state before risk checks or SMS state mutation", async () => {
+    const { businessTable } = setDatabase();
+    mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+
+    const response = await POST(request({ phoneNumber: LOCAL_NUMBER }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to verify plan access",
+      retryable: true,
+    });
+    expect(businessTable.update).not.toHaveBeenCalled();
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+  });
+
   it("saves an ordinary canonical local selection unchanged", async () => {
     const { businessTable, updatePayloads } = setDatabase();
 
@@ -207,6 +256,10 @@ describe("POST /api/messaging/numbers/purchase", () => {
       pending_phone_number_failure_reason: null,
       onboarding_step: "review_submit",
     });
+    expect(mocks.resolveSmsProvisioningAccess).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      { allowDirectPrecheckout: true },
+    );
   });
 
   it("preserves the existing-active-number short circuit without saving the requested replacement", async () => {

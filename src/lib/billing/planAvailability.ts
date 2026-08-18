@@ -2,19 +2,32 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "@/types/database";
+import { SUBSCRIPTION_PLAN_IDS } from "@/types/database";
 
-export type PlanSalesStatus = "available" | "coming_soon";
+export type PlanSalesStatus = "available" | "coming_soon" | "hidden";
 
 /**
- * The single sales switch for new subscriptions. Existing subscriptions keep
- * their plan, entitlements, Stripe mappings, and webhook synchronization even
- * while a plan is unavailable for new purchases.
+ * Catalog-level sales presentation for new subscriptions. Channel-specific
+ * server rollout switches remain an additional authorization boundary.
+ * Existing subscriptions keep their plan and entitlements while a plan is
+ * unavailable for new purchases.
  */
 export const PLAN_SALES_STATUS = {
+  chat_only: "hidden",
   sms_only: "available",
   sms_and_chat: "available",
   full: "coming_soon",
 } as const satisfies Record<SubscriptionPlan, PlanSalesStatus>;
+
+/**
+ * Stable presentation order for customer-facing plan selectors. Hidden plans
+ * remain readable through the catalog but cannot leak from object iteration.
+ */
+export const CUSTOMER_VISIBLE_PLAN_ORDER = Object.freeze(
+  SUBSCRIPTION_PLAN_IDS.filter(
+    (plan) => PLAN_SALES_STATUS[plan] !== "hidden",
+  ),
+);
 
 export function getPlanSalesStatus(
   plan: SubscriptionPlan
@@ -24,6 +37,10 @@ export function getPlanSalesStatus(
 
 export function isPlanAvailable(plan: SubscriptionPlan): boolean {
   return getPlanSalesStatus(plan) === "available";
+}
+
+export function isPlanVisible(plan: SubscriptionPlan): boolean {
+  return getPlanSalesStatus(plan) !== "hidden";
 }
 
 export function availablePlanOrFallback(

@@ -4,6 +4,21 @@ import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { PlanSelectionOption } from "./PlanSelectionOption";
 
 describe("PlanSelectionOption", () => {
+  it("renders no acquisition control for a hidden chat-only plan", () => {
+    const markup = renderToStaticMarkup(
+      <PlanSelectionOption
+        inputName="plan"
+        planKey="chat_only"
+        plan={SUBSCRIPTION_PLANS.chat_only}
+        selected={false}
+        recommended={false}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(markup).toBe("");
+  });
+
   it("renders Full Suite as a non-selectable waitlist card", () => {
     const markup = renderToStaticMarkup(
       <PlanSelectionOption

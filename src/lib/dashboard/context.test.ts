@@ -1,15 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  getUser: vi.fn(),
-  from: vi.fn(),
-  select: vi.fn(),
-  eq: vi.fn(),
-  maybeSingle: vi.fn(),
-  resolveBusinessEntitlements: vi.fn(),
-  requestCacheStores: [] as Map<string, unknown>[],
-}));
+const mocks = vi.hoisted(() => {
+  class TestEntitlementResolutionError extends Error {
+    code: string;
+    constructor(code: string) {
+      super(code);
+      this.code = code;
+    }
+  }
+
+  return {
+    createClient: vi.fn(),
+    getUser: vi.fn(),
+    from: vi.fn(),
+    select: vi.fn(),
+    eq: vi.fn(),
+    maybeSingle: vi.fn(),
+    resolveBusinessEntitlements: vi.fn(),
+    requestCacheStores: [] as Map<string, unknown>[],
+    TestEntitlementResolutionError,
+  };
+});
 
 vi.mock("server-only", () => ({}));
 vi.mock("react", async (importOriginal) => ({
@@ -30,6 +41,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
 }));
 vi.mock("@/lib/billing/entitlements", () => ({
+  EntitlementResolutionError: mocks.TestEntitlementResolutionError,
   resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
 }));
 
@@ -183,5 +195,26 @@ describe("dashboard request context", () => {
     expect(projection).not.toContain("billing_admin_notes");
     expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledOnce();
     expect(mocks.resolveBusinessEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+  });
+
+  it("turns only a missing direct subscription into the onboarding page state", async () => {
+    mocks.resolveBusinessEntitlements.mockRejectedValue(
+      new mocks.TestEntitlementResolutionError("subscription_missing"),
+    );
+
+    await expect(getDashboardEntitledContext()).resolves.toMatchObject({
+      status: "subscription_missing",
+      user: USER,
+      business: BUSINESS,
+    });
+  });
+
+  it("keeps entitlement lookup outages as errors instead of treating them as onboarding", async () => {
+    const failure = new mocks.TestEntitlementResolutionError(
+      "subscription_lookup_failed",
+    );
+    mocks.resolveBusinessEntitlements.mockRejectedValue(failure);
+
+    await expect(getDashboardEntitledContext()).rejects.toBe(failure);
   });
 });

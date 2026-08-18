@@ -4,6 +4,7 @@ import {
   isNanpTollFreeNumber,
   searchAvailableNumbers,
 } from "@/lib/messaging/numbers";
+import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function GET(request: NextRequest) {
@@ -41,6 +42,23 @@ export async function GET(request: NextRequest) {
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const smsAccess = await resolveSmsProvisioningAccess(
+    workspaceGate.access.business.id,
+    { allowDirectPrecheckout: true },
+  );
+  if (!smsAccess.allowed) {
+    if (smsAccess.reason === "billing_state_unavailable") {
+      return NextResponse.json(
+        { error: "Unable to verify plan access", retryable: true },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json(
+      { error: "SMS provisioning is not available on the current plan" },
+      { status: 403 },
+    );
   }
 
   try {

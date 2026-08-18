@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   verifyPublishedCompliancePage: vi.fn(),
   getBusinessContentQuality: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
+  resolveSmsProvisioningAccess: vi.fn(),
+  claimSmsLaunchPlanFamily: vi.fn(),
   buildProviderResourceName: vi.fn(),
   resolveProviderCreateIntent: vi.fn(),
   readProviderCreateIntentForPayload: vi.fn(),
@@ -34,6 +36,12 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/account/operationalControls.server", () => ({
   resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
+}));
+vi.mock("@/lib/billing/smsLaunchFamily.server", () => ({
+  claimSmsLaunchPlanFamily: mocks.claimSmsLaunchPlanFamily,
 }));
 vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
   getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
@@ -191,6 +199,12 @@ beforeEach(() => {
     textingPausedAt: null,
     bookingsPausedAt: null,
   });
+  mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+    allowed: true,
+    source: "billing_override",
+    plan: "full",
+  });
+  mocks.claimSmsLaunchPlanFamily.mockResolvedValue(true);
   mocks.claimRegistrationAttempt.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",
@@ -234,6 +248,61 @@ beforeEach(() => {
 });
 
 describe("attemptPaidLaunch number purchase recovery", () => {
+  it.each([
+    [
+      "a canceled Chat Checkout family lock",
+      {
+        allowed: false,
+        reason: "plan_not_entitled",
+        source: "direct_precheckout",
+        plan: "chat_only",
+      },
+    ],
+    [
+      "contradictory billing and family state",
+      { allowed: false, reason: "billing_state_unavailable" },
+    ],
+  ] as const)(
+    "stops %s before content, risk, registration claims, or Telnyx",
+    async (_label, decision) => {
+      mocks.resolveSmsProvisioningAccess.mockResolvedValue(decision);
+      queueResults({ data: LAUNCH_BUSINESS, error: null });
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result).toEqual({
+        status: "billing_required",
+        message: "Finish checkout before submitting SMS registration.",
+      });
+      expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
+      expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+      expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    },
+  );
+
+  it("loses an opposing Chat Checkout race before risk, registration claims, or Telnyx", async () => {
+    mocks.claimSmsLaunchPlanFamily.mockResolvedValue(false);
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "billing_required",
+      message: "Finish checkout before submitting SMS registration.",
+    });
+    expect(mocks.claimSmsLaunchPlanFamily).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+  });
+
   it("returns neutral copy when registration is administratively disabled", async () => {
     queueResults({
       data: { ...LAUNCH_BUSINESS, telnyx_submission_disabled: true },
@@ -460,6 +529,84 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       expect(mocks.purchaseNumber).not.toHaveBeenCalled();
       expect(mocks.registerCampaign).not.toHaveBeenCalled();
     }
+  );
+
+  it("recognizes chat-only partner billing without allowing SMS/Telnyx launch", async () => {
+    queueResults(
+      {
+        data: {
+          ...LAUNCH_BUSINESS,
+          billing_mode: "invoiced",
+          partner_plan: "chat_only",
+          billing_pilot: true,
+          billing_comped: true,
+          billing_exempt: true,
+        },
+        error: null,
+      },
+      { data: null, error: null },
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("billing_required");
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it("does not let a direct chat-only subscription enter SMS/Telnyx launch", async () => {
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      {
+        data: {
+          plan: "chat_only",
+          status: "active",
+          setup_fee_paid_at: "2026-07-01T00:00:00.000Z",
+        },
+        error: null,
+      },
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "stripe_finalize");
+
+    expect(result.status).toBe("billing_required");
+    expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+    expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, "enterprise"])(
+    "fails closed for malformed direct subscription plan %# before SMS/Telnyx launch",
+    async (plan) => {
+      queueResults(
+        { data: LAUNCH_BUSINESS, error: null },
+        {
+          data: {
+            plan,
+            status: "active",
+            setup_fee_paid_at: "2026-07-01T00:00:00.000Z",
+          },
+          error: null,
+        },
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "stripe_finalize");
+
+      expect(result.status).toBe("billing_required");
+      expect(mocks.getA2pRiskClearanceForBusiness).not.toHaveBeenCalled();
+      expect(mocks.claimRegistrationAttempt).not.toHaveBeenCalled();
+      expect(mocks.registerBrand).not.toHaveBeenCalled();
+      expect(mocks.createMessagingProfile).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+      expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    },
   );
 
   it.each([undefined, null, "external"])(

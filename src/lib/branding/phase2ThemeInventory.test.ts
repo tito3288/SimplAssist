@@ -10,6 +10,7 @@ const CONVERTED_UI_FILES = [
   "../../components/onboarding/BrandVerificationForm.tsx",
   "../../components/onboarding/BusinessHoursForm.tsx",
   "../../components/onboarding/BusinessInfoForm.tsx",
+  "../../components/onboarding/DirectPlanSelection.tsx",
   "../../components/onboarding/PlanSelectionOption.tsx",
   "../../components/onboarding/ReviewAndLaunch.tsx",
   "../../components/onboarding/ServicesAndFaqsForm.tsx",

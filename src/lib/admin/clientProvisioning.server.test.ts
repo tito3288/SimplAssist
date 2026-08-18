@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: {} }));
@@ -61,6 +61,7 @@ type HarnessOptions = {
           | "subscription_exists"
           | "partner_required"
           | "partner_inactive"
+          | "plan_family_transition_not_supported"
           | "assignment_failed";
       };
   assignmentDoesNotPersist?: boolean;
@@ -310,6 +311,10 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("conciergeAuthCreatePayload", () => {
   it("uses a confirmed user and the exact recoverable provisioning markers", () => {
     expect(
@@ -331,6 +336,23 @@ describe("conciergeAuthCreatePayload", () => {
 });
 
 describe("client provisioning service", () => {
+  it("rejects chat-only before any durable work when partner rollout is off", async () => {
+    vi.stubEnv("CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED", "0");
+    const harness = makeHarness();
+
+    await expect(
+      harness.service.create(
+        { ...CREATE_INPUT, partnerPlan: "chat_only" },
+        ADMIN_ID,
+      ),
+    ).rejects.toMatchObject({
+      code: "chat_only_not_available",
+      status: 409,
+    });
+    expect(harness.dependencies.loadPartner).not.toHaveBeenCalled();
+    expect(harness.dependencies.createOrLoadJob).not.toHaveBeenCalled();
+  });
+
   it("validates the partner before creating a durable job", async () => {
     const harness = makeHarness({ partner: { domain_status: "pending" } });
 
@@ -413,6 +435,13 @@ describe("client provisioning service", () => {
     expect(harness.calls.indexOf("assign")).toBeLessThan(
       harness.calls.indexOf("generate-link"),
     );
+    expect(harness.dependencies.assignPartnerBilling).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      partnerId: PARTNER_ID,
+      billingMode: "invoiced",
+      partnerPlan: "sms_and_chat",
+      adminId: ADMIN_ID,
+    });
     expect(harness.dependencies.createAuthUser).toHaveBeenCalledWith({
       email: CREATE_INPUT.email,
       password: "undisclosed-random-password-Aa1!",
@@ -622,21 +651,27 @@ describe("client provisioning service", () => {
     expect(harness.dependencies.generateRecoveryLink).not.toHaveBeenCalled();
   });
 
-  it("does not generate a setup link when assignment conflicts", async () => {
-    const harness = makeHarness({
-      assignment: { ok: false, code: "subscription_exists" },
-    });
+  it.each([
+    "subscription_exists",
+    "plan_family_transition_not_supported",
+  ] as const)(
+    "does not generate a setup link when assignment conflicts with %s",
+    async (code) => {
+      const harness = makeHarness({
+        assignment: { ok: false, code },
+      });
 
-    await expect(
-      harness.service.create(CREATE_INPUT, ADMIN_ID),
-    ).rejects.toMatchObject({
-      code: "subscription_exists",
-      status: 409,
-      provisioningId: JOB_ID,
-    });
-    expect(harness.dependencies.generateRecoveryLink).not.toHaveBeenCalled();
-    expect(harness.dependencies.sendSetupEmail).not.toHaveBeenCalled();
-  });
+      await expect(
+        harness.service.create(CREATE_INPUT, ADMIN_ID),
+      ).rejects.toMatchObject({
+        code,
+        status: 409,
+        provisioningId: JOB_ID,
+      });
+      expect(harness.dependencies.generateRecoveryLink).not.toHaveBeenCalled();
+      expect(harness.dependencies.sendSetupEmail).not.toHaveBeenCalled();
+    },
+  );
 
   it("rechecks the exact business assignment before generating a partner link", async () => {
     const harness = makeHarness({ assignmentDoesNotPersist: true });

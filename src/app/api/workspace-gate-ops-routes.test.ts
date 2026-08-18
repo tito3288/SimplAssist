@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   attemptPaidLaunch: vi.fn(),
   getOnboardingStateForOwner: vi.fn(),
   getOnboardingStateForBusinessId: vi.fn(),
+  resolveSmsProvisioningAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
@@ -42,6 +43,9 @@ vi.mock("@/lib/util/slug.server", () => ({
 }));
 vi.mock("@/lib/billing/launch", () => ({
   attemptPaidLaunch: mocks.attemptPaidLaunch,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
 }));
 vi.mock("@/lib/onboarding/state", () => ({
   getOnboardingStateForOwner: mocks.getOnboardingStateForOwner,

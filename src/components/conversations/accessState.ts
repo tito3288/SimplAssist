@@ -8,6 +8,12 @@ export interface ConversationAccessState {
   canWrite: boolean;
 }
 
+export function smsPlanLockedMessage(smsIncluded: boolean): string {
+  return smsIncluded
+    ? "SMS sending is paused because this plan is inactive."
+    : "SMS is not included in your current plan.";
+}
+
 /**
  * Keep the inbox presentation aligned with the server-side runtime walls.
  * Stored AI state is deliberately ignored when the current plan cannot use it.

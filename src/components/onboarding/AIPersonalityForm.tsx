@@ -5,7 +5,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { AITone, Language, PrimaryGoal } from '@/types/database';
+import type {
+  AITone,
+  Language,
+  OnboardingStep,
+  PrimaryGoal,
+} from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { primaryCtaInlineClass, secondaryCtaClass } from '@/lib/glass';
 import { PrimaryGoalFields } from '@/components/goals/PrimaryGoalFields';
@@ -46,6 +51,7 @@ type SaveAIPersonalitySettingsArgs = {
   data: AIPersonalityData;
   onNext: (data: AIPersonalityData) => void | Promise<void>;
   now?: () => string;
+  nextOnboardingStep?: OnboardingStep;
 };
 
 export async function saveAIPersonalitySettings({
@@ -54,6 +60,7 @@ export async function saveAIPersonalitySettings({
   data,
   onNext,
   now = () => new Date().toISOString(),
+  nextOnboardingStep = 'legal_verification',
 }: SaveAIPersonalitySettingsArgs): Promise<void> {
   const primaryGoalUpdate = buildPrimaryGoalUpdate(data);
   if (!primaryGoalUpdate) {
@@ -88,7 +95,7 @@ export async function saveAIPersonalitySettings({
 
   const { error: businessError } = await supabase.from('businesses').update({
     ...primaryGoalUpdate,
-    onboarding_step: 'legal_verification',
+    onboarding_step: nextOnboardingStep,
     onboarding_last_saved_at: now(),
   }).eq('id', businessId);
   if (businessError) throw businessError;
@@ -104,6 +111,8 @@ interface AIPersonalityFormProps {
   initialData?: Partial<AIPersonalityData>;
   onNext: (data: AIPersonalityData) => void | Promise<void>;
   onBack: () => void;
+  showSmsResponseDelay?: boolean;
+  nextOnboardingStep?: OnboardingStep;
 }
 
 const TONE_OPTIONS: { value: AITone; label: string; description: string }[] = [
@@ -126,6 +135,8 @@ export default function AIPersonalityForm({
   initialData,
   onNext,
   onBack,
+  showSmsResponseDelay = true,
+  nextOnboardingStep = 'legal_verification',
 }: AIPersonalityFormProps) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -173,6 +184,7 @@ export default function AIPersonalityForm({
         businessId,
         data,
         onNext,
+        nextOnboardingStep,
       });
     } catch {
       setSubmitError('Could not save your AI settings. Please try again.');
@@ -270,7 +282,7 @@ export default function AIPersonalityForm({
       </div>
 
       {/* Response Delay */}
-      <div>
+      {showSmsResponseDelay && <div>
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">
           SMS Response Delay: <span className="text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)]">{getDelayLabel(responseDelay)}</span>
         </label>
@@ -293,7 +305,7 @@ export default function AIPersonalityForm({
           <span>Instant</span>
           <span>1 minute</span>
         </div>
-      </div>
+      </div>}
 
       {/* Widget Welcome Message */}
       <div>

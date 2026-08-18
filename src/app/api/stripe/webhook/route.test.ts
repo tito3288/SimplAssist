@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   syncCheckoutSession: vi.fn(),
   syncStripeSubscription: vi.fn(),
-  attemptPaidLaunch: vi.fn(),
+  finalizePaidCheckout: vi.fn(),
 }));
 
 vi.mock("@/lib/stripe/client", () => ({
@@ -31,8 +31,8 @@ vi.mock("@/lib/stripe/subscriptionSync", () => ({
   syncCheckoutSession: mocks.syncCheckoutSession,
   syncStripeSubscription: mocks.syncStripeSubscription,
 }));
-vi.mock("@/lib/billing/launch", () => ({
-  attemptPaidLaunch: mocks.attemptPaidLaunch,
+vi.mock("@/lib/billing/finalizePaidCheckout.server", () => ({
+  finalizePaidCheckout: mocks.finalizePaidCheckout,
 }));
 
 import { POST as stripeWebhook } from "./route";
@@ -44,7 +44,7 @@ const SUBSCRIPTION_ID = "sub_test_webhook";
 function event(
   type: Stripe.Event.Type,
   object: Record<string, unknown>,
-  id = `evt_test_${type.replaceAll(".", "_")}`
+  id = `evt_test_${type.replaceAll(".", "_")}`,
 ): Stripe.Event {
   return {
     id,
@@ -124,12 +124,12 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ received: true });
     expect(mocks.syncCheckoutSession).toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({
         processed_at: expect.any(String),
         processing_error: null,
-      })
+      }),
     );
   });
 
@@ -149,9 +149,82 @@ describe("POST /api/stripe/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.syncCheckoutSession).toHaveBeenCalled();
-    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "stripe_webhook"
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: BUSINESS_ID,
+        plan: "sms_only",
+      }),
+      "stripe_webhook",
+    );
+  });
+
+  it("dispatches Chat Only completion from the synchronized plan", async () => {
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_test_chat_only",
+      metadata: { plan: "sms_only" },
+    });
+    const synced = {
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "chat_only",
+    };
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue(synced);
+    mocks.finalizePaidCheckout.mockResolvedValue({ status: "completed" });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ received: true });
+    // Session metadata is intentionally not used for dispatch; the Price
+    // resolved by synchronization is authoritative.
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      synced,
+      "stripe_webhook",
+    );
+  });
+
+  it("records a retryable Chat Only completion failure and succeeds on redelivery", async () => {
+    const checkoutEvent = event(
+      "checkout.session.completed",
+      { id: "cs_test_chat_retry" },
+      "evt_test_chat_retry",
+    );
+    const synced = {
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "chat_only",
+    };
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue(synced);
+    mocks.finalizePaidCheckout
+      .mockRejectedValueOnce(new Error("serialization failure"))
+      .mockResolvedValueOnce({ status: "completed" });
+
+    const failed = await stripeWebhook(request());
+
+    expect(failed.status).toBe(500);
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("serialization failure"),
+    });
+
+    mocks.insert.mockResolvedValue({
+      error: { code: "23505", message: "duplicate key" },
+    });
+    mocks.select.mockResolvedValue({
+      data: [{ id: checkoutEvent.id }],
+      error: null,
+    });
+
+    const retried = await stripeWebhook(request());
+
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toEqual({ received: true });
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledTimes(2);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
@@ -166,7 +239,7 @@ describe("POST /api/stripe/webhook", () => {
       subscriptionId: SUBSCRIPTION_ID,
       plan: "sms_only",
     });
-    mocks.attemptPaidLaunch.mockResolvedValue({
+    mocks.finalizePaidCheckout.mockResolvedValue({
       status: "services_faqs_required",
       message: "Add 3+3 content.",
     });
@@ -182,7 +255,7 @@ describe("POST /api/stripe/webhook", () => {
       expect.objectContaining({
         processed_at: expect.any(String),
         processing_error: null,
-      })
+      }),
     );
   });
 
@@ -197,7 +270,7 @@ describe("POST /api/stripe/webhook", () => {
       subscriptionId: SUBSCRIPTION_ID,
       plan: "sms_only",
     });
-    mocks.attemptPaidLaunch.mockResolvedValue({
+    mocks.finalizePaidCheckout.mockResolvedValue({
       status: "operations_suspended",
       message: "Account operations are suspended.",
     });
@@ -207,18 +280,18 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ received: true });
     expect(mocks.syncCheckoutSession).toHaveBeenCalledOnce();
-    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "stripe_webhook"
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: BUSINESS_ID, plan: "sms_only" }),
+      "stripe_webhook",
     );
-    expect(
-      mocks.syncCheckoutSession.mock.invocationCallOrder[0]
-    ).toBeLessThan(mocks.attemptPaidLaunch.mock.invocationCallOrder[0]);
+    expect(mocks.syncCheckoutSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.finalizePaidCheckout.mock.invocationCallOrder[0],
+    );
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({
         processed_at: expect.any(String),
         processing_error: null,
-      })
+      }),
     );
   });
 
@@ -248,17 +321,17 @@ describe("POST /api/stripe/webhook", () => {
       expect.objectContaining({
         id: "cs_test_promo_zero",
         payment_status: "no_payment_required",
-      })
+      }),
     );
-    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "stripe_webhook"
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: BUSINESS_ID, plan: "sms_only" }),
+      "stripe_webhook",
     );
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({
         processed_at: expect.any(String),
         processing_error: null,
-      })
+      }),
     );
   });
 
@@ -277,15 +350,15 @@ describe("POST /api/stripe/webhook", () => {
     const response = await stripeWebhook(request());
 
     expect(response.status).toBe(200);
-    expect(mocks.attemptPaidLaunch).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      "stripe_webhook"
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: BUSINESS_ID, plan: "sms_only" }),
+      "stripe_webhook",
     );
   });
 
   it("acknowledges a guarded invoice-failure skip for a deleted or partner-managed business", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+      event("invoice.payment_failed", { customer: CUSTOMER_ID }),
     );
     mocks.rpc.mockResolvedValue({ data: false, error: null });
 
@@ -295,16 +368,16 @@ describe("POST /api/stripe/webhook", () => {
     await expect(response.json()).resolves.toEqual({ received: true });
     expect(mocks.rpc).toHaveBeenCalledWith(
       "mark_stripe_subscription_past_due_if_business_active",
-      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID }),
     );
     expect(mocks.update).toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
   it("returns 500 and records failure when guarded invoice persistence errors", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+      event("invoice.payment_failed", { customer: CUSTOMER_ID }),
     );
     mocks.rpc.mockResolvedValue({
       data: null,
@@ -323,7 +396,7 @@ describe("POST /api/stripe/webhook", () => {
     "returns 500 for malformed invoice guard response %#",
     async (data) => {
       mocks.constructEvent.mockReturnValue(
-        event("invoice.payment_failed", { customer: CUSTOMER_ID })
+        event("invoice.payment_failed", { customer: CUSTOMER_ID }),
       );
       mocks.rpc.mockResolvedValue({ data, error: null });
 
@@ -332,16 +405,16 @@ describe("POST /api/stripe/webhook", () => {
       expect(response.status).toBe(500);
       expect(mocks.update).toHaveBeenCalledWith({
         processing_error: expect.stringContaining(
-          "Guarded past-due update returned an invalid response"
+          "Guarded past-due update returned an invalid response",
         ),
       });
-    }
+    },
   );
 
   it("acknowledges subscription sync null so partner-mode events do not gain local authority or retry forever", async () => {
     const subscription = { id: SUBSCRIPTION_ID };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.updated", subscription)
+      event("customer.subscription.updated", subscription),
     );
     mocks.syncStripeSubscription.mockResolvedValue(null);
 
@@ -349,9 +422,9 @@ describe("POST /api/stripe/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
-    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
     expect(mocks.update).toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
@@ -375,13 +448,13 @@ describe("POST /api/stripe/webhook", () => {
     // The re-claim probe runs (update with a cleared error) but no
     // processed marker is ever written for a suppressed duplicate.
     expect(mocks.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
   it("ignores invoice failures without a string customer id", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", { customer: null })
+      event("invoice.payment_failed", { customer: null }),
     );
 
     const response = await stripeWebhook(request());
@@ -392,7 +465,7 @@ describe("POST /api/stripe/webhook", () => {
 
   it("ignores payment successes without a resolvable subscription id", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_succeeded", { customer: CUSTOMER_ID })
+      event("invoice.payment_succeeded", { customer: CUSTOMER_ID }),
     );
 
     const response = await stripeWebhook(request());
@@ -408,7 +481,7 @@ describe("POST /api/stripe/webhook", () => {
         customer: CUSTOMER_ID,
         // Legacy invoice shape: subscription id on the invoice root.
         subscription: SUBSCRIPTION_ID,
-      })
+      }),
     );
     // Payment success alone never fabricates a status — whatever Stripe
     // reports (here still past_due) is what gets written.
@@ -427,7 +500,7 @@ describe("POST /api/stripe/webhook", () => {
     expect(mocks.retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(retrieved);
     expect(mocks.update).toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
@@ -436,7 +509,7 @@ describe("POST /api/stripe/webhook", () => {
       event("invoice.payment_succeeded", {
         customer: CUSTOMER_ID,
         parent: { subscription_details: { subscription: SUBSCRIPTION_ID } },
-      })
+      }),
     );
     const retrieved = { id: SUBSCRIPTION_ID, status: "active" };
     mocks.retrieve.mockResolvedValue(retrieved);
@@ -452,7 +525,7 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     expect(mocks.retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active" })
+      expect.objectContaining({ status: "active" }),
     );
   });
 
@@ -461,7 +534,7 @@ describe("POST /api/stripe/webhook", () => {
       event("invoice.payment_succeeded", {
         customer: CUSTOMER_ID,
         subscription: SUBSCRIPTION_ID,
-      })
+      }),
     );
     mocks.retrieve.mockRejectedValue(new Error("stripe unreachable"));
 
@@ -477,7 +550,7 @@ describe("POST /api/stripe/webhook", () => {
   it("restores active after the past_due then paid production sequence", async () => {
     // 1. invoice.payment_failed marks the business past_due via the guard.
     mocks.constructEvent.mockReturnValueOnce(
-      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+      event("invoice.payment_failed", { customer: CUSTOMER_ID }),
     );
     mocks.rpc.mockResolvedValue({ data: true, error: null });
 
@@ -486,7 +559,7 @@ describe("POST /api/stripe/webhook", () => {
     expect(failed.status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "mark_stripe_subscription_past_due_if_business_active",
-      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID }),
     );
 
     // 2. The customer fixes their card; invoice.payment_succeeded restores
@@ -495,7 +568,7 @@ describe("POST /api/stripe/webhook", () => {
       event("invoice.payment_succeeded", {
         customer: CUSTOMER_ID,
         parent: { subscription_details: { subscription: SUBSCRIPTION_ID } },
-      })
+      }),
     );
     const retrieved = { id: SUBSCRIPTION_ID, status: "active" };
     mocks.retrieve.mockResolvedValue(retrieved);
@@ -510,14 +583,14 @@ describe("POST /api/stripe/webhook", () => {
 
     expect(paid.status).toBe(200);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active" })
+      expect.objectContaining({ status: "active" }),
     );
   });
 
   it("passes a lapsed subscription through the guarded sync for an active business", async () => {
     const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.deleted", subscription)
+      event("customer.subscription.deleted", subscription),
     );
     mocks.syncStripeSubscription.mockResolvedValue({
       businessId: BUSINESS_ID,
@@ -531,14 +604,14 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(subscription);
     expect(mocks.update).toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
   it("acknowledges a deleted-business lapse skip so the deletion flow keeps terminal ownership", async () => {
     const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.deleted", subscription)
+      event("customer.subscription.deleted", subscription),
     );
     mocks.syncStripeSubscription.mockResolvedValue(null);
 
@@ -552,7 +625,7 @@ describe("POST /api/stripe/webhook", () => {
   it("re-claims a finished-failed event on Stripe redelivery and reprocesses it", async () => {
     const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.deleted", subscription)
+      event("customer.subscription.deleted", subscription),
     );
     mocks.insert.mockResolvedValue({
       error: { code: "23505", message: "duplicate key" },
@@ -578,13 +651,13 @@ describe("POST /api/stripe/webhook", () => {
     // and wrote the processed marker.
     expect(mocks.update).toHaveBeenCalledWith({ processing_error: null });
     expect(mocks.update).toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
   it("keeps acking duplicates while the first attempt is in flight", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID }),
     );
     mocks.insert.mockResolvedValue({
       error: { code: "23505", message: "duplicate key" },
@@ -604,7 +677,7 @@ describe("POST /api/stripe/webhook", () => {
 
   it("re-claims only finished-failed rows: the CAS predicate excludes processed and in-flight events", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID }),
     );
     mocks.insert.mockResolvedValue({
       error: { code: "23505", message: "duplicate key" },
@@ -631,7 +704,7 @@ describe("POST /api/stripe/webhook", () => {
     // handling of the two outcomes.
     const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.deleted", subscription)
+      event("customer.subscription.deleted", subscription),
     );
     mocks.insert.mockResolvedValue({
       error: { code: "23505", message: "duplicate key" },
@@ -660,7 +733,7 @@ describe("POST /api/stripe/webhook", () => {
 
   it("throws without processing when the re-claim query errors, so no event runs unclaimed", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.updated", { id: SUBSCRIPTION_ID })
+      event("customer.subscription.updated", { id: SUBSCRIPTION_ID }),
     );
     mocks.insert.mockResolvedValue({
       error: { code: "23505", message: "duplicate key" },
@@ -673,11 +746,11 @@ describe("POST /api/stripe/webhook", () => {
     // claimStripeEvent runs before the processing try/catch, so an unknown
     // claim state propagates (Next.js turns it into a 500 → Stripe retries).
     await expect(stripeWebhook(request())).rejects.toThrow(
-      /Failed to evaluate re-claim/
+      /Failed to evaluate re-claim/,
     );
     expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ processed_at: expect.any(String) })
+      expect.objectContaining({ processed_at: expect.any(String) }),
     );
   });
 
@@ -688,7 +761,7 @@ describe("POST /api/stripe/webhook", () => {
         event("invoice.payment_failed", {
           customer: CUSTOMER_ID,
           subscription: SUBSCRIPTION_ID,
-        })
+        }),
       );
       const live = { id: SUBSCRIPTION_ID, status };
       mocks.retrieve.mockResolvedValue(live);
@@ -707,7 +780,7 @@ describe("POST /api/stripe/webhook", () => {
       // status classification.
       expect(mocks.rpc).not.toHaveBeenCalled();
       expect(mocks.syncStripeSubscription).toHaveBeenCalledWith(live);
-    }
+    },
   );
 
   it("marks past_due only while the live subscription is still past_due", async () => {
@@ -715,7 +788,7 @@ describe("POST /api/stripe/webhook", () => {
       event("invoice.payment_failed", {
         customer: CUSTOMER_ID,
         subscription: SUBSCRIPTION_ID,
-      })
+      }),
     );
     mocks.retrieve.mockResolvedValue({
       id: SUBSCRIPTION_ID,
@@ -728,14 +801,14 @@ describe("POST /api/stripe/webhook", () => {
     expect(response.status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "mark_stripe_subscription_past_due_if_business_active",
-      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID }),
     );
     expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
   });
 
   it("marks past_due directly when the invoice has no subscription", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+      event("invoice.payment_failed", { customer: CUSTOMER_ID }),
     );
     mocks.rpc.mockResolvedValue({ data: true, error: null });
 
@@ -745,7 +818,7 @@ describe("POST /api/stripe/webhook", () => {
     expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.rpc).toHaveBeenCalledWith(
       "mark_stripe_subscription_past_due_if_business_active",
-      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID })
+      expect.objectContaining({ p_stripe_customer_id: CUSTOMER_ID }),
     );
   });
 
@@ -754,7 +827,7 @@ describe("POST /api/stripe/webhook", () => {
       event("invoice.payment_failed", {
         customer: CUSTOMER_ID,
         subscription: SUBSCRIPTION_ID,
-      })
+      }),
     );
     mocks.retrieve.mockRejectedValue(new Error("stripe unreachable"));
 
@@ -772,7 +845,7 @@ describe("POST /api/stripe/webhook", () => {
   it("returns 500 and records the failure when the processed marker cannot be written", async () => {
     const subscription = { id: SUBSCRIPTION_ID, status: "canceled" };
     mocks.constructEvent.mockReturnValue(
-      event("customer.subscription.deleted", subscription)
+      event("customer.subscription.deleted", subscription),
     );
     mocks.syncStripeSubscription.mockResolvedValue({
       businessId: BUSINESS_ID,
@@ -805,7 +878,7 @@ describe("POST /api/stripe/webhook", () => {
 
   it("guards the failure marker so it never stamps a processed row", async () => {
     mocks.constructEvent.mockReturnValue(
-      event("invoice.payment_failed", { customer: CUSTOMER_ID })
+      event("invoice.payment_failed", { customer: CUSTOMER_ID }),
     );
     mocks.rpc.mockResolvedValue({
       data: null,

@@ -3,6 +3,7 @@ import { InboxLayout } from "@/components/conversations/InboxLayout";
 import type { Conversation, Contact } from "@/types/database";
 import { getSmsReadinessForBusiness } from "@/lib/messaging/lookup";
 import { canUseFeature } from "@/lib/billing/entitlements";
+import { planRequiresSmsProvisioning } from "@/lib/billing/features";
 import { getDashboardEntitledContext } from "@/lib/dashboard/context";
 import { requireWorkspacePageAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
@@ -26,7 +27,13 @@ export default async function ConversationsPage({
   if (context.status !== "resolved") redirect("/onboarding");
 
   const { supabase, business, entitlements } = context;
-  const smsReadiness = await getSmsReadinessForBusiness(business.id);
+  const smsIncluded = planRequiresSmsProvisioning(entitlements.plan);
+  const smsReadiness = smsIncluded
+    ? await getSmsReadinessForBusiness(business.id)
+    : {
+        smsReady: false,
+        blockReason: null,
+      };
   const initialSelectedId =
     typeof searchParams?.conversation === "string" &&
     searchParams.conversation.length > 0
@@ -72,6 +79,7 @@ export default async function ConversationsPage({
       <InboxLayout
         conversations={conversationsWithPreviews}
         businessId={business.id}
+        smsIncluded={smsIncluded}
         smsReady={smsReadiness.smsReady}
         smsBlockReason={smsReadiness.blockReason}
         canUseManualSms={canUseFeature(entitlements, "manual_sms")}

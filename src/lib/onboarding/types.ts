@@ -24,10 +24,32 @@ import type {
 
 export type { OnboardingStep } from "@/types/database";
 
+export const LEGACY_SMS_ONBOARDING_STEPS: OnboardingStep[] = [
+  "business_info",
+  "business_hours",
+  "services_faqs",
+  "ai_settings",
+  "legal_verification",
+  "sms_use_case",
+  "phone_number",
+  "review_submit",
+  "carrier_review",
+];
+
+export const DIRECT_CHAT_ONBOARDING_STEPS: OnboardingStep[] = [
+  "business_info",
+  "business_hours",
+  "services_faqs",
+  "plan_selection",
+  "ai_settings",
+  "review_submit",
+];
+
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   "business_info",
   "business_hours",
   "services_faqs",
+  "plan_selection",
   "ai_settings",
   "legal_verification",
   "sms_use_case",
@@ -40,6 +62,7 @@ export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   business_info: "Business Info",
   business_hours: "Business Hours",
   services_faqs: "Services & FAQs",
+  plan_selection: "Choose Plan",
   ai_settings: "AI Settings",
   legal_verification: "Business Verification",
   sms_use_case: "SMS Use Case",
@@ -146,6 +169,19 @@ export interface OnboardingBillingSnapshot {
   currentPeriodEnd: string | null;
 }
 
+export type OnboardingPlanSource =
+  | "subscription"
+  | "partner_plan"
+  | "direct_intent";
+
+export interface OnboardingPlanSelectionSnapshot {
+  effectivePlan: SubscriptionPlan | null;
+  source: OnboardingPlanSource | null;
+  directIntent: SubscriptionPlan | null;
+  canChooseDirectPlan: boolean;
+  chatOnlyDirectSalesAvailable: boolean;
+}
+
 export interface OnboardingRiskReviewSnapshot {
   status: A2pRiskReviewStatus;
   storedStatus: A2pRiskReviewStatus | null;
@@ -171,6 +207,7 @@ export interface OnboardingState {
   currentStep: OnboardingStep;
   currentStepNumber: number;
   totalSteps: number;
+  steps: OnboardingStep[];
   dashboardReady: boolean;
   completedAt: string | null;
   lastSavedAt: string | null;
@@ -185,11 +222,32 @@ export interface OnboardingState {
   pendingPhoneNumberFailureReason: string | null;
   smsConsentAgreed: boolean;
   billing: OnboardingBillingSnapshot;
+  planSelection: OnboardingPlanSelectionSnapshot;
   registration: OnboardingRegistrationSnapshot;
 }
 
-export function onboardingStepNumber(step: OnboardingStep): number {
-  if (step === "complete") return ONBOARDING_STEPS.length;
-  const index = ONBOARDING_STEPS.indexOf(step);
+export function onboardingStepsForPlan(args: {
+  includePlanSelection: boolean;
+  effectivePlan: SubscriptionPlan | null;
+}): OnboardingStep[] {
+  if (!args.includePlanSelection) {
+    return args.effectivePlan === "chat_only"
+      ? DIRECT_CHAT_ONBOARDING_STEPS.filter(
+          (step) => step !== "plan_selection",
+        )
+      : LEGACY_SMS_ONBOARDING_STEPS;
+  }
+
+  return args.effectivePlan === "chat_only"
+    ? DIRECT_CHAT_ONBOARDING_STEPS
+    : ONBOARDING_STEPS;
+}
+
+export function onboardingStepNumber(
+  step: OnboardingStep,
+  steps: readonly OnboardingStep[] = ONBOARDING_STEPS,
+): number {
+  if (step === "complete") return steps.length;
+  const index = steps.indexOf(step);
   return index === -1 ? 1 : index + 1;
 }

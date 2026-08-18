@@ -274,8 +274,10 @@ SELECT ok(
     JOIN pg_proc AS procedure_row
       ON procedure_row.oid = trigger_row.tgfoid
     WHERE NOT trigger_row.tgisinternal
-      AND pg_get_functiondef(procedure_row.oid)
-            LIKE '%backfill_business_metric_events_v1%'
+      -- pg_get_functiondef() throws for aggregate pg_proc rows, which the
+      -- PostgreSQL 17 planner may inspect before applying the trigger join.
+      -- prosrc is the trigger routine body and is sufficient for this call check.
+      AND procedure_row.prosrc LIKE '%backfill_business_metric_events_v1%'
   )
   AND NOT EXISTS (
     SELECT 1

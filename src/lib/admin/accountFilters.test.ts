@@ -41,7 +41,7 @@ describe("parseAdminAccountFilters", () => {
     },
   );
 
-  it.each(["sms_only", "sms_and_chat", "full"] as const)(
+  it.each(["chat_only", "sms_only", "sms_and_chat", "full"] as const)(
     "accepts the %s plan",
     (plan) => {
       expect(parseAdminAccountFilters({ plan }).plan).toBe(plan);

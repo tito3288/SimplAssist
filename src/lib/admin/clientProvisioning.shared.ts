@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 
 const CANONICAL_EMAIL =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -19,7 +20,7 @@ export const createPartnerClientSchema = z
     businessName: normalizedBusinessNameSchema,
     partnerId: z.string().uuid(),
     billingMode: z.enum(["invoiced", "comped"]),
-    partnerPlan: z.enum(["sms_only", "sms_and_chat", "full"]),
+    partnerPlan: subscriptionPlanSchema,
     sendSetupEmailNow: z.boolean().optional().default(false),
   })
   .strict();
@@ -72,7 +73,7 @@ export const publicProvisioningJobSchema = z
     partnerId: z.string().uuid(),
     partnerName: z.string().trim().min(1),
     billingMode: z.enum(["invoiced", "comped"]),
-    partnerPlan: z.enum(["sms_only", "sms_and_chat", "full"]),
+    partnerPlan: subscriptionPlanSchema,
     status: provisioningStatusSchema,
     lastErrorCode: z.string().nullable(),
     authUserId: z.string().uuid().nullable(),

@@ -284,6 +284,37 @@ describe("loadAdminAccountHealthList", () => {
     });
   });
 
+  it("recognizes chat-only in the authoritative admin billing read model", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        rpcRow({
+          partner_id: "20000000-0000-4000-a045-000000000001",
+          partner_name: "Partner Health",
+          partner_slug: "partner-health",
+          billing_mode: "invoiced",
+          partner_plan: "chat_only",
+          subscription_plan: null,
+          subscription_status: null,
+          subscription_cancel_at_period_end: null,
+          effective_plan: "chat_only",
+          usage_included_sms_parts: 0,
+          usage_inbound_sms_parts: 0,
+          usage_outbound_sms_parts: 0,
+        }),
+      ],
+      error: null,
+    });
+
+    const [record] = await loadAdminAccountHealthList();
+
+    expect(record.business.partner_plan).toBe("chat_only");
+    expect(record.health?.billing).toMatchObject({
+      plan: "chat_only",
+      source: "partner_billing",
+      state: "active",
+    });
+  });
+
   it("treats legacy nullable AI booking fields as disabled configuration", async () => {
     mocks.rpc.mockResolvedValue({
       data: [

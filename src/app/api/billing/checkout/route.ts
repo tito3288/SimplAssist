@@ -4,14 +4,28 @@ import {
   attemptPaidLaunch,
   SERVICES_FAQS_REQUIRED_MESSAGE,
 } from "@/lib/billing/launch";
+import { finalizePaidCheckout } from "@/lib/billing/finalizePaidCheckout.server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
-import { createCheckoutSession } from "@/lib/stripe/checkout";
-import { stripePriceIds, stripeSetupFeePriceId } from "@/lib/stripe/config";
+import {
+  ChatOnlyStripePriceConfigurationError,
+  createCheckoutSession,
+} from "@/lib/stripe/checkout";
+import {
+  hasValidChatOnlyStripePrice,
+  stripePriceIdForPlan,
+  stripeSetupFeePriceId,
+} from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
+import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
+import {
+  DirectCheckoutPlanClaimUnavailableError,
+  PlanFamilyTransitionNotSupportedError,
+} from "@/lib/billing/planFamilyLock.server";
 import {
   partnerManagedBillingMessage,
   resolveAssignedPartnerName,
@@ -23,10 +37,8 @@ import type {
   SubscriptionPlan,
 } from "@/types/database";
 
-const VALID_PLANS: SubscriptionPlan[] = ["sms_only", "sms_and_chat", "full"];
 const VALID_MODES = ["onboarding", "billing"] as const;
-const NO_EIN_HELD_MESSAGE =
-  "Add your EIN before choosing a paid SMS plan.";
+const NO_EIN_HELD_MESSAGE = "Add your EIN before choosing a paid SMS plan.";
 
 type CheckoutBusinessRow = {
   id: string;
@@ -37,6 +49,7 @@ type CheckoutBusinessRow = {
   billing_comped: boolean;
   billing_exempt: boolean;
   onboarding_completed_at: string | null;
+  onboarding_selected_plan: string | null;
   onboarding_registration_status: OnboardingRegistrationStatus | null;
   telnyx_brand_id: string | null;
   brand_status: string | null;
@@ -44,8 +57,11 @@ type CheckoutBusinessRow = {
 };
 
 type CheckoutSubscriptionRow = {
+  plan: string;
   status: string;
   setup_fee_paid_at: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -55,21 +71,21 @@ export async function POST(request: NextRequest) {
   try {
     const { plan, mode: requestedMode } = await request.json();
 
-    if (!VALID_PLANS.includes(plan)) {
-      return NextResponse.json(
-        { error: "Invalid plan. Must be one of: sms_only, sms_and_chat, full" },
-        { status: 400 }
-      );
+    const parsedPlan = subscriptionPlanSchema.safeParse(plan);
+    if (!parsedPlan.success) {
+      return NextResponse.json({ error: "Invalid plan." }, { status: 400 });
     }
-    const selectedPlan = plan as SubscriptionPlan;
+    const selectedPlan: SubscriptionPlan = parsedPlan.data;
 
-    const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "billing";
+    const mode = VALID_MODES.includes(requestedMode)
+      ? requestedMode
+      : "billing";
 
     const supabase = await createClient();
     const { data: business, error: bizError } = await supabase
       .from("businesses")
       .select(
-        "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status"
+        "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_selected_plan, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status",
       )
       .eq("id", workspace.access.business.id)
       .eq("owner_id", workspace.access.user.id)
@@ -78,7 +94,7 @@ export async function POST(request: NextRequest) {
     if (bizError || !business) {
       return NextResponse.json(
         { error: "Business not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -89,11 +105,125 @@ export async function POST(request: NextRequest) {
           error: "billing_managed_by_partner",
           message: partnerManagedBillingMessage(partnerName),
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    if (shouldEnforceInitialContentQuality(business)) {
+    // A partner relationship is independent from billing_mode during repair
+    // and migration windows. Never let a partner-owned business enter the
+    // direct Chat Only acquisition path even if its mode is temporarily
+    // `stripe`; partner Chat Only is assigned by an administrator instead.
+    if (selectedPlan === "chat_only" && business.partner_id !== null) {
+      const partnerName = await resolveAssignedPartnerName(business.partner_id);
+      return NextResponse.json(
+        {
+          error: "billing_managed_by_partner",
+          message: partnerManagedBillingMessage(partnerName),
+        },
+        { status: 409 },
+      );
+    }
+
+    const subscription = await readCheckoutSubscription(supabase, business.id);
+    const directSelectionFlowEnabled =
+      isChatOnlyDirectSalesEnabled() && hasValidChatOnlyStripePrice();
+    if (hasCrossFamilyTransition(subscription, selectedPlan)) {
+      return NextResponse.json(
+        {
+          error:
+            "Switching between Chat Only and SMS plans is not supported yet.",
+          code: "plan_family_transition_not_supported",
+        },
+        { status: 409 },
+      );
+    }
+
+    // Phase 2 supports Chat Only through onboarding only. Existing paid
+    // onboarding retries are still onboarding-mode requests and remain
+    // independent of the acquisition rollout flag.
+    if (selectedPlan === "chat_only" && mode !== "onboarding") {
+      return NextResponse.json(
+        {
+          error: "Chat Only can currently be selected only during onboarding.",
+          code: "chat_only_onboarding_only",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      selectedPlan === "chat_only" &&
+      subscription?.plan === "chat_only" &&
+      subscription.status === "past_due"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Recover your existing Chat Only subscription before continuing.",
+          code: "subscription_payment_recovery_required",
+        },
+        { status: 409 },
+      );
+    }
+
+    const hasActiveChatAuthority =
+      selectedPlan === "chat_only" &&
+      subscription?.plan === "chat_only" &&
+      (subscription.status === "active" || subscription.status === "trialing");
+
+    if (
+      hasActiveChatAuthority &&
+      (!subscription.stripe_customer_id || !subscription.stripe_subscription_id)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Your Chat Only payment is still synchronizing. Try again shortly.",
+          code: "subscription_payment_sync_required",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      selectedPlan === "chat_only" &&
+      !hasActiveChatAuthority &&
+      !directSelectionFlowEnabled
+    ) {
+      return NextResponse.json(
+        {
+          error: "Chat-only is not available yet.",
+          code: "chat_only_not_available",
+        },
+        { status: 409 },
+      );
+    }
+
+    // Advisory intent protects new early-flow acquisition only. Once a
+    // subscription exists, its synchronized plan is authoritative; requiring
+    // a migration-058 intent value would strand legacy paid retries.
+    if (
+      !subscription &&
+      mode === "onboarding" &&
+      !onboardingSelectionMatches(
+        business,
+        selectedPlan,
+        directSelectionFlowEnabled,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error: "Your saved onboarding plan does not match this checkout.",
+          code: "onboarding_plan_mismatch",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      !hasActiveChatAuthority &&
+      shouldEnforceInitialContentQuality(business)
+    ) {
       const contentQuality = await getBusinessContentQuality(business.id);
       if (!contentQuality.ready) {
         const state = await getOnboardingStateForBusinessId(business.id);
@@ -103,12 +233,12 @@ export async function POST(request: NextRequest) {
             code: "services_faqs_required",
             state,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    if (business.has_ein !== true) {
+    if (selectedPlan !== "chat_only" && business.has_ein !== true) {
       const state = await getOnboardingStateForBusinessId(business.id);
       return NextResponse.json(
         {
@@ -116,7 +246,7 @@ export async function POST(request: NextRequest) {
           code: "held_no_ein",
           state,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -124,34 +254,63 @@ export async function POST(request: NextRequest) {
     // database. Stop before creating a Stripe Checkout Session until an
     // administrator has compared and approved the current identity again.
     // Normal customers have no link row and pass through unchanged.
-    const existingBrandLink = await getExistingTelnyxBrandLinkState(
-      business.id
-    );
-    if (
-      existingBrandLink &&
-      existingBrandLink.status !== "approved" &&
-      existingBrandLink.status !== "consumed"
-    ) {
-      const state = await getOnboardingStateForBusinessId(business.id);
-      return NextResponse.json(
-        {
-          error:
-            "Your existing Telnyx brand link needs review before checkout can continue. Contact support.",
-          code: "existing_brand_review_required",
-          state,
-        },
-        { status: 409 }
+    if (selectedPlan !== "chat_only") {
+      const existingBrandLink = await getExistingTelnyxBrandLinkState(
+        business.id,
       );
+      if (
+        existingBrandLink &&
+        existingBrandLink.status !== "approved" &&
+        existingBrandLink.status !== "consumed"
+      ) {
+        const state = await getOnboardingStateForBusinessId(business.id);
+        return NextResponse.json(
+          {
+            error:
+              "Your existing Telnyx brand link needs review before checkout can continue. Contact support.",
+            code: "existing_brand_review_required",
+            state,
+          },
+          { status: 409 },
+        );
+      }
     }
 
     if (
       mode === "onboarding" &&
-      (await hasSatisfiedOnboardingBilling(supabase, business))
+      hasSatisfiedOnboardingBilling(business, subscription, selectedPlan)
     ) {
-      const launch = await attemptPaidLaunch(business.id, "onboarding_retry");
+      const launch =
+        selectedPlan === "chat_only" &&
+        subscription?.stripe_customer_id &&
+        subscription.stripe_subscription_id
+          ? await finalizePaidCheckout(
+              {
+                businessId: business.id,
+                customerId: subscription.stripe_customer_id,
+                subscriptionId: subscription.stripe_subscription_id,
+                plan: "chat_only",
+              },
+              "stripe_finalize",
+            )
+          : await attemptPaidLaunch(business.id, "onboarding_retry");
+      if (
+        selectedPlan === "chat_only" &&
+        launch.status === "billing_required"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Your Chat Only payment is still synchronizing. Try again shortly.",
+            code: "subscription_payment_sync_required",
+          },
+          { status: 409 },
+        );
+      }
       if (launch.status !== "billing_required") {
         const state = await getOnboardingStateForBusinessId(business.id);
         if (
+          launch.status === "completed" ||
           launch.status === "submitted" ||
           launch.status === "already_submitted"
         ) {
@@ -167,24 +326,28 @@ export async function POST(request: NextRequest) {
             code: launch.status,
             state,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    if (!isPlanAvailable(selectedPlan)) {
+    if (selectedPlan !== "chat_only" && !isPlanAvailable(selectedPlan)) {
       return NextResponse.json(
         {
           error:
             "Full Suite is coming soon. Join the waitlist to be notified when it launches.",
           code: "full_suite_coming_soon",
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    const priceId = stripePriceIds()[selectedPlan];
-    const setupFeePriceId = stripeSetupFeePriceId();
+    // Resolve only the selected plan after all acquisition gates. In
+    // particular, unrelated SMS checkout and webhook paths never require the
+    // Chat Only Price environment variable while rollout is disabled.
+    const priceId = stripePriceIdForPlan(selectedPlan);
+    const setupFeePriceId =
+      selectedPlan === "chat_only" ? null : stripeSetupFeePriceId();
     const origin = publicAppOrigin(request.nextUrl.origin);
     const successPath =
       mode === "onboarding"
@@ -202,37 +365,77 @@ export async function POST(request: NextRequest) {
       setupFeePriceId,
       `${origin}${successPath}`,
       `${origin}${cancelPath}`,
-      mode
+      mode,
+      !subscription && mode === "onboarding" && directSelectionFlowEnabled,
     );
 
     return NextResponse.json({ url: checkoutUrl });
   } catch (error) {
+    if (error instanceof DirectCheckoutPlanClaimUnavailableError) {
+      return NextResponse.json(
+        {
+          error: "Your setup changed. Refresh and choose your plan again.",
+          code: "checkout_plan_state_changed",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof PlanFamilyTransitionNotSupportedError) {
+      return NextResponse.json(
+        {
+          error:
+            "Switching between Chat Only and SMS plans is not supported yet.",
+          code: "plan_family_transition_not_supported",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof ChatOnlyStripePriceConfigurationError) {
+      return NextResponse.json(
+        {
+          error: "Chat Only billing is temporarily unavailable.",
+          code: "chat_only_price_configuration_invalid",
+        },
+        { status: 503 },
+      );
+    }
     console.error("Checkout error:", error);
     return NextResponse.json(
       { error: "Failed to create checkout session" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
-async function hasSatisfiedOnboardingBilling(
+async function readCheckoutSubscription(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  business: CheckoutBusinessRow
-): Promise<boolean> {
+  businessId: string,
+): Promise<CheckoutSubscriptionRow | null> {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("status, setup_fee_paid_at")
-    .eq("business_id", business.id)
+    .select(
+      "plan, status, setup_fee_paid_at, stripe_customer_id, stripe_subscription_id",
+    )
+    .eq("business_id", businessId)
     .maybeSingle<CheckoutSubscriptionRow>();
 
   if (error) {
     throw error;
   }
 
+  return data;
+}
+
+function hasSatisfiedOnboardingBilling(
+  business: CheckoutBusinessRow,
+  subscription: CheckoutSubscriptionRow | null,
+  selectedPlan: SubscriptionPlan,
+): boolean {
   // Keep provisioning aligned with runtime entitlements: a synchronized
   // subscription takes precedence, and protected overrides apply only when
   // there is no subscription row at all.
-  if (!data) {
+  if (!subscription) {
+    if (selectedPlan === "chat_only") return false;
     return (
       business.billing_pilot ||
       business.billing_comped ||
@@ -240,8 +443,51 @@ async function hasSatisfiedOnboardingBilling(
     );
   }
 
+  if (selectedPlan === "chat_only" && subscription.plan === "chat_only") {
+    return (
+      (subscription.status === "active" ||
+        subscription.status === "trialing") &&
+      Boolean(subscription.stripe_customer_id) &&
+      Boolean(subscription.stripe_subscription_id)
+    );
+  }
+
   return (
-    !!data.setup_fee_paid_at &&
-    (data.status === "active" || data.status === "trialing")
+    !!subscription.setup_fee_paid_at &&
+    (subscription.status === "active" || subscription.status === "trialing")
   );
+}
+
+function hasCrossFamilyTransition(
+  subscription: CheckoutSubscriptionRow | null,
+  selectedPlan: SubscriptionPlan,
+): boolean {
+  if (!subscription) return false;
+
+  const parsedCurrentPlan = subscriptionPlanSchema.safeParse(subscription.plan);
+  if (!parsedCurrentPlan.success) {
+    throw new Error(
+      `Existing subscription has an invalid plan: ${String(subscription.plan)}`,
+    );
+  }
+
+  return (
+    (parsedCurrentPlan.data === "chat_only") !== (selectedPlan === "chat_only")
+  );
+}
+
+function onboardingSelectionMatches(
+  business: CheckoutBusinessRow,
+  selectedPlan: SubscriptionPlan,
+  directSelectionFlowEnabled: boolean,
+): boolean {
+  // When the complete early-flow gate (flag plus valid Chat Price config) is
+  // enabled, the durable advisory intent must match exactly. If that gate is
+  // rolled back, plan selection is no longer available, so stale intent must
+  // not strand legacy SMS onboarding. New Chat acquisition is independently
+  // rejected by the acquisition gate above.
+  if (!directSelectionFlowEnabled) {
+    return selectedPlan !== "chat_only";
+  }
+  return business.onboarding_selected_plan === selectedPlan;
 }

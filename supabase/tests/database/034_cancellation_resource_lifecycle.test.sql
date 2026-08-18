@@ -2254,17 +2254,7 @@ SELECT throws_ok(
   '23514',
   format(
     'new row for relation "telnyx_resource_release_actions" violates check constraint "%s"',
-    (
-      SELECT constraint_row.conname
-      FROM pg_constraint AS constraint_row
-      WHERE constraint_row.conrelid =
-              'public.telnyx_resource_release_actions'::regclass
-        AND constraint_row.contype = 'c'
-        AND pg_get_constraintdef(constraint_row.oid)
-              LIKE '%previous_resource_status%'
-      ORDER BY constraint_row.conname
-      LIMIT 1
-    )
+    'telnyx_release_actions_phone_previous_status_required'
   ),
   'phone actions cannot omit the previous resource status'
 );

@@ -3,10 +3,9 @@ import "server-only";
 import type Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { stripe } from "./client";
-import {
-  planFromStripePriceId,
-  stripeSetupFeePriceId,
-} from "./config";
+import { planFromStripePriceId } from "./config";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
+import { assertApprovedChatOnlyStripePrice } from "./chatOnlyPrice";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
 
 export type SyncedCheckout = {
@@ -17,10 +16,11 @@ export type SyncedCheckout = {
 };
 
 export async function syncCheckoutSession(
-  session: Stripe.Checkout.Session
+  session: Stripe.Checkout.Session,
 ): Promise<SyncedCheckout | null> {
   const businessId = session.metadata?.business_id;
-  const customerId = typeof session.customer === "string" ? session.customer : null;
+  const customerId =
+    typeof session.customer === "string" ? session.customer : null;
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : null;
 
@@ -28,15 +28,28 @@ export async function syncCheckoutSession(
     return null;
   }
 
+  const metadataPlan = subscriptionPlanSchema.safeParse(session.metadata?.plan);
+  if (!metadataPlan.success) {
+    throw new Error(
+      `[stripe:sync] Checkout Session ${session.id} has missing or invalid plan metadata`,
+    );
+  }
+
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const completedAt =
+    session.payment_status === "paid" || session.status === "complete"
+      ? new Date().toISOString()
+      : null;
   const synced = await syncStripeSubscription(subscription, {
     businessId,
     checkoutSessionId: session.id,
-    setupFeePaidAt:
-      session.payment_status === "paid" || session.status === "complete"
-        ? new Date().toISOString()
-        : null,
-    setupFeePriceId: session.metadata?.setup_fee_price_id ?? stripeSetupFeePriceId(),
+    setupFeePaidAt: completedAt,
+    // Absence is authoritative and fail-closed. Every SMS checkout created by
+    // this application includes the setup-fee Price in metadata; Chat Only
+    // intentionally does not. Never fall back to a global setup-fee Price,
+    // because that would stamp a fee onto a no-fee checkout.
+    setupFeePriceId: session.metadata?.setup_fee_price_id ?? null,
+    expectedPlan: metadataPlan.data,
   });
 
   return synced;
@@ -49,7 +62,8 @@ export async function syncStripeSubscription(
     checkoutSessionId?: string | null;
     setupFeePaidAt?: string | null;
     setupFeePriceId?: string | null;
-  } = {}
+    expectedPlan?: SubscriptionPlan;
+  } = {},
 ): Promise<SyncedCheckout | null> {
   const businessId = options.businessId ?? subscription.metadata?.business_id;
   const customerId =
@@ -65,9 +79,33 @@ export async function syncStripeSubscription(
   // deliberate null-ack below.
   const status = normalizeStripeSubscriptionStatus(subscription.status);
 
+  if (options.expectedPlan && plan !== options.expectedPlan) {
+    throw new Error(
+      `[stripe:sync] Checkout plan metadata ${options.expectedPlan} does not match subscription Price plan ${String(plan)}`,
+    );
+  }
+
+  if (plan === "chat_only") {
+    if (!primaryItem) {
+      throw new Error("[stripe:sync] Chat Only subscription has no item");
+    }
+    assertApprovedChatOnlyStripePrice(primaryItem.price, {
+      expectedPriceId: priceId ?? undefined,
+      requireActive: false,
+      subscriptionItemCount: subscription.items.has_more
+        ? subscription.items.data.length + 1
+        : subscription.items.data.length,
+      quantity: primaryItem.quantity ?? null,
+    });
+  }
+
   if (!businessId || !customerId || !subscriptionId || !plan) {
     return null;
   }
+  const setupFeePriceId =
+    plan === "chat_only" ? null : (options.setupFeePriceId ?? null);
+  const setupFeePaidAt =
+    setupFeePriceId === null ? null : (options.setupFeePaidAt ?? null);
   const periodStart = primaryItem?.current_period_start
     ? new Date(primaryItem.current_period_start * 1000).toISOString()
     : null;
@@ -87,17 +125,17 @@ export async function syncStripeSubscription(
       p_current_period_start: periodStart,
       p_current_period_end: periodEnd,
       p_stripe_price_id: priceId,
-      p_stripe_setup_fee_price_id: options.setupFeePriceId ?? null,
+      p_stripe_setup_fee_price_id: setupFeePriceId,
       p_stripe_checkout_session_id: options.checkoutSessionId ?? null,
-      p_setup_fee_paid_at: options.setupFeePaidAt ?? null,
+      p_setup_fee_paid_at: setupFeePaidAt,
       p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
       p_updated_at: now,
-    }
+    },
   );
 
   if (error) {
     throw new Error(
-      `[stripe:sync] Failed to sync subscription ${subscriptionId} for business ${businessId}: ${error.message}`
+      `[stripe:sync] Failed to sync subscription ${subscriptionId} for business ${businessId}: ${error.message}`,
     );
   }
 
@@ -106,7 +144,7 @@ export async function syncStripeSubscription(
   }
   if (synced !== true) {
     throw new Error(
-      `[stripe:sync] Guarded sync returned an invalid response for subscription ${subscriptionId} and business ${businessId}`
+      `[stripe:sync] Guarded sync returned an invalid response for subscription ${subscriptionId} and business ${businessId}`,
     );
   }
 
@@ -135,7 +173,7 @@ const STRIPE_STATUS_PROJECTION: Record<
 };
 
 export function normalizeStripeSubscriptionStatus(
-  status: Stripe.Subscription.Status
+  status: Stripe.Subscription.Status,
 ): SubscriptionStatus {
   const mapped = STRIPE_STATUS_PROJECTION[status];
   if (mapped === undefined) {
@@ -143,7 +181,7 @@ export function normalizeStripeSubscriptionStatus(
     // an absent status at runtime (types are compile-time only). Webhook
     // callers surface this as a recorded, re-claimable failure.
     throw new Error(
-      `[stripe:sync] Unrecognized Stripe subscription status: ${String(status)}`
+      `[stripe:sync] Unrecognized Stripe subscription status: ${String(status)}`,
     );
   }
   return mapped;

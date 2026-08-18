@@ -63,6 +63,8 @@ const mocks = vi.hoisted(() => {
     verifyPublishedCompliancePage: vi.fn(),
     getBusinessContentQuality: vi.fn(),
     resolveBusinessOperationalControls: vi.fn(),
+    resolveSmsProvisioningAccess: vi.fn(),
+    claimSmsLaunchPlanFamily: vi.fn(),
     resolveProviderCreateIntent: vi.fn(),
   readProviderCreateIntentForPayload: vi.fn(),
   };
@@ -74,6 +76,12 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/account/operationalControls.server", () => ({
   resolveBusinessOperationalControls: mocks.resolveBusinessOperationalControls,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
+}));
+vi.mock("@/lib/billing/smsLaunchFamily.server", () => ({
+  claimSmsLaunchPlanFamily: mocks.claimSmsLaunchPlanFamily,
 }));
 vi.mock("@/lib/messaging/phoneNumberLookup", () => ({
   getActiveSmsNumberForBusiness: mocks.getActiveSmsNumber,
@@ -218,6 +226,12 @@ beforeEach(() => {
     textingPausedAt: null,
     bookingsPausedAt: null,
   });
+  mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+    allowed: true,
+    source: "billing_override",
+    plan: "full",
+  });
+  mocks.claimSmsLaunchPlanFamily.mockResolvedValue(true);
   mocks.claim.mockResolvedValue({
     claimed: true,
     claimedFrom: "not_started",

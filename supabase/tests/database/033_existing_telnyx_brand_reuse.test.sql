@@ -407,19 +407,21 @@ SELECT ok(
 SELECT ok(
   (
     SELECT pg_get_functiondef(procedure_row.oid) LIKE ALL (ARRAY[
+      '%ensure_telnyx_release_reason%',
+      '%snapshot_telnyx_release_actions%',
       '%queue_account_deletion_stripe_action%',
       '%UPDATE public.messages SET content = ''[deleted]''%',
       '%UPDATE public.contacts%',
       '%DELETE FROM public.subscriptions%',
       '%DELETE FROM public.telnyx_brand_link_events%',
       '%DELETE FROM public.telnyx_brand_link_requests%',
-      '%telnyx_brand_source = NULL%'
+      '%cleanup_pii_scrubbed_at = COALESCE(cleanup_pii_scrubbed_at, now())%'
     ])
     FROM pg_proc AS procedure_row
     WHERE procedure_row.oid =
       'public.cleanup_expired_business(uuid)'::regprocedure
   ),
-  'cleanup retains migration-029 work and adds only approved link cleanup fields'
+  'cleanup preserves account privacy work while snapshotting Telnyx release state'
 );
 
 SELECT ok(
@@ -1638,8 +1640,10 @@ SELECT ok(
        AND cleanup_auth_user_id = '00000000-0000-4000-a000-000000000334'
        AND name = '[deleted]'
        AND ein IS NULL
-       AND telnyx_brand_id IS NULL
-       AND telnyx_brand_source IS NULL
+       AND cleanup_pii_scrubbed_at IS NOT NULL
+       AND telnyx_brand_id = '33000000-0000-4000-a000-000000000004'
+       AND telnyx_brand_source = 'linked_existing'
+       AND brand_status IS NULL
     FROM public.businesses
     WHERE id = '10000000-0000-4000-a000-000000000334'
   )
@@ -1652,8 +1656,25 @@ SELECT ok(
     SELECT 1
     FROM public.telnyx_brand_link_events
     WHERE business_id = '10000000-0000-4000-a000-000000000334'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.telnyx_resource_release_actions AS action
+    JOIN public.telnyx_resource_release_runs AS run
+      ON run.id = action.run_id
+     AND run.business_id = action.business_id
+    JOIN public.businesses AS business
+      ON business.id = action.business_id
+     AND business.active_telnyx_release_run_id = run.id
+    WHERE action.business_id = '10000000-0000-4000-a000-000000000334'
+      AND action.resource_type = 'brand'
+      AND action.provider_id = '33000000-0000-4000-a000-000000000004'
+      AND action.classification = 'policy_retain'
+      AND action.desired_action = 'retain'
+      AND action.state = 'retained'
+      AND run.status = 'protected_hold'
   ),
-  'cleanup removes local link state and scrubs EIN, brand ID, and provenance'
+  'cleanup removes local link state and PII while durably retaining Telnyx release provenance'
 );
 
 RESET ROLE;

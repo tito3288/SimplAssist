@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getConversationAccessState } from "./accessState";
+import {
+  getConversationAccessState,
+  smsPlanLockedMessage,
+} from "./accessState";
 
 describe("getConversationAccessState", () => {
   it("forces Starter SMS into writable Human mode despite a tampered AI flag", () => {
@@ -101,5 +104,14 @@ describe("getConversationAccessState", () => {
       canToggleAi: false,
       canWrite: false,
     });
+  });
+
+  it("describes retained SMS history as excluded for an active no-SMS plan", () => {
+    expect(smsPlanLockedMessage(false)).toBe(
+      "SMS is not included in your current plan.",
+    );
+    expect(smsPlanLockedMessage(true)).toBe(
+      "SMS sending is paused because this plan is inactive.",
+    );
   });
 });

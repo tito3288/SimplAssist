@@ -49,6 +49,7 @@ interface AISettingsFormProps {
   canUseGuardrails?: boolean;
   planActive?: boolean;
   fullSuiteAvailable: boolean;
+  showSmsResponseDelay?: boolean;
 }
 function UpgradeNotice({
   plan,
@@ -122,6 +123,7 @@ export default function AISettingsForm({
   canUseGuardrails = true,
   planActive = true,
   fullSuiteAvailable,
+  showSmsResponseDelay = true,
 }: AISettingsFormProps) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -287,7 +289,7 @@ export default function AISettingsForm({
       </section>
 
       {/* Section 3: Response Behavior */}
-      <section>
+      {showSmsResponseDelay && <section>
         <h3 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Response Behavior</h3>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control how quickly your AI responds to SMS messages.</p>
 
@@ -323,7 +325,7 @@ export default function AISettingsForm({
             <span>1 minute</span>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* Section 4: Booking */}
       {calendarGoalAvailable && (

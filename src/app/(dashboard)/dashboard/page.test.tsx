@@ -6,9 +6,10 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   requireWorkspacePageAccess: vi.fn(async () => undefined),
   getDashboardBusinessContext: vi.fn(),
-  getDashboardEntitlements: vi.fn(),
+  getDashboardPageEntitlements: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   canUseFeature: vi.fn(),
+  planRequiresSmsProvisioning: vi.fn(),
   isPlanAvailable: vi.fn(),
   getFirstNameFromAuthMetadata: vi.fn(),
   shouldShowCallForwardingNudge: vi.fn(),
@@ -38,13 +39,16 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,
-  getDashboardEntitlements: mocks.getDashboardEntitlements,
+  getDashboardPageEntitlements: mocks.getDashboardPageEntitlements,
 }));
 vi.mock("@/lib/messaging/lookup", () => ({
   getSmsReadinessForBusiness: mocks.getSmsReadinessForBusiness,
 }));
 vi.mock("@/lib/billing/entitlements", () => ({
   canUseFeature: mocks.canUseFeature,
+}));
+vi.mock("@/lib/billing/features", () => ({
+  planRequiresSmsProvisioning: mocks.planRequiresSmsProvisioning,
 }));
 vi.mock("@/lib/billing/planAvailability", () => ({
   isPlanAvailable: mocks.isPlanAvailable,
@@ -85,11 +89,16 @@ interface DashboardOverviewProps {
   billingMode: "stripe" | "invoiced" | "comped";
   isPartnerManagedBilling: boolean;
   hotLeads: Array<Record<string, unknown>>;
+  smsEnabled: boolean;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.redirect.mockImplementation((path: string) => {
+    throw new Error(`redirect:${path}`);
+  });
   mocks.isPlanAvailable.mockReturnValue(true);
+  mocks.planRequiresSmsProvisioning.mockReturnValue(true);
 });
 
 function deferred<T>() {
@@ -244,7 +253,10 @@ function configureResolvedDashboardWithSavedGuardrails({
       primary_goal: primaryGoal,
     },
   });
-  mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
+  mocks.getDashboardPageEntitlements.mockResolvedValue({
+    status: "resolved",
+    entitlements: ENTITLEMENTS,
+  });
   mocks.getSmsReadinessForBusiness.mockResolvedValue({
     smsReady: true,
     blockReason: null,
@@ -279,8 +291,22 @@ async function renderedDashboardOverviewProps() {
 }
 
 describe("DashboardPage query scheduling", () => {
-  it("starts entitlements, readiness, and page data once the business is known", async () => {
-    const entitlements = deferred<typeof ENTITLEMENTS>();
+  it("redirects a direct pre-checkout business before child page reads", async () => {
+    configureResolvedDashboardWithSavedGuardrails({ primaryGoal: "book" });
+    mocks.getDashboardPageEntitlements.mockResolvedValue({
+      status: "subscription_missing",
+    });
+
+    await expect(DashboardPage()).rejects.toThrow("redirect:/onboarding");
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("resolves plan authority before starting SMS page data and readiness", async () => {
+    const entitlements = deferred<{
+      status: "resolved";
+      entitlements: typeof ENTITLEMENTS;
+    }>();
     const preview = deferred<{ data: { content: string }[] }>();
     const tableCalls = new Map<string, number>();
 
@@ -329,7 +355,7 @@ describe("DashboardPage query scheduling", () => {
         primary_goal: null,
       },
     });
-    mocks.getDashboardEntitlements.mockReturnValue(entitlements.promise);
+    mocks.getDashboardPageEntitlements.mockReturnValue(entitlements.promise);
     mocks.getSmsReadinessForBusiness.mockResolvedValue({
       smsReady: true,
       blockReason: null,
@@ -344,18 +370,45 @@ describe("DashboardPage query scheduling", () => {
     const page = DashboardPage();
 
     await vi.waitFor(() => {
-      expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS_ID);
-      expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledWith(BUSINESS_ID);
-      expect(mocks.from).toHaveBeenCalledTimes(10);
+      expect(mocks.getDashboardPageEntitlements).toHaveBeenCalledWith(BUSINESS_ID);
     });
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
 
-    entitlements.resolve(ENTITLEMENTS);
+    entitlements.resolve({ status: "resolved", entitlements: ENTITLEMENTS });
     await vi.waitFor(() => {
+      expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledWith(BUSINESS_ID);
       expect(mocks.from).toHaveBeenCalledTimes(11);
     });
 
     preview.resolve({ data: [{ content: "Latest message" }] });
     await expect(page).resolves.toBeDefined();
+  });
+});
+
+describe("DashboardPage Chat Only projection", () => {
+  it("does not read phone or side-effectful SMS readiness and marks the overview no-SMS", async () => {
+    configureResolvedDashboardWithSavedGuardrails({ primaryGoal: "book" });
+    mocks.getDashboardPageEntitlements.mockResolvedValue({
+      status: "resolved",
+      entitlements: {
+        ...ENTITLEMENTS,
+        plan: "chat_only",
+      },
+    });
+    mocks.planRequiresSmsProvisioning.mockReturnValue(false);
+
+    const overviewProps = await renderedDashboardOverviewProps();
+
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.from.mock.calls.map(([table]) => table)).not.toContain(
+      "phone_numbers",
+    );
+    expect(overviewProps).toMatchObject({
+      phoneNumber: null,
+      showCallForwardingNudge: false,
+      smsEnabled: false,
+    });
   });
 });
 

@@ -4,6 +4,7 @@ import type {} from "react/canary";
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
+  EntitlementResolutionError,
   resolveBusinessEntitlements,
   type BusinessEntitlements,
 } from "@/lib/billing/entitlements";
@@ -78,9 +79,16 @@ export type DashboardBusinessContext =
 
 export type DashboardEntitledContext =
   | Exclude<DashboardBusinessContext, { status: "resolved" }>
+  | (Omit<Extract<DashboardBusinessContext, { status: "resolved" }>, "status"> & {
+      status: "subscription_missing";
+    })
   | (Extract<DashboardBusinessContext, { status: "resolved" }> & {
       entitlements: BusinessEntitlements;
     });
+
+export type DashboardPageEntitlementResult =
+  | { status: "resolved"; entitlements: BusinessEntitlements }
+  | { status: "subscription_missing" };
 
 const DASHBOARD_BUSINESS_SELECT = [
   "id",
@@ -165,14 +173,42 @@ export const getDashboardEntitlements = cache(
     resolveBusinessEntitlements(businessId)
 );
 
+/**
+ * Page-safe entitlement resolution for the legitimate direct pre-checkout
+ * state. Only an exact missing synchronized subscription becomes a redirect
+ * signal; malformed state and database failures still surface as real errors.
+ */
+export const getDashboardPageEntitlements = cache(
+  async (businessId: string): Promise<DashboardPageEntitlementResult> => {
+    try {
+      return {
+        status: "resolved",
+        entitlements: await getDashboardEntitlements(businessId),
+      };
+    } catch (error) {
+      if (
+        error instanceof EntitlementResolutionError &&
+        error.code === "subscription_missing"
+      ) {
+        return { status: "subscription_missing" };
+      }
+      throw error;
+    }
+  }
+);
+
 export const getDashboardEntitledContext = cache(
   async (): Promise<DashboardEntitledContext> => {
     const context = await getDashboardBusinessContext();
     if (context.status !== "resolved") return context;
 
-    return {
-      ...context,
-      entitlements: await getDashboardEntitlements(context.business.id),
-    };
+    const entitlementResult = await getDashboardPageEntitlements(
+      context.business.id
+    );
+    if (entitlementResult.status === "subscription_missing") {
+      return { ...context, status: "subscription_missing" };
+    }
+
+    return { ...context, entitlements: entitlementResult.entitlements };
   }
 );

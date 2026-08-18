@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   mapCampaignStatus: vi.fn(),
   getOnboardingStateForOwnerReadOnly: vi.fn(),
   requireWorkspaceRouteAccess: vi.fn(),
+  resolveSmsProvisioningAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -61,6 +62,9 @@ vi.mock("@/lib/onboarding/state", () => ({
 
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
 }));
 
 import { POST } from "./route";
@@ -161,6 +165,11 @@ beforeEach(() => {
   });
   setBusinessRead({ data: SNAPSHOT, error: null });
   mocks.getCampaignAssignmentSafetyBlock.mockReturnValue(null);
+  mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+    allowed: true,
+    source: "subscription",
+    plan: "sms_and_chat",
+  });
   mocks.retrieveCampaign.mockResolvedValue(remoteCampaign());
   mocks.mapCampaignStatus.mockReturnValue({
     dbStatus: null,
@@ -260,6 +269,51 @@ describe("POST /api/onboarding/refresh-status", () => {
     });
     expect(JSON.stringify(body)).not.toContain("sensitive database detail");
     expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+    expectNoReconciliation();
+  });
+
+  it.each(["subscription", "partner_billing"] as const)(
+    "blocks a %s chat-only account before Telnyx reads, audits, or assignment",
+    async (source) => {
+      mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source,
+        plan: "chat_only",
+      });
+
+      const { response, body } = await invoke();
+
+      expect(response.status).toBe(403);
+      expect(body).toEqual({
+        code: "sms_provisioning_not_available",
+        error: "Carrier status is not available on the current plan.",
+      });
+      expect(mocks.resolveSmsProvisioningAccess).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        { allowDirectPrecheckout: false },
+      );
+      expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+      expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+      expectNoReconciliation();
+    },
+  );
+
+  it("fails retryably on uncertain billing state before Telnyx reads, audits, or assignment", async () => {
+    mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+
+    const { response, body } = await invoke();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: "Unable to verify plan access",
+      retryable: true,
+    });
+    expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+    expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
     expectNoReconciliation();
   });
 

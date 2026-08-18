@@ -157,6 +157,7 @@ describe("CreateClientForm contract", () => {
     expect(html).toContain("Example Partner — partner.example.com");
     expect(html).toContain('value="sms_and_chat" selected');
     expect(html).toContain('value="invoiced" selected');
+    expect(html).not.toContain('value="chat_only"');
     expect(html).toContain('type="checkbox"');
     expect(html).not.toContain('type="checkbox" checked');
     expect(html).not.toContain("temporary password");

@@ -13,11 +13,15 @@ import {
 } from "@/lib/theme-v2/theme";
 import type { Message, SmsBlockReason } from "@/types/database";
 import type { ConversationWithContact } from "@/app/(dashboard)/conversations/page";
-import { getConversationAccessState } from "./accessState";
+import {
+  getConversationAccessState,
+  smsPlanLockedMessage,
+} from "./accessState";
 
 interface MessageThreadProps {
   conversation: ConversationWithContact;
   businessId: string;
+  smsIncluded?: boolean;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
   canUseManualSms: boolean;
@@ -52,6 +56,7 @@ function smsPausedCopy(reason: SmsBlockReason | null): string {
 export function MessageThread({
   conversation,
   businessId,
+  smsIncluded = true,
   smsReady,
   smsBlockReason,
   canUseManualSms,
@@ -470,7 +475,9 @@ export function MessageThread({
           <div className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm", statusWarning)}>
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-medium">SMS sending is paused because this plan is inactive.</p>
+              <p className="font-medium">
+                {smsPlanLockedMessage(smsIncluded)}
+              </p>
               <Link href="/billing" className="mt-1 inline-flex text-xs font-semibold underline">
                 Manage billing
               </Link>

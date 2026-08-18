@@ -59,6 +59,16 @@ function operation(overrides: Record<string, unknown> = {}) {
 }
 
 describe("parseAdminProvisioningRecord", () => {
+  it("recognizes a stored chat-only job without making it an acquisition option", () => {
+    expect(
+      parseAdminProvisioningRecord(
+        storedJob({ partner_plan: "chat_only" }),
+        storedPartner(),
+        NOW,
+      )?.provisioning.partnerPlan,
+    ).toBe("chat_only");
+  });
+
   it("uses the exact fifteen-minute pending boundary", () => {
     const atBoundary = parseAdminProvisioningRecord(
       storedJob({

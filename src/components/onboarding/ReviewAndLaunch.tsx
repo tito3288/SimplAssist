@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useBrand } from "@/components/branding/BrandProvider";
 import { PlanSelectionOption } from "@/components/onboarding/PlanSelectionOption";
 import { getUsStateName } from '@/lib/usStates';
-import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
+import { SETUP_FEE_CENTS } from '@/lib/stripe/config';
 import {
   availablePlanOrFallback,
+  CUSTOMER_VISIBLE_PLAN_ORDER,
   paidPlanForOnboardingRetry,
 } from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
@@ -15,6 +16,7 @@ import type { OnboardingState } from '@/lib/onboarding/types';
 import type { SubscriptionPlan } from '@/types/database';
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 import { partnerManagedBillingMessage } from "@/lib/billing/partnerManagedBilling";
+import { BillingPortalButton } from "@/components/billing/BillingPortalButton";
 import { SETUP_FEE_EXPLAINER_PATH } from "@/lib/support/constants";
 import { tile, statusSuccess, statusWarning, statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
@@ -30,6 +32,10 @@ export function buildOnboardingLaunchRequest(args: {
   billingMode: OnboardingState["billing"]["mode"];
   plan: SubscriptionPlan;
 }): { url: string; init: RequestInit } {
+  if (args.plan === "chat_only" && args.billingMode !== "stripe") {
+    throw new Error("partner_chat_only_requires_no_sms_launch");
+  }
+
   if (args.billingMode !== "stripe") {
     return {
       url: "/api/onboarding/submit-registration",
@@ -103,8 +109,12 @@ interface ReviewAndLaunchProps {
   data: ReviewData;
   billing: OnboardingState["billing"];
   registration: OnboardingState["registration"];
+  effectivePlan?: SubscriptionPlan | null;
+  chatOnly?: boolean;
+  canEditPlan?: boolean;
   pendingPhoneNumberFailureReason: string | null;
   onEditStep: (step: number) => void;
+  onEditPlan?: () => void;
   onBack: () => void;
   onSubmitted: (state: OnboardingState | null) => void;
   onLaunchBlocked: (state: OnboardingState | null) => void;
@@ -171,8 +181,12 @@ export default function ReviewAndLaunch({
   data,
   billing,
   registration,
+  effectivePlan = null,
+  chatOnly = false,
+  canEditPlan = false,
   pendingPhoneNumberFailureReason,
   onEditStep,
+  onEditPlan,
   onBack,
   onSubmitted,
   onLaunchBlocked,
@@ -181,8 +195,11 @@ export default function ReviewAndLaunch({
   const brandArticle = /^[aeiou]/i.test(brand.name.trim()) ? "an" : "a";
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(
-    availablePlanOrFallback(billing.plan, RECOMMENDED_PLAN)
+  const selectedEffectivePlan = effectivePlan ?? billing.plan;
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(() =>
+    selectedEffectivePlan === "chat_only"
+      ? "chat_only"
+      : availablePlanOrFallback(selectedEffectivePlan, RECOMMENDED_PLAN)
   );
   const paidPlanKey = paidPlanForOnboardingRetry(
     billing.plan,
@@ -190,10 +207,18 @@ export default function ReviewAndLaunch({
   );
   const isPartnerManaged = billing.mode !== "stripe";
   const isPaidSubscription = Boolean(paidPlanKey);
+  const isChatOnly =
+    chatOnly || selectedEffectivePlan === "chat_only" || paidPlanKey === "chat_only";
+  const isPartnerChatOnly = isPartnerManaged && isChatOnly;
+  const isPastDueChatOnly =
+    !isPartnerManaged &&
+    isChatOnly &&
+    billing.plan === "chat_only" &&
+    billing.status === "past_due";
   const paidPlan = paidPlanKey
     ? getPlanPresentation(paidPlanKey, brand.name)
     : null;
-  const launchHold = isPaidSubscription || isPartnerManaged
+  const launchHold = !isChatOnly && (isPaidSubscription || isPartnerManaged)
     ? classifyPaidLaunchHold(
         registration,
         pendingPhoneNumberFailureReason,
@@ -206,22 +231,28 @@ export default function ReviewAndLaunch({
     isPartnerManaged,
     launchHold,
     launching,
+    isChatOnly,
   });
-  const showPrimaryButton = !launchHold || launchHold.action !== 'none';
+  const showPrimaryButton =
+    !isPartnerChatOnly &&
+    !isPastDueChatOnly &&
+    (!launchHold || launchHold.action !== 'none');
 
   useEffect(() => {
     setSelectedPlan((currentPlan) =>
-      availablePlanOrFallback(
-        billing.plan ?? currentPlan,
-        RECOMMENDED_PLAN
-      )
+      selectedEffectivePlan === "chat_only"
+        ? "chat_only"
+        : availablePlanOrFallback(
+            selectedEffectivePlan ?? currentPlan,
+            RECOMMENDED_PLAN
+          )
     );
-  }, [billing.plan]);
+  }, [selectedEffectivePlan]);
 
   const handleLaunch = async () => {
     setError(null);
 
-    if (!data.phoneNumber) {
+    if (!isChatOnly && !data.phoneNumber) {
       onEditStep(7);
       return;
     }
@@ -235,7 +266,9 @@ export default function ReviewAndLaunch({
       });
       const requestFailureMessage = isPartnerManaged
         ? "Could not submit your SMS registration right now."
-        : "Could not start checkout right now.";
+        : isChatOnly
+          ? "Could not start Chat Only checkout right now."
+          : "Could not start checkout right now.";
       const response = (await res.json().catch(() => ({}))) as {
         success?: boolean;
         error?: string;
@@ -268,7 +301,9 @@ export default function ReviewAndLaunch({
       setError(
         isPartnerManaged
           ? "Could not submit your SMS registration right now."
-          : "Could not start checkout right now."
+          : isChatOnly
+            ? "Could not start Chat Only checkout right now."
+            : "Could not start checkout right now."
       );
     } finally {
       setLaunching(false);
@@ -287,14 +322,30 @@ export default function ReviewAndLaunch({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">
-          {isPartnerManaged
+          {isPastDueChatOnly
+            ? "Payment needs attention"
+            : isPartnerChatOnly
+            ? "Chat setup pending"
+            : isChatOnly && isPaidSubscription
+            ? "Finish Chat Only setup"
+            : isChatOnly
+            ? "Review & Pay"
+            : isPartnerManaged
             ? "Review & Submit"
             : isPaidSubscription
               ? "Review & Setup Status"
               : "Review & Pay"}
         </h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
-          {isPartnerManaged
+          {isPastDueChatOnly
+            ? "Update your payment method to finish Chat Only activation."
+            : isPartnerChatOnly
+            ? "Review your assistant. Your partner will finish Chat Only activation."
+            : isChatOnly && isPaidSubscription
+            ? "Payment is complete. Finish activating website chat without another charge."
+            : isChatOnly
+            ? "Review your assistant and start website chat."
+            : isPartnerManaged
             ? "Review your information before submitting your SMS registration for carrier review."
             : isPaidSubscription
               ? "Payment is complete. We will finish SMS setup from here without charging you again."
@@ -309,6 +360,15 @@ export default function ReviewAndLaunch({
               {partnerManagedBillingMessage(billing.handledByName)}
             </p>
           </div>
+          {isPartnerChatOnly && (
+            <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
+              <p className="font-medium">Waiting for partner activation</p>
+              <p className="mt-1">
+                Chat Only will stay unavailable until your partner finishes
+                activation. You do not need to take another action here.
+              </p>
+            </div>
+          )}
           {launchHold && (
             <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
               <p className="font-medium">SMS setup is paused</p>
@@ -322,17 +382,34 @@ export default function ReviewAndLaunch({
           )}
         </Section>
       ) : (
-      <Section title={isPaidSubscription ? 'Paid Plan' : 'Plan & Setup Fee'}>
+      <Section
+        title={
+          isPaidSubscription
+            ? 'Paid Plan'
+            : isPastDueChatOnly
+              ? 'Chat Only billing'
+            : isChatOnly
+              ? 'Chat Only Plan'
+              : 'Plan & Setup Fee'
+        }
+        onEdit={canEditPlan && onEditPlan ? onEditPlan : undefined}
+      >
         {isPaidSubscription && paidPlan ? (
           <div className="space-y-3">
             <div className={cn("rounded-lg p-3 text-sm", statusSuccess)}>
               <p className="font-medium">{paidPlan.name}</p>
               <p className="mt-1">
-                ${paidPlan.price}/month · {paidPlan.includedSmsParts.toLocaleString()} included SMS parts/month
+                {isChatOnly
+                  ? `$${paidPlan.price}/month · ${paidPlan.includedAiReplies?.toLocaleString() ?? 0} AI replies/month`
+                  : `$${paidPlan.price}/month · ${paidPlan.includedSmsParts.toLocaleString()} included SMS parts/month`}
               </p>
-              <p className="mt-1 text-xs">
-                Status: {billing.status}. Setup fee {billing.setupFeePaidAt ? 'paid' : 'not recorded'}.
-              </p>
+              {isChatOnly ? (
+                <p className="mt-1 text-xs">Status: {billing.status}.</p>
+              ) : (
+                <p className="mt-1 text-xs">
+                  Status: {billing.status}. Setup fee {billing.setupFeePaidAt ? 'paid' : 'not recorded'}.
+                </p>
+              )}
             </div>
             {launchHold && (
               <div className={cn("rounded-lg p-3 text-sm", statusWarning)}>
@@ -346,6 +423,45 @@ export default function ReviewAndLaunch({
               </div>
             )}
           </div>
+        ) : selectedEffectivePlan ? (
+          <div className="space-y-3">
+            <div className={cn("rounded-lg p-3 text-sm", statusNeutral)}>
+              <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+                {getPlanPresentation(selectedPlan, brand.name).name}
+              </p>
+              <p className="mt-1">
+                {isChatOnly
+                  ? `$${getPlanPresentation(selectedPlan, brand.name).price}/month · ${getPlanPresentation(selectedPlan, brand.name).includedAiReplies?.toLocaleString() ?? 0} AI replies/month`
+                  : `$${getPlanPresentation(selectedPlan, brand.name).price}/month · ${getPlanPresentation(selectedPlan, brand.name).includedSmsParts.toLocaleString()} included SMS parts/month`}
+              </p>
+            </div>
+            {isPastDueChatOnly ? (
+              <div className={cn("rounded-[16px] p-3 text-sm", statusWarning)}>
+                <p className="font-medium">Payment needs attention</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Stripe could not complete your latest payment. Manage your
+                  billing details, then return here to continue.
+                </p>
+                <BillingPortalButton
+                  className={`${primaryCtaInlineClass} mt-3 text-sm`}
+                  label="Manage billing"
+                  loadingLabel="Opening billing..."
+                />
+              </div>
+            ) : isChatOnly ? (
+              <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
+                <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+                  $10 due today
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  Your website widget, conversation inbox, AI customization,
+                  and Google Calendar connection are included.
+                </p>
+              </div>
+            ) : (
+              <SetupFeeExplainer />
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             <fieldset className="space-y-3">
@@ -353,7 +469,7 @@ export default function ReviewAndLaunch({
                 Choose {brandArticle} {brand.name} plan
               </legend>
 
-              {(Object.keys(SUBSCRIPTION_PLANS) as SubscriptionPlan[]).map((key) => {
+              {CUSTOMER_VISIBLE_PLAN_ORDER.map((key) => {
                 const plan = getPlanPresentation(key, brand.name);
                 const selected = selectedPlan === key;
                 const recommended = key === RECOMMENDED_PLAN;
@@ -371,20 +487,7 @@ export default function ReviewAndLaunch({
                 );
               })}
             </fieldset>
-            <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
-              <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">${SETUP_FEE} one-time setup and SMS activation fee</p>
-              <p className="mt-1 leading-relaxed">
-                This covers your business&apos;s registration with AT&amp;T, T-Mobile, Verizon, Cricket, Metro, Visible, Mint, Boost, and every other U.S. carrier via The Campaign Registry, plus phone number activation and the compliance pages carriers require — so your messages are delivered reliably instead of filtered as spam.
-              </p>
-              <a
-                href={SETUP_FEE_EXPLAINER_PATH}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 inline-block font-medium underline underline-offset-2 hover:text-[var(--brand-primary)] dark:hover:text-[var(--brand-primary-dark)]"
-              >
-                Learn more about this fee →
-              </a>
-            </div>
+            <SetupFeeExplainer />
           </div>
         )}
       </Section>
@@ -435,15 +538,17 @@ export default function ReviewAndLaunch({
         <SummaryRow label="Tone" value={TONE_LABELS[data.aiSettings.tone] || data.aiSettings.tone} />
         <SummaryRow label="Voice" value={data.aiSettings.business_voice === 'we' ? '"We"' : 'Business name'} />
         <SummaryRow label="Language" value={LANGUAGE_LABELS[data.aiSettings.language] || data.aiSettings.language} />
-        <SummaryRow
-          label="Response Delay"
-          value={data.aiSettings.response_delay_seconds === 0 ? 'Instant' : `${data.aiSettings.response_delay_seconds}s`}
-        />
+        {!isChatOnly && (
+          <SummaryRow
+            label="Response Delay"
+            value={data.aiSettings.response_delay_seconds === 0 ? 'Instant' : `${data.aiSettings.response_delay_seconds}s`}
+          />
+        )}
         <SummaryRow label="Booking" value={data.aiSettings.booking_enabled ? 'Enabled' : 'Disabled'} />
       </Section>
 
       {/* Legal Verification */}
-      {data.brandVerification && (
+      {!isChatOnly && data.brandVerification && (
         <Section title="Business Verification" onEdit={() => onEditStep(5)}>
           {data.brandVerification.legal_business_name && (
             <SummaryRow label="Legal name" value={data.brandVerification.legal_business_name} />
@@ -474,7 +579,7 @@ export default function ReviewAndLaunch({
       )}
 
       {/* SMS Use Case */}
-      {data.brandVerification && (
+      {!isChatOnly && data.brandVerification && (
         <Section title="SMS Use Case" onEdit={() => onEditStep(6)}>
           {data.brandVerification.estimated_monthly_volume && (
             <SummaryRow
@@ -505,7 +610,7 @@ export default function ReviewAndLaunch({
       )}
 
       {/* Phone Number */}
-      <Section title="Phone Number" onEdit={() => onEditStep(7)}>
+      {!isChatOnly && <Section title="Phone Number" onEdit={() => onEditStep(7)}>
         {data.phoneNumber ? (
           <SummaryRow label="AI Phone Number" value={data.phoneNumber} />
         ) : (
@@ -516,7 +621,7 @@ export default function ReviewAndLaunch({
             </p>
           </div>
         )}
-      </Section>
+      </Section>}
 
       {error && (
         <div className={cn("rounded-lg px-4 py-3 text-sm", statusDanger)}>
@@ -608,12 +713,13 @@ function classifyPaidLaunchHold(
   };
 }
 
-function primaryLaunchButtonLabel(args: {
+export function primaryLaunchButtonLabel(args: {
   data: ReviewData;
   isPaidSubscription: boolean;
   isPartnerManaged: boolean;
   launchHold: PaidLaunchHold | null;
   launching: boolean;
+  isChatOnly: boolean;
 }): string {
   const {
     data,
@@ -621,12 +727,19 @@ function primaryLaunchButtonLabel(args: {
     isPartnerManaged,
     launchHold,
     launching,
+    isChatOnly,
   } = args;
   if (launchHold?.buttonLabel) return launchHold.buttonLabel;
   if (launching) {
+    if (isChatOnly && isPaidSubscription) {
+      return "Finishing Chat Only setup...";
+    }
+    if (isChatOnly) return "Opening secure checkout...";
     if (isPartnerManaged) return "Submitting registration...";
     return isPaidSubscription ? "Checking setup..." : "Opening checkout...";
   }
+  if (isChatOnly && isPaidSubscription) return "Finish Chat Only setup";
+  if (isChatOnly) return "Pay $10 & launch web chat";
   if (!data.phoneNumber) return "Choose number to submit";
   if (isPartnerManaged) return "Submit SMS registration";
   return isPaidSubscription ? "Continue SMS setup" : "Pay & submit SMS registration";
@@ -652,6 +765,31 @@ function isRiskReviewHold(message: string | null): boolean {
 
 function isNoEinHold(message: string | null): boolean {
   return /held_no_ein|add your ein|before .*ein/i.test(message ?? "");
+}
+
+function SetupFeeExplainer() {
+  return (
+    <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>
+      <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+        ${SETUP_FEE} one-time setup and SMS activation fee
+      </p>
+      <p className="mt-1 leading-relaxed">
+        This covers your business&apos;s registration with AT&amp;T, T-Mobile,
+        Verizon, Cricket, Metro, Visible, Mint, Boost, and every other U.S.
+        carrier via The Campaign Registry, plus phone number activation and the
+        compliance pages carriers require — so your messages are delivered
+        reliably instead of filtered as spam.
+      </p>
+      <a
+        href={SETUP_FEE_EXPLAINER_PATH}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-block font-medium underline underline-offset-2 hover:text-[var(--brand-primary)] dark:hover:text-[var(--brand-primary-dark)]"
+      >
+        Learn more about this fee →
+      </a>
+    </div>
+  );
 }
 
 function Section({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {

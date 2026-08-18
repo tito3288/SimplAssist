@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   getSmsReadinessForBusiness,
   getSmsReadinessForBusinessReadOnly,
+  type SmsReadiness,
 } from "@/lib/messaging/lookup";
 import type {
   A2pRiskChecklistAnswer,
@@ -28,13 +29,15 @@ import type {
   SubscriptionStatus,
 } from "@/types/database";
 import { resolveAssignedPartnerName } from "@/lib/billing/partnerManagedBilling.server";
+import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
 import {
   hashA2pRiskInput,
   registrationHasStartedForRisk,
 } from "@/lib/messaging/registration/riskScreening";
 import { evaluateContentQuality } from "@/lib/contentQuality";
 import {
-  ONBOARDING_STEPS,
+  onboardingStepsForPlan,
   onboardingStepNumber,
   type OnboardingAiSettings,
   type OnboardingBrandVerification,
@@ -55,11 +58,23 @@ const DAYS = [
   "saturday",
 ] as const;
 
+const CHAT_ONLY_SMS_READINESS = {
+  smsReady: false,
+  blockReason: null,
+  campaignStatus: null,
+  assignmentStatus: null,
+  assignmentFailureReason: null,
+  phoneNumber: null,
+  messagingProfileId: null,
+} satisfies SmsReadiness;
+
 type BusinessRow = {
   id: string;
   owner_id: string;
   partner_id: string | null;
   billing_mode: BillingMode;
+  partner_plan: SubscriptionPlan | null;
+  onboarding_selected_plan: SubscriptionPlan | null;
   primary_goal: PrimaryGoal | null;
   goal_url: string | null;
   name: string | null;
@@ -199,6 +214,8 @@ async function getOnboardingStateForOwnerInternal(
         "owner_id",
         "partner_id",
         "billing_mode",
+        "partner_plan",
+        "onboarding_selected_plan",
         "primary_goal",
         "goal_url",
         "name",
@@ -287,6 +304,8 @@ export async function getOnboardingStateForBusinessId(
         "owner_id",
         "partner_id",
         "billing_mode",
+        "partner_plan",
+        "onboarding_selected_plan",
         "primary_goal",
         "goal_url",
         "name",
@@ -379,7 +398,7 @@ async function getOnboardingStateForBusiness(
     { data: aiSettings },
     { data: widgetConfig },
     { data: phoneNumber },
-    { data: subscription },
+    subscriptionResult,
     handledByName,
   ] = await Promise.all([
     supabaseAdmin
@@ -432,9 +451,45 @@ async function getOnboardingStateForBusiness(
     assignedPartnerNamePromise,
   ]);
 
-  const smsReadiness = allowSideEffects
-    ? await getSmsReadinessForBusiness(business.id)
-    : await getSmsReadinessForBusinessReadOnly(business.id);
+  if (subscriptionResult.error) {
+    throw new Error(
+      `[onboarding:state] Failed to read subscription for ${business.id}: ${subscriptionResult.error.message}`,
+    );
+  }
+  const subscription = subscriptionResult.data;
+
+  // Resolve the plan before consulting SMS readiness. The side-effectful
+  // readiness helper can lazily assign a phone number to a Telnyx campaign;
+  // Chat Only must never enter that provider lifecycle, even when legacy SMS
+  // rows are still attached to the business.
+  const directFlow =
+    business.billing_mode === "stripe" && business.partner_id === null;
+  const partnerAuthorityPlan =
+    business.partner_id !== null &&
+    (business.billing_mode === "invoiced" || business.billing_mode === "comped")
+      ? business.partner_plan
+      : null;
+  const directSalesEnabled =
+    isChatOnlyDirectSalesEnabled() && hasValidChatOnlyStripePrice();
+  const directIntent =
+    directFlow && directSalesEnabled
+      ? business.onboarding_selected_plan
+      : null;
+  const effectivePlan =
+    subscription?.plan ?? partnerAuthorityPlan ?? directIntent ?? null;
+  const planSource = subscription
+    ? "subscription"
+    : partnerAuthorityPlan
+      ? "partner_plan"
+      : directIntent
+        ? "direct_intent"
+        : null;
+  const smsReadiness =
+    effectivePlan === "chat_only"
+      ? CHAT_ONLY_SMS_READINESS
+      : !allowSideEffects
+        ? await getSmsReadinessForBusinessReadOnly(business.id)
+        : await getSmsReadinessForBusiness(business.id);
   const normalizedHours = normalizeHours(hours ?? []);
   const normalizedServices = normalizeServices(services ?? []);
   const normalizedFaqs = normalizeFaqs(faqs ?? []);
@@ -451,8 +506,32 @@ async function getOnboardingStateForBusiness(
     faqs: normalizedFaqs,
     registrationStarted,
   });
-  const activePhone = smsReadiness.phoneNumber ?? phoneNumber?.phone_number ?? null;
-  const phone = activePhone ?? business.pending_phone_number ?? null;
+  const activePhone =
+    effectivePlan === "chat_only"
+      ? null
+      : smsReadiness.phoneNumber ?? phoneNumber?.phone_number ?? null;
+  const phone =
+    effectivePlan === "chat_only"
+      ? null
+      : activePhone ?? business.pending_phone_number ?? null;
+  const canChooseDirectPlan =
+    directFlow &&
+    directSalesEnabled &&
+    !subscription &&
+    business.partner_plan === null;
+  const chatOnlyAuthorityActive =
+    effectivePlan === "chat_only" &&
+    (planSource === "partner_plan" ||
+      (planSource === "subscription" &&
+        canResumeChatOnlyOnboarding(
+          subscription?.status ?? null,
+          business.onboarding_completed_at,
+        )));
+  const includePlanSelection = canChooseDirectPlan;
+  const steps = onboardingStepsForPlan({
+    includePlanSelection,
+    effectivePlan,
+  });
   const derivedStep = deriveOnboardingStep({
     business,
     hours: normalizedHours,
@@ -464,9 +543,27 @@ async function getOnboardingStateForBusiness(
     smsReady: smsReadiness.smsReady,
     riskCleared:
       riskReview.status === "passed" || riskReview.status === "admin_approved",
+    effectivePlan,
+    requiresDirectPlanSelection: canChooseDirectPlan,
+    chatOnlyAuthorityActive,
   });
+  const coreOnboardingComplete = hasCoreOnboardingFacts({
+    business,
+    hours: normalizedHours,
+    services: normalizedServices,
+    faqs: normalizedFaqs,
+    aiSettings: normalizedAiSettings,
+  });
+  const chatOnlyReady =
+    chatOnlyAuthorityActive &&
+    coreOnboardingComplete &&
+    business.onboarding_completed_at !== null;
+  const onboardingReady =
+    effectivePlan === "chat_only" ? chatOnlyReady : smsReadiness.smsReady;
   const completedAt =
-    smsReadiness.smsReady && !business.onboarding_completed_at
+    allowSideEffects &&
+    smsReadiness.smsReady &&
+    !business.onboarding_completed_at
       ? new Date().toISOString()
       : business.onboarding_completed_at;
 
@@ -475,7 +572,8 @@ async function getOnboardingStateForBusiness(
       business,
       derivedStep,
       completedAt,
-      smsReady: smsReadiness.smsReady,
+      onboardingReady,
+      syncSmsRegistrationState: effectivePlan !== "chat_only",
     });
   }
 
@@ -484,10 +582,10 @@ async function getOnboardingStateForBusiness(
     primaryGoal: business.primary_goal,
     goalUrl: business.goal_url,
     currentStep: derivedStep,
-    currentStepNumber: onboardingStepNumber(derivedStep),
-    totalSteps: ONBOARDING_STEPS.length,
-    dashboardReady:
-      smsReadiness.smsReady && business.primary_goal !== null,
+    currentStepNumber: onboardingStepNumber(derivedStep, steps),
+    totalSteps: steps.length,
+    steps,
+    dashboardReady: onboardingReady && business.primary_goal !== null,
     completedAt,
     lastSavedAt: business.onboarding_last_saved_at,
     businessInfo: normalizeBusinessInfo(business),
@@ -512,6 +610,14 @@ async function getOnboardingStateForBusiness(
       currentPeriodStart: subscription?.current_period_start ?? null,
       currentPeriodEnd: subscription?.current_period_end ?? null,
     },
+    planSelection: {
+      effectivePlan,
+      source: planSource,
+      directIntent,
+      canChooseDirectPlan,
+      chatOnlyDirectSalesAvailable:
+        canChooseDirectPlan && directSalesEnabled,
+    },
     registration: {
       status: normalizeRegistrationStatus(business),
       holdReason: business.has_ein === true ? null : "held_no_ein",
@@ -525,13 +631,17 @@ async function getOnboardingStateForBusiness(
       campaignStatusUpdatedAt: business.campaign_status_updated_at,
       campaignRejectionReason: business.campaign_rejection_reason,
       assignmentStatus:
-        smsReadiness.assignmentStatus ??
-        phoneNumber?.telnyx_campaign_assignment_status ??
-        null,
+        effectivePlan === "chat_only"
+          ? null
+          : smsReadiness.assignmentStatus ??
+            phoneNumber?.telnyx_campaign_assignment_status ??
+            null,
       assignmentFailureReason:
-        smsReadiness.assignmentFailureReason ??
-        phoneNumber?.telnyx_campaign_assignment_failure_reason ??
-        null,
+        effectivePlan === "chat_only"
+          ? null
+          : smsReadiness.assignmentFailureReason ??
+            phoneNumber?.telnyx_campaign_assignment_failure_reason ??
+            null,
       smsReady: smsReadiness.smsReady,
       smsBlockReason: smsReadiness.blockReason,
       riskReview,
@@ -704,6 +814,9 @@ export function deriveOnboardingStep(args: {
   activePhoneNumber: string | null;
   smsReady: boolean;
   riskCleared: boolean;
+  effectivePlan?: SubscriptionPlan | null;
+  requiresDirectPlanSelection?: boolean;
+  chatOnlyAuthorityActive?: boolean;
 }): OnboardingStep {
   const {
     business,
@@ -715,13 +828,27 @@ export function deriveOnboardingStep(args: {
     activePhoneNumber,
     smsReady,
     riskCleared,
+    effectivePlan = null,
+    requiresDirectPlanSelection = false,
+    chatOnlyAuthorityActive = false,
   } = args;
 
   if (business.primary_goal === null) {
     if (!hasBusinessInfo(business)) return "business_info";
     if (hours.length < 7) return "business_hours";
     if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
+    if (requiresDirectPlanSelection && !effectivePlan) return "plan_selection";
     return "ai_settings";
+  }
+
+  if (effectivePlan === "chat_only") {
+    if (!hasBusinessInfo(business)) return "business_info";
+    if (hours.length < 7) return "business_hours";
+    if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
+    if (!aiSettings) return "ai_settings";
+    return chatOnlyAuthorityActive && business.onboarding_completed_at
+      ? "complete"
+      : "review_submit";
   }
 
   if (smsReady || business.onboarding_completed_at) return "complete";
@@ -745,6 +872,7 @@ export function deriveOnboardingStep(args: {
   if (!hasBusinessInfo(business)) return "business_info";
   if (hours.length < 7) return "business_hours";
   if (!evaluateContentQuality(services, faqs).ready) return "services_faqs";
+  if (requiresDirectPlanSelection && !effectivePlan) return "plan_selection";
   if (hasPendingNumberFailure) {
     return "phone_number";
   }
@@ -816,21 +944,29 @@ async function syncStoredProgress(args: {
   business: BusinessRow;
   derivedStep: OnboardingStep;
   completedAt: string | null;
-  smsReady: boolean;
+  onboardingReady: boolean;
+  syncSmsRegistrationState: boolean;
 }): Promise<void> {
-  const { business, derivedStep, completedAt, smsReady } = args;
+  const {
+    business,
+    derivedStep,
+    completedAt,
+    onboardingReady,
+    syncSmsRegistrationState,
+  } = args;
   const update: Record<string, unknown> = {};
 
   if (business.onboarding_step !== derivedStep) {
     update.onboarding_step = derivedStep;
   }
 
-  if (smsReady && !business.onboarding_completed_at && completedAt) {
+  if (onboardingReady && !business.onboarding_completed_at && completedAt) {
     update.onboarding_completed_at = completedAt;
     update.onboarding_last_saved_at = completedAt;
   }
 
   const shouldMarkSubmittedFromExistingTelnyxId =
+    syncSmsRegistrationState &&
     Boolean(business.telnyx_brand_id) &&
     (business.onboarding_registration_status == null ||
       (business.onboarding_registration_status === "not_started" &&
@@ -860,6 +996,33 @@ async function syncStoredProgress(args: {
       error
     );
   }
+}
+
+function hasCoreOnboardingFacts(args: {
+  business: BusinessRow;
+  hours: OnboardingHours[];
+  services: OnboardingService[];
+  faqs: OnboardingFaq[];
+  aiSettings: OnboardingAiSettings | null;
+}): boolean {
+  return Boolean(
+    args.business.primary_goal !== null &&
+      hasBusinessInfo(args.business) &&
+      args.hours.length >= 7 &&
+      evaluateContentQuality(args.services, args.faqs).ready &&
+      args.aiSettings,
+  );
+}
+
+function canResumeChatOnlyOnboarding(
+  status: SubscriptionStatus | null,
+  completedAt: string | null,
+): boolean {
+  return (
+    status === "active" ||
+    status === "trialing" ||
+    (status === "past_due" && completedAt !== null)
+  );
 }
 
 function toTimeInput(value: string): string {

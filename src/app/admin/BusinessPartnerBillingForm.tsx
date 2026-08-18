@@ -37,6 +37,7 @@ const PARTNER_PLAN_OPTIONS: Array<{
 ];
 
 const PARTNER_PLAN_LABELS: Record<SubscriptionPlan, string> = {
+  chat_only: "Chat Only",
   sms_only: "Starter",
   sms_and_chat: "Growth",
   full: "Full",
@@ -50,6 +51,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_partner_plan: "Choose a valid partner plan.",
   unsupported_partner_stripe:
     "Partner assignment with Stripe billing is not supported yet.",
+  plan_family_transition_not_supported:
+    "Switching this client between Chat Only and texting requires the reviewed activation or release workflow and is not available yet.",
   business_not_found: "Business not found.",
 };
 

@@ -13,6 +13,7 @@ import { card } from '@/lib/theme-v2/theme';
 import DangerZone from '@/components/settings/DangerZone';
 import { LockedFeatureCard } from '@/components/entitlements/LockedFeatureCard';
 import { canUseFeature } from '@/lib/billing/entitlements';
+import { planRequiresSmsProvisioning } from '@/lib/billing/features';
 import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
@@ -32,7 +33,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
   const { supabase, business, entitlements } = context;
   const signupMode = business.primary_goal === 'signup';
-  const registrationLocked = isSettingsRegistrationLocked(business);
+  const smsEnabled = planRequiresSmsProvisioning(entitlements.plan);
+  const registrationLocked =
+    smsEnabled && isSettingsRegistrationLocked(business);
   const showCalendarUnavailableStatus =
     signupMode && searchParams?.calendar === 'unavailable';
   const canCustomizeAi = canUseFeature(entitlements, 'ai_customization');
@@ -52,7 +55,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
     supabase.from('services').select('*').eq('business_id', business.id).order('name'),
     supabase.from('faqs').select('*').eq('business_id', business.id).order('question'),
     supabase.from('business_hours').select('*').eq('business_id', business.id).order('day_of_week'),
-    supabase.from('phone_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single(),
+    smsEnabled
+      ? supabase.from('phone_numbers').select('*').eq('business_id', business.id).eq('is_active', true).single()
+      : Promise.resolve({ data: null }),
     supabase.from('google_calendar_tokens').select('*').eq('business_id', business.id).single(),
   ]);
 
@@ -76,7 +81,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       )}
 
       {/* Phone Number */}
-      <div className={`p-6 ${card}`}>
+      {smsEnabled && <div className={`p-6 ${card}`}>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Phone Number</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
           The phone number customers use to text your AI assistant.
@@ -87,7 +92,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           callForwardingEnabled={business.call_forwarding_enabled ?? false}
           forwardToNumber={business.forward_to_number ?? null}
         />
-      </div>
+      </div>}
 
       {/* Business Email */}
       <div className={`p-6 ${card}`}>
@@ -99,7 +104,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       </div>
 
       {/* Compliance (Phase 6) — privacy/terms URLs submitted to Telnyx */}
-      <div className={`p-6 ${card}`}>
+      {smsEnabled && <div className={`p-6 ${card}`}>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Compliance</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
           Where your privacy policy and terms of service live. Carriers (T-Mobile, AT&amp;T, Verizon) check these when reviewing your SMS campaign.
@@ -123,7 +128,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           initialTermsUrl={business.terms_url_override}
           registrationLocked={registrationLocked}
         />
-      </div>
+      </div>}
 
       {/* AI Settings */}
       <div className={`p-6 ${card}`}>
@@ -144,6 +149,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           canUseGuardrails={canUseGuardrails}
           planActive={entitlements.active}
           fullSuiteAvailable={fullSuiteAvailable}
+          showSmsResponseDelay={smsEnabled}
         />
       </div>
 

@@ -7,9 +7,9 @@ import {
   syncStripeSubscription,
 } from "@/lib/stripe/subscriptionSync";
 import {
-  attemptPaidLaunch,
-  type LaunchResult,
-} from "@/lib/billing/launch";
+  finalizePaidCheckout,
+  type PaidCheckoutFinalizeResult,
+} from "@/lib/billing/finalizePaidCheckout.server";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   if (!signature) {
     return NextResponse.json(
       { error: "Missing stripe-signature header" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      process.env.STRIPE_WEBHOOK_SECRET!,
     );
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
@@ -53,20 +53,20 @@ export async function POST(request: NextRequest) {
     await markStripeEventFailed(event.id, errorMessage(error));
     return NextResponse.json(
       { error: "Webhook handler failed" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 async function processStripeEvent(
-  event: Stripe.Event
-): Promise<LaunchResult | null> {
+  event: Stripe.Event,
+): Promise<PaidCheckoutFinalizeResult | null> {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
       const synced = await syncCheckoutSession(session);
       if (synced) {
-        return attemptPaidLaunch(synced.businessId, "stripe_webhook");
+        return finalizePaidCheckout(synced, "stripe_webhook");
       }
       return null;
     }
@@ -98,7 +98,8 @@ async function processStripeEvent(
 
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice;
-      const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+      const customerId =
+        typeof invoice.customer === "string" ? invoice.customer : null;
       if (!customerId) return null;
 
       // Freshness check: a redelivered (possibly re-claimed) failure event
@@ -124,12 +125,12 @@ async function processStripeEvent(
         {
           p_stripe_customer_id: customerId,
           p_updated_at: new Date().toISOString(),
-        }
+        },
       );
 
       if (error) {
         throw new Error(
-          `[stripe:webhook] Failed to mark customer ${customerId} past_due: ${error.message}`
+          `[stripe:webhook] Failed to mark customer ${customerId} past_due: ${error.message}`,
         );
       }
 
@@ -138,7 +139,7 @@ async function processStripeEvent(
       }
       if (updated !== true) {
         throw new Error(
-          `[stripe:webhook] Guarded past-due update returned an invalid response for customer ${customerId}`
+          `[stripe:webhook] Guarded past-due update returned an invalid response for customer ${customerId}`,
         );
       }
 
@@ -161,7 +162,7 @@ async function claimStripeEvent(event: Stripe.Event): Promise<boolean> {
     return reclaimFailedStripeEvent(event.id);
   }
   throw new Error(
-    `[stripe:webhook] Failed to claim event ${event.id}: ${error.message}`
+    `[stripe:webhook] Failed to claim event ${event.id}: ${error.message}`,
   );
 }
 
@@ -186,7 +187,7 @@ async function reclaimFailedStripeEvent(eventId: string): Promise<boolean> {
     // Unknown claim state fails closed: a 500 here means Stripe retries
     // later, rather than us processing without holding the claim.
     throw new Error(
-      `[stripe:webhook] Failed to evaluate re-claim for event ${eventId}: ${error.message}`
+      `[stripe:webhook] Failed to evaluate re-claim for event ${eventId}: ${error.message}`,
     );
   }
   return (data?.length ?? 0) > 0;
@@ -206,14 +207,14 @@ async function markStripeEventProcessed(eventId: string): Promise<void> {
     // (guarded upsert RPCs; claimRegistrationAttempt short-circuits a
     // completed launch before any Telnyx side effect).
     throw new Error(
-      `[stripe:webhook] Failed to mark event ${eventId} processed: ${error.message}`
+      `[stripe:webhook] Failed to mark event ${eventId} processed: ${error.message}`,
     );
   }
 }
 
 async function markStripeEventFailed(
   eventId: string,
-  message: string
+  message: string,
 ): Promise<void> {
   const { error } = await supabaseAdmin
     .from("stripe_webhook_events")
@@ -230,14 +231,15 @@ async function markStripeEventFailed(
     // (unclaimable) until the claimed_at staleness reaper follow-up ships.
     console.error(
       `[stripe:webhook] FAILED TO RECORD FAILURE for event ${eventId} — row stranded in-flight until the reaper follow-up:`,
-      error
+      error,
     );
   }
 }
 
 function resolveInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
-  const legacySubscription = (invoice as Stripe.Invoice & { subscription?: unknown })
-    .subscription;
+  const legacySubscription = (
+    invoice as Stripe.Invoice & { subscription?: unknown }
+  ).subscription;
   const id =
     typeof legacySubscription === "string"
       ? legacySubscription

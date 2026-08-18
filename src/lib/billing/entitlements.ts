@@ -1,6 +1,8 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
 import type {
   BillingMode,
   SubscriptionPlan,
@@ -8,7 +10,10 @@ import type {
 } from "@/types/database";
 import {
   canPlanUseFeature,
+  eligiblePlansForFeature,
   isSubscriptionPlan,
+  planRequiresSmsProvisioning,
+  recommendedUpgradePlan,
   requiredPlanForFeature,
   type FeatureKey,
 } from "./features";
@@ -31,6 +36,23 @@ export interface BusinessEntitlements {
   cancelAtPeriodEnd: boolean;
 }
 
+export type SmsProvisioningAccessDecision =
+  | {
+      allowed: true;
+      source: EntitlementSource | "direct_precheckout";
+      plan: SubscriptionPlan | null;
+    }
+  | {
+      allowed: false;
+      reason: "plan_not_entitled";
+      source: EntitlementSource | "direct_precheckout";
+      plan: SubscriptionPlan;
+    }
+  | {
+      allowed: false;
+      reason: "billing_state_unavailable";
+    };
+
 /**
  * Durable billing facts needed to resolve entitlements without performing any
  * database reads. Unknown field types are deliberate: the resolver validates
@@ -41,6 +63,8 @@ export interface BusinessEntitlementSnapshot {
     id: unknown;
     billing_mode: unknown;
     partner_plan: unknown;
+    /** Advisory only; consulted solely to narrow the legacy SMS pre-checkout exception. */
+    onboarding_selected_plan?: unknown;
     billing_pilot: unknown;
     billing_comped: unknown;
     billing_exempt: unknown;
@@ -91,6 +115,8 @@ export type FeatureAccessDecision =
       allowed: true;
       feature: FeatureKey;
       requiredPlan: SubscriptionPlan;
+      eligiblePlans: readonly SubscriptionPlan[];
+      recommendedUpgradePlan: null;
       currentPlan: SubscriptionPlan;
       status: EntitlementStatus;
     }
@@ -100,6 +126,8 @@ export type FeatureAccessDecision =
       reason: "inactive_subscription" | "plan";
       feature: FeatureKey;
       requiredPlan: SubscriptionPlan;
+      eligiblePlans: readonly SubscriptionPlan[];
+      recommendedUpgradePlan: SubscriptionPlan | null;
       currentPlan: SubscriptionPlan;
       status: EntitlementStatus;
     };
@@ -110,6 +138,8 @@ type BusinessEntitlementRow = NonNullable<
 type SubscriptionEntitlementRow = NonNullable<
   BusinessEntitlementSnapshot["subscription"]
 >;
+type BusinessPlanFamilyLock = "sms" | "chat_only";
+type BusinessPlanFamilyLockRow = { family: unknown };
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>([
   "active",
@@ -127,6 +157,191 @@ const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>([
 export async function resolveBusinessEntitlements(
   businessId: string
 ): Promise<BusinessEntitlements> {
+  const snapshot = await loadBusinessEntitlementSnapshot(businessId);
+  return resolveBusinessEntitlementsFromSnapshot(businessId, snapshot);
+}
+
+/**
+ * Authorize entry into SMS/Telnyx provisioning flows.
+ *
+ * Direct onboarding intentionally selects a number before checkout creates a
+ * subscription, so callers must opt into that one narrow legacy exception.
+ * Every other missing or malformed billing state fails closed. A recognized
+ * chat-only plan is always denied regardless of whether Stripe or partner
+ * billing supplied it.
+ */
+export async function resolveSmsProvisioningAccess(
+  businessId: string,
+  options: { allowDirectPrecheckout: boolean },
+): Promise<SmsProvisioningAccessDecision> {
+  let snapshot: BusinessEntitlementSnapshot;
+  let familyLock: BusinessPlanFamilyLock | null;
+  let entitlements: BusinessEntitlements;
+  try {
+    [snapshot, familyLock] = await Promise.all([
+      loadBusinessEntitlementSnapshot(businessId),
+      loadBusinessPlanFamilyLock(businessId),
+    ]);
+    entitlements = resolveBusinessEntitlementsFromSnapshot(
+      businessId,
+      snapshot,
+    );
+  } catch (error) {
+    if (
+      error instanceof EntitlementResolutionError &&
+      error.code === "subscription_missing" &&
+      options.allowDirectPrecheckout
+    ) {
+      return directPrecheckoutSmsAccess(snapshot!, familyLock!);
+    }
+
+    if (error instanceof EntitlementResolutionError) {
+      return { allowed: false, reason: "billing_state_unavailable" };
+    }
+    throw error;
+  }
+
+  // A durable Chat family claim can outlive a canceled Checkout Session or a
+  // cleared subscription. It is service-owned transition authority, so an
+  // advisory SMS intent or even contradictory local SMS authority must never
+  // reopen Telnyx provisioning around it.
+  if (
+    familyLock === "chat_only" &&
+    planRequiresSmsProvisioning(entitlements.plan)
+  ) {
+    return { allowed: false, reason: "billing_state_unavailable" };
+  }
+
+  if (!planRequiresSmsProvisioning(entitlements.plan)) {
+    return {
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: entitlements.source,
+      plan: entitlements.plan,
+    };
+  }
+
+  return {
+    allowed: true,
+    source: entitlements.source,
+    plan: entitlements.plan,
+  };
+}
+
+/**
+ * Preserve the legacy direct-number picker only for an unselected account or
+ * a durable SMS-plan intent. While the guarded early-selection flow is live,
+ * choosing Chat Only makes the advisory intent a denial signal for this
+ * narrow exception; it still never grants runtime entitlements.
+ */
+function directPrecheckoutSmsAccess(
+  snapshot: BusinessEntitlementSnapshot,
+  familyLock: BusinessPlanFamilyLock | null,
+): SmsProvisioningAccessDecision {
+  const intent = snapshot.business?.onboarding_selected_plan;
+
+  // Checkout claims this durable family before Stripe mutation. Unlike the
+  // owner-writable intent, the lock survives cancellation and remains
+  // authoritative even when acquisition flags are later rolled back.
+  if (familyLock === "chat_only") {
+    return {
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: "chat_only",
+    };
+  }
+
+  // Existing rows were intentionally not backfilled by migration 058. Treat
+  // an absent/null intent as the established pre-Phase-2 SMS onboarding path.
+  if (intent === null || intent === undefined) {
+    return {
+      allowed: true,
+      source: "direct_precheckout",
+      plan: null,
+    };
+  }
+
+  if (!isSubscriptionPlan(intent)) {
+    return { allowed: false, reason: "billing_state_unavailable" };
+  }
+
+  // This advisory intent narrows the legacy exception only while the guarded
+  // early-selection flow is actually available. If rollout is rolled back
+  // (or its Chat Price becomes unavailable), onboarding deliberately returns
+  // to the legacy SMS wizard; a previously saved valid intent must not strand
+  // that no-subscription account at number search. Authoritative subscription
+  // and partner Chat plans are resolved before this reducer and remain denied.
+  if (
+    !isChatOnlyDirectSalesEnabled() ||
+    !hasValidChatOnlyStripePrice()
+  ) {
+    return {
+      allowed: true,
+      source: "direct_precheckout",
+      plan: null,
+    };
+  }
+
+  if (!planRequiresSmsProvisioning(intent)) {
+    return {
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: intent,
+    };
+  }
+
+  return {
+    allowed: true,
+    source: "direct_precheckout",
+    // The intent narrowed this exception but is never returned as if it were
+    // authoritative billing provenance.
+    plan: null,
+  };
+}
+
+async function loadBusinessPlanFamilyLock(
+  businessId: string,
+): Promise<BusinessPlanFamilyLock | null> {
+  if (typeof businessId !== "string" || businessId.trim() === "") {
+    throw new EntitlementResolutionError({
+      code: "invalid_business_id",
+      businessId,
+      message: "Cannot resolve a plan-family lock without a business ID.",
+    });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("business_plan_family_locks")
+    .select("family")
+    .eq("business_id", businessId)
+    .maybeSingle<BusinessPlanFamilyLockRow>();
+
+  if (error) {
+    throw new EntitlementResolutionError({
+      code: "business_lookup_failed",
+      businessId,
+      message: `Failed to read the plan-family lock for business ${businessId}: ${errorMessage(error)}`,
+      cause: error,
+    });
+  }
+
+  if (!data) return null;
+  if (data.family !== "sms" && data.family !== "chat_only") {
+    throw new EntitlementResolutionError({
+      code: "malformed_business",
+      businessId,
+      message: `Business ${businessId} has a malformed plan-family lock.`,
+    });
+  }
+
+  return data.family;
+}
+
+async function loadBusinessEntitlementSnapshot(
+  businessId: string,
+): Promise<BusinessEntitlementSnapshot> {
   if (typeof businessId !== "string" || businessId.trim() === "") {
     throw new EntitlementResolutionError({
       code: "invalid_business_id",
@@ -139,7 +354,7 @@ export async function resolveBusinessEntitlements(
     supabaseAdmin
       .from("businesses")
       .select(
-        "id, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt"
+        "id, billing_mode, partner_plan, onboarding_selected_plan, billing_pilot, billing_comped, billing_exempt"
       )
       .eq("id", businessId)
       .maybeSingle<BusinessEntitlementRow>(),
@@ -181,10 +396,7 @@ export async function resolveBusinessEntitlements(
   // Preserve the existing lookup precedence: an absent or mismatched business
   // is authoritative even when the parallel subscription read also errored.
   if (!businessResult.data || businessResult.data.id !== businessId) {
-    return resolveBusinessEntitlementsFromSnapshot(businessId, {
-      business: businessResult.data,
-      subscription: null,
-    });
+    return { business: businessResult.data, subscription: null };
   }
   if (subscriptionResult.error) {
     throw new EntitlementResolutionError({
@@ -195,10 +407,10 @@ export async function resolveBusinessEntitlements(
     });
   }
 
-  return resolveBusinessEntitlementsFromSnapshot(businessId, {
+  return {
     business: businessResult.data,
     subscription: subscriptionResult.data,
-  });
+  };
 }
 
 /**
@@ -322,6 +534,8 @@ export function decideFeatureAccess(
   const base = {
     feature,
     requiredPlan,
+    eligiblePlans: eligiblePlansForFeature(feature),
+    recommendedUpgradePlan: null,
     currentPlan: entitlements.plan,
     status: entitlements.status,
   };
@@ -336,8 +550,11 @@ export function decideFeatureAccess(
   }
 
   if (!canPlanUseFeature(entitlements.plan, feature)) {
+    const upgradePlan = recommendedUpgradePlan(entitlements.plan, feature);
+
     return {
       ...base,
+      recommendedUpgradePlan: upgradePlan,
       outcome: "not_entitled",
       allowed: false,
       reason: "plan",
@@ -353,7 +570,12 @@ export function isEntitlementResolutionError(
   return error instanceof EntitlementResolutionError;
 }
 
-export { requiredPlanForFeature } from "./features";
+export {
+  eligiblePlansForFeature,
+  planRequiresSmsProvisioning,
+  recommendedUpgradePlan,
+  requiredPlanForFeature,
+} from "./features";
 export type { FeatureKey } from "./features";
 
 function entitlementsFromSubscription(

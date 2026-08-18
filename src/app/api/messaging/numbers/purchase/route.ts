@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isNanpTollFreeNumber } from "@/lib/messaging/numbers";
 import { getA2pRiskClearanceForBusiness } from "@/lib/messaging/registration/riskScreening";
+import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const CANONICAL_US_E164_PATTERN = /^\+1\d{10}$/;
@@ -86,6 +87,22 @@ export async function POST(request: NextRequest) {
           "Finish business verification before choosing your SimplAssist number",
       },
       { status: 400 }
+    );
+  }
+
+  const smsAccess = await resolveSmsProvisioningAccess(business.id, {
+    allowDirectPrecheckout: true,
+  });
+  if (!smsAccess.allowed) {
+    if (smsAccess.reason === "billing_state_unavailable") {
+      return NextResponse.json(
+        { error: "Unable to verify plan access", retryable: true },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json(
+      { error: "SMS provisioning is not available on the current plan" },
+      { status: 403 },
     );
   }
 

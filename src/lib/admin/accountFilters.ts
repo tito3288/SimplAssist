@@ -1,4 +1,7 @@
-import type { SubscriptionPlan } from "@/types/database";
+import {
+  SUBSCRIPTION_PLAN_IDS,
+  type SubscriptionPlan,
+} from "@/types/database";
 
 export const ADMIN_ACCOUNT_LIFECYCLE_FILTERS = [
   "live",
@@ -11,11 +14,7 @@ export const ADMIN_ACCOUNT_LIFECYCLE_FILTERS = [
 
 export const ADMIN_ACCOUNT_OWNERSHIP_FILTERS = ["direct", "partner"] as const;
 
-export const ADMIN_ACCOUNT_PLAN_FILTERS = [
-  "sms_only",
-  "sms_and_chat",
-  "full",
-] as const satisfies readonly SubscriptionPlan[];
+export const ADMIN_ACCOUNT_PLAN_FILTERS = SUBSCRIPTION_PLAN_IDS;
 
 export type AdminAccountLifecycleFilter =
   (typeof ADMIN_ACCOUNT_LIFECYCLE_FILTERS)[number];

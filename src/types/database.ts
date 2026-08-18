@@ -52,7 +52,19 @@ export type MessageRole = "customer" | "assistant" | "human_agent" | "system";
 
 export type KnowledgeGapStatus = "open" | "resolved" | "dismissed";
 
-export type SubscriptionPlan = "sms_only" | "sms_and_chat" | "full";
+/**
+ * Every plan identifier the application and database may persist or read.
+ * Sales visibility and channel-specific acquisition gates live separately;
+ * recognizing a value here must never make it purchasable by itself.
+ */
+export const SUBSCRIPTION_PLAN_IDS = [
+  "chat_only",
+  "sms_only",
+  "sms_and_chat",
+  "full",
+] as const;
+
+export type SubscriptionPlan = (typeof SUBSCRIPTION_PLAN_IDS)[number];
 
 export type SubscriptionStatus =
   | "active"
@@ -138,6 +150,7 @@ export type OnboardingStep =
   | "business_info"
   | "business_hours"
   | "services_faqs"
+  | "plan_selection"
   | "ai_settings"
   | "legal_verification"
   | "sms_use_case"
@@ -367,6 +380,7 @@ export interface Business {
   billing_admin_notes: string | null;
   billing_flags_updated_at: string | null;
   billing_flags_updated_by: string | null;
+  onboarding_selected_plan: SubscriptionPlan | null;
   onboarding_step: OnboardingStep;
   onboarding_completed_at: string | null;
   onboarding_last_saved_at: string | null;

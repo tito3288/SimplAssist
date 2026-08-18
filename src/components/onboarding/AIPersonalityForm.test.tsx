@@ -134,6 +134,24 @@ function makeSaveClient(options: {
 }
 
 describe("AIPersonalityForm primary goal boundary", () => {
+  it("hides the SMS response delay while keeping widget customization for Chat Only", () => {
+    const markup = renderToStaticMarkup(
+      <AIPersonalityForm
+        businessId="business-1"
+        businessName="Example Business"
+        initialPrimaryGoal="book"
+        initialGoalUrl={null}
+        showSmsResponseDelay={false}
+        nextOnboardingStep="review_submit"
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(markup).not.toContain("SMS Response Delay");
+    expect(markup).toContain("Widget Welcome Message");
+  });
+
   it("renders the exact goal copy first, with no NULL default or suggestion", () => {
     const markup = renderForm(null);
     const positions = AUTHORITATIVE_COPY.map((copy) =>
@@ -212,6 +230,23 @@ describe("AIPersonalityForm primary goal boundary", () => {
 });
 
 describe("saveAIPersonalitySettings", () => {
+  it("stores the no-SMS review successor for Chat Only", async () => {
+    const writes = makeSaveClient();
+
+    await saveAIPersonalitySettings({
+      supabase: writes.client,
+      businessId: "business-1",
+      data: dataFor("book", ""),
+      onNext: vi.fn(),
+      nextOnboardingStep: "review_submit",
+      now: () => "2026-08-11T12:00:00.000Z",
+    });
+
+    expect(writes.updates[0]?.payload).toMatchObject({
+      onboarding_step: "review_submit",
+    });
+  });
+
   it("writes signup goal and URL together before advancing", async () => {
     const writes = makeSaveClient();
     const onNext = vi.fn(() => {

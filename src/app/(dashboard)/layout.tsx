@@ -5,12 +5,13 @@ import { pageShell, fontStack, lightAmbient, darkAmbient } from "@/lib/theme-v2/
 import { canUseFeature } from "@/lib/billing/entitlements";
 import {
   getDashboardBusinessContext,
-  getDashboardEntitlements,
+  getDashboardPageEntitlements,
 } from "@/lib/dashboard/context";
 import { PRIVATE_ROUTE_METADATA } from "@/lib/seo/privateMetadata";
 import { getWorkspaceAccess } from "@/lib/customer/workspaceAccess.server";
 import { workspacePageRedirectTarget } from "@/lib/customer/workspaceRouteResponse.server";
 import { AccountServiceStatusBanner } from "@/components/account/AccountServiceStatusBanner";
+import { getOnboardingStateForOwnerReadOnly } from "@/lib/onboarding/state";
 
 export const metadata = PRIVATE_ROUTE_METADATA;
 
@@ -42,13 +43,30 @@ export default async function DashboardLayout({
   }
   const isPartnerManagedBilling = business.partner_id !== null;
 
-  // Dashboard unlocks only after SMS is actually ready: approved campaign plus
-  // the active phone number assigned to that campaign.
-  const [smsReadiness, entitlements] = await Promise.all([
-    getSmsReadinessForBusiness(business.id),
-    getDashboardEntitlements(business.id),
-  ]);
-  if (!smsReadiness.smsReady) {
+  // SMS plans still unlock only after carrier + number readiness. Chat Only
+  // uses the authoritative onboarding read model so an owner-writable intent
+  // or stale completion timestamp can never unlock the dashboard by itself.
+  const entitlementResult = await getDashboardPageEntitlements(business.id);
+  if (entitlementResult.status === "subscription_missing") {
+    redirect("/onboarding");
+  }
+  const { entitlements } = entitlementResult;
+  let dashboardReady: boolean;
+
+  if (entitlements.plan === "chat_only") {
+    const onboardingState = await getOnboardingStateForOwnerReadOnly(user.id);
+    dashboardReady = Boolean(
+      onboardingState?.dashboardReady === true &&
+        onboardingState.completedAt !== null &&
+        onboardingState.planSelection.effectivePlan === "chat_only" &&
+        (onboardingState.planSelection.source === "subscription" ||
+          onboardingState.planSelection.source === "partner_plan"),
+    );
+  } else {
+    const smsReadiness = await getSmsReadinessForBusiness(business.id);
+    dashboardReady = smsReadiness.smsReady;
+  }
+  if (!dashboardReady) {
     redirect("/onboarding");
   }
 

@@ -26,6 +26,24 @@ const SETTINGS: AISettings = {
 };
 
 describe("AISettingsForm Google Calendar connection state", () => {
+  it("omits only the SMS response-delay surface for Chat Only", () => {
+    const html = renderToStaticMarkup(
+      <AISettingsForm
+        settings={SETTINGS}
+        businessName="Example Business"
+        businessId="business-1"
+        showSmsResponseDelay={false}
+        fullSuiteAvailable={false}
+      />
+    );
+
+    expect(html).not.toContain("Response Behavior");
+    expect(html).not.toContain("SMS Response Delay");
+    expect(html).toContain("Tone &amp; Voice");
+    expect(html).toContain("Web Chat Greeting");
+    expect(html).toContain("Google Calendar");
+  });
+
   it("omits the entire booking and Google Calendar card when the goal does not use Calendar", () => {
     const html = renderToStaticMarkup(
       <AISettingsForm

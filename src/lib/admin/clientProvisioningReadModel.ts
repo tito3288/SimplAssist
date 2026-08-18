@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import { getCanonicalAppHostname } from "@/lib/branding/defaultBrand";
 import { normalizeHostHeader } from "@/lib/branding/hostname";
 import {
@@ -18,7 +19,7 @@ const storedJobSchema = z
     requested_business_name: z.string(),
     partner_id: z.string().uuid(),
     billing_mode: z.enum(["invoiced", "comped"]),
-    partner_plan: z.enum(["sms_only", "sms_and_chat", "full"]),
+    partner_plan: subscriptionPlanSchema,
     auth_user_id: z.string().uuid().nullable(),
     business_id: z.string().uuid().nullable(),
     status: z.enum([

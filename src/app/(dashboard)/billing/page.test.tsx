@@ -55,6 +55,7 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
   getRequestBrand: mocks.getRequestBrand,
 }));
 vi.mock("@/lib/billing/planAvailability", () => ({
+  CUSTOMER_VISIBLE_PLAN_ORDER: ["sms_only", "sms_and_chat", "full"],
   isPlanAvailable: mocks.isPlanAvailable,
 }));
 vi.mock("./billing-actions", () => ({
@@ -199,6 +200,8 @@ describe("BillingPage", () => {
       expect(html).toContain("Choose a plan to get started");
       expect(html).toContain("Starter / SMS Only");
       expect(html).toContain("Growth / SMS + Web Chat");
+      expect(html).not.toContain("Chat Only");
+      expect(html).not.toContain("200 AI replies/month");
       expect(html).not.toContain("Pro / Full Suite");
       expect(html).not.toContain("Notify Me When It Launches");
       expect(html.match(/Stripe billing action: checkout/g)).toHaveLength(2);
@@ -271,6 +274,51 @@ describe("BillingPage", () => {
     expect(html).toContain("Pro / Full Suite");
     expect(html).toContain("Stripe billing action: portal");
     expect(html).toContain("50 / 2,500 parts");
+    expect(html).not.toContain("Stripe billing action: checkout");
+    expect(html).not.toContain("Choose a plan to get started");
+    expect(mocks.isPlanAvailable).not.toHaveBeenCalled();
+  });
+
+  it("shows an active Chat Only subscription without SMS usage or acquisition actions", async () => {
+    mocks.from.mockImplementation((table: string) =>
+      queryThenable(
+        Promise.resolve(
+          table === "subscriptions"
+            ? {
+                data: {
+                  plan: "chat_only",
+                  status: "active",
+                  current_period_end: "2026-09-01T12:00:00.000Z",
+                },
+              }
+            : {
+                data: {
+                  inbound_sms_parts: 500,
+                  outbound_sms_parts: 500,
+                  included_sms_parts: 1_000,
+                },
+              },
+        ),
+      ),
+    );
+    mocks.getDashboardBusinessContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "user-1" },
+      business: {
+        id: "business-1",
+        partner_id: null,
+        billing_mode: "stripe",
+        operations_suspended_at: null,
+      },
+    });
+
+    const html = renderToStaticMarkup(await BillingPage({}));
+
+    expect(html).toContain("Chat Only");
+    expect(html).toContain("Stripe billing action: portal");
+    expect(html).not.toContain("SMS usage");
+    expect(html).not.toContain("parts");
     expect(html).not.toContain("Stripe billing action: checkout");
     expect(html).not.toContain("Choose a plan to get started");
     expect(mocks.isPlanAvailable).not.toHaveBeenCalled();

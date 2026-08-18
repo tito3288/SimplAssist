@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SubscriptionPlan } from "@/types/database";
 
 const mocks = vi.hoisted(() => ({
   getAdminUser: vi.fn(),
   rpc: vi.fn(),
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/admin/auth", () => ({
   getAdminUser: mocks.getAdminUser,
 }));
@@ -26,7 +28,7 @@ function request(body: unknown) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-    }
+    },
   );
 }
 
@@ -37,15 +39,16 @@ function invalidJsonRequest() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{",
-    }
+    },
   );
 }
 
 function rpcAssignment(
   billingMode: "stripe" | "invoiced" | "comped" = "invoiced",
   partnerId: string | null = PARTNER_ID,
-  partnerPlan: "sms_only" | "sms_and_chat" | "full" | null =
-    billingMode === "stripe" ? null : "sms_and_chat"
+  partnerPlan: SubscriptionPlan | null = billingMode === "stripe"
+    ? null
+    : "sms_and_chat",
 ) {
   return {
     business_id: BUSINESS_ID,
@@ -65,7 +68,59 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/admin/business-partner-billing", () => {
+  it.each(["", "0", "true", "yes", "01", " 1", "1 "])(
+    "rejects crafted chat-only partner assignment with fail-closed flag %j before the RPC",
+    async (flag) => {
+      vi.stubEnv("CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED", flag);
+
+      const response = await POST(
+        request({
+          businessId: BUSINESS_ID,
+          partnerId: PARTNER_ID,
+          billingMode: "invoiced",
+          partnerPlan: "chat_only",
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "chat_only_not_available",
+      });
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows chat-only to reach the partner RPC only with the exact assignment flag", async () => {
+    vi.stubEnv("CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED", "1");
+    mocks.rpc.mockResolvedValue({
+      data: [rpcAssignment("invoiced", PARTNER_ID, "chat_only")],
+      error: null,
+    });
+
+    const response = await POST(
+      request({
+        businessId: BUSINESS_ID,
+        partnerId: PARTNER_ID,
+        billingMode: "invoiced",
+        partnerPlan: "chat_only",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "assign_business_partner_billing",
+      expect.objectContaining({ p_partner_plan: "chat_only" }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      assignment: { partner_plan: "chat_only" },
+    });
+  });
+
   it("returns a non-disclosing 404 before parsing JSON or calling the RPC", async () => {
     mocks.getAdminUser.mockResolvedValue(null);
 
@@ -87,7 +142,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         billingMode: "invoiced",
         partnerPlan: "sms_and_chat",
         p_actor_user_id: "00000000-0000-4000-8000-000000000111",
-      })
+      }),
     );
     expect(extraActor.status).toBe(400);
     expect(mocks.rpc).not.toHaveBeenCalled();
@@ -100,7 +155,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "stripe",
         partnerPlan: null,
-      })
+      }),
     );
 
     expect(response.status).toBe(409);
@@ -119,7 +174,7 @@ describe("POST /api/admin/business-partner-billing", () => {
           partnerId: null,
           billingMode,
           partnerPlan: "sms_and_chat",
-        })
+        }),
       );
 
       expect(response.status).toBe(409);
@@ -127,7 +182,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         error: "partner_required",
       });
       expect(mocks.rpc).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("rejects a missing or unknown plan before the RPC", async () => {
@@ -136,7 +191,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         businessId: BUSINESS_ID,
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
-      })
+      }),
     );
     expect(missingPlan.status).toBe(400);
     await expect(missingPlan.json()).resolves.toMatchObject({
@@ -149,7 +204,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
         partnerPlan: "starter",
-      })
+      }),
     );
     expect(unknownPlan.status).toBe(400);
     await expect(unknownPlan.json()).resolves.toMatchObject({
@@ -171,7 +226,7 @@ describe("POST /api/admin/business-partner-billing", () => {
           partnerId,
           billingMode,
           partnerPlan,
-        })
+        }),
       );
 
       expect(response.status).toBe(400);
@@ -179,7 +234,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         error: "invalid_partner_plan",
       });
       expect(mocks.rpc).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it.each([
@@ -201,7 +256,7 @@ describe("POST /api/admin/business-partner-billing", () => {
           partnerId,
           billingMode,
           partnerPlan,
-        })
+        }),
       );
 
       expect(response.status).toBe(200);
@@ -214,15 +269,16 @@ describe("POST /api/admin/business-partner-billing", () => {
           p_billing_mode: billingMode,
           p_actor_user_id: ADMIN_ID,
           p_partner_plan: partnerPlan,
-        }
+        },
       );
-    }
+    },
   );
 
   it.each([
     ["subscription_exists", 409],
     ["partner_required", 409],
     ["partner_inactive", 409],
+    ["plan_family_transition_not_supported", 409],
     ["business_not_found", 404],
   ] as const)("maps RPC error %s to %s", async (code, status) => {
     mocks.rpc.mockResolvedValue({
@@ -236,7 +292,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
         partnerPlan: "sms_and_chat",
-      })
+      }),
     );
 
     expect(response.status).toBe(status);
@@ -261,7 +317,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "comped",
         partnerPlan: "full",
-      })
+      }),
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -271,7 +327,9 @@ describe("POST /api/admin/business-partner-billing", () => {
   });
 
   it("fails closed for an unknown RPC error or malformed RPC result", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     mocks.rpc.mockResolvedValueOnce({
       data: null,
       error: { message: "unexpected_failure" },
@@ -283,7 +341,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
         partnerPlan: "sms_and_chat",
-      })
+      }),
     );
     expect(unknownError.status).toBe(500);
 
@@ -297,7 +355,7 @@ describe("POST /api/admin/business-partner-billing", () => {
         partnerId: PARTNER_ID,
         billingMode: "invoiced",
         partnerPlan: "sms_and_chat",
-      })
+      }),
     );
     expect(malformedResult.status).toBe(500);
     consoleError.mockRestore();

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { telnyx } from "@/lib/messaging/client";
+import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
 import {
   appendRegistrationEvent,
   appendRegistrationEventOrThrow,
@@ -76,6 +77,25 @@ export async function POST() {
   }
 
   const snapshot = data;
+  const smsAccess = await resolveSmsProvisioningAccess(snapshot.id, {
+    allowDirectPrecheckout: false,
+  });
+  if (!smsAccess.allowed) {
+    if (smsAccess.reason === "billing_state_unavailable") {
+      return NextResponse.json(
+        { error: "Unable to verify plan access", retryable: true },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json(
+      {
+        code: "sms_provisioning_not_available",
+        error: "Carrier status is not available on the current plan.",
+      },
+      { status: 403 },
+    );
+  }
+
   const safetyBlock = getCampaignAssignmentSafetyBlock(snapshot);
   if (safetyBlock) {
     await auditRefresh(snapshot, {

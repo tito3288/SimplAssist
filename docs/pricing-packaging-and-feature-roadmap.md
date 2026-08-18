@@ -3,11 +3,15 @@
 Decision record for SimplAssist's initial pricing, tier positioning, feature
 entitlements, and post-launch validation plan.
 
-Last updated: July 18, 2026
+Last updated: August 18, 2026
 
 ## Current decision
 
-Keep the founding/test-user prices at:
+Add a self-serve website-receptionist entry tier at:
+
+- Chat Only: **$10/month** with 200 completed web-chat AI replies per month
+
+Keep the founding/test-user SMS plan prices at:
 
 - Starter / SMS Only: **$25/month** with 500 included SMS parts
 - Growth / SMS + Web Chat: **$45/month** with 1,500 included SMS parts
@@ -25,12 +29,14 @@ $29 / $49 / $79, but the evidence should determine the final prices.
 
 ## Tier positioning
 
-Each tier should sell a progressively larger business outcome:
+Each tier should sell a clear business outcome:
 
-1. **Starter:** Respond to missed calls.
-2. **Growth:** Capture leads from calls and websites, then turn them into booked
+1. **Chat Only:** Answer website visitors, capture leads, and book appointments
+   without phone/SMS registration.
+2. **Starter:** Respond to missed calls.
+3. **Growth:** Capture leads from calls and websites, then turn them into booked
    appointments.
-3. **Full Suite:** Measure performance, automate follow-up, and generate more
+4. **Full Suite:** Measure performance, automate follow-up, and generate more
    repeat business and reviews.
 
 Growth is the intended "Most Popular" plan. Google Calendar connection and AI
@@ -39,6 +45,19 @@ from lead capture to a booked appointment. Calendar should not be held in Full
 Suite merely to make the highest tier look larger.
 
 ## Approved package matrix
+
+### Chat Only — $10/month
+
+For a business that wants an AI website receptionist without texting.
+
+- Website chat widget
+- 200 completed AI replies per billing period
+- Web-chat lead capture
+- Contact and conversation inbox
+- AI answer, tone, FAQ, and service customization
+- Google Calendar connection
+- AI direct appointment scheduling
+- No phone number, A2P registration, SMS, MMS, or Telnyx activation
 
 ### Starter / SMS Only — $25/month
 
@@ -103,10 +122,18 @@ the review-request use case.
 
 ## Implementation truth as of this decision
 
-- Server-enforced feature walls now exist in code from one minimum-plan matrix.
-  Starter keeps the automatic missed-call template and manual follow-up;
-  ongoing AI SMS begins with Growth. Migration 031 must be applied before the
-  walls are rolled out in production.
+- Server-enforced feature walls now use an explicit per-plan capability matrix,
+  not a ranked minimum-plan ladder. Chat Only and Starter are intentionally
+  incomparable: Chat Only has web chat and Calendar but no SMS capability;
+  Starter has missed-call/manual SMS but no AI chat. Existing Starter, Growth,
+  and Full feature vectors remain unchanged.
+- The application catalog and local migration 057 recognize Chat Only at
+  $10/month, zero SMS parts, and 200 AI replies. Local Phase 2 code and
+  migrations 058–059 add a default-off direct Stripe purchase path, simplified
+  no-SMS onboarding, atomic paid completion, plan-aware dashboard, and durable
+  cross-family transition guard. No hosted Chat Only Stripe Price or migration
+  has been created/applied, both acquisition switches remain off, partner
+  selection remains hidden, and no AI-reply meter is active yet.
 - Plan-specific SMS allowances are enforced at 500 / 1,500 / 2,500 parts.
 - Active, trialing, and past-due subscriptions retain their selected plan;
   canceled and normalized unpaid subscriptions stop paid execution without

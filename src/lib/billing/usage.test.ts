@@ -268,6 +268,83 @@ describe("preflightOutboundSms", () => {
     ).resolves.toMatchObject({ allowed: false, reason: "canceled" });
   });
 
+  it.each([
+    ["sms_only", "manual_dashboard_send", true],
+    ["sms_only", "missed_call", true],
+    ["sms_only", "ai_reply", false],
+    ["sms_only", "mms_fallback", false],
+    ["sms_and_chat", "manual_dashboard_send", true],
+    ["sms_and_chat", "missed_call", true],
+    ["sms_and_chat", "ai_reply", true],
+    ["sms_and_chat", "mms_fallback", true],
+    ["full", "manual_dashboard_send", true],
+    ["full", "missed_call", true],
+    ["full", "ai_reply", true],
+    ["full", "mms_fallback", true],
+    ["chat_only", "manual_dashboard_send", false],
+    ["chat_only", "missed_call", false],
+    ["chat_only", "ai_reply", false],
+    ["chat_only", "mms_fallback", false],
+  ] as const)(
+    "enforces the %s capability contract for %s",
+    async (plan, purpose, allowed) => {
+      const includedSmsParts =
+        plan === "full"
+          ? 2500
+          : plan === "sms_and_chat"
+            ? 1500
+            : plan === "sms_only"
+              ? 500
+              : 0;
+      setSubscription({ plan });
+      setUsagePeriod({ plan, included_sms_parts: includedSmsParts });
+
+      const result = await preflightOutboundSms({
+        businessId: BUSINESS_ID,
+        text: "Hello",
+        purpose,
+      });
+
+      if (allowed) {
+        expect(result).toMatchObject({ allowed: true });
+      } else {
+        expect(result).toMatchObject({
+          allowed: false,
+          reason: "plan_not_entitled",
+        });
+      }
+    },
+  );
+
+  it.each(["invoiced", "comped"] as const)(
+    "hard-denies every outbound SMS purpose for a %s partner chat-only plan before usage writes",
+    async (billingMode) => {
+      setBusiness({ billing_mode: billingMode, partner_plan: "chat_only" });
+      setNoSubscription();
+
+      for (const purpose of [
+        "manual_dashboard_send",
+        "missed_call",
+        "ai_reply",
+        "mms_fallback",
+      ] as const) {
+        await expect(
+          preflightOutboundSms({
+            businessId: BUSINESS_ID,
+            text: "Hello",
+            purpose,
+          }),
+        ).resolves.toMatchObject({
+          allowed: false,
+          reason: "plan_not_entitled",
+        });
+      }
+
+      expect(mocks.writes).toEqual([]);
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    },
+  );
+
   it("fails retryably on malformed synchronized billing values", async () => {
     setSubscription({ plan: "mystery_plan" });
 
@@ -286,6 +363,122 @@ describe("preflightOutboundSms", () => {
       preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" })
     ).rejects.toThrow("temporary database failure");
   });
+
+  it.each([
+    [398, false],
+    [399, true],
+  ] as const)(
+    "reports the exact 80%% boundary from %i used parts as %s",
+    async (usedParts, warningThresholdReached) => {
+      setUsagePeriod({
+        inbound_sms_parts: usedParts,
+        outbound_sms_parts: 0,
+      });
+
+      await expect(
+        preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" })
+      ).resolves.toMatchObject({
+        allowed: true,
+        warningThresholdReached,
+      });
+
+      expect(
+        mocks.writes.some(
+          (write) =>
+            write.table === "billing_usage_periods" &&
+            write.operation === "update" &&
+            typeof write.values === "object" &&
+            write.values !== null &&
+            "warning_80_sent_at" in write.values
+        )
+      ).toBe(warningThresholdReached);
+    }
+  );
+
+  it("allows the final included Stripe SMS part without marking a hard limit", async () => {
+    setUsagePeriod({
+      inbound_sms_parts: 250,
+      outbound_sms_parts: 249,
+    });
+
+    await expect(
+      preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" })
+    ).resolves.toMatchObject({
+      allowed: true,
+      smsParts: 1,
+      warningThresholdReached: true,
+    });
+
+    expect(
+      mocks.writes.some(
+        (write) =>
+          write.table === "billing_usage_periods" &&
+          write.operation === "update" &&
+          typeof write.values === "object" &&
+          write.values !== null &&
+          "hard_limit_reached_at" in write.values
+      )
+    ).toBe(false);
+  });
+
+  it("blocks the first non-opted-in Stripe overage and records the hard limit", async () => {
+    setUsagePeriod({
+      inbound_sms_parts: 250,
+      outbound_sms_parts: 250,
+    });
+
+    await expect(
+      preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" })
+    ).resolves.toMatchObject({
+      allowed: false,
+      reason: "usage_limit_reached",
+      smsParts: 1,
+    });
+
+    expect(mocks.writes).toContainEqual({
+      table: "billing_usage_periods",
+      operation: "update",
+      values: { hard_limit_reached_at: expect.any(String) },
+    });
+  });
+
+  it.each([
+    ["sms_only", 500],
+    ["sms_and_chat", 1500],
+    ["full", 2500],
+  ] as const)(
+    "creates a direct %s usage period from the Stripe dates with %i included parts",
+    async (plan, includedSmsParts) => {
+      setSubscription({ plan });
+      queueResults(
+        "billing_usage_periods",
+        { data: null, error: null },
+        {
+          data: usagePeriod({
+            plan,
+            included_sms_parts: includedSmsParts,
+          }),
+          error: null,
+        }
+      );
+
+      await expect(
+        preflightOutboundSms({ businessId: BUSINESS_ID, text: "Hello" })
+      ).resolves.toMatchObject({ allowed: true, periodId: PERIOD_ID });
+
+      expect(mocks.writes).toContainEqual({
+        table: "billing_usage_periods",
+        operation: "insert",
+        values: {
+          business_id: BUSINESS_ID,
+          period_start: defaultSubscription.current_period_start,
+          period_end: defaultSubscription.current_period_end,
+          plan,
+          included_sms_parts: includedSmsParts,
+        },
+      });
+    }
+  );
 
   it.each([
     ["invoiced", "sms_only", 500],

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { MessageSquare, Users, Zap, Mail, ArrowRight, Cog, CreditCard, Flame, Phone, X, AlertTriangle } from 'lucide-react';
+import { MessageSquare, Users, Zap, Mail, ArrowRight, Cog, CreditCard, Flame, Phone, X, AlertTriangle, AppWindow } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import type { BillingMode, Conversation, Contact } from '@/types/database';
@@ -33,6 +33,7 @@ interface DashboardOverviewProps {
   showCallForwardingNudge: boolean;
   billingMode: BillingMode;
   isPartnerManagedBilling?: boolean;
+  smsEnabled?: boolean;
 }
 
 const statCards = [
@@ -43,7 +44,7 @@ const statCards = [
 ];
 
 /** Layered illustration: large gray circle + dashed chat bubble + overlapping phone badge */
-function EmptyConversationsIllustration() {
+function EmptyConversationsIllustration({ smsEnabled }: { smsEnabled: boolean }) {
   return (
     <div className="relative mx-auto mb-8 sm:mb-10 h-36 w-36 sm:h-44 sm:w-44">
       <div className="flex h-32 w-32 items-center justify-center rounded-full bg-stone-100 sm:h-40 sm:w-40 dark:bg-white/[0.07]">
@@ -66,7 +67,11 @@ function EmptyConversationsIllustration() {
       <div
         className="absolute -bottom-0.5 -right-0.5 flex h-14 w-14 items-center justify-center rounded-full border border-[#ece4d8] bg-white shadow-[0_8px_28px_rgba(0,0,0,0.1)] sm:h-16 sm:w-16 dark:border-white/[0.12] dark:bg-[#1c1c1f] dark:shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
       >
-        <Phone className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] sm:h-7 sm:w-7" strokeWidth={1.75} />
+        {smsEnabled ? (
+          <Phone className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] sm:h-7 sm:w-7" strokeWidth={1.75} />
+        ) : (
+          <AppWindow className="h-6 w-6 text-[var(--brand-accent)] dark:text-[var(--brand-accent-dark)] sm:h-7 sm:w-7" strokeWidth={1.75} />
+        )}
       </div>
     </div>
   );
@@ -81,6 +86,7 @@ export default function DashboardOverview({
   showCallForwardingNudge,
   billingMode,
   isPartnerManagedBilling = false,
+  smsEnabled = true,
 }: DashboardOverviewProps) {
   const brand = useBrand();
   const hasData = stats.totalConversations > 0 || stats.totalContacts > 0;
@@ -89,10 +95,10 @@ export default function DashboardOverview({
 
   return (
     <div className="space-y-6">
-      {showCallForwardingNudge && <CallForwardingNudge />}
+      {smsEnabled && showCallForwardingNudge && <CallForwardingNudge />}
 
       {/* Phone Number Banner */}
-      {!phoneNumber && !bannerDismissed && (
+      {smsEnabled && !phoneNumber && !bannerDismissed && (
         <div className={`p-4 ${cardSurface}`}>
           <div className="flex items-start gap-3">
             <div className={`p-2 shrink-0 ${orangeAccentIcon}`}>
@@ -122,7 +128,7 @@ export default function DashboardOverview({
       )}
 
       {/* A2P Registration Status */}
-      <A2pStatusCard {...a2pStatus} />
+      {smsEnabled && <A2pStatusCard {...a2pStatus} />}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -138,7 +144,11 @@ export default function DashboardOverview({
                   {card.badge}
                 </span>
               </div>
-              <p className={`text-sm ${body}`}>{card.label}</p>
+              <p className={`text-sm ${body}`}>
+                {!smsEnabled && card.key === 'messagesThisWeek'
+                  ? 'Web Messages'
+                  : card.label}
+              </p>
               <p className={`text-3xl font-extrabold tracking-tight ${ink}`}>{stats[card.key]}</p>
             </div>
           );
@@ -146,7 +156,7 @@ export default function DashboardOverview({
       </div>
 
       {/* Phone Number Active Card */}
-      {phoneNumber && (
+      {smsEnabled && phoneNumber && (
         <div className={`p-5 ${cardSurface}`}>
           <div className="flex items-center gap-3">
             <div className={`p-2 ${orangeAccentIcon}`}>
@@ -178,12 +188,14 @@ export default function DashboardOverview({
             sm:px-10 sm:py-12 lg:px-12 lg:py-14
           `}
         >
-          <EmptyConversationsIllustration />
+          <EmptyConversationsIllustration smsEnabled={smsEnabled} />
           <h3 className={`text-xl font-bold tracking-tight sm:text-2xl mb-3 ${ink}`}>
             No conversations yet!
           </h3>
           <p className={`mx-auto max-w-md text-sm leading-relaxed sm:text-base ${body}`}>
-            Once you set up your phone number and customers start texting, your dashboard will come alive.
+            {smsEnabled
+              ? 'Once you set up your phone number and customers start texting, your dashboard will come alive.'
+              : 'Install your website widget and start a test chat. New web conversations will appear here.'}
           </p>
         </div>
       ) : (
@@ -319,7 +331,9 @@ export default function DashboardOverview({
               Settings
             </h4>
             <p className={`text-sm leading-relaxed ${body}`}>
-              Manage business details, hours, messaging, and the features included in your plan.
+              {smsEnabled
+                ? 'Manage business details, hours, messaging, and the features included in your plan.'
+                : 'Manage your widget, AI answers, business details, hours, and calendar connection.'}
             </p>
           </Link>
           {!isPartnerManagedBilling && (
@@ -352,7 +366,7 @@ export default function DashboardOverview({
       </section>
 
       {/* Phone Number Setup Modal */}
-      {showPhoneModal && (
+      {smsEnabled && showPhoneModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/60">
           <div className={`${cardSurface} w-full max-w-lg mx-4 p-6`}>
             <div className="flex items-center justify-between mb-4">

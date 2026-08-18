@@ -8,6 +8,7 @@ import BusinessInfoForm, { type ScrapedData } from '@/components/onboarding/Busi
 import BusinessHoursForm from '@/components/onboarding/BusinessHoursForm';
 import ServicesAndFaqsForm from '@/components/onboarding/ServicesAndFaqsForm';
 import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
+import DirectPlanSelection from '@/components/onboarding/DirectPlanSelection';
 import BrandVerificationForm from '@/components/onboarding/BrandVerificationForm';
 import SmsUseCaseForm from '@/components/onboarding/SmsUseCaseForm';
 import ReviewAndLaunch from '@/components/onboarding/ReviewAndLaunch';
@@ -19,7 +20,6 @@ import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
-  ONBOARDING_STEPS,
   ONBOARDING_STEP_LABELS,
   onboardingStepNumber,
   type OnboardingState,
@@ -37,6 +37,14 @@ import { evaluateContentQuality } from '@/lib/contentQuality';
 import { replaceDefaultBrandName } from '@/lib/branding/presentation';
 import type { BusinessType } from '@/types/database';
 import { completeGoalSaveNavigation } from '@/lib/goals/primaryGoal';
+import {
+  displayStepForState,
+  isCompletedChatOnlyState,
+} from '@/lib/onboarding/navigation';
+import {
+  CHECKOUT_FINALIZE_ERROR,
+  checkoutFinalizeFailureAction,
+} from '@/lib/onboarding/checkoutFinalize';
 
 type StateResponse = {
   state?: OnboardingState;
@@ -52,6 +60,7 @@ export default function OnboardingPage() {
   const [step, setStep] = useState<OnboardingStep>('business_info');
   const [loading, setLoading] = useState(true);
   const [finalizingCheckout, setFinalizingCheckout] = useState(false);
+  const [finalizeRetryNonce, setFinalizeRetryNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Website-scan results carried from Business Info to the Hours and
@@ -78,11 +87,15 @@ export default function OnboardingPage() {
     }
 
     setState(payload.state);
+    if (isCompletedChatOnlyState(payload.state)) {
+      router.replace('/dashboard');
+      return payload.state;
+    }
     if (!options.keepStep) {
-      setStep(payload.state.currentStep === 'complete' ? 'carrier_review' : payload.state.currentStep);
+      setStep(displayStepForState(payload.state));
     }
     return payload.state;
-  }, []);
+  }, [router]);
 
   const refreshState = useCallback(async (options: { keepStep?: boolean } = {}) => {
     setRefreshing(true);
@@ -119,11 +132,42 @@ export default function OnboardingPage() {
     })
       .then(async (res) => {
         const payload = (await res.json().catch(() => ({}))) as StateResponse;
+        const failureAction = checkoutFinalizeFailureAction({
+          responseOk: res.ok,
+          payloadError: payload.error,
+          hasState: Boolean(payload.state),
+        });
+        if (failureAction?.kind === 'resume_onboarding' && payload.state) {
+          setState(payload.state);
+          if (isCompletedChatOnlyState(payload.state)) {
+            setLoadError(null);
+            router.replace('/dashboard');
+            return;
+          }
+          setStep(displayStepForState(payload.state));
+          setLoadError(null);
+          router.replace('/onboarding');
+          return;
+        }
+        if (failureAction?.kind === 'retry_finalization') {
+          setLoadError(failureAction.message);
+          return;
+        }
+
         if (payload.state) {
           setState(payload.state);
-          setStep(payload.state.currentStep === 'complete' ? 'carrier_review' : payload.state.currentStep);
+          if (isCompletedChatOnlyState(payload.state)) {
+            router.replace('/dashboard');
+            return;
+          }
+          setStep(displayStepForState(payload.state));
         } else {
-          await refreshState();
+          const refreshedState = await refreshState();
+          if (!refreshedState) {
+            setLoadError(CHECKOUT_FINALIZE_ERROR);
+            return;
+          }
+          if (isCompletedChatOnlyState(refreshedState)) return;
         }
         router.replace('/onboarding');
       })
@@ -133,13 +177,28 @@ export default function OnboardingPage() {
       .finally(() => {
         setFinalizingCheckout(false);
       });
-  }, [finalizingCheckout, refreshState, router, searchParams]);
+  }, [finalizeRetryNonce, finalizingCheckout, refreshState, router, searchParams]);
 
   useEffect(() => {
     if (state?.dashboardReady && state.currentStep === 'complete') {
       router.prefetch('/dashboard');
     }
   }, [router, state]);
+
+  const checkoutSessionId =
+    searchParams.get('checkout') === 'success'
+      ? searchParams.get('session_id')
+      : null;
+
+  function retryLoadOrFinalize() {
+    if (checkoutSessionId) {
+      finalizedSessionRef.current = null;
+      setLoadError(null);
+      setFinalizeRetryNonce((value) => value + 1);
+      return;
+    }
+    void refreshState();
+  }
 
   if (loading) {
     return (
@@ -160,19 +219,19 @@ export default function OnboardingPage() {
             brand.name
           )}
         </p>
-        <Button type="button" onClick={() => refreshState()}>
-          Try again
+        <Button type="button" onClick={retryLoadOrFinalize}>
+          {checkoutSessionId ? 'Retry finalization' : 'Try again'}
         </Button>
       </div>
     );
   }
 
-  const currentStepNumber = onboardingStepNumber(step);
+  const currentStepNumber = onboardingStepNumber(step, state.steps);
   const contentQuality = evaluateContentQuality(state.servicesAndFaqs);
 
   return (
     <div>
-      <StepProgress currentStep={currentStepNumber} />
+      <StepProgress currentStep={currentStepNumber} steps={state.steps} />
       <ProgressNote state={state} refreshing={refreshing || finalizingCheckout} step={step} />
 
       <div className="transition-opacity duration-200">
@@ -194,7 +253,7 @@ export default function OnboardingPage() {
                     }
                   : current
               );
-              setStep(nextStepOf(step));
+              setStep(nextStepOf(step, state.steps));
               refreshState({ keepStep: true });
             }}
           />
@@ -214,7 +273,7 @@ export default function OnboardingPage() {
                     }
                   : current
               );
-              setStep(nextStepOf(step));
+              setStep(nextStepOf(step, state.steps));
               refreshState({ keepStep: true });
             }}
             onBack={() => setStep('business_info')}
@@ -249,10 +308,24 @@ export default function OnboardingPage() {
                     }
                   : current
               );
-              setStep(nextStepOf(step));
+              setStep(nextStepOf(step, state.steps));
               refreshState({ keepStep: true });
             }}
             onBack={() => setStep('business_hours')}
+          />
+        )}
+
+        {step === 'plan_selection' && (
+          <DirectPlanSelection
+            initialPlan={state.planSelection.directIntent}
+            chatOnlyAvailable={
+              state.planSelection.chatOnlyDirectSalesAvailable
+            }
+            onBack={() => setStep(previousStepOf(step, state.steps))}
+            onNext={async () => {
+              const nextState = await refreshState({ keepStep: true });
+              if (nextState) setStep(displayStepForState(nextState));
+            }}
           />
         )}
 
@@ -263,6 +336,14 @@ export default function OnboardingPage() {
             initialPrimaryGoal={state.primaryGoal}
             initialGoalUrl={state.goalUrl}
             initialData={state.aiSettings || undefined}
+            showSmsResponseDelay={
+              state.planSelection.effectivePlan !== 'chat_only'
+            }
+            nextOnboardingStep={
+              state.planSelection.effectivePlan === 'chat_only'
+                ? 'review_submit'
+                : 'legal_verification'
+            }
             onNext={() =>
               completeGoalSaveNavigation({
                 refreshState,
@@ -270,7 +351,7 @@ export default function OnboardingPage() {
                 setStep,
               })
             }
-            onBack={() => setStep('services_faqs')}
+            onBack={() => setStep(previousStepOf(step, state.steps))}
           />
         )}
 
@@ -278,7 +359,7 @@ export default function OnboardingPage() {
           <BrandVerificationForm
             businessId={state.businessId}
             initialData={state.brandVerification || undefined}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            onNext={() => { setStep(nextStepOf(step, state.steps)); refreshState({ keepStep: true }); }}
             onBack={() => setStep('ai_settings')}
           />
         )}
@@ -302,7 +383,7 @@ export default function OnboardingPage() {
               services={state.servicesAndFaqs.services}
               riskReview={state.registration.riskReview}
               initialData={state.brandVerification}
-              onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+              onNext={() => { setStep(nextStepOf(step, state.steps)); refreshState({ keepStep: true }); }}
               onBack={() => setStep('legal_verification')}
             />
           </div>
@@ -313,7 +394,7 @@ export default function OnboardingPage() {
             state={state}
             onBack={() => setStep('sms_use_case')}
             onPurchased={() => refreshState()}
-            onNext={() => { setStep(nextStepOf(step)); refreshState({ keepStep: true }); }}
+            onNext={() => { setStep(nextStepOf(step, state.steps)); refreshState({ keepStep: true }); }}
           />
         )}
 
@@ -340,18 +421,31 @@ export default function OnboardingPage() {
             }}
             billing={state.billing}
             registration={state.registration}
+            effectivePlan={state.planSelection.effectivePlan}
+            chatOnly={state.planSelection.effectivePlan === 'chat_only'}
+            canEditPlan={
+              state.planSelection.canChooseDirectPlan &&
+              state.billing.plan === null
+            }
             pendingPhoneNumberFailureReason={state.pendingPhoneNumberFailureReason}
             onEditStep={(targetStep) => setStep(numberToStep(targetStep))}
-            onBack={() => setStep('phone_number')}
+            onEditPlan={() => setStep('plan_selection')}
+            onBack={() => setStep(previousStepOf(step, state.steps))}
             onSubmitted={(nextState) => {
-              if (nextState) setState(nextState);
+              if (nextState) {
+                setState(nextState);
+                if (isCompletedChatOnlyState(nextState)) {
+                  router.replace('/dashboard');
+                  return;
+                }
+              }
               setStep('carrier_review');
               refreshState({ keepStep: true });
             }}
             onLaunchBlocked={(nextState) => {
               if (!nextState) return;
               setState(nextState);
-              setStep(nextState.currentStep === 'complete' ? 'carrier_review' : nextState.currentStep);
+              setStep(displayStepForState(nextState));
             }}
           />
         )}
@@ -928,10 +1022,22 @@ function statusCopy(state: OnboardingState): string {
  * resume position applies only on load and after Stripe/purchase snaps
  * (docs/onboarding-resume-position-bug.md).
  */
-function nextStepOf(step: OnboardingStep): OnboardingStep {
-  const idx = ONBOARDING_STEPS.indexOf(step);
+function nextStepOf(
+  step: OnboardingStep,
+  steps: readonly OnboardingStep[],
+): OnboardingStep {
+  const idx = steps.indexOf(step);
   if (idx === -1) return step;
-  return ONBOARDING_STEPS[Math.min(idx + 1, ONBOARDING_STEPS.length - 1)];
+  return steps[Math.min(idx + 1, steps.length - 1)];
+}
+
+function previousStepOf(
+  step: OnboardingStep,
+  steps: readonly OnboardingStep[],
+): OnboardingStep {
+  const idx = steps.indexOf(step);
+  if (idx <= 0) return step;
+  return steps[idx - 1];
 }
 
 function numberToStep(step: number): OnboardingStep {

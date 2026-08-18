@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe/client";
 import { syncCheckoutSession } from "@/lib/stripe/subscriptionSync";
-import { attemptPaidLaunch } from "@/lib/billing/launch";
+import { finalizePaidCheckout } from "@/lib/billing/finalizePaidCheckout.server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import {
   partnerManagedBillingMessage,
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   if (!initialBusiness) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   if (!sessionId || !sessionId.startsWith("cs_")) {
     return NextResponse.json(
       { error: "A valid checkout session is required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -61,14 +61,14 @@ export async function POST(request: NextRequest) {
   if (!businessId) {
     return NextResponse.json(
       { error: "Checkout session is missing business metadata" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (businessId !== initialBusiness.id) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
   if (!business) {
     return NextResponse.json(
       { error: "Business not found or unauthorized" },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -98,14 +98,18 @@ export async function POST(request: NextRequest) {
   if (!synced) {
     return NextResponse.json(
       { error: "Checkout session could not be finalized" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const launch = await attemptPaidLaunch(businessId, "stripe_finalize");
+  const launch = await finalizePaidCheckout(synced, "stripe_finalize");
   const state = await getOnboardingStateForBusinessId(businessId);
 
-  if (launch.status === "submitted" || launch.status === "already_submitted") {
+  if (
+    launch.status === "completed" ||
+    launch.status === "submitted" ||
+    launch.status === "already_submitted"
+  ) {
     return NextResponse.json({ success: true, state });
   }
   if (launch.status === "in_progress") {
@@ -119,7 +123,7 @@ export async function POST(request: NextRequest) {
       code: launch.status,
       state,
     },
-    { status }
+    { status },
   );
 }
 
@@ -130,6 +134,6 @@ async function partnerBillingResponse(partnerId: string | null) {
       error: "billing_managed_by_partner",
       message: partnerManagedBillingMessage(partnerName),
     },
-    { status: 409 }
+    { status: 409 },
   );
 }

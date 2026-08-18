@@ -3,7 +3,10 @@ import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import type { SubscriptionPlan } from "@/types/database";
 import { BillingActions } from "./billing-actions";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
-import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import {
+  CUSTOMER_VISIBLE_PLAN_ORDER,
+  isPlanAvailable,
+} from "@/lib/billing/planAvailability";
 import { getPlanPresentation } from "@/lib/billing/planPresentation";
 import { getRequestBrand } from "@/lib/branding/requestBrand.server";
 import { secondaryCtaClass } from "@/lib/glass";
@@ -98,6 +101,7 @@ export default async function BillingPage(_props: BillingPageProps) {
   const usagePercent =
     includedSmsParts > 0 ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100)) : 0;
   const { brand } = await getRequestBrand();
+  const activePlan = subscription?.plan as SubscriptionPlan | undefined;
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -142,12 +146,8 @@ export default async function BillingPage(_props: BillingPageProps) {
         </div>
       ) : (
         <div className="mt-8 grid gap-6 md:grid-cols-3">
-          {(
-            Object.entries(SUBSCRIPTION_PLANS) as [
-              SubscriptionPlan,
-              (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan],
-            ][]
-          ).map(([key, plan]) => {
+          {CUSTOMER_VISIBLE_PLAN_ORDER.map((key) => {
+            const plan = SUBSCRIPTION_PLANS[key];
             const available = isPlanAvailable(key);
             const presentedPlan = getPlanPresentation(key, brand.name);
 
@@ -217,7 +217,7 @@ export default async function BillingPage(_props: BillingPageProps) {
         </div>
       )}
 
-      {hasActiveSubscription && (
+      {hasActiveSubscription && activePlan !== "chat_only" && (
         <div className={`mt-6 p-6 ${card}`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>

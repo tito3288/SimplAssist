@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getDashboardEntitledContext: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   canUseFeature: vi.fn(),
+  planRequiresSmsProvisioning: vi.fn(),
   inboxLayout: vi.fn(),
   from: vi.fn(),
   conversationSelect: vi.fn(),
@@ -37,6 +38,10 @@ vi.mock("@/lib/messaging/lookup", () => ({
 
 vi.mock("@/lib/billing/entitlements", () => ({
   canUseFeature: mocks.canUseFeature,
+}));
+
+vi.mock("@/lib/billing/features", () => ({
+  planRequiresSmsProvisioning: mocks.planRequiresSmsProvisioning,
 }));
 
 vi.mock("@/components/conversations/InboxLayout", () => ({
@@ -112,6 +117,7 @@ beforeEach(() => {
   mocks.canUseFeature.mockImplementation(
     (_entitlements: unknown, feature: string) => feature !== "web_chat",
   );
+  mocks.planRequiresSmsProvisioning.mockReturnValue(true);
   mocks.redirect.mockImplementation((path: string) => {
     throw new Error(`redirect:${path}`);
   });
@@ -182,6 +188,7 @@ describe("ConversationsPage deep links", () => {
         },
       ],
       businessId: BUSINESS_ID,
+      smsIncluded: true,
       smsReady: true,
       smsBlockReason: null,
       canUseManualSms: true,
@@ -189,5 +196,33 @@ describe("ConversationsPage deep links", () => {
       canUseWebChat: false,
       initialSelectedId: CONVERSATION_ID,
     });
+  });
+
+  it("keeps Chat Only web conversations available without touching SMS readiness", async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValue({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      user: { id: "owner-1" },
+      business: { id: BUSINESS_ID },
+      entitlements: { plan: "chat_only", active: true },
+    });
+    mocks.planRequiresSmsProvisioning.mockReturnValue(false);
+    mocks.canUseFeature.mockImplementation(
+      (_entitlements: unknown, feature: string) => feature === "web_chat",
+    );
+
+    renderToStaticMarkup(await ConversationsPage({}));
+
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.inboxLayout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        smsIncluded: false,
+        smsReady: false,
+        smsBlockReason: null,
+        canUseManualSms: false,
+        canUseAiSms: false,
+        canUseWebChat: true,
+      }),
+    );
   });
 });

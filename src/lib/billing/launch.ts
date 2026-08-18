@@ -3,6 +3,9 @@ import "server-only";
 import {
   resolveBusinessOperationalControls,
 } from "@/lib/account/operationalControls.server";
+import { resolveSmsProvisioningAccess } from "@/lib/billing/entitlements";
+import { claimSmsLaunchPlanFamily } from "@/lib/billing/smsLaunchFamily.server";
+import { planRequiresSmsProvisioning } from "@/lib/billing/features";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   attachOwnedNumberToCustomerProfile,
@@ -62,6 +65,7 @@ import type {
   OnboardingRegistrationStatus,
   SubscriptionPlan,
 } from "@/types/database";
+import { SUBSCRIPTION_PLAN_IDS } from "@/types/database";
 
 const PAID_NUMBER_FAILED_MESSAGE =
   "That number was no longer available when we tried to activate it. Please choose another number; you will not be charged again.";
@@ -142,6 +146,7 @@ interface ActiveNumberRow {
 }
 
 interface SubscriptionRow {
+  plan: unknown;
   status: string;
   setup_fee_paid_at: string | null;
 }
@@ -168,6 +173,31 @@ export async function attemptPaidLaunch(
     };
   }
 
+  // Recheck the shared SMS/Telnyx authorization boundary before content,
+  // risk, registration-state, or provider work. In particular, a canceled
+  // Chat Checkout leaves a durable Chat family lock even without a
+  // subscription row; legacy billing overrides or contradictory SMS rows
+  // must never route around that lock into paid launch.
+  const smsProvisioningAccess = await resolveSmsProvisioningAccess(
+    businessId,
+    { allowDirectPrecheckout: false },
+  );
+  if (!smsProvisioningAccess.allowed) {
+    return { status: "billing_required", message: BILLING_REQUIRED_MESSAGE };
+  }
+
+  const billingReady = await isBillingReady(business);
+  if (!billingReady.ready) {
+    return { status: "billing_required", message: billingReady.message };
+  }
+
+  // The earlier access read rejects an existing Chat lock. This atomic claim
+  // closes the remaining read-to-provider race: whichever of Chat Checkout or
+  // SMS launch claims the business row first becomes the only allowed family.
+  if (!(await claimSmsLaunchPlanFamily(businessId))) {
+    return { status: "billing_required", message: BILLING_REQUIRED_MESSAGE };
+  }
+
   if (shouldEnforceInitialContentQuality(business)) {
     const contentQuality = await getBusinessContentQuality(businessId);
     if (!contentQuality.ready) {
@@ -185,11 +215,6 @@ export async function attemptPaidLaunch(
   if (business.telnyx_submission_disabled) {
     await markRegistrationFailed(businessId, SUBMISSION_DISABLED_MESSAGE);
     return { status: "submission_disabled", message: SUBMISSION_DISABLED_MESSAGE };
-  }
-
-  const billingReady = await isBillingReady(business);
-  if (!billingReady.ready) {
-    return { status: "billing_required", message: billingReady.message };
   }
 
   const riskClearance = await getA2pRiskClearanceForBusiness(businessId);
@@ -572,7 +597,7 @@ async function isBillingReady(
 ): Promise<{ ready: true } | { ready: false; message: string }> {
   const { data, error } = await supabaseAdmin
     .from("subscriptions")
-    .select("status, setup_fee_paid_at")
+    .select("plan, status, setup_fee_paid_at")
     .eq("business_id", business.id)
     .maybeSingle<SubscriptionRow>();
 
@@ -606,6 +631,14 @@ async function isBillingReady(
     return { ready: false, message: BILLING_REQUIRED_MESSAGE };
   }
   if (data) {
+    if (!isSubscriptionPlan(data.plan)) {
+      return { ready: false, message: BILLING_REQUIRED_MESSAGE };
+    }
+    if (!planRequiresSmsProvisioning(data.plan)) {
+      return { ready: false, message: BILLING_REQUIRED_MESSAGE };
+    }
+  }
+  if (data) {
     return { ready: true };
   }
 
@@ -613,7 +646,8 @@ async function isBillingReady(
     business.billing_mode === "invoiced" ||
     business.billing_mode === "comped"
   ) {
-    return isSubscriptionPlan(business.partner_plan)
+    return isSubscriptionPlan(business.partner_plan) &&
+      planRequiresSmsProvisioning(business.partner_plan)
       ? { ready: true }
       : { ready: false, message: BILLING_REQUIRED_MESSAGE };
   }
@@ -643,7 +677,8 @@ async function isBillingReady(
 
 function isSubscriptionPlan(value: unknown): value is SubscriptionPlan {
   return (
-    value === "sms_only" || value === "sms_and_chat" || value === "full"
+    typeof value === "string" &&
+    (SUBSCRIPTION_PLAN_IDS as readonly string[]).includes(value)
   );
 }
 

@@ -14,6 +14,7 @@ vi.mock("@/components/onboarding/PlanSelectionOption", () => ({
 import { BrandProvider } from "@/components/branding/BrandProvider";
 import ReviewAndLaunch, {
   buildOnboardingLaunchRequest,
+  primaryLaunchButtonLabel,
   requestOnboardingLaunch,
 } from "./ReviewAndLaunch";
 
@@ -182,6 +183,9 @@ describe("ReviewAndLaunch visible brand copy", () => {
       "Choose a SimplAssist number before submitting SMS registration."
     );
     expect(html).toContain("One local SimplAssist number");
+    expect(html.match(/Plan option:/g)).toHaveLength(3);
+    expect(html).not.toContain("200 AI replies/month");
+    expect(html).not.toContain("Chat Only");
   });
 
   it("uses the partner name in plan and number copy", () => {
@@ -349,6 +353,33 @@ describe("buildOnboardingLaunchRequest", () => {
     });
   });
 
+  it("builds Chat Only as direct Stripe onboarding with no SMS endpoint", () => {
+    const request = buildOnboardingLaunchRequest({
+      billingMode: "stripe",
+      plan: "chat_only",
+    });
+
+    expect(request.url).toBe("/api/billing/checkout");
+    expect(request.init.body).toBe(
+      JSON.stringify({ plan: "chat_only", mode: "onboarding" }),
+    );
+  });
+
+  it.each(["invoiced", "comped"] as const)(
+    "fails closed before any SMS launch for partner Chat Only in %s mode",
+    (billingMode) => {
+      const fetcher = vi.fn();
+
+      expect(() =>
+        requestOnboardingLaunch(
+          { billingMode, plan: "chat_only" },
+          fetcher,
+        ),
+      ).toThrow("partner_chat_only_requires_no_sms_launch");
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["invoiced", "comped"] as const)(
     "calls submit-registration instead of checkout for %s onboarding",
     async (billingMode) => {
@@ -369,6 +400,123 @@ describe("buildOnboardingLaunchRequest", () => {
         expect.anything()
       );
     }
+  );
+
+  it("shows billing recovery instead of a new checkout for incomplete past-due Chat Only", () => {
+    const markup = renderReview(DEFAULT_REQUEST_BRAND, {
+      ...baseProps,
+      effectivePlan: "chat_only",
+      chatOnly: true,
+      billing: {
+        ...baseProps.billing,
+        plan: "chat_only",
+        status: "past_due",
+      },
+    });
+
+    expect(markup).toContain("Payment needs attention");
+    expect(markup).toContain("Manage billing");
+    expect(markup).not.toContain("Pay $10");
+    expect(markup).not.toContain("due today");
+    expect(markup).not.toContain("launch web chat");
+    expect(markup).not.toContain("Phone Number");
+  });
+});
+
+describe("ReviewAndLaunch Chat Only review", () => {
+  it("omits every SMS/setup surface even when stale carrier data exists", () => {
+    const markup = renderReview(DEFAULT_REQUEST_BRAND, {
+      ...baseProps,
+      effectivePlan: "chat_only",
+      chatOnly: true,
+      canEditPlan: true,
+      onEditPlan: vi.fn(),
+      data: {
+        ...baseProps.data,
+        phoneNumber: "+13175550123",
+        brandVerification: {
+          legal_business_name: "Stale Carrier LLC",
+          business_entity_type: "llc",
+          ein: "12-3456789",
+          use_case_description: "Stale SMS campaign",
+          estimated_monthly_volume: "under_1k",
+          sample_messages: ["One", "Two", "Three"],
+        },
+      },
+    });
+
+    expect(markup).toContain("Chat Only Plan");
+    expect(markup).toContain("$10/month · 200 AI replies/month");
+    expect(markup).toContain("$10 due today");
+    expect(markup).toContain("Pay $10 &amp; launch web chat");
+    expect(markup).not.toContain("SMS");
+    expect(markup).not.toContain("carrier");
+    expect(markup).not.toContain("Phone Number");
+    expect(markup).not.toContain("Business Verification");
+    expect(markup).not.toContain("EIN");
+    expect(markup).not.toContain("Response Delay");
+    expect(markup).not.toContain("$25");
+    expect(markup.toLowerCase()).not.toContain("setup");
+  });
+
+  it.each(["active", "trialing"] as const)(
+    "finishes already-paid %s Chat Only without purchase copy",
+    (status) => {
+      const markup = renderReview(DEFAULT_REQUEST_BRAND, {
+        ...baseProps,
+        effectivePlan: "chat_only",
+        chatOnly: true,
+        billing: {
+          ...baseProps.billing,
+          plan: "chat_only",
+          status,
+        },
+      });
+
+      expect(markup).toContain("Finish Chat Only setup");
+      expect(markup).toContain("Payment is complete");
+      expect(markup).toContain("without another charge");
+      expect(markup).not.toContain("Pay $10");
+      expect(markup).not.toContain("due today");
+      expect(markup).not.toContain("Review &amp; Pay");
+    },
+  );
+
+  it("uses finalization—not checkout—loading language for paid Chat Only", () => {
+    expect(
+      primaryLaunchButtonLabel({
+        data: baseProps.data,
+        isPaidSubscription: true,
+        isPartnerManaged: false,
+        launchHold: null,
+        launching: true,
+        isChatOnly: true,
+      }),
+    ).toBe("Finishing Chat Only setup...");
+  });
+
+  it.each(["invoiced", "comped"] as const)(
+    "holds partner Chat Only for external activation with no pay or SMS action in %s mode",
+    (mode) => {
+      const markup = renderReview(PARTNER_REQUEST_BRAND, {
+        ...baseProps,
+        effectivePlan: "chat_only",
+        chatOnly: true,
+        billing: {
+          ...baseProps.billing,
+          mode,
+          handledByName: "Alpha Dog Agency",
+        },
+      });
+
+      expect(markup).toContain("Chat setup pending");
+      expect(markup).toContain("Billing is handled by Alpha Dog Agency.");
+      expect(markup).toContain("Waiting for partner activation");
+      expect(markup).not.toContain("Pay $10");
+      expect(markup).not.toContain("Stripe checkout");
+      expect(markup).not.toContain("Submit SMS registration");
+      expect(markup).not.toContain("Phone Number");
+    },
   );
 });
 

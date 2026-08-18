@@ -4,8 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   getDashboardBusinessContext: vi.fn(),
-  getDashboardEntitlements: vi.fn(),
+  getDashboardPageEntitlements: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
+  getOnboardingStateForOwnerReadOnly: vi.fn(),
   canUseFeature: vi.fn(),
   getWorkspaceAccess: vi.fn(),
   workspacePageRedirectTarget: vi.fn(),
@@ -18,10 +19,14 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/dashboard/context", () => ({
   getDashboardBusinessContext: mocks.getDashboardBusinessContext,
-  getDashboardEntitlements: mocks.getDashboardEntitlements,
+  getDashboardPageEntitlements: mocks.getDashboardPageEntitlements,
 }));
 vi.mock("@/lib/messaging/lookup", () => ({
   getSmsReadinessForBusiness: mocks.getSmsReadinessForBusiness,
+}));
+vi.mock("@/lib/onboarding/state", () => ({
+  getOnboardingStateForOwnerReadOnly:
+    mocks.getOnboardingStateForOwnerReadOnly,
 }));
 vi.mock("@/lib/billing/entitlements", () => ({
   canUseFeature: mocks.canUseFeature,
@@ -82,7 +87,11 @@ beforeEach(() => {
     business: BUSINESS,
   });
   mocks.getSmsReadinessForBusiness.mockResolvedValue({ smsReady: true });
-  mocks.getDashboardEntitlements.mockResolvedValue(ENTITLEMENTS);
+  mocks.getDashboardPageEntitlements.mockResolvedValue({
+    status: "resolved",
+    entitlements: ENTITLEMENTS,
+  });
+  mocks.getOnboardingStateForOwnerReadOnly.mockResolvedValue(null);
   mocks.canUseFeature.mockReturnValue(true);
   mocks.getWorkspaceAccess.mockResolvedValue({
     status: "resolved",
@@ -134,7 +143,19 @@ describe("DashboardLayout access gate", () => {
 
     expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledOnce();
     expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledWith(BUSINESS.id);
-    expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+    expect(mocks.getDashboardPageEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+  });
+
+  it("redirects a direct pre-checkout business when the subscription is missing", async () => {
+    mocks.getDashboardPageEntitlements.mockResolvedValue({
+      status: "subscription_missing",
+    });
+
+    await expect(
+      DashboardLayout({ children: <div>Dashboard child</div> }),
+    ).rejects.toThrow("redirect:/onboarding");
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getOnboardingStateForOwnerReadOnly).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -230,28 +251,29 @@ describe("DashboardLayout access gate", () => {
     ).rejects.toThrow("redirect:/onboarding");
 
     expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
-    expect(mocks.getDashboardEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getDashboardPageEntitlements).not.toHaveBeenCalled();
     expect(mocks.sidebar).not.toHaveBeenCalled();
   });
 
-  it("starts readiness and entitlements together once the business is known", async () => {
-    const readiness = deferred<{ smsReady: boolean }>();
-    const entitlements = deferred<typeof ENTITLEMENTS>();
-    mocks.getSmsReadinessForBusiness.mockReturnValue(readiness.promise);
-    mocks.getDashboardEntitlements.mockReturnValue(entitlements.promise);
+  it("resolves plan authority before starting the SMS-only readiness path", async () => {
+    const entitlements = deferred<{
+      status: "resolved";
+      entitlements: typeof ENTITLEMENTS;
+    }>();
+    mocks.getDashboardPageEntitlements.mockReturnValue(entitlements.promise);
 
     const layout = DashboardLayout({
       children: <div>Dashboard child</div>,
     });
 
     await vi.waitFor(() => {
-      expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledOnce();
-      expect(mocks.getDashboardEntitlements).toHaveBeenCalledOnce();
+      expect(mocks.getDashboardPageEntitlements).toHaveBeenCalledOnce();
     });
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
 
-    readiness.resolve({ smsReady: true });
-    entitlements.resolve(ENTITLEMENTS);
+    entitlements.resolve({ status: "resolved", entitlements: ENTITLEMENTS });
     await expect(layout).resolves.toBeDefined();
+    expect(mocks.getSmsReadinessForBusiness).toHaveBeenCalledOnce();
   });
 
   it("redirects when SMS is not ready after resolving the parallel access checks", async () => {
@@ -260,8 +282,111 @@ describe("DashboardLayout access gate", () => {
     await expect(
       DashboardLayout({ children: <div>Dashboard child</div> })
     ).rejects.toThrow("redirect:/onboarding");
-    expect(mocks.getDashboardEntitlements).toHaveBeenCalledWith(BUSINESS.id);
+    expect(mocks.getDashboardPageEntitlements).toHaveBeenCalledWith(BUSINESS.id);
   });
+
+  it.each(["subscription", "partner_plan"] as const)(
+    "unlocks completed Chat Only from authoritative %s without an SMS readiness read",
+    async (source) => {
+      mocks.getDashboardPageEntitlements.mockResolvedValue({
+        status: "resolved",
+        entitlements: {
+          ...ENTITLEMENTS,
+          plan: "chat_only",
+          source,
+        },
+      });
+      mocks.getOnboardingStateForOwnerReadOnly.mockResolvedValue({
+        dashboardReady: true,
+        completedAt: "2026-08-18T12:00:00.000Z",
+        planSelection: {
+          effectivePlan: "chat_only",
+          source,
+        },
+      });
+
+      await expect(
+        DashboardLayout({ children: <div>Dashboard child</div> }),
+      ).resolves.toBeDefined();
+
+      expect(mocks.getOnboardingStateForOwnerReadOnly).toHaveBeenCalledWith(
+        "user-1",
+      );
+      expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps previously completed Chat Only accessible during past-due recovery", async () => {
+    mocks.getDashboardPageEntitlements.mockResolvedValue({
+      status: "resolved",
+      entitlements: {
+        ...ENTITLEMENTS,
+        plan: "chat_only",
+        status: "past_due",
+        source: "subscription",
+        active: true,
+      },
+    });
+    mocks.getOnboardingStateForOwnerReadOnly.mockResolvedValue({
+      dashboardReady: true,
+      completedAt: "2026-08-18T12:00:00.000Z",
+      planSelection: {
+        effectivePlan: "chat_only",
+        source: "subscription",
+      },
+    });
+
+    await expect(
+      DashboardLayout({ children: <div>Dashboard child</div> }),
+    ).resolves.toBeDefined();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "owner intent",
+      completedAt: "2026-08-18T12:00:00.000Z",
+      dashboardReady: true,
+      source: "direct_intent",
+    },
+    {
+      name: "missing durable completion",
+      completedAt: null,
+      dashboardReady: true,
+      source: "subscription",
+    },
+    {
+      name: "past-due/unfinalized state",
+      completedAt: "2026-08-18T12:00:00.000Z",
+      dashboardReady: false,
+      source: "subscription",
+    },
+  ] as const)(
+    "rejects Chat Only from $name without touching SMS lifecycle",
+    async ({ completedAt, dashboardReady, source }) => {
+      mocks.getDashboardPageEntitlements.mockResolvedValue({
+        status: "resolved",
+        entitlements: {
+          ...ENTITLEMENTS,
+          plan: "chat_only",
+          active: true,
+        },
+      });
+      mocks.getOnboardingStateForOwnerReadOnly.mockResolvedValue({
+        dashboardReady,
+        completedAt,
+        planSelection: {
+          effectivePlan: "chat_only",
+          source,
+        },
+      });
+
+      await expect(
+        DashboardLayout({ children: <div>Dashboard child</div> }),
+      ).rejects.toThrow("redirect:/onboarding");
+      expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps a suspended, SMS-ready account on the dashboard and renders the notice before its children", async () => {
     mocks.getDashboardBusinessContext.mockResolvedValue({
@@ -328,6 +453,6 @@ describe("DashboardLayout access gate", () => {
       DashboardLayout({ children: <div>Dashboard child</div> })
     ).rejects.toThrow("redirect:/account-deleted");
     expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
-    expect(mocks.getDashboardEntitlements).not.toHaveBeenCalled();
+    expect(mocks.getDashboardPageEntitlements).not.toHaveBeenCalled();
   });
 });

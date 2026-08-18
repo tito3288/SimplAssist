@@ -2,31 +2,41 @@ import { describe, expect, it } from "vitest";
 import type { SubscriptionPlan } from "@/types/database";
 import {
   availablePlanOrFallback,
+  CUSTOMER_VISIBLE_PLAN_ORDER,
   getPlanSalesStatus,
   isPlanAvailable,
+  isPlanVisible,
   paidPlanForOnboardingRetry,
   PLAN_SALES_STATUS,
 } from "./planAvailability";
 
 describe("plan sales availability", () => {
-  it("keeps Starter and Growth available while Full Suite is coming soon", () => {
+  it("recognizes chat-only without exposing it in customer sales UI", () => {
     expect(PLAN_SALES_STATUS).toEqual({
+      chat_only: "hidden",
       sms_only: "available",
       sms_and_chat: "available",
       full: "coming_soon",
     });
+    expect(CUSTOMER_VISIBLE_PLAN_ORDER).toEqual([
+      "sms_only",
+      "sms_and_chat",
+      "full",
+    ]);
   });
 
   it.each([
-    ["sms_only", true],
-    ["sms_and_chat", true],
-    ["full", false],
-  ] satisfies [SubscriptionPlan, boolean][])(
+    ["chat_only", false, false],
+    ["sms_only", true, true],
+    ["sms_and_chat", true, true],
+    ["full", false, true],
+  ] satisfies [SubscriptionPlan, boolean, boolean][])(
     "reports whether %s can start a new sale",
-    (plan, expected) => {
+    (plan, expected, visible) => {
       expect(isPlanAvailable(plan)).toBe(expected);
+      expect(isPlanVisible(plan)).toBe(visible);
       expect(getPlanSalesStatus(plan)).toBe(
-        expected ? "available" : "coming_soon"
+        expected ? "available" : visible ? "coming_soon" : "hidden"
       );
     }
   );
@@ -37,6 +47,9 @@ describe("plan sales availability", () => {
     );
     expect(availablePlanOrFallback("sms_only", "sms_and_chat")).toBe(
       "sms_only"
+    );
+    expect(availablePlanOrFallback("chat_only", "sms_and_chat")).toBe(
+      "sms_and_chat"
     );
   });
 

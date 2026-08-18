@@ -528,9 +528,34 @@ SELECT throws_ok(
 -- Poisoned cleanup rollback, retry, lease CAS, and final completion
 -- ---------------------------------------------------------------------------
 
-UPDATE public.businesses
-SET deletion_scheduled_for = now() - interval '1 second'
-WHERE id = '10000000-0000-4000-a000-000000000001';
+DO $expire_account_deletion_fixture$
+DECLARE
+  v_deleted_at timestamptz := now() - interval '60 days 1 second';
+  v_release_at timestamptz := v_deleted_at + interval '60 days';
+BEGIN
+  -- Account-deletion deadlines are one identity shared by the business,
+  -- release reason, and release run. Age all three together so this legacy
+  -- Stripe test cannot manufacture a state production cleanup rejects.
+  UPDATE public.businesses
+  SET deleted_at = v_deleted_at,
+      deletion_scheduled_for = v_release_at
+  WHERE id = '10000000-0000-4000-a000-000000000001';
+
+  UPDATE public.telnyx_resource_release_reasons
+  SET triggered_at = v_deleted_at,
+      release_at = v_release_at,
+      updated_at = now()
+  WHERE business_id = '10000000-0000-4000-a000-000000000001'
+    AND reason_type = 'account_deletion'
+    AND status = 'active';
+
+  UPDATE public.telnyx_resource_release_runs
+  SET effective_release_at = v_release_at,
+      updated_at = now()
+  WHERE business_id = '10000000-0000-4000-a000-000000000001'
+    AND status = 'parked';
+END;
+$expire_account_deletion_fixture$;
 
 CREATE FUNCTION public.test_029_poison_subscription_delete()
 RETURNS trigger

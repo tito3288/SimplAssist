@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -17,14 +17,17 @@ import {
   EntitlementResolutionError,
   resolveBusinessEntitlements,
   resolveBusinessEntitlementsFromSnapshot,
+  resolveSmsProvisioningAccess,
   type BusinessEntitlementSnapshot,
 } from "./entitlements";
+import { ALL_FEATURES } from "./features";
 
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000031";
 const BUSINESS = {
   id: BUSINESS_ID,
   billing_mode: "stripe",
   partner_plan: null,
+  onboarding_selected_plan: null,
   billing_pilot: false,
   billing_comped: false,
   billing_exempt: false,
@@ -47,10 +50,16 @@ function entitlementSnapshot(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+  vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_chat_only_test");
   mocks.results.clear();
   mocks.rejectedTables.clear();
   mocks.results.set("businesses", { data: BUSINESS, error: null });
   mocks.results.set("subscriptions", { data: SUBSCRIPTION, error: null });
+  mocks.results.set("business_plan_family_locks", {
+    data: null,
+    error: null,
+  });
   mocks.from.mockImplementation((table: string) => {
     const chain = {
       select: vi.fn(),
@@ -66,6 +75,10 @@ beforeEach(() => {
     });
     return chain;
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("resolveBusinessEntitlements", () => {
@@ -106,6 +119,7 @@ describe("resolveBusinessEntitlements", () => {
       outcome: "not_entitled",
       allowed: false,
       reason: "inactive_subscription",
+      recommendedUpgradePlan: null,
     });
   });
 
@@ -130,9 +144,11 @@ describe("resolveBusinessEntitlements", () => {
   );
 
   it.each([
+    ["invoiced", "chat_only"],
     ["invoiced", "sms_only"],
     ["invoiced", "sms_and_chat"],
     ["invoiced", "full"],
+    ["comped", "chat_only"],
     ["comped", "sms_only"],
     ["comped", "sms_and_chat"],
     ["comped", "full"],
@@ -480,6 +496,340 @@ describe("resolveBusinessEntitlementsFromSnapshot", () => {
   });
 });
 
+describe("resolveSmsProvisioningAccess", () => {
+  it.each([
+    ["subscription", "stripe"],
+    ["partner_billing", "invoiced"],
+    ["partner_billing", "comped"],
+  ] as const)(
+    "denies a chat-only %s authority before SMS provisioning (%s)",
+    async (source, billingMode) => {
+      if (source === "subscription") {
+        mocks.results.set("subscriptions", {
+          data: { ...SUBSCRIPTION, plan: "chat_only" },
+          error: null,
+        });
+      } else {
+        mocks.results.set("businesses", {
+          data: {
+            ...BUSINESS,
+            billing_mode: billingMode,
+            partner_plan: "chat_only",
+          },
+          error: null,
+        });
+        mocks.results.set("subscriptions", { data: null, error: null });
+      }
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: true,
+        }),
+      ).resolves.toEqual({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source,
+        plan: "chat_only",
+      });
+    },
+  );
+
+  it.each([
+    ["subscription", "stripe", "sms_only"],
+    ["subscription", "stripe", "sms_and_chat"],
+    ["subscription", "stripe", "full"],
+    ["partner_billing", "invoiced", "sms_only"],
+    ["partner_billing", "invoiced", "sms_and_chat"],
+    ["partner_billing", "comped", "full"],
+  ] as const)(
+    "preserves %s %s SMS provisioning for %s",
+    async (source, billingMode, plan) => {
+      if (source === "subscription") {
+        mocks.results.set("subscriptions", {
+          data: { ...SUBSCRIPTION, plan },
+          error: null,
+        });
+      } else {
+        mocks.results.set("businesses", {
+          data: {
+            ...BUSINESS,
+            billing_mode: billingMode,
+            partner_plan: plan,
+          },
+          error: null,
+        });
+        mocks.results.set("subscriptions", { data: null, error: null });
+      }
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: false,
+        }),
+      ).resolves.toEqual({ allowed: true, source, plan });
+    },
+  );
+
+  it("preserves the explicit legacy direct pre-checkout exception when plan intent is null", async () => {
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: true,
+      source: "direct_precheckout",
+      plan: null,
+    });
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: false,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+  });
+
+  it.each(["sms_only", "sms_and_chat", "full"] as const)(
+    "allows the direct pre-checkout exception for a durable %s intent",
+    async (plan) => {
+      mocks.results.set("businesses", {
+        data: { ...BUSINESS, onboarding_selected_plan: plan },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: true,
+        }),
+      ).resolves.toEqual({
+        allowed: true,
+        source: "direct_precheckout",
+        plan: null,
+      });
+    },
+  );
+
+  it("denies the direct pre-checkout exception after Chat Only is selected", async () => {
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: "chat_only",
+    });
+  });
+
+  it("denies SMS pre-checkout after a canceled Chat Checkout left a durable family lock", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "sms_and_chat" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+    mocks.results.set("business_plan_family_locks", {
+      data: { family: "chat_only" },
+      error: null,
+    });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: "chat_only",
+    });
+  });
+
+  it("fails closed when an SMS authority contradicts a durable Chat family lock", async () => {
+    mocks.results.set("business_plan_family_locks", {
+      data: { family: "chat_only" },
+      error: null,
+    });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: false,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+  });
+
+  it.each([
+    ["lookup failure", { data: null, error: { message: "down" } }],
+    ["malformed value", { data: { family: "voice" }, error: null }],
+  ] as const)("fails closed on family-lock %s", async (_label, result) => {
+    mocks.results.set("business_plan_family_locks", result);
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+  });
+
+  it.each([
+    ["rollout is disabled", "0", "price_chat_only_test"],
+    ["the Chat Price is missing", "1", ""],
+  ] as const)(
+    "restores legacy direct SMS pre-checkout when %s",
+    async (_label, rollout, chatPrice) => {
+      vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", rollout);
+      vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", chatPrice);
+      mocks.results.set("businesses", {
+        data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: true,
+        }),
+      ).resolves.toEqual({
+        allowed: true,
+        source: "direct_precheckout",
+        plan: null,
+      });
+    },
+  );
+
+  it("restores legacy direct SMS pre-checkout when the Chat Price collides with an existing billing Price", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_collision");
+    vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_collision");
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: true,
+      source: "direct_precheckout",
+      plan: null,
+    });
+  });
+
+  it("fails closed when pre-checkout plan intent is malformed", async () => {
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "enterprise" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+  });
+
+  it.each([
+    ["lookup failure", "businesses", { data: null, error: { message: "down" } }],
+    [
+      "malformed authority",
+      "businesses",
+      {
+        data: { ...BUSINESS, billing_mode: "invoiced", partner_plan: null },
+        error: null,
+      },
+    ],
+  ] as const)("fails closed on %s", async (_label, table, result) => {
+    mocks.results.set(table, result);
+    if (_label === "malformed authority") {
+      mocks.results.set("subscriptions", { data: null, error: null });
+    }
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+  });
+});
+
+describe("direct and partner capability parity", () => {
+  it.each([
+    ["invoiced", "chat_only"],
+    ["invoiced", "sms_only"],
+    ["invoiced", "sms_and_chat"],
+    ["invoiced", "full"],
+    ["comped", "chat_only"],
+    ["comped", "sms_only"],
+    ["comped", "sms_and_chat"],
+    ["comped", "full"],
+  ] as const)(
+    "keeps a direct %s-equivalent %s plan on the same capability vector",
+    (billingMode, plan) => {
+      const direct = resolveBusinessEntitlementsFromSnapshot(
+        BUSINESS_ID,
+        entitlementSnapshot({
+          subscription: {
+            ...SUBSCRIPTION,
+            plan,
+          },
+        })
+      );
+      const partner = resolveBusinessEntitlementsFromSnapshot(
+        BUSINESS_ID,
+        entitlementSnapshot({
+          business: {
+            ...BUSINESS,
+            billing_mode: billingMode,
+            partner_plan: plan,
+          },
+          subscription: null,
+        })
+      );
+
+      expect(direct).toMatchObject({
+        plan,
+        source: "subscription",
+        active: true,
+      });
+      expect(partner).toMatchObject({
+        plan,
+        source: "partner_billing",
+        active: true,
+      });
+      expect(
+        ALL_FEATURES.map((feature) => canUseFeature(direct, feature))
+      ).toEqual(
+        ALL_FEATURES.map((feature) => canUseFeature(partner, feature))
+      );
+    }
+  );
+});
+
 describe("feature decisions", () => {
   it("allows inherited Growth features", async () => {
     const entitlements = await resolveBusinessEntitlements(BUSINESS_ID);
@@ -491,6 +841,8 @@ describe("feature decisions", () => {
       allowed: true,
       feature: "web_chat",
       requiredPlan: "sms_and_chat",
+      eligiblePlans: ["chat_only", "sms_and_chat", "full"],
+      recommendedUpgradePlan: null,
       currentPlan: "sms_and_chat",
       status: "active",
     });
@@ -510,12 +862,49 @@ describe("feature decisions", () => {
       reason: "plan",
       feature: "ai_sms_conversations",
       requiredPlan: "sms_and_chat",
+      eligiblePlans: ["sms_and_chat", "full"],
+      recommendedUpgradePlan: "sms_and_chat",
       currentPlan: "sms_only",
       status: "active",
     });
   });
 
+  it("authorizes chat-only chat capabilities and denies every SMS path", async () => {
+    mocks.results.set("subscriptions", {
+      data: { ...SUBSCRIPTION, plan: "chat_only" },
+      error: null,
+    });
+    const entitlements = await resolveBusinessEntitlements(BUSINESS_ID);
+
+    expect(entitlements).toMatchObject({
+      plan: "chat_only",
+      source: "subscription",
+      active: true,
+    });
+    expect(canUseFeature(entitlements, "contacts_inbox")).toBe(true);
+    expect(canUseFeature(entitlements, "web_chat")).toBe(true);
+    expect(canUseFeature(entitlements, "widget_branding")).toBe(true);
+    expect(canUseFeature(entitlements, "ai_customization")).toBe(true);
+    expect(canUseFeature(entitlements, "calendar")).toBe(true);
+    expect(canUseFeature(entitlements, "direct_booking")).toBe(true);
+    expect(canUseFeature(entitlements, "missed_call_sms")).toBe(false);
+    expect(canUseFeature(entitlements, "manual_sms")).toBe(false);
+    expect(canUseFeature(entitlements, "ai_sms_conversations")).toBe(false);
+    expect(decideFeatureAccess(entitlements, "manual_sms")).toEqual({
+      outcome: "not_entitled",
+      allowed: false,
+      reason: "plan",
+      feature: "manual_sms",
+      requiredPlan: "sms_only",
+      eligiblePlans: ["sms_only", "sms_and_chat", "full"],
+      recommendedUpgradePlan: "sms_and_chat",
+      currentPlan: "chat_only",
+      status: "active",
+    });
+  });
+
   it.each([
+    ["chat_only", false, true, false],
     ["sms_only", true, false, false],
     ["sms_and_chat", true, true, false],
     ["full", true, true, true],

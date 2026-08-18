@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   searchAvailableNumbers: vi.fn(),
   isNanpTollFreeNumber: vi.fn(),
+  resolveSmsProvisioningAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
@@ -18,6 +19,9 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/messaging/numbers", () => ({
   searchAvailableNumbers: mocks.searchAvailableNumbers,
   isNanpTollFreeNumber: mocks.isNanpTollFreeNumber,
+}));
+vi.mock("@/lib/billing/entitlements", () => ({
+  resolveSmsProvisioningAccess: mocks.resolveSmsProvisioningAccess,
 }));
 
 import { GET } from "./route";
@@ -33,7 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireWorkspaceRouteAccess.mockResolvedValue({
     ok: true,
-    access: {},
+    access: { business: { id: "business-1" } },
   });
   mocks.getUser.mockResolvedValue({
     data: { user: { id: "owner-1" } },
@@ -45,6 +49,11 @@ beforeEach(() => {
   mocks.isNanpTollFreeNumber.mockImplementation((value: string) =>
     /^\+1(?:800|833|844|855|866|877|888)\d{7}$/.test(value)
   );
+  mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+    allowed: true,
+    source: "direct_precheckout",
+    plan: null,
+  });
 });
 
 describe("GET /api/messaging/numbers/search", () => {
@@ -73,6 +82,42 @@ describe("GET /api/messaging/numbers/search", () => {
     const response = await GET(request("574"));
 
     expect(response.status).toBe(401);
+    expect(mocks.searchAvailableNumbers).not.toHaveBeenCalled();
+  });
+
+  it.each(["subscription", "partner_billing", "direct_precheckout"] as const)(
+    "blocks a %s chat-only account before calling Telnyx",
+    async (source) => {
+      mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source,
+        plan: "chat_only",
+      });
+
+      const response = await GET(request("574"));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "SMS provisioning is not available on the current plan",
+      });
+      expect(mocks.searchAvailableNumbers).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails retryably on uncertain billing state before calling Telnyx", async () => {
+    mocks.resolveSmsProvisioningAccess.mockResolvedValue({
+      allowed: false,
+      reason: "billing_state_unavailable",
+    });
+
+    const response = await GET(request("574"));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to verify plan access",
+      retryable: true,
+    });
     expect(mocks.searchAvailableNumbers).not.toHaveBeenCalled();
   });
 
@@ -118,5 +163,9 @@ describe("GET /api/messaging/numbers/search", () => {
     await expect(response.json()).resolves.toEqual({ numbers });
     expect(mocks.searchAvailableNumbers).toHaveBeenCalledOnce();
     expect(mocks.searchAvailableNumbers).toHaveBeenCalledWith("574");
+    expect(mocks.resolveSmsProvisioningAccess).toHaveBeenCalledWith(
+      "business-1",
+      { allowDirectPrecheckout: true },
+    );
   });
 });

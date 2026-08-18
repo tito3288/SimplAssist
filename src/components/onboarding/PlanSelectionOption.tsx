@@ -3,7 +3,10 @@
 import { Check } from "lucide-react";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { secondaryCtaClass } from "@/lib/glass";
-import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import {
+  isPlanAvailable,
+  isPlanVisible,
+} from "@/lib/billing/planAvailability";
 import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { cn } from "@/lib/utils";
 import type { SubscriptionPlan } from "@/types/database";
@@ -15,6 +18,13 @@ interface PlanSelectionOptionProps {
   selected: boolean;
   recommended: boolean;
   onSelect: (plan: SubscriptionPlan) => void;
+  /**
+   * A server-authorized acquisition surface can opt a catalog-hidden plan in
+   * without changing the global catalog. Omit this everywhere else so the
+   * established public visibility rules remain authoritative.
+   */
+  availabilityOverride?: "available" | "coming_soon" | "hidden";
+  setupFeeCents?: number;
 }
 
 export function PlanSelectionOption({
@@ -24,9 +34,24 @@ export function PlanSelectionOption({
   selected,
   recommended,
   onSelect,
+  availabilityOverride,
+  setupFeeCents = SETUP_FEE_CENTS,
 }: PlanSelectionOptionProps) {
-  const available = isPlanAvailable(planKey);
-  const today = plan.price + SETUP_FEE_CENTS / 100;
+  const visible = availabilityOverride
+    ? availabilityOverride !== "hidden"
+    : isPlanVisible(planKey);
+  if (!visible) return null;
+
+  const available = availabilityOverride
+    ? availabilityOverride === "available"
+    : isPlanAvailable(planKey);
+  const today = plan.price + setupFeeCents / 100;
+  const includedAllowance =
+    plan.includedSmsParts > 0
+      ? `${plan.includedSmsParts.toLocaleString()} SMS parts/month`
+      : plan.includedAiReplies !== null
+        ? `${plan.includedAiReplies.toLocaleString()} AI replies/month`
+        : "no metered allowance";
 
   const content = (
     <>
@@ -48,9 +73,8 @@ export function PlanSelectionOption({
             )}
           </span>
           <span className="mt-1 block text-xs leading-relaxed text-stone-500 dark:text-[#bdbdbf]">
-            {available ? "Then " : ""}
-            ${plan.price}/month. Includes{" "}
-            {plan.includedSmsParts.toLocaleString()} SMS parts/month.
+            {available && setupFeeCents > 0 ? "Then " : ""}
+            ${plan.price}/month. Includes {includedAllowance}.
           </span>
         </span>
 

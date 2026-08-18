@@ -7,15 +7,11 @@ SET LOCAL search_path = public, extensions;
 
 -- This test commits a disposable fixture through dblink. Refuse to run
 -- against anything except the local Supabase database (or a runner that
--- explicitly attests that its database is disposable).
+-- explicitly attests that its database is disposable with
+-- PGOPTIONS='-c simplassist.disposable_test_database=on').
 DO $require_disposable_local_database$
 DECLARE
   v_server_address inet := inet_server_addr();
-  v_is_superuser boolean := (
-    SELECT role.rolsuper
-    FROM pg_roles AS role
-    WHERE role.rolname = current_user
-  );
   v_known_local_jwt boolean := current_setting(
     'app.settings.jwt_secret',
     true
@@ -25,7 +21,7 @@ DECLARE
     true
   ) = 'on';
 BEGIN
-  IF NOT coalesce(v_is_superuser, false)
+  IF current_user <> 'postgres'
      OR current_setting('port') <> '5432'
      OR NOT (
        v_server_address IS NULL

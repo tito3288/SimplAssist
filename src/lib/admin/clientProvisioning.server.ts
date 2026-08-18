@@ -3,6 +3,8 @@ import "server-only";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
 import { z } from "zod";
+import { isChatOnlyPartnerAssignmentEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import { getCanonicalAppHostname } from "@/lib/branding/defaultBrand";
 import { normalizeHostHeader } from "@/lib/branding/hostname";
 import { generateAuthRecoveryLink } from "@/lib/auth/recovery.server";
@@ -17,6 +19,7 @@ import {
   type RetryPartnerClientInput,
   type SetupEmailRouteResponse,
 } from "./clientProvisioning.shared";
+import type { SubscriptionPlan } from "@/types/database";
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -51,7 +54,7 @@ const storedJobSchema = z.object({
   requested_business_name: z.string().min(1),
   partner_id: z.string().uuid(),
   billing_mode: z.enum(["invoiced", "comped"]),
-  partner_plan: z.enum(["sms_only", "sms_and_chat", "full"]),
+  partner_plan: subscriptionPlanSchema,
   auth_user_id: z.string().uuid().nullable(),
   business_id: z.string().uuid().nullable(),
   status: z.enum([
@@ -93,7 +96,7 @@ const businessSchema = z.object({
   name: z.string(),
   partner_id: z.string().uuid().nullable(),
   billing_mode: z.enum(["stripe", "invoiced", "comped"]),
-  partner_plan: z.enum(["sms_only", "sms_and_chat", "full"]).nullable(),
+  partner_plan: subscriptionPlanSchema.nullable(),
   deleted_at: z.string().nullable(),
 });
 
@@ -138,6 +141,7 @@ type AssignmentErrorCode =
   | "subscription_exists"
   | "partner_required"
   | "partner_inactive"
+  | "plan_family_transition_not_supported"
   | "assignment_failed";
 
 export type ClientProvisioningDependencies = {
@@ -181,7 +185,7 @@ export type ClientProvisioningDependencies = {
     businessId: string;
     partnerId: string;
     billingMode: "invoiced" | "comped";
-    partnerPlan: "sms_only" | "sms_and_chat" | "full";
+    partnerPlan: SubscriptionPlan;
     adminId: string;
   }) => Promise<AssignmentResult>;
   generateRecoveryLink: (input: {
@@ -209,6 +213,7 @@ export type ClientProvisioningErrorCode =
   | "provisioning_in_progress"
   | "provisioning_outcome_unknown"
   | "partner_inactive"
+  | "chat_only_not_available"
   | "provisioning_conflict"
   | "email_in_use"
   | "auth_creation_failed"
@@ -221,6 +226,7 @@ export type ClientProvisioningErrorCode =
   | "business_not_found"
   | "subscription_exists"
   | "partner_required"
+  | "plan_family_transition_not_supported"
   | "assignment_failed"
   | "link_generation_failed"
   | "setup_email_failed"
@@ -986,6 +992,12 @@ export function createClientProvisioningService(
     ): Promise<ProvisioningRouteResponse> {
       let provisioningId: string | null = null;
       try {
+        if (
+          input.partnerPlan === "chat_only" &&
+          !isChatOnlyPartnerAssignmentEnabled()
+        ) {
+          throw errorFor("chat_only_not_available", 409);
+        }
         // Validate before inserting a durable provisioning job so stale,
         // disconnected, or malformed partner configuration leaves no job.
         validatePartner(await dependencies.loadPartner(input.partnerId));
@@ -1148,6 +1160,7 @@ function rpcConflictCode(error: unknown): AssignmentErrorCode {
     "subscription_exists",
     "partner_required",
     "partner_inactive",
+    "plan_family_transition_not_supported",
   ] as const) {
     if (new RegExp(`\\b${code}\\b`).test(text)) return code;
   }

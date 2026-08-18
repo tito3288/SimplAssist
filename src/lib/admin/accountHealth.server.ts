@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import {
   EntitlementResolutionError,
   resolveBusinessEntitlementsFromSnapshot,
@@ -109,7 +110,6 @@ const timestampSchema = z.string().refine(
   "Invalid timestamp",
 );
 const nullableTimestampSchema = timestampSchema.nullable();
-const subscriptionPlanSchema = z.enum(["sms_only", "sms_and_chat", "full"]);
 const subscriptionStatusSchema = z.enum([
   "active",
   "past_due",

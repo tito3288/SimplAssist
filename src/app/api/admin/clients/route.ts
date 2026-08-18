@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { createPartnerClientSchema } from "@/lib/admin/clientProvisioning.shared";
 import { provisionPartnerClient } from "@/lib/admin/clientProvisioning.server";
+import { isChatOnlyPartnerAssignmentEnabled } from "@/lib/billing/chatOnlyRollout.server";
 import {
   authorizeAdminMutation,
   provisioningFailure,
@@ -17,6 +18,15 @@ export async function POST(request: NextRequest) {
   const parsed = createPartnerClientSchema.safeParse(body.value);
   if (!parsed.success) {
     return provisioningJson({ error: "invalid_request" }, { status: 400 });
+  }
+  if (
+    parsed.data.partnerPlan === "chat_only" &&
+    !isChatOnlyPartnerAssignmentEnabled()
+  ) {
+    return provisioningJson(
+      { error: "chat_only_not_available" },
+      { status: 409 },
+    );
   }
 
   try {

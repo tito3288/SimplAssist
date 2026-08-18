@@ -12,6 +12,7 @@ import type { Message, SmsBlockReason } from "@/types/database";
 interface InboxLayoutProps {
   conversations: ConversationWithContact[];
   businessId: string;
+  smsIncluded?: boolean;
   smsReady: boolean;
   smsBlockReason: SmsBlockReason | null;
   canUseManualSms?: boolean;
@@ -26,6 +27,7 @@ interface InboxLayoutProps {
 export function InboxLayout({
   conversations: initialConversations,
   businessId,
+  smsIncluded = true,
   smsReady,
   smsBlockReason,
   canUseManualSms = true,
@@ -89,6 +91,7 @@ export function InboxLayout({
               <MessageThread
                 conversation={selected}
                 businessId={businessId}
+                smsIncluded={smsIncluded}
                 smsReady={smsReady}
                 smsBlockReason={smsBlockReason}
                 canUseManualSms={canUseManualSms}

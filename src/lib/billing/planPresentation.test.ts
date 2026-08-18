@@ -3,6 +3,18 @@ import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { getPlanPresentation } from "./planPresentation";
 
 describe("getPlanPresentation", () => {
+  it("presents the recognized chat-only product with its approved metadata", () => {
+    expect(getPlanPresentation("chat_only", "SimplAssist")).toEqual(
+      SUBSCRIPTION_PLANS.chat_only,
+    );
+    expect(getPlanPresentation("chat_only", "SimplAssist")).toMatchObject({
+      name: "Chat Only",
+      price: 10,
+      includedSmsParts: 0,
+      includedAiReplies: 200,
+    });
+  });
+
   it("preserves the exact SimplAssist plan presentation for the default brand", () => {
     const presentation = getPlanPresentation("sms_only", "SimplAssist");
 

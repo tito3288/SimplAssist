@@ -96,6 +96,7 @@ export function AdminAccountFilters({
             className={controlClass}
           >
             <option value="">All plans</option>
+            <option value="chat_only">Chat Only</option>
             <option value="sms_only">Starter</option>
             <option value="sms_and_chat">Growth</option>
             <option value="full">Full</option>
@@ -241,6 +242,8 @@ function lifecycleLabel(
 
 function planLabel(plan: NonNullable<AdminAccountFilters["plan"]>) {
   switch (plan) {
+    case "chat_only":
+      return "Chat Only";
     case "sms_only":
       return "Starter";
     case "sms_and_chat":

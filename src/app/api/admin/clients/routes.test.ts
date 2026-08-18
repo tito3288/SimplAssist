@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
@@ -124,7 +124,53 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("admin client provisioning routes", () => {
+  it.each(["", "0", "true", "yes", "01", " 1", "1 "])(
+    "rejects a crafted chat-only client with fail-closed partner flag %j before provisioning",
+    async (flag) => {
+      vi.stubEnv("CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED", flag);
+
+      const response = await createClient(
+        request("/api/admin/clients", {
+          ...CREATE_BODY,
+          partnerPlan: "chat_only",
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "chat_only_not_available",
+      });
+      expect(mocks.provisionPartnerClient).not.toHaveBeenCalled();
+      expectPrivateNoStore(response);
+    },
+  );
+
+  it("passes chat-only to provisioning only with the exact partner flag", async () => {
+    vi.stubEnv("CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED", "1");
+    mocks.provisionPartnerClient.mockResolvedValue({
+      provisioning: { ...PROVISIONING, partnerPlan: "chat_only" },
+    });
+
+    const response = await createClient(
+      request("/api/admin/clients", {
+        ...CREATE_BODY,
+        partnerPlan: "chat_only",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.provisionPartnerClient).toHaveBeenCalledWith(
+      expect.objectContaining({ partnerPlan: "chat_only" }),
+      ADMIN_ID,
+    );
+    expectPrivateNoStore(response);
+  });
+
   it("authorizes before origin/body processing and returns a non-disclosing 404", async () => {
     mocks.getAdminUser.mockResolvedValue(null);
     const response = await createClient(

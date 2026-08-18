@@ -104,6 +104,7 @@ describe("AdminAccountFilters", () => {
       "failed_setup",
       "direct",
       "partner",
+      "chat_only",
       "sms_only",
       "sms_and_chat",
       "full",

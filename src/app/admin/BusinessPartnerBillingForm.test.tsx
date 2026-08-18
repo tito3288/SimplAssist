@@ -47,6 +47,7 @@ describe("BusinessPartnerBillingForm", () => {
     expect(html).toContain("Starter — 500 included SMS parts");
     expect(html).toContain("Growth — 1,500 included SMS parts");
     expect(html).toContain("Full — 2,500 included SMS parts");
+    expect(html).not.toContain('value="chat_only"');
     expect(html).toContain("New partner assignments default to Growth.");
     expect(html).toContain(
       "Partner plans use the same feature matrix and included SMS allowances as Stripe plans."
@@ -58,6 +59,28 @@ describe("BusinessPartnerBillingForm", () => {
     expect(html).toContain(
       "The business will require checkout before access continues."
     );
+  });
+
+  it("can display a stored chat-only assignment without offering it as a new choice", () => {
+    const html = renderToStaticMarkup(
+      <BusinessPartnerBillingForm
+        businessId={BUSINESS_ID}
+        initialPartnerId={PARTNER_ID}
+        initialBillingMode="invoiced"
+        initialPartnerPlan="chat_only"
+        currentPartner={{
+          id: PARTNER_ID,
+          name: "Alpha Dog Agency",
+          status: "active",
+        }}
+        activePartners={[{ id: PARTNER_ID, name: "Alpha Dog Agency" }]}
+      />
+    );
+
+    expect(html).toMatch(
+      /Current partner plan<\/dt><dd class="text-right">Chat Only<\/dd>/,
+    );
+    expect(html).not.toContain('<option value="chat_only"');
   });
 
   it("shows an inactive current assignment but does not offer it as active", () => {

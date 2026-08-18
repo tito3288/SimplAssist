@@ -11,7 +11,11 @@ import {
 } from "@/lib/messaging/outboundSmsOperational.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
-import { isSubscriptionPlan } from "./features";
+import {
+  canPlanUseFeature,
+  isSubscriptionPlan,
+  type FeatureKey,
+} from "./features";
 import { countSmsParts } from "./smsParts";
 import type {
   BillingMode,
@@ -29,6 +33,8 @@ const USAGE_BLOCK_MESSAGES = {
     "Choose an active plan before sending SMS.",
   canceled:
     "Choose an active plan before SMS sending can continue.",
+  plan_not_entitled:
+    "Your current plan does not include this type of SMS sending.",
   usage_limit_reached:
     "You have used all included SMS parts for this billing period. Upgrade or enable overages to keep sending.",
 };
@@ -127,6 +133,9 @@ export async function preflightOutboundSms(args: {
     context.subscription?.status === "canceled"
   ) {
     return blocked("canceled", smsParts);
+  }
+  if (!canPlanUseFeature(context.plan, smsFeatureForPurpose(args.purpose))) {
+    return blocked("plan_not_entitled", smsParts);
   }
 
   const period = await ensureUsagePeriod(context);
@@ -231,6 +240,18 @@ function blocked(reason: UsageBlockReason, smsParts: number): UsagePreflight {
     message: usageBlockMessage(reason),
     smsParts,
   };
+}
+
+function smsFeatureForPurpose(purpose: OutboundSmsPurpose): FeatureKey {
+  switch (purpose) {
+    case "manual_dashboard_send":
+      return "manual_sms";
+    case "missed_call":
+      return "missed_call_sms";
+    case "ai_reply":
+    case "mms_fallback":
+      return "ai_sms_conversations";
+  }
 }
 
 async function resolveUsageContext(businessId: string): Promise<UsageContext> {

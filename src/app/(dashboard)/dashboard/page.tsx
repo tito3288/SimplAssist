@@ -5,12 +5,13 @@ import { card } from '@/lib/theme-v2/theme';
 import { getFirstNameFromAuthMetadata } from '@/lib/utils';
 import { getSmsReadinessForBusiness } from '@/lib/messaging/lookup';
 import { canUseFeature } from '@/lib/billing/entitlements';
+import { planRequiresSmsProvisioning } from '@/lib/billing/features';
 import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { FeatureStatusBanners } from '@/components/entitlements/FeatureStatusBanners';
 import { shouldShowCallForwardingNudge } from '@/components/dashboard/callForwardingNudgeEligibility';
 import {
   getDashboardBusinessContext,
-  getDashboardEntitlements,
+  getDashboardPageEntitlements,
 } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 
@@ -30,8 +31,11 @@ export default async function DashboardPage() {
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekAgoISO = weekAgo.toISOString();
 
-  const [entitlements, dashboardData, smsReadiness] = await Promise.all([
-    getDashboardEntitlements(business.id),
+  const entitlementResult = await getDashboardPageEntitlements(business.id);
+  if (entitlementResult.status === 'subscription_missing') redirect('/onboarding');
+  const { entitlements } = entitlementResult;
+  const smsEnabled = planRequiresSmsProvisioning(entitlements.plan);
+  const [dashboardData, smsReadiness] = await Promise.all([
     Promise.all([
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
       supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('business_id', business.id).eq('status', 'active'),
@@ -50,17 +54,29 @@ export default async function DashboardPage() {
         .eq('lead_status', 'hot')
         .order('lead_status_updated_at', { ascending: false })
         .limit(10),
-      supabase
-        .from('phone_numbers')
-        .select('phone_number, is_active')
-        .eq('business_id', business.id)
-        .eq('is_active', true)
-        .single(),
+      smsEnabled
+        ? supabase
+            .from('phone_numbers')
+            .select('phone_number, is_active')
+            .eq('business_id', business.id)
+            .eq('is_active', true)
+            .single()
+        : Promise.resolve({ data: null }),
       supabase.from('ai_settings').select('booking_enabled, booking_mode, guardrails').eq('business_id', business.id).single(),
       supabase.from('google_calendar_tokens').select('id').eq('business_id', business.id).single(),
       supabase.from('widget_configs').select('is_active').eq('business_id', business.id).maybeSingle(),
     ]),
-    getSmsReadinessForBusiness(business.id),
+    smsEnabled
+      ? getSmsReadinessForBusiness(business.id)
+      : Promise.resolve({
+          smsReady: false,
+          blockReason: null,
+          campaignStatus: null,
+          assignmentStatus: null,
+          assignmentFailureReason: null,
+          phoneNumber: null,
+          messagingProfileId: null,
+        }),
   ]);
 
   const [
@@ -176,6 +192,7 @@ export default async function DashboardPage() {
         showCallForwardingNudge={showCallForwardingNudge}
         billingMode={business.billing_mode}
         isPartnerManagedBilling={isPartnerManagedBilling}
+        smsEnabled={smsEnabled}
         a2pStatus={{
           brandStatus: business.brand_status ?? null,
           brandStatusUpdatedAt: business.brand_status_updated_at ?? null,

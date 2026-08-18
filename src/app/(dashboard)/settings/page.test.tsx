@@ -419,6 +419,37 @@ describe('SettingsPage registration-sensitive settings', () => {
       );
     }
   );
+
+  it('hides every SMS-only surface for Chat Only despite stale carrier data', async () => {
+    const context = resolvedContext('book', RETAINED_GOAL_URL, {
+      telnyx_brand_id: 'stale-brand',
+      brand_status: 'approved',
+      campaign_status: 'approved',
+      onboarding_registration_status: 'submitted',
+    });
+    context.entitlements = { active: true, plan: 'chat_only' };
+    mocks.getDashboardEntitledContext.mockResolvedValue(context);
+
+    const markup = renderToStaticMarkup(await SettingsPage({}));
+
+    expect(mocks.from.mock.calls.map(([table]) => table)).not.toContain(
+      'phone_numbers'
+    );
+    expect(markup).not.toContain('Phone Number');
+    expect(markup).not.toContain('Phone number section');
+    expect(markup).not.toContain('Compliance');
+    expect(markup).not.toContain('Compliance panel');
+    expect(mocks.compliancePanel).not.toHaveBeenCalled();
+    expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
+      expect.objectContaining({ showSmsResponseDelay: false })
+    );
+    expect(mocks.goalSettingsForm).toHaveBeenCalledWith(
+      expect.objectContaining({ registrationLocked: false })
+    );
+    expect(mocks.businessInfoEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ registrationLocked: false })
+    );
+  });
 });
 
 describe('SettingsPage Calendar status parsing', () => {

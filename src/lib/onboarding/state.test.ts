@@ -390,3 +390,49 @@ describe("deriveOnboardingStep explicit goal gate", () => {
     }
   );
 });
+
+describe("deriveOnboardingStep Chat Only branch", () => {
+  it("asks a new direct customer to choose a plan before AI settings", () => {
+    const args = baseArgs();
+    args.business.primary_goal = null;
+    args.effectivePlan = null;
+    args.requiresDirectPlanSelection = true;
+
+    expect(deriveOnboardingStep(args)).toBe("plan_selection");
+  });
+
+  it("routes selected Chat Only directly from core setup to review", () => {
+    const args = baseArgs();
+    args.effectivePlan = "chat_only";
+    args.chatOnlyAuthorityActive = false;
+    args.phoneNumber = null;
+    args.business.has_ein = null;
+    args.business.legal_business_name = null;
+    args.business.compliance_info_completed_at = null;
+
+    expect(deriveOnboardingStep(args)).toBe("review_submit");
+  });
+
+  it("requires authoritative Chat Only activation before completion", () => {
+    const args = baseArgs();
+    args.effectivePlan = "chat_only";
+    args.chatOnlyAuthorityActive = false;
+    args.smsReady = true;
+    args.business.onboarding_completed_at =
+      "2026-07-24T00:00:00.000Z";
+
+    expect(deriveOnboardingStep(args)).toBe("review_submit");
+
+    args.chatOnlyAuthorityActive = true;
+    expect(deriveOnboardingStep(args)).toBe("complete");
+  });
+
+  it("keeps core setup ahead of Chat Only activation", () => {
+    const args = baseArgs();
+    args.effectivePlan = "chat_only";
+    args.chatOnlyAuthorityActive = true;
+    args.services = [];
+
+    expect(deriveOnboardingStep(args)).toBe("services_faqs");
+  });
+});
