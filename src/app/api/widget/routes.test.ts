@@ -9,12 +9,25 @@ const mocks = vi.hoisted(() => {
         | "conversation_in_manual_mode"
         | "account_suspended"
         | "ai_replies_paused"
-        | "texting_paused"
+        | "texting_paused",
     ) {
       super(reason);
     }
   }
   class AIProcessingStateError extends Error {}
+  class AIProcessingIdempotencyConflictError extends Error {}
+  class AIProcessingInProgressError extends Error {
+    readonly retryAfterSeconds = 2;
+  }
+  class AIReplyLimitReachedError extends Error {
+    constructor(
+      readonly resetAt: string | null,
+      readonly allowanceRenewal: "scheduled" | "frozen_past_due" =
+        resetAt === null ? "frozen_past_due" : "scheduled",
+    ) {
+      super("assistant unavailable");
+    }
+  }
   class BusinessPartnerResolutionError extends Error {}
   return {
     from: vi.fn(),
@@ -23,6 +36,7 @@ const mocks = vi.hoisted(() => {
     resolveBusinessEntitlements: vi.fn(),
     canUseFeature: vi.fn(),
     processIncomingMessageDetailed: vi.fn(),
+    buildWidgetChatRequestFingerprint: vi.fn(),
     finalizeGoalLinkEvent: vi.fn(),
     recordKnowledgeGap: vi.fn(),
     buildAiConversationSourceKey: vi.fn(),
@@ -31,9 +45,20 @@ const mocks = vi.hoisted(() => {
     resolveWidgetAttribution: vi.fn(),
     resolveBusinessOperationalControls: vi.fn(),
     AIProcessingBlockedError,
+    AIProcessingIdempotencyConflictError,
+    AIProcessingInProgressError,
     AIProcessingStateError,
+    AIReplyLimitReachedError,
     BusinessPartnerResolutionError,
     requireWorkspaceRouteAccess: vi.fn(),
+    mintWidgetToken: vi.fn(),
+    verifyWidgetToken: vi.fn(),
+    readWidgetBearerToken: vi.fn(),
+    acquireWidgetIngressTraffic: vi.fn(),
+    acquireWidgetTraffic: vi.fn(),
+    releaseWidgetTraffic: vi.fn(),
+    deriveWidgetNetworkKey: vi.fn(),
+    deriveWidgetRequestKey: vi.fn(),
   };
 });
 
@@ -59,7 +84,14 @@ vi.mock("@/lib/billing/entitlements", async (importOriginal) => {
 vi.mock("@/lib/ai/engine", () => ({
   processIncomingMessageDetailed: mocks.processIncomingMessageDetailed,
   AIProcessingBlockedError: mocks.AIProcessingBlockedError,
+  AIProcessingIdempotencyConflictError:
+    mocks.AIProcessingIdempotencyConflictError,
+  AIProcessingInProgressError: mocks.AIProcessingInProgressError,
   AIProcessingStateError: mocks.AIProcessingStateError,
+  AIReplyLimitReachedError: mocks.AIReplyLimitReachedError,
+}));
+vi.mock("@/lib/widget/idempotency.server", () => ({
+  buildWidgetChatRequestFingerprint: mocks.buildWidgetChatRequestFingerprint,
 }));
 vi.mock("@/lib/ai/goalEvents", () => ({
   finalizeGoalLinkEvent: mocks.finalizeGoalLinkEvent,
@@ -82,26 +114,41 @@ vi.mock("@/lib/branding/businessPartner.server", () => ({
 vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
-vi.mock(
-  "@/lib/account/operationalControls.server",
-  async (importOriginal) => {
-    const actual =
-      await importOriginal<
-        typeof import("@/lib/account/operationalControls.server")
-      >();
-    return {
-      ...actual,
-      resolveBusinessOperationalControls:
-        mocks.resolveBusinessOperationalControls,
-    };
-  }
-);
+vi.mock("@/lib/widget/token.server", () => ({
+  mintWidgetToken: mocks.mintWidgetToken,
+  verifyWidgetToken: mocks.verifyWidgetToken,
+  readWidgetBearerToken: mocks.readWidgetBearerToken,
+}));
+vi.mock("@/lib/widget/ingressTraffic.server", () => ({
+  acquireWidgetIngressTraffic: mocks.acquireWidgetIngressTraffic,
+}));
+vi.mock("@/lib/widget/traffic.server", () => ({
+  acquireWidgetTraffic: mocks.acquireWidgetTraffic,
+  releaseWidgetTraffic: mocks.releaseWidgetTraffic,
+  deriveWidgetNetworkKey: mocks.deriveWidgetNetworkKey,
+  deriveWidgetRequestKey: mocks.deriveWidgetRequestKey,
+}));
+vi.mock("@/lib/account/operationalControls.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/account/operationalControls.server")
+    >();
+  return {
+    ...actual,
+    resolveBusinessOperationalControls:
+      mocks.resolveBusinessOperationalControls,
+  };
+});
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
 import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
-import { POST as postChat } from "./chat/route";
-import { GET as getConfig, PATCH as patchConfig } from "./config/route";
-import { POST as postEnd } from "./end/route";
+import { OPTIONS as optionsChat, POST as postChat } from "./chat/route";
+import {
+  GET as getConfig,
+  OPTIONS as optionsConfig,
+  PATCH as patchConfig,
+} from "./config/route";
+import { OPTIONS as optionsEnd, POST as postEnd } from "./end/route";
 import { GET as getPreviewConfig } from "./preview-config/route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
@@ -149,7 +196,22 @@ function deferred<T>() {
 function queueDatabaseResults(...results: QueryResult[]) {
   const queue = [...results];
   mocks.from.mockImplementation(() => {
-    const result = queue.shift() ?? { data: null, error: null };
+    const queued = queue.shift() ?? { data: null, error: null };
+    const result =
+      queued.data &&
+      typeof queued.data === "object" &&
+      !Array.isArray(queued.data) &&
+      "id" in queued.data &&
+      String((queued.data as { id?: unknown }).id).startsWith("widget-")
+        ? {
+            ...queued,
+            data: {
+              allowed_hostnames: ["localhost"],
+              is_active: true,
+              ...queued.data,
+            },
+          }
+        : queued;
     const chain: Record<string, ReturnType<typeof vi.fn>> = {};
     for (const method of ["select", "eq", "maybeSingle", "update"]) {
       chain[method] = vi.fn(() => chain);
@@ -163,8 +225,8 @@ function queueDatabaseResults(...results: QueryResult[]) {
 
 function configRequest(headers?: HeadersInit) {
   return new NextRequest(
-    `http://localhost/api/widget/config?businessId=${BUSINESS_ID}`,
-    { headers },
+    `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+    { headers: { Origin: "http://localhost", ...headers } },
   );
 }
 
@@ -185,6 +247,7 @@ const WIDGET_CONFIG_PATCH = {
   lead_capture_timing: "start",
   quick_replies: ["Pricing"],
   is_active: true,
+  allowed_hostnames: ["localhost"],
 } as const;
 
 function configPatchRequest(body: unknown = WIDGET_CONFIG_PATCH) {
@@ -206,12 +269,46 @@ function setServerBusinessResult(result: QueryResult) {
   });
 }
 
-function postRequest(path: "chat" | "end", body: unknown) {
-  return new NextRequest(`http://localhost/api/widget/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+function postRequest(
+  path: "chat" | "end",
+  body: unknown,
+  headers: HeadersInit = {},
+) {
+  const original = body as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {
+    ...original,
+    ...(path === "chat" && original.clientMessageId === undefined
+      ? { clientMessageId: "00000000-0000-4000-8000-000000000003" }
+      : {}),
+    ...(original.preview === true || original.sessionNonce !== undefined
+      ? {}
+      : { sessionNonce: "abcdefghijklmnopqrstuvwx" }),
+  };
+  const businessId = String(normalized.businessId ?? BUSINESS_ID);
+  const sessionId = String(normalized.sessionId ?? "missing-session");
+  return new NextRequest(
+    `http://localhost/api/widget/${path}?businessId=${encodeURIComponent(businessId)}&sessionId=${encodeURIComponent(sessionId)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost",
+        Authorization: "Bearer test-token",
+        ...headers,
+      },
+      body: JSON.stringify(normalized),
+    },
+  );
+}
+
+function preflightRequest(
+  path: "config" | "chat" | "end",
+  origin = "http://localhost",
+) {
+  return new NextRequest(
+    `http://localhost/api/widget/${path}?businessId=${BUSINESS_ID}&sessionId=session-1`,
+    { method: "OPTIONS", headers: { Origin: origin } },
+  );
 }
 
 beforeEach(() => {
@@ -222,7 +319,7 @@ beforeEach(() => {
   mocks.resolveBusinessEntitlements.mockResolvedValue(ENTITLEMENTS);
   mocks.canUseFeature.mockReturnValue(true);
   mocks.resolveBusinessOperationalControls.mockResolvedValue(
-    ACTIVE_OPERATIONAL_CONTROLS
+    ACTIVE_OPERATIONAL_CONTROLS,
   );
   mocks.processIncomingMessageDetailed.mockResolvedValue({
     text: "How can I help?",
@@ -232,11 +329,14 @@ beforeEach(() => {
     actions: [],
     assistantMessageId: "assistant-message-1",
   });
+  mocks.buildWidgetChatRequestFingerprint.mockReturnValue(
+    "request-fingerprint",
+  );
   mocks.finalizeGoalLinkEvent.mockResolvedValue("inserted");
   mocks.recordKnowledgeGap.mockResolvedValue(undefined);
   mocks.buildWebChatSessionSourceKey.mockReturnValue(WEB_CHAT_SOURCE_KEY);
   mocks.buildAiConversationSourceKey.mockReturnValue(
-    AI_CONVERSATION_SOURCE_KEY
+    AI_CONVERSATION_SOURCE_KEY,
   );
   mocks.recordBusinessMetricEventBestEffort.mockReturnValue(undefined);
   mocks.resolveWidgetAttribution.mockResolvedValue({
@@ -252,6 +352,21 @@ beforeEach(() => {
       hostKind: "canonical",
     },
   });
+  mocks.mintWidgetToken.mockReturnValue({
+    token: "test-token",
+    sessionNonce: "abcdefghijklmnopqrstuvwx",
+    expiresAt: "2026-08-18T12:05:00.000Z",
+  });
+  mocks.verifyWidgetToken.mockReturnValue(true);
+  mocks.readWidgetBearerToken.mockReturnValue("test-token");
+  mocks.acquireWidgetIngressTraffic.mockResolvedValue({ status: "allowed" });
+  mocks.acquireWidgetTraffic.mockResolvedValue({
+    status: "allowed",
+    lease: { sharedLeaseToken: null, localConcurrencyKeys: [] },
+  });
+  mocks.releaseWidgetTraffic.mockResolvedValue(undefined);
+  mocks.deriveWidgetNetworkKey.mockReturnValue("network-key");
+  mocks.deriveWidgetRequestKey.mockReturnValue("request-key");
   queueDatabaseResults();
 });
 
@@ -260,21 +375,24 @@ describe("authenticated widget configuration mutations", () => {
     [401, { error: "Unauthorized" }],
     [403, { error: "workspace_access_denied" }],
     [503, { error: "workspace_access_unavailable", retryable: true }],
-  ])("returns workspace %i before parsing, entitlements, or updates", async (status, body) => {
-    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json(body, { status }),
-    });
-    const guardedRequest = configPatchRequest();
-    const json = vi.spyOn(guardedRequest, "json");
+  ])(
+    "returns workspace %i before parsing, entitlements, or updates",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
+      const guardedRequest = configPatchRequest();
+      const json = vi.spyOn(guardedRequest, "json");
 
-    const response = await patchConfig(guardedRequest);
+      const response = await patchConfig(guardedRequest);
 
-    expect(response.status).toBe(status);
-    expect(json).not.toHaveBeenCalled();
-    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
-    expect(mocks.from).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(status);
+      expect(json).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns 403 for a known web-chat entitlement denial", async () => {
     mocks.canUseFeature.mockReturnValue(false);
@@ -296,7 +414,7 @@ describe("authenticated widget configuration mutations", () => {
         code: "subscription_lookup_failed",
         businessId: BUSINESS_ID,
         message: "database unavailable",
-      })
+      }),
     );
 
     const response = await patchConfig(configPatchRequest());
@@ -311,7 +429,11 @@ describe("authenticated widget configuration mutations", () => {
 
   it("updates an allow-listed configuration through the admin client", async () => {
     queueDatabaseResults({
-      data: { id: "widget-1", business_id: BUSINESS_ID, ...WIDGET_CONFIG_PATCH },
+      data: {
+        id: "widget-1",
+        business_id: BUSINESS_ID,
+        ...WIDGET_CONFIG_PATCH,
+      },
       error: null,
     });
 
@@ -334,7 +456,10 @@ describe("authenticated widget configuration mutations", () => {
   });
 
   it("returns retryable 503 when the admin configuration update fails", async () => {
-    queueDatabaseResults({ data: null, error: { message: "connection reset" } });
+    queueDatabaseResults({
+      data: null,
+      error: { message: "connection reset" },
+    });
 
     const response = await patchConfig(configPatchRequest());
 
@@ -343,6 +468,51 @@ describe("authenticated widget configuration mutations", () => {
       error: "Service temporarily unavailable",
       retryable: true,
     });
+  });
+
+  it("refuses to activate a widget with an explicitly empty hostname allowlist", async () => {
+    const response = await patchConfig(
+      configPatchRequest({ ...WIDGET_CONFIG_PATCH, allowed_hostnames: [] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "An allowed website hostname is required before activation",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("checks the persisted effective allowlist when activation omits hostnames", async () => {
+    const legacyPayload = {
+      ...WIDGET_CONFIG_PATCH,
+      allowed_hostnames: undefined,
+    };
+    queueDatabaseResults({ data: { allowed_hostnames: [] }, error: null });
+
+    const response = await patchConfig(configPatchRequest(legacyPayload));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "An allowed website hostname is required before activation",
+    });
+    expect(mocks.from).toHaveBeenCalledOnce();
+  });
+
+  it("allows an inactive widget to retain an empty allowlist", async () => {
+    const payload = {
+      ...WIDGET_CONFIG_PATCH,
+      is_active: false,
+      allowed_hostnames: [],
+    };
+    queueDatabaseResults({ data: { id: "widget-1", ...payload }, error: null });
+
+    const response = await patchConfig(configPatchRequest(payload));
+
+    expect(response.status).toBe(200);
+    const updateChain = mocks.from.mock.results[0]?.value as {
+      update: ReturnType<typeof vi.fn>;
+    };
+    expect(updateChain.update).toHaveBeenCalledWith(payload);
   });
 });
 
@@ -365,14 +535,14 @@ describe("public widget entitlement boundaries", () => {
         code: "subscription_lookup_failed",
         businessId: BUSINESS_ID,
         message: "database unavailable",
-      })
+      }),
     );
 
     const response = await getConfig(configRequest());
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
   });
@@ -385,7 +555,7 @@ describe("public widget entitlement boundaries", () => {
     async (_label, pausedState) => {
       queueDatabaseResults(
         { data: { id: "widget-1" }, error: null },
-        { data: { name: "Acme" }, error: null }
+        { data: { name: "Acme" }, error: null },
       );
       mocks.resolveBusinessOperationalControls.mockResolvedValue({
         ...ACTIVE_OPERATIONAL_CONTROLS,
@@ -397,44 +567,47 @@ describe("public widget entitlement boundaries", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ available: false });
       expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledWith(
-        BUSINESS_ID
+        BUSINESS_ID,
       );
       expect(mocks.from).toHaveBeenCalledTimes(1);
       expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it.each([
     ["texting pause", { textingPausedAt: PAUSED_AT }],
     ["bookings pause", { bookingsPausedAt: PAUSED_AT }],
-  ])("keeps public config available during a %s", async (_label, pausedState) => {
-    queueDatabaseResults(
-      {
-        data: {
-          id: "widget-1",
-          brand_color: "#123456",
-          position: "bottom_right",
-          welcome_message: "Welcome",
-          show_logo: false,
-          logo_url: null,
-          lead_capture_enabled: true,
-          lead_capture_timing: "start",
-          quick_replies: [],
+  ])(
+    "keeps public config available during a %s",
+    async (_label, pausedState) => {
+      queueDatabaseResults(
+        {
+          data: {
+            id: "widget-1",
+            brand_color: "#123456",
+            position: "bottom_right",
+            welcome_message: "Welcome",
+            show_logo: false,
+            logo_url: null,
+            lead_capture_enabled: true,
+            lead_capture_timing: "start",
+            quick_replies: [],
+          },
+          error: null,
         },
-        error: null,
-      },
-      { data: { name: "Acme" }, error: null }
-    );
-    mocks.resolveBusinessOperationalControls.mockResolvedValue({
-      ...ACTIVE_OPERATIONAL_CONTROLS,
-      ...pausedState,
-    });
+        { data: { name: "Acme" }, error: null },
+      );
+      mocks.resolveBusinessOperationalControls.mockResolvedValue({
+        ...ACTIVE_OPERATIONAL_CONTROLS,
+        ...pausedState,
+      });
 
-    const response = await getConfig(configRequest());
+      const response = await getConfig(configRequest());
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ available: true });
-  });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ available: true });
+    },
+  );
 
   it("returns a generic retryable response when config operational state is indeterminate", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
@@ -443,14 +616,14 @@ describe("public widget entitlement boundaries", () => {
         code: "business_lookup_failed",
         businessId: BUSINESS_ID,
         message: "private database detail",
-      })
+      }),
     );
 
     const response = await getConfig(configRequest());
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
@@ -472,7 +645,7 @@ describe("public widget entitlement boundaries", () => {
         },
         error: null,
       },
-      { data: { name: "Acme" }, error: null }
+      { data: { name: "Acme" }, error: null },
     );
 
     const response = await getConfig(configRequest());
@@ -485,11 +658,18 @@ describe("public widget entitlement boundaries", () => {
       welcomeMessage: "Welcome",
       poweredByName: "SimplAssist",
       poweredByUrl: "https://simplassist.com",
+      widgetToken: "test-token",
+      widgetSessionNonce: "abcdefghijklmnopqrstuvwx",
+    });
+    expect(mocks.mintWidgetToken).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      origin: "http://localhost",
+      sessionId: "session-1",
     });
     const configChain = mocks.from.mock.results[0]?.value as {
       eq: ReturnType<typeof vi.fn>;
     };
-    expect(configChain.eq).toHaveBeenCalledWith("is_active", true);
+    expect(configChain.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
   });
 
   it("returns unavailable when AI pauses while config attribution is pending", async () => {
@@ -508,7 +688,7 @@ describe("public widget entitlement boundaries", () => {
         },
         error: null,
       },
-      { data: { name: "Acme" }, error: null }
+      { data: { name: "Acme" }, error: null },
     );
     const attribution = deferred<{
       poweredByName: string;
@@ -524,7 +704,7 @@ describe("public widget entitlement boundaries", () => {
 
     const responsePromise = getConfig(configRequest());
     await vi.waitFor(() =>
-      expect(mocks.resolveWidgetAttribution).toHaveBeenCalledOnce()
+      expect(mocks.resolveWidgetAttribution).toHaveBeenCalledOnce(),
     );
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(1);
 
@@ -555,7 +735,7 @@ describe("public widget entitlement boundaries", () => {
         },
         error: null,
       },
-      { data: { name: "Acme" }, error: null }
+      { data: { name: "Acme" }, error: null },
     );
     mocks.resolveBusinessOperationalControls
       .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
@@ -564,20 +744,20 @@ describe("public widget entitlement boundaries", () => {
           code: "business_lookup_failed",
           businessId: BUSINESS_ID,
           message: "private database detail",
-        })
+        }),
       );
 
     const response = await getConfig(configRequest());
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
   });
 
-  it("finalizes a live goal action only after the engine and final operational fence", async () => {
+  it("finalizes a live goal action after the committed engine result without a mutable route recheck", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockResolvedValue({
       text: "Start here: https://example.com/signup",
@@ -593,7 +773,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "I want to sign up.",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -611,13 +791,10 @@ describe("public widget entitlement boundaries", () => {
       occurredAt: expect.any(Date),
     });
     expect(
-      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
-    );
-    expect(
-      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.finalizeGoalLinkEvent.mock.invocationCallOrder[0]);
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
   });
 
   it("serves an unauthenticated non-preview chat request without requiring workspace access", async () => {
@@ -632,7 +809,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Can you help?",
         sessionId: "public-session",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -649,8 +826,25 @@ describe("public widget entitlement boundaries", () => {
       "Can you help?",
       "web_chat",
       "public-session",
-      { persistBookingRequests: true }
+      {
+        persistBookingRequests: true,
+        isPreview: false,
+        contactName: undefined,
+        webChatRequest: {
+          clientMessageId: "00000000-0000-4000-8000-000000000003",
+          requestFingerprint: "request-fingerprint",
+        },
+      },
     );
+    expect(mocks.buildWidgetChatRequestFingerprint).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      origin: "http://localhost",
+      sessionId: "public-session",
+      clientMessageId: "00000000-0000-4000-8000-000000000003",
+      message: "Can you help?",
+      visitorEmail: undefined,
+      visitorName: undefined,
+    });
   });
 
   it("awaits and logs a failed live finalizer without retrying or suppressing the persisted reply", async () => {
@@ -672,11 +866,11 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "I want to sign up.",
         sessionId: "session-1",
-      })
+      }),
     );
 
     await vi.waitFor(() =>
-      expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce()
+      expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce(),
     );
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
     finalization.reject(finalizationError);
@@ -697,7 +891,7 @@ describe("public widget entitlement boundaries", () => {
         conversationId: "conversation-1",
         sourceMessageId: "customer-message-1",
       },
-      finalizationError
+      finalizationError,
     );
   });
 
@@ -718,7 +912,7 @@ describe("public widget entitlement boundaries", () => {
         message: "I want to sign up.",
         sessionId: "preview-session",
         preview: true,
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -727,6 +921,9 @@ describe("public widget entitlement boundaries", () => {
       response: "Start here: https://example.com/signup",
     });
     expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "preview_chat" }),
+    );
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
       BUSINESS_ID,
       null,
@@ -734,17 +931,23 @@ describe("public widget entitlement boundaries", () => {
       "I want to sign up.",
       "web_chat",
       "preview-session",
-      { persistBookingRequests: false }
+      {
+        persistBookingRequests: false,
+        isPreview: true,
+        contactName: undefined,
+        webChatRequest: undefined,
+      },
     );
+    expect(mocks.buildWidgetChatRequestFingerprint).not.toHaveBeenCalled();
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
     expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
     expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it.each([
-    [401, { error: "Unauthorized" }],
-    [403, { error: "workspace_access_denied" }],
-    [503, { error: "workspace_access_unavailable", retryable: true }],
+    [401, { error: "unauthorized" }],
+    [403, { error: "origin_not_allowed" }],
+    [503, { error: "service_unavailable", retryable: true }],
   ])(
     "rejects an unverified preview with workspace %i before any chat read or AI work",
     async (status, body) => {
@@ -759,18 +962,20 @@ describe("public widget entitlement boundaries", () => {
           message: "I want to sign up.",
           sessionId: "preview-session",
           preview: true,
-        })
+        }),
       );
 
       expect(response.status).toBe(status);
       expect(await response.json()).toEqual(body);
-      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost",
+      );
       expect(mocks.from).not.toHaveBeenCalled();
       expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
       expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
       expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
       expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("rejects a same-session preview marker for another workspace business before AI", async () => {
@@ -793,19 +998,19 @@ describe("public widget entitlement boundaries", () => {
         message: "I want to sign up.",
         sessionId: "preview-session",
         preview: true,
-      })
+      }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: "Widget preview not found",
+      error: "origin_not_allowed",
     });
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
-  it("does not let a non-boolean preview marker suppress live finalization", async () => {
+  it("rejects a non-boolean preview marker before live work", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockResolvedValue({
       text: "Start here: https://example.com/signup",
@@ -822,21 +1027,14 @@ describe("public widget entitlement boundaries", () => {
         message: "I want to sign up.",
         sessionId: "session-1",
         preview: "true",
-      })
+      }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
     expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
-    expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledWith(
-      BUSINESS_ID,
-      null,
-      null,
-      "I want to sign up.",
-      "web_chat",
-      "session-1",
-      { persistBookingRequests: true }
-    );
-    expect(mocks.finalizeGoalLinkEvent).toHaveBeenCalledOnce();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
   });
 
   it("logs a missing assistant proof without recording or suppressing the reply", async () => {
@@ -855,7 +1053,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "I want to sign up.",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -870,7 +1068,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         conversationId: "conversation-1",
         sourceMessageId: "customer-message-1",
-      }
+      },
     );
   });
 
@@ -891,7 +1089,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Do you offer free trials?",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -906,18 +1104,18 @@ describe("public widget entitlement boundaries", () => {
       aiResponseText: "I don't see free trials mentioned. Please call us.",
     });
     expect(
-      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.recordKnowledgeGap.mock.invocationCallOrder[0]);
     expect(mocks.buildWebChatSessionSourceKey).toHaveBeenCalledWith(
       BUSINESS_ID,
-      "session-1"
+      "session-1",
     );
     expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledTimes(1);
     const [, metricOccurredAt] = mocks.buildAiConversationSourceKey.mock
       .calls[0] as [string, Date];
     expect(mocks.buildAiConversationSourceKey).toHaveBeenCalledWith(
       "conversation-1",
-      metricOccurredAt
+      metricOccurredAt,
     );
     expect(mocks.recordBusinessMetricEventBestEffort.mock.calls).toEqual([
       [
@@ -942,7 +1140,7 @@ describe("public widget entitlement boundaries", () => {
       ],
     ]);
     expect(
-      JSON.stringify(mocks.recordBusinessMetricEventBestEffort.mock.calls)
+      JSON.stringify(mocks.recordBusinessMetricEventBestEffort.mock.calls),
     ).not.toContain("session-1");
   });
 
@@ -962,7 +1160,7 @@ describe("public widget entitlement boundaries", () => {
           businessId: BUSINESS_ID,
           message: "Hello",
           sessionId: "session-private",
-        })
+        }),
       );
 
       expect(response.status).toBe(200);
@@ -971,7 +1169,9 @@ describe("public widget entitlement boundaries", () => {
         response: "How can I help?",
         sessionId: "session-private",
       });
-      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
+      expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(
+        2,
+      );
       expect(console.error).toHaveBeenCalledWith(
         "[widget:chat] Metric recording failed:",
         {
@@ -980,15 +1180,15 @@ describe("public widget entitlement boundaries", () => {
             failedCallIndex === 0
               ? "web_chat_session_engaged"
               : "ai_conversation_engaged",
-        }
+        },
       );
-    }
+    },
   );
 
   it("does not wait for unresolved metric work before returning the widget response", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.recordBusinessMetricEventBestEffort.mockReturnValue(
-      new Promise(() => undefined)
+      new Promise(() => undefined),
     );
 
     const response = await postChat(
@@ -996,7 +1196,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1023,7 +1223,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1039,7 +1239,7 @@ describe("public widget entitlement boundaries", () => {
   it("reuses conflict-stable widget and conversation source keys on route retries", async () => {
     queueDatabaseResults(
       { data: { id: "widget-1" }, error: null },
-      { data: { id: "widget-1" }, error: null }
+      { data: { id: "widget-1" }, error: null },
     );
     const requestBody = {
       businessId: BUSINESS_ID,
@@ -1054,8 +1254,8 @@ describe("public widget entitlement boundaries", () => {
     expect(secondResponse.status).toBe(200);
     expect(
       mocks.recordBusinessMetricEventBestEffort.mock.calls.map(
-        ([input]) => input.sourceKey
-      )
+        ([input]) => input.sourceKey,
+      ),
     ).toEqual([
       WEB_CHAT_SOURCE_KEY,
       AI_CONVERSATION_SOURCE_KEY,
@@ -1072,7 +1272,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1101,7 +1301,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Do you offer free trials?",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1116,29 +1316,30 @@ describe("public widget entitlement boundaries", () => {
           businessId: BUSINESS_ID,
           sourceMessageId: "customer-message-1",
         },
-        captureError
-      )
+        captureError,
+      ),
     );
   });
 
   it.each([
-    ["account suspension", { operationsSuspendedAt: PAUSED_AT }],
-    ["AI pause", { aiRepliesPausedAt: PAUSED_AT }],
+    ["account suspension", "account_suspended"],
+    ["AI pause", "ai_replies_paused"],
   ])(
-    "skips AI and returns privacy-safe unavailable chat for %s",
-    async (_label, pausedState) => {
+    "maps the engine's live %s gate to privacy-safe unavailable chat",
+    async (_label, reason) => {
       queueDatabaseResults({ data: { id: "widget-1" }, error: null });
-      mocks.resolveBusinessOperationalControls.mockResolvedValue({
-        ...ACTIVE_OPERATIONAL_CONTROLS,
-        ...pausedState,
-      });
+      mocks.processIncomingMessageDetailed.mockRejectedValue(
+        new mocks.AIProcessingBlockedError(
+          reason as "account_suspended" | "ai_replies_paused",
+        ),
+      );
 
       const response = await postChat(
         postRequest("chat", {
           businessId: BUSINESS_ID,
           message: "Hello",
           sessionId: "session-1",
-        })
+        }),
       );
 
       expect(response.status).toBe(200);
@@ -1146,45 +1347,44 @@ describe("public widget entitlement boundaries", () => {
         available: false,
         response: null,
       });
-      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
       expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
-    }
+    },
   );
 
-  it.each([
-    ["texting pause", { textingPausedAt: PAUSED_AT }],
-    ["bookings pause", { bookingsPausedAt: PAUSED_AT }],
-  ])("keeps web chat available during a %s", async (_label, pausedState) => {
-    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
-    mocks.resolveBusinessOperationalControls.mockResolvedValue({
-      ...ACTIVE_OPERATIONAL_CONTROLS,
-      ...pausedState,
-    });
+  it.each([["texting pause"], ["bookings pause"]])(
+    "leaves non-AI pause decisions to the live engine for a %s",
+    async () => {
+      queueDatabaseResults({ data: { id: "widget-1" }, error: null });
 
-    const response = await postChat(
-      postRequest("chat", {
-        businessId: BUSINESS_ID,
-        message: "Hello",
-        sessionId: "session-1",
-      })
-    );
+      const response = await postChat(
+        postRequest("chat", {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-1",
+        }),
+      );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      available: true,
-      response: "How can I help?",
-    });
-    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
-  });
-
-  it("suppresses the response and gap dispatch when AI pauses after generation", async () => {
-    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
-    mocks.resolveBusinessOperationalControls
-      .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
-      .mockResolvedValueOnce({
-        ...ACTIVE_OPERATIONAL_CONTROLS,
-        aiRepliesPausedAt: PAUSED_AT,
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        available: true,
+        response: "How can I help?",
       });
+      expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledOnce();
+      expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    },
+  );
+
+  it("never suppresses a committed live reply with a post-engine route gate", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.resolveBusinessEntitlements.mockRejectedValue(
+      new Error("a recovered live reply must precede mutable billing state"),
+    );
+    mocks.resolveBusinessOperationalControls.mockRejectedValue(
+      new Error("a recovered live reply must precede mutable pause state"),
+    );
     mocks.processIncomingMessageDetailed.mockResolvedValue({
       text: "Private generated response",
       knowledgeGapDetected: true,
@@ -1199,21 +1399,23 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Do you offer free trials?",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      available: false,
-      response: null,
+      available: true,
+      response: "Private generated response",
+      sessionId: "session-1",
     });
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledTimes(1);
-    expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
-    expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
-    expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.recordKnowledgeGap).toHaveBeenCalledOnce();
+    expect(mocks.recordBusinessMetricEventBestEffort).toHaveBeenCalledTimes(2);
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when the post-generation operational read is indeterminate", async () => {
+  it("fails preview closed when its post-generation operational read is indeterminate", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.resolveBusinessOperationalControls
       .mockResolvedValueOnce(ACTIVE_OPERATIONAL_CONTROLS)
@@ -1222,7 +1424,7 @@ describe("public widget entitlement boundaries", () => {
           code: "business_lookup_failed",
           businessId: BUSINESS_ID,
           message: "private database detail",
-        })
+        }),
       );
     mocks.processIncomingMessageDetailed.mockResolvedValue({
       text: "Private generated response",
@@ -1237,54 +1439,57 @@ describe("public widget entitlement boundaries", () => {
       postRequest("chat", {
         businessId: BUSINESS_ID,
         message: "Do you offer free trials?",
-        sessionId: "session-1",
-      })
+        sessionId: "preview-session",
+        preview: true,
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     expect(mocks.processIncomingMessageDetailed).toHaveBeenCalledTimes(1);
     expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalledTimes(2);
     expect(
-      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0]
+      mocks.processIncomingMessageDetailed.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
+      mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1],
     );
     expect(mocks.recordKnowledgeGap).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
   });
 
-  it("fails closed before AI when the initial operational read is indeterminate", async () => {
+  it("fails preview closed before AI when its initial operational read is indeterminate", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.resolveBusinessOperationalControls.mockRejectedValue(
       new OperationalControlsResolutionError({
         code: "business_lookup_failed",
         businessId: BUSINESS_ID,
         message: "private database detail",
-      })
+      }),
     );
 
     const response = await postChat(
       postRequest("chat", {
         businessId: BUSINESS_ID,
         message: "Hello",
-        sessionId: "session-1",
-      })
+        sessionId: "preview-session",
+        preview: true,
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.recordBusinessMetricEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
   });
 
-  it("skips AI and acknowledges chat when the plan is not entitled", async () => {
+  it("skips preview AI and acknowledges chat when the plan is not entitled", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.canUseFeature.mockReturnValue(false);
 
@@ -1292,8 +1497,9 @@ describe("public widget entitlement boundaries", () => {
       postRequest("chat", {
         businessId: BUSINESS_ID,
         message: "Hello",
-        sessionId: "session-1",
-      })
+        sessionId: "preview-session",
+        preview: true,
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1302,40 +1508,43 @@ describe("public widget entitlement boundaries", () => {
       response: null,
     });
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
   });
 
-  it("returns retryable 503 without AI or writes when chat entitlement resolution fails", async () => {
+  it("returns retryable 503 without preview AI when entitlement resolution fails", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.resolveBusinessEntitlements.mockRejectedValue(
       new EntitlementResolutionError({
         code: "subscription_lookup_failed",
         businessId: BUSINESS_ID,
         message: "database unavailable",
-      })
+      }),
     );
 
     const response = await postChat(
       postRequest("chat", {
         businessId: BUSINESS_ID,
         message: "Hello",
-        sessionId: "session-1",
-      })
+        sessionId: "preview-session",
+        preview: true,
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
     // The sole database call is the required read-only widget availability lookup.
     expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
   });
 
   it("returns unavailable when the AI engine catches a downgrade race", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockRejectedValue(
-      new mocks.AIProcessingBlockedError("feature_not_entitled")
+      new mocks.AIProcessingBlockedError("feature_not_entitled"),
     );
 
     const response = await postChat(
@@ -1343,7 +1552,7 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1351,6 +1560,118 @@ describe("public widget entitlement boundaries", () => {
       available: false,
       response: null,
     });
+  });
+
+  it("switches to lead capture without exposing monthly reply quota state", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
+      new mocks.AIReplyLimitReachedError("2026-09-01T00:00:00.000Z"),
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Can someone call me?",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      available: true,
+      response: null,
+      mode: "lead_capture",
+      reason: "assistant_unavailable",
+    });
+    expect(JSON.stringify(body)).not.toMatch(
+      /allowance|completed|limit|quota|remaining|reset|usage/i,
+    );
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(response.headers.get("vary")).toContain("Origin");
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a frozen past-due allowance denial generic without deriving a reset", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
+      new mocks.AIReplyLimitReachedError(null, "frozen_past_due"),
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Can someone call me?",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      available: true,
+      response: null,
+      mode: "lead_capture",
+      reason: "assistant_unavailable",
+    });
+    expect(JSON.stringify(body)).not.toMatch(
+      /allowance|completed|limit|quota|remaining|reset|usage|payment/i,
+    );
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
+  });
+
+  it("maps an in-progress duplicate to a generic retryable response", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
+      new mocks.AIProcessingInProgressError(),
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Can someone call me?",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: "rate_limited",
+      retryable: true,
+    });
+    expect(response.headers.get("retry-after")).toBe("2");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a reused client message id with a non-retryable generic conflict", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.processIncomingMessageDetailed.mockRejectedValue(
+      new mocks.AIProcessingIdempotencyConflictError(),
+    );
+
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "This payload changed.",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "request_conflict",
+      retryable: false,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.releaseWidgetTraffic).toHaveBeenCalledOnce();
   });
 
   it.each(["account_suspended", "ai_replies_paused"] as const)(
@@ -1358,7 +1679,7 @@ describe("public widget entitlement boundaries", () => {
     async (reason) => {
       queueDatabaseResults({ data: { id: "widget-1" }, error: null });
       mocks.processIncomingMessageDetailed.mockRejectedValue(
-        new mocks.AIProcessingBlockedError(reason)
+        new mocks.AIProcessingBlockedError(reason),
       );
 
       const response = await postChat(
@@ -1366,7 +1687,7 @@ describe("public widget entitlement boundaries", () => {
           businessId: BUSINESS_ID,
           message: "Hello",
           sessionId: "session-1",
-        })
+        }),
       );
 
       expect(response.status).toBe(200);
@@ -1374,7 +1695,7 @@ describe("public widget entitlement boundaries", () => {
         available: false,
         response: null,
       });
-    }
+    },
   );
 
   it("returns retryable 503 for an indeterminate engine operational read", async () => {
@@ -1384,7 +1705,7 @@ describe("public widget entitlement boundaries", () => {
         code: "business_lookup_failed",
         businessId: BUSINESS_ID,
         message: "private database detail",
-      })
+      }),
     );
 
     const response = await postChat(
@@ -1392,12 +1713,12 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
   });
@@ -1405,7 +1726,7 @@ describe("public widget entitlement boundaries", () => {
   it("returns retryable 503 when AI context persistence or lookup is uncertain", async () => {
     queueDatabaseResults({ data: { id: "widget-1" }, error: null });
     mocks.processIncomingMessageDetailed.mockRejectedValue(
-      new mocks.AIProcessingStateError("database unavailable")
+      new mocks.AIProcessingStateError("database unavailable"),
     );
 
     const response = await postChat(
@@ -1413,12 +1734,12 @@ describe("public widget entitlement boundaries", () => {
         businessId: BUSINESS_ID,
         message: "Hello",
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
   });
@@ -1431,7 +1752,7 @@ describe("public widget entitlement boundaries", () => {
       postRequest("end", {
         businessId: BUSINESS_ID,
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1449,19 +1770,19 @@ describe("public widget entitlement boundaries", () => {
         code: "subscription_lookup_failed",
         businessId: BUSINESS_ID,
         message: "database unavailable",
-      })
+      }),
     );
 
     const response = await postEnd(
       postRequest("end", {
         businessId: BUSINESS_ID,
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
     // The sole database call is the required read-only widget availability lookup.
@@ -1473,17 +1794,17 @@ describe("public widget entitlement boundaries", () => {
       { data: { id: "widget-1" }, error: null },
       { data: { id: "contact-1" }, error: null },
       { data: { id: "conversation-1" }, error: null },
-      { data: null, error: null }
+      { data: null, error: null },
     );
     mocks.resolveBusinessOperationalControls.mockRejectedValue(
-      new Error("operational controls must not gate cleanup")
+      new Error("operational controls must not gate cleanup"),
     );
 
     const response = await postEnd(
       postRequest("end", {
         businessId: BUSINESS_ID,
         sessionId: "session-1",
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -1492,6 +1813,550 @@ describe("public widget entitlement boundaries", () => {
       available: true,
     });
     expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+  });
+});
+
+describe("public widget transport security", () => {
+  it.each([
+    ["config", optionsConfig],
+    ["chat", optionsChat],
+    ["end", optionsEnd],
+  ] as const)(
+    "answers %s preflight without DB work or wildcard CORS",
+    async (_path, handler) => {
+      const response = await handler(preflightRequest(_path));
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost",
+      );
+      expect(response.headers.get("access-control-allow-origin")).not.toBe("*");
+      expect(response.headers.get("access-control-allow-methods")).toBe(
+        _path === "config" ? "GET, OPTIONS" : "POST, OPTIONS",
+      );
+      if (_path === "config") {
+        expect(response.headers.get("access-control-allow-headers")).toBeNull();
+      } else {
+        expect(response.headers.get("access-control-allow-headers")).toContain(
+          "Authorization",
+        );
+      }
+      expect(response.headers.get("vary")).toContain("Origin");
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+      expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects malformed preflight before DB work", async () => {
+    const response = await optionsChat(preflightRequest("chat", "null"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("vary")).toContain("Origin");
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing Origin before token, DB, traffic, or AI work", async () => {
+    const response = await postChat(
+      postRequest(
+        "chat",
+        {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-1",
+        },
+        { Origin: "" },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("denies rotating unknown config identifiers at ingress before widget reads", async () => {
+    mocks.acquireWidgetIngressTraffic.mockResolvedValueOnce({
+      status: "rate_limited",
+      retryAfterSeconds: 19,
+    });
+    const unknownBusinessId = "00000000-0000-4000-8000-000000000099";
+    const response = await getConfig(
+      new NextRequest(
+        `http://localhost/api/widget/config?businessId=${unknownBusinessId}&sessionId=session-unknown`,
+        { headers: { Origin: "https://untrusted.example" } },
+      ),
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: "rate_limited",
+      retryable: true,
+    });
+    expect(response.headers.get("retry-after")).toBe("19");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledWith({
+      endpoint: "config",
+      networkKey: "network-key",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["chat", postChat],
+    ["end", postEnd],
+  ] as const)(
+    "counts a denied-origin or invalid-bearer %s request before authentication",
+    async (path, handler) => {
+      mocks.acquireWidgetIngressTraffic.mockResolvedValueOnce({
+        status: "rate_limited",
+        retryAfterSeconds: 7,
+      });
+      mocks.readWidgetBearerToken.mockReturnValue(null);
+      const response = await handler(
+        postRequest(
+          path,
+          {
+            businessId: "00000000-0000-4000-8000-000000000099",
+            ...(path === "chat" ? { message: "Hello" } : {}),
+            sessionId: "session-rotated",
+          },
+          { Origin: "https://untrusted.example", Authorization: "bad" },
+        ),
+      );
+
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({
+        error: "rate_limited",
+        retryable: true,
+      });
+      expect(response.headers.get("retry-after")).toBe("7");
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledWith({
+        endpoint: path,
+        networkKey: "network-key",
+      });
+      expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+      expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+      expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+      expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails ingress closed without granting unverified CORS authority", async () => {
+    mocks.acquireWidgetIngressTraffic.mockResolvedValueOnce({
+      status: "unavailable",
+    });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_unavailable",
+      retryable: true,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("rate-controls an inactive exact-origin config before preserving its unavailable response", async () => {
+    queueDatabaseResults({
+      data: { id: "widget-1", is_active: false },
+      error: null,
+    });
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false });
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      originHostname: "localhost",
+      sessionId: "session-1",
+      endpoint: "config",
+      networkKey: "network-key",
+      requestKey: "request-key",
+    });
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic 429 when inactive config polling exceeds shared capacity", async () => {
+    queueDatabaseResults({
+      data: { id: "widget-1", is_active: false },
+      error: null,
+    });
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "rate_limited",
+      retryAfterSeconds: 13,
+    });
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: "rate_limited",
+      retryable: true,
+    });
+    expect(response.headers.get("retry-after")).toBe("13");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    // Only the exact-allowlist read needed to decide CORS may precede traffic.
+    expect(mocks.from).toHaveBeenCalledOnce();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.resolveWidgetAttribution).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing bearer token before DB or AI work", async () => {
+    mocks.readWidgetBearerToken.mockReturnValue(null);
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthorized" });
+    expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledWith({
+      endpoint: "chat",
+      networkKey: "network-key",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token replay whose complete binding does not verify", async () => {
+    mocks.verifyWidgetToken.mockReturnValue(false);
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-replayed",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.verifyWidgetToken).toHaveBeenCalledWith("test-token", {
+      businessId: BUSINESS_ID,
+      origin: "http://localhost",
+      sessionId: "session-replayed",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("preserves a shared exact-origin denial without downstream reads", async () => {
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "origin_not_allowed",
+    });
+    const response = await postChat(
+      postRequest(
+        "chat",
+        {
+          businessId: BUSINESS_ID,
+          message: "Hello",
+          sessionId: "session-1",
+        },
+        { Origin: "https://evil.test" },
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledOnce();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("preserves the inactive public-chat response without downstream reads", async () => {
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "widget_inactive",
+    });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false, response: null });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledOnce();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic 429 before downstream reads without quota state or AI", async () => {
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "rate_limited",
+      retryAfterSeconds: 9,
+    });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: "rate_limited",
+      retryable: true,
+    });
+    expect(response.headers.get("retry-after")).toBe("9");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with a typed 503 when shared traffic state is unavailable", async () => {
+    mocks.acquireWidgetTraffic.mockResolvedValue({ status: "unavailable" });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_unavailable",
+      retryable: true,
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits authenticated preview through the same shared adapter", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "concurrency_limited",
+      retryAfterSeconds: 2,
+    });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "preview-session",
+        preview: true,
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+    expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("preserves missing preview configuration semantics from shared traffic", async () => {
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "origin_not_allowed",
+    });
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "preview-session",
+        preview: true,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.releaseWidgetTraffic).not.toHaveBeenCalled();
+  });
+
+  it("strictly rejects unknown chat fields", async () => {
+    const response = await postChat(
+      postRequest("chat", {
+        businessId: BUSINESS_ID,
+        message: "Hello",
+        sessionId: "session-1",
+        unexpectedAdminOverride: true,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("requires the widget token on end-session before conversation reads", async () => {
+    mocks.readWidgetBearerToken.mockReturnValue(null);
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthorized" });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("binds end-session authorization to the token before origin or conversation reads", async () => {
+    mocks.verifyWidgetToken.mockReturnValue(false);
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "session-replayed",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.verifyWidgetToken).toHaveBeenCalledWith("test-token", {
+      businessId: BUSINESS_ID,
+      origin: "http://localhost",
+      sessionId: "session-replayed",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("rejects inactive public end-session before contact writes", async () => {
+    queueDatabaseResults({
+      data: { id: "widget-1", is_active: false },
+      error: null,
+    });
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      available: false,
+    });
+    expect(mocks.from).toHaveBeenCalledOnce();
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledOnce();
+  });
+
+  it("allows authenticated same-business preview end without a public token", async () => {
+    queueDatabaseResults(
+      { data: { id: "widget-1", is_active: false }, error: null },
+      { data: null, error: null },
+    );
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "preview-session",
+        preview: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      available: true,
+    });
+    expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+    expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+    expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "preview_end" }),
+    );
+  });
+
+  it("preserves an inactive race from shared end traffic", async () => {
+    queueDatabaseResults({ data: { id: "widget-1" }, error: null });
+    mocks.acquireWidgetTraffic.mockResolvedValue({
+      status: "widget_inactive",
+    });
+
+    const response = await postEnd(
+      postRequest("end", {
+        businessId: BUSINESS_ID,
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      available: false,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when public config has no configured hostname", async () => {
+    queueDatabaseResults({
+      data: { id: "widget-1", allowed_hostnames: [], is_active: false },
+      error: null,
+    });
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
   });
 });
 
@@ -1537,7 +2402,9 @@ describe("widget attribution responses", () => {
       businessId: BUSINESS_ID,
       hostHeader: "simplassist.com",
     });
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
   });
 
   it("returns retryable 503 with CORS when public attribution lookup fails", async () => {
@@ -1553,10 +2420,12 @@ describe("widget attribution responses", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: "Service temporarily unavailable",
+      error: "service_unavailable",
       retryable: true,
     });
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost",
+    );
   });
 
   it("returns retryable 503 with private cache headers when preview attribution fails", async () => {
@@ -1604,22 +2473,24 @@ describe("owner-only widget preview", () => {
   it.each([
     [403, { error: "workspace_access_denied" }],
     [503, { error: "workspace_access_unavailable", retryable: true }],
-  ])("returns workspace %i with private headers before preview reads", async (status, body) => {
-    mocks.requireWorkspaceRouteAccess.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json(body, { status }),
-    });
+  ])(
+    "returns workspace %i with private headers before preview reads",
+    async (status, body) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json(body, { status }),
+      });
 
-    const response = await getPreviewConfig(previewConfigRequest());
+      const response = await getPreviewConfig(previewConfigRequest());
 
-    expect(response.status).toBe(status);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("vary")).toBe("Cookie");
-    expect(mocks.serverFrom).not.toHaveBeenCalled();
-    expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
-  });
-
+      expect(response.status).toBe(status);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("vary")).toBe("Cookie");
+      expect(mocks.serverFrom).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns 404 without revealing a widget owned by another user", async () => {
     setServerBusinessResult({ data: null, error: null });

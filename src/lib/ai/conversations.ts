@@ -1,5 +1,13 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { buildWidgetSourceProviderEventId } from "@/lib/widget/idempotency.server";
 import type { Conversation, Message, Channel, MessageRole } from "@/types/database";
+
+export class WebChatMessageIdempotencyConflictError extends Error {
+  constructor() {
+    super("web_chat_message_idempotency_conflict");
+    this.name = "WebChatMessageIdempotencyConflictError";
+  }
+}
 
 export async function getOrCreateConversation(
   businessId: string,
@@ -78,7 +86,11 @@ export async function addMessage(
   businessId: string,
   role: MessageRole,
   content: string,
-  channel: Channel
+  channel: Channel,
+  options: {
+    aiReplyReservationId: string;
+    aiReplyReservationAttemptToken: string;
+  } | null = null,
 ): Promise<Message> {
   const { data, error } = await supabaseAdmin
     .from("messages")
@@ -88,6 +100,13 @@ export async function addMessage(
       role,
       content,
       channel,
+      ...(options
+        ? {
+            ai_reply_reservation_id: options.aiReplyReservationId,
+            ai_reply_reservation_attempt_token:
+              options.aiReplyReservationAttemptToken,
+          }
+        : {}),
     })
     .select("*")
     .single();
@@ -103,6 +122,88 @@ export async function addMessage(
   );
 
   return data as Message;
+}
+
+/**
+ * Persist one browser-originated customer message exactly once. The opaque
+ * provider-event key contains no session, email, name, or message content.
+ * A reused client id with different immutable content fails closed.
+ */
+export async function addWebChatInboundMessageOnce(
+  conversationId: string,
+  businessId: string,
+  content: string,
+  clientMessageId: string,
+): Promise<Message> {
+  const providerEventId = buildWidgetSourceProviderEventId({
+    businessId,
+    clientMessageId,
+  });
+
+  const { data, error } = await supabaseAdmin
+    .from("messages")
+    .insert({
+      conversation_id: conversationId,
+      business_id: businessId,
+      role: "customer",
+      content,
+      channel: "web_chat",
+      provider_event_id: providerEventId,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    if (error.code !== "23505") throw error;
+
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from("messages")
+      .select("*")
+      .eq("provider_event_id", providerEventId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (
+      !existing ||
+      existing.business_id !== businessId ||
+      existing.role !== "customer" ||
+      existing.channel !== "web_chat" ||
+      existing.content !== content
+    ) {
+      throw new WebChatMessageIdempotencyConflictError();
+    }
+    await touchConversation(
+      existing.conversation_id,
+      businessId,
+      typeof existing.created_at === "string"
+        ? existing.created_at
+        : new Date().toISOString(),
+    );
+    return existing as Message;
+  }
+
+  if (!data) throw new Error("Web chat message insert returned no row.");
+  await touchConversation(
+    conversationId,
+    businessId,
+    typeof data.created_at === "string"
+      ? data.created_at
+      : new Date().toISOString(),
+  );
+  return data as Message;
+}
+
+export async function getConversationById(
+  conversationId: string,
+): Promise<Conversation> {
+  const { data, error } = await supabaseAdmin
+    .from("conversations")
+    .select("*")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error(`Conversation ${conversationId} was not found.`);
+  return data as Conversation;
 }
 
 /**

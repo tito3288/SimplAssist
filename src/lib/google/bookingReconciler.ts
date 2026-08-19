@@ -38,7 +38,9 @@ export type CalendarBookingReconciliationCounts = {
   failed: number;
 };
 
-export async function reconcilePendingCalendarBookings(): Promise<CalendarBookingReconciliationCounts> {
+export async function reconcilePendingCalendarBookings(options?: {
+  deadlineAt?: number;
+}): Promise<CalendarBookingReconciliationCounts> {
   const staleBefore = new Date(
     Date.now() - STALE_BOOKING_CLAIM_MS
   ).toISOString();
@@ -48,7 +50,6 @@ export async function reconcilePendingCalendarBookings(): Promise<CalendarBookin
     .eq("status", "pending")
     .not("operation_claim_token", "is", null)
     .not("businesses.owner_id", "is", null)
-    .is("businesses.deleted_at", null)
     .lt("operation_claimed_at", staleBefore)
     .order("reconciliation_attempted_at", {
       ascending: true,
@@ -70,6 +71,14 @@ export async function reconcilePendingCalendarBookings(): Promise<CalendarBookin
   };
 
   for (const booking of (data ?? []) as PendingCalendarBooking[]) {
+    // The daily maintenance route supplies its remaining wall-clock budget;
+    // other callers keep the established ten-row recovery capacity.
+    if (
+      options?.deadlineAt !== undefined &&
+      Date.now() >= options.deadlineAt
+    ) {
+      break;
+    }
     let claimed: RecoverableCalendarBooking;
     try {
       claimed = await claimCalendarBookingReconciliation(booking);

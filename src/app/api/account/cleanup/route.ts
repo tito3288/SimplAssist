@@ -5,9 +5,17 @@ import {
 } from "@/lib/account/deletion.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { reconcilePendingCalendarBookings } from "@/lib/google/bookingReconciler";
+import { reconcileCalendarProviderOperations } from "@/lib/google/providerOperationReconciler";
 import { purgeExpiredGoogleCalendarOAuthAttempts } from "@/lib/google/oauthAttempt.server";
 
 const CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
+// The hosted caller currently has a 30-second deadline. Maintenance
+// reconciliation is useful before destructive cleanup, but it may never
+// consume the whole request and starve the authoritative account-cleanup
+// work. Late reconciliation promises are drained; all their DB transitions
+// still serialize on the business mutex and remain safe if they settle later.
+const RECONCILIATION_PRELUDE_BUDGET_MS = 8_000;
+const PROVIDER_RECONCILIATION_BUDGET_MS = 5_000;
 
 type CleanupStripeAction = {
   generation: number;
@@ -68,6 +76,62 @@ export async function POST(request: NextRequest) {
     await purgeExpiredGoogleCalendarOAuthAttempts();
   } catch {
     console.error("[cleanup] Google OAuth attempt purge failed");
+  }
+
+  // Resolve bounded provider work before expired-account cleanup. One shared
+  // route-level budget covers both reconcilers; their individual provider
+  // deadlines alone are not enough to fit the hosted caller's 30-second cap.
+  const reconciliationStartedAt = Date.now();
+  // A same-run success releases the owner-null guard without waiting for the
+  // next daily heartbeat; failures remain fail-closed and do not block
+  // unrelated businesses from cleanup.
+  let providerReconciliation = {
+    attempted: 0,
+    finalized: 0,
+    failed: 0,
+    deferred: 0,
+  };
+  try {
+    providerReconciliation = await withCleanupPreludeDeadline(
+      reconcileCalendarProviderOperations(),
+      Math.min(
+        PROVIDER_RECONCILIATION_BUDGET_MS,
+        remainingReconciliationPreludeMs(reconciliationStartedAt),
+      ),
+    );
+    console.log("[cleanup] Calendar provider reconciliation completed", {
+      ...providerReconciliation,
+    });
+  } catch {
+    providerReconciliation.deferred++;
+    console.error("[cleanup] Calendar provider reconciliation failed");
+  }
+
+  let bookingReconciliation = {
+    confirmed: 0,
+    notFound: 0,
+    failed: 0,
+  };
+  try {
+    const remaining = remainingReconciliationPreludeMs(
+      reconciliationStartedAt,
+    );
+    if (remaining <= 0) {
+      throw new Error("Calendar reconciliation prelude budget exhausted");
+    }
+    bookingReconciliation = await withCleanupPreludeDeadline(
+      reconcilePendingCalendarBookings({
+        deadlineAt:
+          reconciliationStartedAt + RECONCILIATION_PRELUDE_BUDGET_MS,
+      }),
+      remaining,
+    );
+    console.log("[cleanup] Calendar booking reconciliation completed", {
+      ...bookingReconciliation,
+    });
+  } catch {
+    bookingReconciliation.failed++;
+    console.error("[cleanup] Calendar booking reconciliation failed");
   }
 
   const { data: expiredBusinesses, error: queryError } = await supabaseAdmin
@@ -305,20 +369,47 @@ export async function POST(request: NextRequest) {
     console.log(`[cleanup] Permanently cleaned business ${business.id}`);
   }
 
-  // Booking recovery is lower priority than account teardown. Run it after
-  // the critical cleanup work and keep provider failures non-blocking.
-  try {
-    await reconcilePendingCalendarBookings();
-  } catch {
-    console.error("[cleanup] Calendar booking reconciliation failed");
-  }
-
   return NextResponse.json({
     success: failedIds.size === 0,
     deleted_count: deletedCount,
     failed_count: failedIds.size,
     failed_ids: Array.from(failedIds),
+    calendar_provider_reconciliation: providerReconciliation,
+    calendar_booking_reconciliation: bookingReconciliation,
   });
+}
+
+function remainingReconciliationPreludeMs(startedAt: number): number {
+  return Math.max(
+    0,
+    RECONCILIATION_PRELUDE_BUDGET_MS - (Date.now() - startedAt),
+  );
+}
+
+async function withCleanupPreludeDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    promise.catch(() => undefined);
+    throw new Error("Calendar reconciliation prelude budget exhausted");
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  promise.catch(() => undefined);
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Calendar reconciliation timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function parseGraceStripeAction(value: unknown): GraceStripeAction | null {

@@ -110,25 +110,38 @@ export default function CalendarView({
     eventCreationState
   );
   const [deleteEventId, setDeleteEventId] = useState<string | null>(null);
+  const [deleteOperationId, setDeleteOperationId] = useState<string | null>(
+    null
+  );
   const [deleting, setDeleting] = useState(false);
   const [viewEvent, setViewEvent] = useState<CalendarEvent | null>(null);
   const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
 
   async function handleDeleteEvent() {
-    if (!deleteEventId) return;
+    if (!deleteEventId || !deleteOperationId) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/calendar/events?eventId=${encodeURIComponent(deleteEventId)}`, {
+      const params = new URLSearchParams({
+        eventId: deleteEventId,
+        operationId: deleteOperationId,
+      });
+      const res = await fetch(`/api/calendar/events?${params.toString()}`, {
         method: "DELETE",
       });
       if (res.ok) {
         fetchEvents();
+        setDeleteEventId(null);
+        setDeleteOperationId(null);
+      } else if (res.status === 409) {
+        // The prior identity is definitively conflicted; a new deliberate
+        // attempt may use a fresh UUID. Retryable/ambiguous failures retain
+        // the exact ID so provider reconciliation can converge safely.
+        setDeleteOperationId(globalThis.crypto.randomUUID());
       }
     } catch {
       // Handle silently
     } finally {
       setDeleting(false);
-      setDeleteEventId(null);
     }
   }
 
@@ -507,6 +520,7 @@ export default function CalendarView({
             <button
               onClick={() => {
                 setDeleteEventId(viewEvent?.id || null);
+                setDeleteOperationId(globalThis.crypto.randomUUID());
                 setViewEvent(null);
               }}
               className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
@@ -521,13 +535,19 @@ export default function CalendarView({
       {/* Delete Confirmation Modal */}
       <Modal
         open={!!deleteEventId}
-        onClose={() => setDeleteEventId(null)}
+        onClose={() => {
+          setDeleteEventId(null);
+          setDeleteOperationId(null);
+        }}
         title="Delete Event"
         description="Are you sure? This will remove the event from your Google Calendar and notify any attendees."
       >
         <div className="flex items-center gap-3 pt-2">
           <button
-            onClick={() => setDeleteEventId(null)}
+            onClick={() => {
+              setDeleteEventId(null);
+              setDeleteOperationId(null);
+            }}
             disabled={deleting}
             className="flex-1 rounded-full border border-[#e7e0d4] dark:border-white/[0.12] px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-[#bdbdbf] hover:bg-[#faf6ef] dark:hover:bg-white/[0.04] transition-colors"
           >

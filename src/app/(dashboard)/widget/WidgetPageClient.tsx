@@ -29,6 +29,7 @@ export default function WidgetPageClient({
     lead_capture_enabled: config.lead_capture_enabled,
     lead_capture_timing: config.lead_capture_timing,
     quick_replies: config.quick_replies || [],
+    allowed_hostnames: config.allowed_hostnames || [],
     is_active: config.is_active,
   }));
 

@@ -936,8 +936,16 @@ SELECT is(
 SELECT ok(
   (
     SELECT bool_and(
-      NOT procedure_row.prosecdef
-      AND procedure_row.proconfig @> ARRAY['search_path=public, pg_temp']
+      CASE
+        WHEN procedure_row.oid =
+          'public.complete_google_calendar_oauth_connection(uuid,uuid,uuid,uuid,text,text,text,timestamptz,text,text)'::regprocedure
+        THEN procedure_row.prosecdef
+          AND procedure_row.proconfig =
+            ARRAY['search_path=public, pg_temp']::text[]
+        ELSE NOT procedure_row.prosecdef
+          AND procedure_row.proconfig @>
+            ARRAY['search_path=public, pg_temp']::text[]
+      END
     )
     FROM pg_proc AS procedure_row
     WHERE procedure_row.oid = ANY (ARRAY[
@@ -961,7 +969,7 @@ SELECT ok(
       'public.cleanup_expired_business(uuid)'::regprocedure
     ])
   ),
-  'every callable lifecycle function is security-invoker with a fixed search path'
+  'lifecycle functions retain fixed search paths and only OAuth completion uses its hardened definer boundary'
 );
 
 SELECT is(

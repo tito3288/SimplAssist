@@ -479,7 +479,7 @@ describe("database adapter contracts", () => {
         accessToken: "google-access-token",
         refreshToken: "google-refresh-token",
         tokenExpiry: "2026-08-04T13:00:00.000Z",
-        googleEmail: null,
+        googleEmail: "client@example.com",
       });
       throw new Error("Expected a non-boolean completion result to fail");
     } catch (error) {
@@ -538,10 +538,24 @@ describe("database adapter contracts", () => {
           accessToken: "google-access-token",
           refreshToken: "google-refresh-token",
           tokenExpiry: "2026-08-04T13:00:00.000Z",
-          googleEmail: null,
+          googleEmail: "client@example.com",
         }),
       ).rejects.toMatchObject({ code: "service_unavailable", status: 503 });
     }
+  });
+
+  it("rejects a missing provider email before credential persistence", async () => {
+    await expect(
+      completeGoogleCalendarOAuthConnection({
+        attemptId: ATTEMPT_ID,
+        identity: canonicalIdentity,
+        accessToken: "google-access-token",
+        refreshToken: "google-refresh-token",
+        tokenExpiry: "2026-08-04T13:00:00.000Z",
+        googleEmail: null,
+      }),
+    ).rejects.toMatchObject({ code: "configuration_error", status: 503 });
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("rejects widened composite rows instead of exposing unknown fields", async () => {

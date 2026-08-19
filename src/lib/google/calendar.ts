@@ -5,36 +5,217 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BusinessHours } from "@/types/database";
 import {
   canUseFeature,
-  resolveBusinessEntitlements,
+  resolveBusinessEntitlements
 } from "@/lib/billing/entitlements";
 import {
   assertBookingOperationallyAllowed,
   BookingOperationalStateError,
-  isBookingOperationalBlockedError,
+  isBookingOperationalBlockedError
 } from "./bookingOperational.server";
 import { businessWallTimeToInstant } from "./calendarTime";
+import { normalizeKnowledgeKey } from "@/lib/contentQuality";
+import { normalizeEmail } from "@/lib/leads/classification";
 
 const SLOT_DURATION_MINUTES = 30;
+const MAX_BOOKING_DURATION_MINUTES = 240;
+const DEFAULT_BOOKING_MIN_LEAD_MINUTES = 60;
+const DEFAULT_BOOKING_MAX_HORIZON_DAYS = 90;
+const MAX_CONFIGURED_LEAD_MINUTES = 30 * 24 * 60;
+const MAX_CONFIGURED_HORIZON_DAYS = 365;
+const MAX_CUSTOMER_NAME_LENGTH = 200;
+const MAX_SERVICE_NAME_LENGTH = 200;
+const MAX_CUSTOMER_PHONE_LENGTH = 50;
+const MAX_CUSTOMER_EMAIL_LENGTH = 254;
+const MAX_START_TIME_LENGTH = 64;
+const MAX_TIMEZONE_LENGTH = 100;
+const CALENDAR_AVAILABILITY_TIMEOUT_MS = 10_000;
+const CALENDAR_MUTATION_TIMEOUT_MS = 60_000;
+const CALENDAR_RECOVERY_TIMEOUT_MS = 10_000;
+const CALENDAR_CREDENTIAL_TIMEOUT_MS = 5_000;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UNSAFE_TEXT_PATTERN = /[\u0000-\u001f\u007f]/;
 const CREATE_BOOKING_TIMEZONE_ERROR =
   "A valid IANA business timezone is required to create a booking.";
+
+interface BookingWindowPolicy {
+  minimumLeadMinutes: number;
+  maximumHorizonDays: number;
+}
+
+interface BusinessLocalParts {
+  date: string;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+interface ActiveServiceRow {
+  id: string;
+  business_id: string;
+  name: string;
+  is_active: boolean;
+}
+
+interface LinkedContactRow {
+  id: string;
+  business_id: string;
+  email: string | null;
+}
+
+interface ValidatedBookingParams {
+  customerName: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  serviceName: string;
+  startTime: string;
+  durationMinutes: number;
+}
 
 function requireBusinessTimeZone(
   timezone: string,
   errorMessage: string
 ): string {
-  if (typeof timezone !== "string" || timezone.trim().length === 0) {
+  if (
+    typeof timezone !== "string" ||
+    timezone.trim().length === 0 ||
+    timezone.length > MAX_TIMEZONE_LENGTH
+  ) {
     throw new Error(errorMessage);
   }
 
+  const normalizedTimezone = timezone.trim();
+
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(
+    new Intl.DateTimeFormat("en-US", { timeZone: normalizedTimezone }).format(
       new Date(0)
     );
   } catch {
     throw new Error(errorMessage);
   }
 
-  return timezone;
+  return normalizedTimezone;
+}
+
+function configuredInteger(
+  environmentName: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number
+): number {
+  const raw = process.env[environmentName];
+  if (raw === undefined || raw === "") return defaultValue;
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid ${environmentName} calendar configuration.`);
+  }
+
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`Invalid ${environmentName} calendar configuration.`);
+  }
+  return value;
+}
+
+function bookingWindowPolicy(): BookingWindowPolicy {
+  return {
+    minimumLeadMinutes: configuredInteger(
+      "CALENDAR_BOOKING_MIN_LEAD_MINUTES",
+      DEFAULT_BOOKING_MIN_LEAD_MINUTES,
+      0,
+      MAX_CONFIGURED_LEAD_MINUTES
+    ),
+    maximumHorizonDays: configuredInteger(
+      "CALENDAR_BOOKING_MAX_HORIZON_DAYS",
+      DEFAULT_BOOKING_MAX_HORIZON_DAYS,
+      1,
+      MAX_CONFIGURED_HORIZON_DAYS
+    )
+  };
+}
+
+function businessLocalParts(
+  instant: Date,
+  timezone: string
+): BusinessLocalParts {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    calendar: "iso8601",
+    numberingSystem: "latn",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(instant);
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+  return {
+    date: `${String(values.year).padStart(4, "0")}-${String(values.month).padStart(2, "0")}-${String(values.day).padStart(2, "0")}`,
+    hour: values.hour,
+    minute: values.minute,
+    second: values.second
+  };
+}
+
+function cleanRequiredText(
+  value: unknown,
+  label: string,
+  maximumLength: number
+): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} is required to create a booking.`);
+  }
+  if (value.length > maximumLength || UNSAFE_TEXT_PATTERN.test(value)) {
+    throw new Error(
+      `A valid ${label.toLowerCase()} is required to create a booking.`
+    );
+  }
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (
+    !normalized ||
+    normalized.length > maximumLength ||
+    UNSAFE_TEXT_PATTERN.test(normalized)
+  ) {
+    throw new Error(
+      `A valid ${label.toLowerCase()} is required to create a booking.`
+    );
+  }
+  return normalized;
+}
+
+function cleanOptionalText(
+  value: unknown,
+  label: string,
+  maximumLength: number
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") {
+    throw new Error(
+      `A valid ${label.toLowerCase()} is required to create a booking.`
+    );
+  }
+  if (value.length > maximumLength || UNSAFE_TEXT_PATTERN.test(value)) {
+    throw new Error(
+      `A valid ${label.toLowerCase()} is required to create a booking.`
+    );
+  }
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (
+    !normalized ||
+    normalized.length > maximumLength ||
+    UNSAFE_TEXT_PATTERN.test(normalized)
+  ) {
+    throw new Error(
+      `A valid ${label.toLowerCase()} is required to create a booking.`
+    );
+  }
+  return normalized;
 }
 
 function businessCalendarDate(now: Date, timezone: string): Date {
@@ -42,7 +223,7 @@ function businessCalendarDate(now: Date, timezone: string): Date {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
-    day: "2-digit",
+    day: "2-digit"
   }).formatToParts(now);
   const values = Object.fromEntries(
     parts
@@ -75,7 +256,15 @@ function normalizeDate(input: string, timezone: string): string {
   }
 
   // Handle day names: "friday", "this friday", "next friday", etc.
-  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const dayNames = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday"
+  ];
   const isNext = lower.startsWith("next ");
   const cleaned = lower.replace(/^(this |next )/, "");
   const dayIndex = dayNames.indexOf(cleaned);
@@ -90,13 +279,8 @@ function normalizeDate(input: string, timezone: string): string {
     return formatYMD(d);
   }
 
-  // Try native Date parsing as last resort (handles "April 11, 2026", "4/11/2026", etc.)
-  const parsed = new Date(`${input.trim()} 12:00:00 UTC`);
-  if (!isNaN(parsed.getTime()) && parsed.getUTCFullYear() > 2000) {
-    return formatYMD(parsed);
-  }
-
-  // Return original — will likely fail downstream, but at least we tried
+  // Return the original so strict downstream validation rejects unsupported
+  // or ambiguous natural-language dates deterministically.
   return input;
 }
 
@@ -143,6 +327,158 @@ function parseBookingStartTime(input: string, timezone: string): Date {
   throw new Error(
     "Appointment start time must be YYYY-MM-DDTHH:mm:ss in the business timezone or an ISO 8601 timestamp with a UTC offset."
   );
+}
+
+function validateAvailabilityDate(
+  normalizedDate: string,
+  timezone: string,
+  policy: BookingWindowPolicy,
+  now: Date
+): void {
+  const today = formatYMD(businessCalendarDate(now, timezone));
+  const horizonDate = formatYMD(
+    businessCalendarDate(
+      new Date(now.getTime() + policy.maximumHorizonDays * 24 * 60 * 60 * 1000),
+      timezone
+    )
+  );
+  if (normalizedDate < today) {
+    throw new RangeError(
+      "Appointment availability cannot be checked in the past."
+    );
+  }
+  if (normalizedDate > horizonDate) {
+    throw new RangeError("Appointment date is outside the booking horizon.");
+  }
+}
+
+function validateBookingWindow(
+  startDate: Date,
+  endDate: Date,
+  timezone: string,
+  policy: BookingWindowPolicy,
+  now: Date
+): BusinessLocalParts {
+  const localStart = businessLocalParts(startDate, timezone);
+  const localEnd = businessLocalParts(endDate, timezone);
+  if (
+    startDate.getUTCMilliseconds() !== 0 ||
+    localStart.second !== 0 ||
+    localStart.minute % SLOT_DURATION_MINUTES !== 0
+  ) {
+    throw new RangeError(
+      "Appointment start time must align to a 30-minute boundary."
+    );
+  }
+
+  const earliestStart = new Date(
+    now.getTime() + policy.minimumLeadMinutes * 60 * 1000
+  );
+  const latestStart = new Date(
+    now.getTime() + policy.maximumHorizonDays * 24 * 60 * 60 * 1000
+  );
+  if (startDate < earliestStart) {
+    throw new RangeError(
+      `Appointment start time must be at least ${policy.minimumLeadMinutes} minutes in the future.`
+    );
+  }
+  if (startDate > latestStart) {
+    throw new RangeError(
+      "Appointment start time is outside the booking horizon."
+    );
+  }
+  if (localStart.date !== localEnd.date) {
+    throw new RangeError(
+      "Appointments must start and end on the same business day."
+    );
+  }
+  return localStart;
+}
+
+function requireValidLinkage(linkage: BookingLinkage): void {
+  for (const [label, value] of [
+    ["Contact", linkage?.contactId],
+    ["Conversation", linkage?.conversationId],
+    ["Source message", linkage?.sourceMessageId]
+  ] as const) {
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw new Error(
+        "Contact, conversation, and source message linkage are required."
+      );
+    }
+    if (value.length > 36) {
+      throw new Error(`${label} linkage is invalid.`);
+    }
+  }
+}
+
+function normalizeBookingParams(
+  params: BookingParams,
+  linkage: BookingLinkage
+): ValidatedBookingParams {
+  if (!params || typeof params !== "object") {
+    throw new Error("Valid booking details are required.");
+  }
+  requireValidLinkage(linkage);
+
+  const customerName = cleanRequiredText(
+    params.customerName,
+    "Customer name",
+    MAX_CUSTOMER_NAME_LENGTH
+  );
+  const serviceName = cleanRequiredText(
+    params.serviceName,
+    "Service name",
+    MAX_SERVICE_NAME_LENGTH
+  );
+  const customerPhone = cleanOptionalText(
+    params.customerPhone,
+    "Customer phone",
+    MAX_CUSTOMER_PHONE_LENGTH
+  );
+  let customerEmail: string | undefined;
+  if (params.customerEmail !== undefined && params.customerEmail !== null) {
+    if (typeof params.customerEmail !== "string") {
+      throw new Error(
+        "A valid customer email is required to create a booking."
+      );
+    }
+    customerEmail = normalizeEmail(params.customerEmail) ?? undefined;
+    if (!customerEmail || customerEmail.length > MAX_CUSTOMER_EMAIL_LENGTH) {
+      throw new Error(
+        "A valid customer email is required to create a booking."
+      );
+    }
+  }
+  if (
+    typeof params.startTime !== "string" ||
+    params.startTime.length === 0 ||
+    params.startTime.length > MAX_START_TIME_LENGTH ||
+    UNSAFE_TEXT_PATTERN.test(params.startTime)
+  ) {
+    throw new Error("A valid booking start time is required.");
+  }
+
+  const durationMinutes = params.durationMinutes ?? SLOT_DURATION_MINUTES;
+  if (
+    !Number.isSafeInteger(durationMinutes) ||
+    durationMinutes < SLOT_DURATION_MINUTES ||
+    durationMinutes > MAX_BOOKING_DURATION_MINUTES ||
+    durationMinutes % SLOT_DURATION_MINUTES !== 0
+  ) {
+    throw new Error(
+      "Booking duration must be between 30 and 240 minutes in 30-minute increments."
+    );
+  }
+
+  return {
+    customerName,
+    customerPhone,
+    customerEmail,
+    serviceName,
+    startTime: params.startTime,
+    durationMinutes
+  };
 }
 
 interface BookingParams {
@@ -195,11 +531,262 @@ export class DirectBookingNotEntitledError extends Error {
   }
 }
 
+export class BookingSlotUnavailableError extends Error {
+  constructor() {
+    super("The requested appointment time is no longer available.");
+    this.name = "BookingSlotUnavailableError";
+  }
+}
+
 async function requireDirectBooking(businessId: string): Promise<void> {
   const entitlements = await resolveBusinessEntitlements(businessId);
   if (!canUseFeature(entitlements, "direct_booking")) {
     throw new DirectBookingNotEntitledError();
   }
+}
+
+async function loadExistingCalendarBooking(
+  businessId: string,
+  linkage: BookingLinkage
+): Promise<CalendarBookingRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from("calendar_bookings")
+    .select(
+      "id,business_id,contact_id,conversation_id,source_message_id,google_calendar_id,google_event_id,event_summary,request_fingerprint,operation_claim_token,operation_claimed_at,reconciliation_attempt_count,reconciliation_attempted_at,status,starts_at,ends_at"
+    )
+    .eq("business_id", businessId)
+    .eq("source_message_id", linkage.sourceMessageId)
+    .maybeSingle();
+  if (error) {
+    throw new Error("Could not check existing calendar booking state.");
+  }
+  if (!data) return null;
+
+  const booking = requireCalendarBookingRow(data, "reserve");
+  assertBookingLinkage(booking, businessId, linkage);
+  return booking;
+}
+
+function requireCalendarId(value: unknown): string {
+  const calendarId = typeof value === "string" ? value.trim() : "";
+  if (
+    !calendarId ||
+    calendarId.length > 1024 ||
+    UNSAFE_TEXT_PATTERN.test(calendarId)
+  ) {
+    throw new Error("The connected Google Calendar selection is invalid.");
+  }
+  return calendarId;
+}
+
+function requireCalendarProviderNamespace(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The connected Google Calendar identity is unavailable.");
+  }
+  const token = value as { calendar_id?: unknown; google_email?: unknown };
+  const calendarId = requireCalendarId(token.calendar_id || "primary");
+  const googleEmail =
+    typeof token.google_email === "string"
+      ? token.google_email.trim().toLowerCase()
+      : "";
+  if (!googleEmail || googleEmail.length > 320 || UNSAFE_TEXT_PATTERN.test(googleEmail)) {
+    throw new Error("The connected Google Calendar identity is unavailable.");
+  }
+  return `${googleEmail}\n${calendarId}`;
+}
+
+function requireBusinessHours(
+  data: unknown,
+  businessId: string,
+  dayOfWeek: number
+): BusinessHours {
+  const hours = data as Partial<BusinessHours> | null;
+  if (
+    !hours ||
+    hours.business_id !== businessId ||
+    hours.day_of_week !== dayOfWeek ||
+    typeof hours.open_time !== "string" ||
+    typeof hours.close_time !== "string" ||
+    typeof hours.is_closed !== "boolean"
+  ) {
+    throw new Error("Configured business hours are unavailable.");
+  }
+  return hours as BusinessHours;
+}
+
+async function loadBookingCatalogContext(
+  businessId: string,
+  requestedServiceName: string,
+  contactId: string,
+  localStart: BusinessLocalParts,
+  customerEmail?: string
+): Promise<{
+  serviceId: string;
+  serviceName: string;
+  customerEmail?: string;
+  hours: BusinessHours;
+}> {
+  const dayDate = new Date(`${localStart.date}T00:00:00.000Z`);
+  const dayOfWeek = dayDate.getUTCDay();
+  const [servicesResult, contactResult, hoursResult] = await Promise.all([
+    supabaseAdmin
+      .from("services")
+      .select("id,business_id,name,is_active")
+      .eq("business_id", businessId)
+      .eq("is_active", true),
+    supabaseAdmin
+      .from("contacts")
+      .select("id,business_id,email")
+      .eq("business_id", businessId)
+      .eq("id", contactId)
+      .single(),
+    supabaseAdmin
+      .from("business_hours")
+      .select("id,business_id,day_of_week,open_time,close_time,is_closed")
+      .eq("business_id", businessId)
+      .eq("day_of_week", dayOfWeek)
+      .single()
+  ]);
+
+  if (servicesResult.error) {
+    throw new Error("Could not validate the business service catalog.");
+  }
+  if (contactResult.error) {
+    throw new Error("Could not validate the booking contact.");
+  }
+  if (hoursResult.error) {
+    throw new Error("Could not validate configured business hours.");
+  }
+
+  const requestedServiceKey = normalizeKnowledgeKey(requestedServiceName);
+  const matchingServices = Array.isArray(servicesResult.data)
+    ? servicesResult.data.filter((candidate: unknown) => {
+        const service = candidate as Partial<ActiveServiceRow>;
+        return (
+          typeof service.id === "string" &&
+          UUID_PATTERN.test(service.id) &&
+          service.business_id === businessId &&
+          service.is_active === true &&
+          typeof service.name === "string" &&
+          service.name.length <= MAX_SERVICE_NAME_LENGTH &&
+          !UNSAFE_TEXT_PATTERN.test(service.name) &&
+          normalizeKnowledgeKey(service.name) === requestedServiceKey
+        );
+      })
+    : [];
+  if (matchingServices.length !== 1) {
+    throw new Error(
+      "The requested service must match one active service in the business catalog."
+    );
+  }
+  const canonicalService = matchingServices[0] as ActiveServiceRow;
+
+  const contact = contactResult.data as Partial<LinkedContactRow> | null;
+  if (
+    !contact ||
+    contact.id !== contactId ||
+    contact.business_id !== businessId ||
+    !(contact.email === null || typeof contact.email === "string")
+  ) {
+    throw new Error("The booking contact could not be validated.");
+  }
+  if (customerEmail) {
+    const persistedEmail = normalizeEmail(contact.email);
+    if (!persistedEmail || persistedEmail !== customerEmail) {
+      throw new Error(
+        "A calendar invitation can only be sent to the validated email saved on this contact."
+      );
+    }
+  }
+
+  return {
+    serviceId: canonicalService.id,
+    serviceName: canonicalService.name
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/g, " "),
+    customerEmail,
+    hours: requireBusinessHours(hoursResult.data, businessId, dayOfWeek)
+  };
+}
+
+function assertWithinBusinessHours(
+  startDate: Date,
+  endDate: Date,
+  localStart: BusinessLocalParts,
+  timezone: string,
+  hours: BusinessHours
+): void {
+  if (hours.is_closed) {
+    throw new RangeError(
+      "The business is closed at the requested appointment time."
+    );
+  }
+  const opensAt = businessWallTimeToInstant(
+    localStart.date,
+    hours.open_time,
+    timezone
+  );
+  const closesAt = businessWallTimeToInstant(
+    localStart.date,
+    hours.close_time,
+    timezone
+  );
+  if (closesAt <= opensAt || startDate < opensAt || endDate > closesAt) {
+    throw new RangeError(
+      "The requested appointment must fit entirely within configured business hours."
+    );
+  }
+}
+
+function validatedBusyPeriods(
+  response: { data: calendar_v3.Schema$FreeBusyResponse },
+  calendarId: string
+): Array<{ start: number; end: number }> {
+  const calendarResult = response?.data?.calendars?.[calendarId];
+  const errors = calendarResult?.errors;
+  if (
+    !calendarResult ||
+    (errors !== undefined && (!Array.isArray(errors) || errors.length > 0)) ||
+    (calendarResult.busy !== undefined && !Array.isArray(calendarResult.busy))
+  ) {
+    throw new Error("Google Calendar availability could not be verified.");
+  }
+
+  return (calendarResult.busy ?? []).map((period) => {
+    const start =
+      typeof period.start === "string" ? Date.parse(period.start) : Number.NaN;
+    const end =
+      typeof period.end === "string" ? Date.parse(period.end) : Number.NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      throw new Error("Google Calendar returned invalid availability data.");
+    }
+    return { start, end };
+  });
+}
+
+async function calendarRangeIsBusy(
+  calendar: ReturnType<typeof getCalendarService>,
+  calendarId: string,
+  startDate: Date,
+  endDate: Date,
+  timezone: string
+): Promise<boolean> {
+  const response = await calendar.freebusy.query(
+    {
+      requestBody: {
+        timeMin: startDate.toISOString(),
+        timeMax: endDate.toISOString(),
+        timeZone: timezone,
+        items: [{ id: calendarId }]
+      }
+    },
+    { timeout: CALENDAR_AVAILABILITY_TIMEOUT_MS, retry: false }
+  );
+  return validatedBusyPeriods(response, calendarId).some(
+    (period) =>
+      startDate.getTime() < period.end && endDate.getTime() > period.start
+  );
 }
 
 export async function checkAvailability(
@@ -213,6 +800,22 @@ export async function checkAvailability(
   );
   await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
+  if (
+    typeof date !== "string" ||
+    date.length === 0 ||
+    date.length > 32 ||
+    UNSAFE_TEXT_PATTERN.test(date)
+  ) {
+    throw new RangeError("A valid appointment date is required.");
+  }
+  const policy = bookingWindowPolicy();
+  const now = new Date();
+  const normalizedDate = normalizeDate(date, businessTimezone);
+  if (!isValidCalendarDate(normalizedDate)) {
+    throw new RangeError(`Invalid appointment date: ${date}`);
+  }
+  validateAvailabilityDate(normalizedDate, businessTimezone, policy, now);
+
   const client = await getAuthenticatedClient(businessId);
   if (!client) {
     throw new Error("Google Calendar not connected");
@@ -221,33 +824,31 @@ export async function checkAvailability(
   const calendar = getCalendarService(client);
 
   // Get the calendar ID for this business
-  const { data: tokenData } = await supabaseAdmin
+  const { data: tokenData, error: tokenError } = await supabaseAdmin
     .from("google_calendar_tokens")
-    .select("calendar_id")
+    .select("calendar_id, google_email")
     .eq("business_id", businessId)
     .single();
-
-  const calendarId = tokenData?.calendar_id || "primary";
-
-  // Normalize date in case AI passes a relative date string
-  const normalizedDate = normalizeDate(date, businessTimezone);
+  if (tokenError) {
+    throw new Error("Could not load the connected Google Calendar.");
+  }
+  const calendarId = requireCalendarId(tokenData?.calendar_id || "primary");
 
   // Get business hours for this day
-  if (!isValidCalendarDate(normalizedDate)) {
-    throw new RangeError(`Invalid appointment date: ${date}`);
-  }
   const dayDate = new Date(`${normalizedDate}T00:00:00.000Z`);
   const dayOfWeek = dayDate.getUTCDay();
 
-  const { data: hoursData } = await supabaseAdmin
+  const { data: hoursData, error: hoursError } = await supabaseAdmin
     .from("business_hours")
     .select("*")
     .eq("business_id", businessId)
     .eq("day_of_week", dayOfWeek)
     .single();
-
-  const hours = hoursData as BusinessHours | null;
-  if (!hours || hours.is_closed) {
+  if (hoursError) {
+    throw new Error("Could not load configured business hours.");
+  }
+  const hours = requireBusinessHours(hoursData, businessId, dayOfWeek);
+  if (hours.is_closed) {
     await assertBookingOperationallyAllowed(businessId);
     return [];
   }
@@ -264,20 +865,31 @@ export async function checkAvailability(
     hours.close_time,
     businessTimezone
   );
+  if (maxDate <= minDate) {
+    throw new Error("Configured business hours contain an invalid time range.");
+  }
 
   await assertBookingOperationallyAllowed(businessId);
-  const freeBusy = await calendar.freebusy.query({
-    requestBody: {
-      timeMin: minDate.toISOString(),
-      timeMax: maxDate.toISOString(),
-      timeZone: businessTimezone,
-      items: [{ id: calendarId }],
+  const freeBusy = await calendar.freebusy.query(
+    {
+      requestBody: {
+        timeMin: minDate.toISOString(),
+        timeMax: maxDate.toISOString(),
+        timeZone: businessTimezone,
+        items: [{ id: calendarId }]
+      }
     },
-  });
+    { timeout: CALENDAR_AVAILABILITY_TIMEOUT_MS, retry: false }
+  );
   await assertBookingOperationallyAllowed(businessId);
 
-  const busySlots =
-    freeBusy.data.calendars?.[calendarId]?.busy || [];
+  const busySlots = validatedBusyPeriods(freeBusy, calendarId);
+  const earliestStart = new Date(
+    now.getTime() + policy.minimumLeadMinutes * 60 * 1000
+  );
+  const latestStart = new Date(
+    now.getTime() + policy.maximumHorizonDays * 24 * 60 * 60 * 1000
+  );
 
   // Generate all possible slots during business hours
   const slots: string[] = [];
@@ -287,8 +899,10 @@ export async function checkAvailability(
   const openMinutes = openHour * 60 + openMin;
   const closeMinutes = closeHour * 60 + closeMin;
 
+  const firstAlignedSlot =
+    Math.ceil(openMinutes / SLOT_DURATION_MINUTES) * SLOT_DURATION_MINUTES;
   for (
-    let m = openMinutes;
+    let m = firstAlignedSlot;
     m + SLOT_DURATION_MINUTES <= closeMinutes;
     m += SLOT_DURATION_MINUTES
   ) {
@@ -310,11 +924,11 @@ export async function checkAvailability(
       slotStart.getTime() + SLOT_DURATION_MINUTES * 60 * 1000
     );
 
+    if (slotStart < earliestStart || slotStart > latestStart) continue;
+
     // Check if this slot overlaps with any busy period
     const isBusy = busySlots.some((busy) => {
-      const busyStart = new Date(busy.start!).getTime();
-      const busyEnd = new Date(busy.end!).getTime();
-      return slotStart.getTime() < busyEnd && slotEnd.getTime() > busyStart;
+      return slotStart.getTime() < busy.end && slotEnd.getTime() > busy.start;
     });
 
     if (!isBusy) {
@@ -343,33 +957,102 @@ export async function createBooking(
   );
   await assertBookingOperationallyAllowed(businessId);
   await requireDirectBooking(businessId);
-  const client = await getAuthenticatedClient(businessId);
-  if (!client) {
-    throw new Error("Google Calendar not connected");
+  const normalizedParams = normalizeBookingParams(params, linkage);
+  const startDate = parseBookingStartTime(
+    normalizedParams.startTime,
+    businessTimezone
+  );
+  const endDate = new Date(
+    startDate.getTime() + normalizedParams.durationMinutes * 60 * 1000
+  );
+  const existingBooking = await loadExistingCalendarBooking(
+    businessId,
+    linkage
+  );
+  if (existingBooking?.status === "confirmed") {
+    return bookingResultFromRow(existingBooking);
   }
+  if (existingBooking?.status === "cancelled") {
+    throw new Error(
+      `Calendar booking ${existingBooking.id} cannot be created from status cancelled.`
+    );
+  }
+  if (existingBooking?.status === "pending") {
+    const recoveryClient = await getAuthenticatedClient(businessId);
+    if (!recoveryClient) {
+      throw new Error("Google Calendar not connected");
+    }
+    const recoveredEvent = await findReservedGoogleEvent(
+      getCalendarService(recoveryClient),
+      existingBooking.google_calendar_id,
+      existingBooking.id
+    );
+    if (recoveredEvent) {
+      const confirmed = await confirmCalendarBooking(
+        businessId,
+        existingBooking.id,
+        requireGoogleEventId(recoveredEvent.id, existingBooking.id),
+        eventDateTime(
+          recoveredEvent.start?.dateTime,
+          new Date(existingBooking.starts_at)
+        ),
+        eventDateTime(
+          recoveredEvent.end?.dateTime,
+          new Date(existingBooking.ends_at)
+        ),
+        requireBookingClaimToken(existingBooking)
+      );
+      assertBookingLinkage(confirmed, businessId, linkage, existingBooking);
+      return bookingResultFromRow(confirmed);
+    }
+  }
+
+  const localStart = validateBookingWindow(
+    startDate,
+    endDate,
+    businessTimezone,
+    bookingWindowPolicy(),
+    new Date()
+  );
+  const bookingContext = await loadBookingCatalogContext(
+    businessId,
+    normalizedParams.serviceName,
+    linkage.contactId,
+    localStart,
+    normalizedParams.customerEmail
+  );
+  assertWithinBusinessHours(
+    startDate,
+    endDate,
+    localStart,
+    businessTimezone,
+    bookingContext.hours
+  );
+  const canonicalParams: ValidatedBookingParams = {
+    ...normalizedParams,
+    serviceName: bookingContext.serviceName,
+    customerEmail: bookingContext.customerEmail
+  };
 
   const { data: tokenData, error: tokenError } = await supabaseAdmin
     .from("google_calendar_tokens")
-    .select("calendar_id")
+    .select("calendar_id, google_email")
     .eq("business_id", businessId)
     .single();
 
   if (tokenError) {
-    throw new Error(
-      `Could not load the connected Google Calendar: ${tokenError.message}`
-    );
+    throw new Error("Could not load the connected Google Calendar.");
   }
 
-  const selectedCalendarId = tokenData?.calendar_id || "primary";
-  const duration = params.durationMinutes ?? SLOT_DURATION_MINUTES;
-
-  const startDate = parseBookingStartTime(
-    params.startTime,
-    businessTimezone
+  const preflightNamespace = requireCalendarProviderNamespace(tokenData);
+  const selectedCalendarId = requireCalendarId(
+    tokenData?.calendar_id || "primary"
   );
-  const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
-  validateBookingInput(params, linkage, startDate, endDate, duration);
-  const requestedSummary = `${params.serviceName} - ${params.customerName}`;
+  const preflightClient = await getAuthenticatedClient(businessId);
+  if (!preflightClient) {
+    throw new Error("Google Calendar not connected");
+  }
+  const requestedSummary = `${canonicalParams.serviceName} - ${canonicalParams.customerName}`;
   const requestFingerprint = bookingRequestFingerprint(
     params,
     businessTimezone,
@@ -409,6 +1092,61 @@ export async function createBooking(
     );
   }
 
+  const { data: currentToken, error: currentTokenError } = await supabaseAdmin
+    .from("google_calendar_tokens")
+    .select("calendar_id, google_email")
+    .eq("business_id", businessId)
+    .single();
+  let currentNamespace: string | null = null;
+  try {
+    if (currentToken) {
+      currentNamespace = requireCalendarProviderNamespace(currentToken);
+    }
+  } catch {
+    // Treat malformed post-reservation identity as a namespace change, then
+    // release the provably pre-submission reservation below.
+  }
+  if (
+    currentTokenError ||
+    currentNamespace !== preflightNamespace
+  ) {
+    const stopped = await stopCalendarBookingBeforeProviderSubmission(
+      reservation,
+      claimToken
+    );
+    if (stopped.status === "confirmed") return bookingResultFromRow(stopped);
+    throw new Error("Google Calendar connection changed. Please retry.");
+  }
+
+  // Load/reload credentials only after the durable reservation owns the
+  // business mutex boundary. OAuth completion may switch provider namespaces
+  // before this point, but once pending work exists it can only refresh the
+  // same proven Google account/calendar namespace.
+  let client: Awaited<ReturnType<typeof getAuthenticatedClient>>;
+  try {
+    client = await getAuthenticatedClient(businessId);
+  } catch {
+    const stopped = await stopCalendarBookingBeforeProviderSubmission(
+      reservation,
+      claimToken
+    );
+    if (stopped.status === "confirmed") {
+      assertBookingLinkage(stopped, businessId, linkage, reservation);
+      return bookingResultFromRow(stopped);
+    }
+    throw new Error("Google Calendar credentials are temporarily unavailable.");
+  }
+  if (!client) {
+    const stopped = await stopCalendarBookingBeforeProviderSubmission(
+      reservation,
+      claimToken
+    );
+    if (stopped.status === "confirmed") {
+      assertBookingLinkage(stopped, businessId, linkage, reservation);
+      return bookingResultFromRow(stopped);
+    }
+    throw new Error("Google Calendar not connected");
+  }
   const calendar = getCalendarService(client);
   const reservedStartDate = new Date(reservation.starts_at);
   const reservedEndDate = new Date(reservation.ends_at);
@@ -439,11 +1177,11 @@ export async function createBooking(
     throw new CalendarBookingInProgressError(reservation.id);
   }
 
-  const descriptionParts = [`Service: ${params.serviceName}`];
-  if (params.customerPhone)
-    descriptionParts.push(`Phone: ${params.customerPhone}`);
-  if (params.customerEmail)
-    descriptionParts.push(`Email: ${params.customerEmail}`);
+  const descriptionParts = [`Service: ${canonicalParams.serviceName}`];
+  if (canonicalParams.customerPhone)
+    descriptionParts.push(`Phone: ${canonicalParams.customerPhone}`);
+  if (canonicalParams.customerEmail)
+    descriptionParts.push(`Email: ${canonicalParams.customerEmail}`);
   descriptionParts.push("Booked via AI assistant");
 
   const requestBody: Record<string, unknown> = {
@@ -452,14 +1190,14 @@ export async function createBooking(
     description: descriptionParts.join("\n"),
     start: {
       dateTime: reservedStartDate.toISOString(),
-      timeZone: businessTimezone,
+      timeZone: businessTimezone
     },
     end: {
       dateTime: reservedEndDate.toISOString(),
-      timeZone: businessTimezone,
+      timeZone: businessTimezone
     },
     reminders: {
-      useDefault: true,
+      useDefault: true
     },
     extendedProperties: {
       private: {
@@ -468,13 +1206,33 @@ export async function createBooking(
         simplassist_contact_id: linkage.contactId,
         simplassist_conversation_id: linkage.conversationId,
         simplassist_source_message_id: linkage.sourceMessageId,
-      },
-    },
+        simplassist_service_id: bookingContext.serviceId
+      }
+    }
   };
 
   // Add customer as attendee so Google sends them a calendar invite
-  if (params.customerEmail) {
-    requestBody.attendees = [{ email: params.customerEmail }];
+  if (canonicalParams.customerEmail) {
+    requestBody.attendees = [{ email: canonicalParams.customerEmail }];
+  }
+
+  const rangeIsBusy = await calendarRangeIsBusy(
+    calendar,
+    calendarId,
+    reservedStartDate,
+    reservedEndDate,
+    businessTimezone
+  );
+  if (rangeIsBusy) {
+    const stopped = await stopCalendarBookingForUnavailableSlot(
+      reservation,
+      claimToken
+    );
+    if (stopped.status === "confirmed") {
+      assertBookingLinkage(stopped, businessId, linkage, reservation);
+      return bookingResultFromRow(stopped);
+    }
+    throw new BookingSlotUnavailableError();
   }
 
   try {
@@ -484,7 +1242,7 @@ export async function createBooking(
 
     const stopped = await stopCalendarBookingBeforeProviderSubmission(
       reservation,
-      claimToken,
+      claimToken
     );
     if (stopped.status === "confirmed") {
       assertBookingLinkage(stopped, businessId, linkage, reservation);
@@ -493,13 +1251,28 @@ export async function createBooking(
     throw error;
   }
 
+  const submissionReservation =
+    await markCalendarBookingSubmissionStarted(reservation, claimToken);
+  if (submissionReservation.status === "confirmed") {
+    assertBookingLinkage(
+      submissionReservation,
+      businessId,
+      linkage,
+      reservation
+    );
+    return bookingResultFromRow(submissionReservation);
+  }
+
   let event;
   try {
-    event = await calendar.events.insert({
-      calendarId,
-      sendUpdates: "all",
-      requestBody,
-    });
+    event = await calendar.events.insert(
+      {
+        calendarId,
+        sendUpdates: "all",
+        requestBody
+      },
+      { timeout: CALENDAR_MUTATION_TIMEOUT_MS, retry: false }
+    );
   } catch (error) {
     const recoveredAfterError = await recoverAfterGoogleInsertError(
       calendar,
@@ -517,8 +1290,7 @@ export async function createBooking(
       await markCalendarBookingFailedBestEffort(
         businessId,
         reservation.id,
-        claimToken,
-        error
+        claimToken
       );
     }
     throw error;
@@ -541,39 +1313,6 @@ export async function createBooking(
   return bookingResultFromRow(confirmed);
 }
 
-function validateBookingInput(
-  params: BookingParams,
-  linkage: BookingLinkage,
-  startDate: Date,
-  endDate: Date,
-  durationMinutes: number
-): void {
-  if (!params.customerName.trim()) {
-    throw new Error("Customer name is required to create a booking.");
-  }
-  if (!params.serviceName.trim()) {
-    throw new Error("Service name is required to create a booking.");
-  }
-  if (
-    !Number.isFinite(startDate.getTime()) ||
-    !Number.isFinite(durationMinutes) ||
-    durationMinutes <= 0 ||
-    !Number.isFinite(endDate.getTime()) ||
-    endDate <= startDate
-  ) {
-    throw new Error("A valid booking start time and duration are required.");
-  }
-  if (
-    !linkage?.contactId?.trim() ||
-    !linkage.conversationId?.trim() ||
-    !linkage.sourceMessageId?.trim()
-  ) {
-    throw new Error(
-      "Contact, conversation, and source message linkage are required."
-    );
-  }
-}
-
 function bookingRequestFingerprint(
   params: BookingParams,
   timezone: string,
@@ -582,14 +1321,13 @@ function bookingRequestFingerprint(
 ): string {
   const canonicalPayload = {
     customerName: params.customerName.normalize("NFKC").trim(),
-    customerPhone:
-      params.customerPhone?.normalize("NFKC").trim() || null,
+    customerPhone: params.customerPhone?.normalize("NFKC").trim() || null,
     customerEmail:
       params.customerEmail?.normalize("NFKC").trim().toLowerCase() || null,
     serviceName: params.serviceName.normalize("NFKC").trim(),
     startTime: startDate.toISOString(),
     endTime: endDate.toISOString(),
-    timezone: timezone.trim(),
+    timezone: timezone.trim()
   };
   return createHash("sha256")
     .update(JSON.stringify(canonicalPayload))
@@ -616,10 +1354,17 @@ async function reserveCalendarBooking(
     p_claim_token: claimToken,
     p_google_calendar_id: googleCalendarId,
     p_event_summary: eventSummary,
-    p_request_fingerprint: requestFingerprint,
+    p_request_fingerprint: requestFingerprint
   });
   if (error) {
     await assertBookingOperationallyAllowed(businessId);
+    if (
+      error.code === "23P01" ||
+      error.message === "calendar_booking_slot_unavailable" ||
+      error.message?.includes("calendar_booking_slot_unavailable")
+    ) {
+      throw new BookingSlotUnavailableError();
+    }
     throw new Error(`Could not reserve calendar booking: ${error.message}`);
   }
   return requireCalendarBookingRow(data, "reserve");
@@ -627,7 +1372,66 @@ async function reserveCalendarBooking(
 
 async function stopCalendarBookingBeforeProviderSubmission(
   reservation: CalendarBookingRow,
+  claimToken: string
+): Promise<CalendarBookingRow> {
+  return stopClaimedCalendarBooking(
+    reservation,
+    claimToken,
+    "Booking was blocked before Google Calendar submission."
+  );
+}
+
+async function markCalendarBookingSubmissionStarted(
+  reservation: CalendarBookingRow,
+  claimToken: string
+): Promise<CalendarBookingRow> {
+  if (!reservation.operation_claimed_at) {
+    throw new CalendarBookingInProgressError(reservation.id);
+  }
+  const { data, error } = await supabaseAdmin.rpc(
+    "mark_calendar_booking_submission_started",
+    {
+      p_business_id: reservation.business_id,
+      p_booking_id: reservation.id,
+      p_claim_token: claimToken,
+      p_expected_claimed_at: reservation.operation_claimed_at
+    }
+  );
+  if (error) {
+    if (error.code === "42501") {
+      throw new CalendarBookingInProgressError(reservation.id);
+    }
+    await assertBookingOperationallyAllowed(reservation.business_id);
+    throw new Error("Could not fence calendar booking submission.");
+  }
+  const fenced = requireCalendarBookingRow(data, "mark_submission_started");
+  if (
+    fenced.id !== reservation.id ||
+    fenced.business_id !== reservation.business_id ||
+    (fenced.status === "pending" &&
+      (fenced.operation_claim_token !== claimToken ||
+        !fenced.operation_claimed_at))
+  ) {
+    throw new Error("Calendar booking submission fence was invalid.");
+  }
+  return fenced;
+}
+
+async function stopCalendarBookingForUnavailableSlot(
+  reservation: CalendarBookingRow,
+  claimToken: string
+): Promise<CalendarBookingRow> {
+  return stopClaimedCalendarBooking(
+    reservation,
+    claimToken,
+    "The requested appointment time was no longer available."
+  );
+}
+
+async function stopClaimedCalendarBooking(
+  reservation: CalendarBookingRow,
   claimToken: string,
+  failureReason: string
 ): Promise<CalendarBookingRow> {
   let result: { data: unknown; error: { message?: unknown } | null };
   try {
@@ -635,8 +1439,7 @@ async function stopCalendarBookingBeforeProviderSubmission(
       p_business_id: reservation.business_id,
       p_booking_id: reservation.id,
       p_claim_token: claimToken,
-      p_failure_reason:
-        "Booking was blocked before Google Calendar submission.",
+      p_failure_reason: failureReason
     });
   } catch (error) {
     throw bookingCleanupError(reservation, error);
@@ -655,9 +1458,9 @@ async function stopCalendarBookingBeforeProviderSubmission(
       {
         contactId: reservation.contact_id,
         conversationId: reservation.conversation_id,
-        sourceMessageId: reservation.source_message_id,
+        sourceMessageId: reservation.source_message_id
       },
-      reservation,
+      reservation
     );
   } catch (error) {
     throw bookingCleanupError(reservation, error);
@@ -681,13 +1484,13 @@ async function stopCalendarBookingBeforeProviderSubmission(
 
 function bookingCleanupError(
   reservation: CalendarBookingRow,
-  cause?: unknown,
+  cause?: unknown
 ): BookingOperationalStateError {
   return new BookingOperationalStateError({
     businessId: reservation.business_id,
     code: "booking_cleanup_failed",
     message: `Could not safely stop calendar booking ${reservation.id} before provider submission.`,
-    cause,
+    cause
   });
 }
 
@@ -705,7 +1508,7 @@ async function confirmCalendarBooking(
     p_google_event_id: googleEventId,
     p_starts_at: startsAt,
     p_ends_at: endsAt,
-    p_claim_token: claimToken,
+    p_claim_token: claimToken
   });
   if (error) {
     throw new Error(`Could not confirm calendar booking: ${error.message}`);
@@ -715,7 +1518,7 @@ async function confirmCalendarBooking(
 
 function requireCalendarBookingRow(
   data: unknown,
-  operation: "reserve" | "confirm" | "fail"
+  operation: "reserve" | "confirm" | "fail" | "mark_submission_started"
 ): CalendarBookingRow {
   const candidate = Array.isArray(data) ? data[0] : data;
   if (
@@ -730,8 +1533,7 @@ function requireCalendarBookingRow(
     !(candidate as CalendarBookingRow).google_calendar_id.trim() ||
     typeof (candidate as CalendarBookingRow).event_summary !== "string" ||
     !(candidate as CalendarBookingRow).event_summary.trim() ||
-    typeof (candidate as CalendarBookingRow).request_fingerprint !==
-      "string" ||
+    typeof (candidate as CalendarBookingRow).request_fingerprint !== "string" ||
     !/^[0-9a-f]{64}$/.test(
       (candidate as CalendarBookingRow).request_fingerprint
     ) ||
@@ -749,8 +1551,7 @@ function requireCalendarBookingRow(
     ) ||
     !(
       (candidate as CalendarBookingRow).operation_claimed_at === null ||
-      typeof (candidate as CalendarBookingRow).operation_claimed_at ===
-        "string"
+      typeof (candidate as CalendarBookingRow).operation_claimed_at === "string"
     ) ||
     !Number.isSafeInteger(
       (candidate as CalendarBookingRow).reconciliation_attempt_count
@@ -784,8 +1585,7 @@ function assertBookingLinkage(
     booking.source_message_id !== linkage.sourceMessageId ||
     (expectedReservation !== undefined &&
       (booking.id !== expectedReservation.id ||
-        booking.google_calendar_id !==
-          expectedReservation.google_calendar_id ||
+        booking.google_calendar_id !== expectedReservation.google_calendar_id ||
         booking.event_summary !== expectedReservation.event_summary ||
         booking.request_fingerprint !==
           expectedReservation.request_fingerprint))
@@ -819,23 +1619,32 @@ async function findReservedGoogleEvent(
 ): Promise<calendar_v3.Schema$Event | null> {
   const deterministicEventId = googleEventIdForBooking(bookingId);
   try {
-    const direct = await calendar.events.get({
-      calendarId,
-      eventId: deterministicEventId,
-    });
+    const direct = await calendar.events.get(
+      {
+        calendarId,
+        eventId: deterministicEventId
+      },
+      { timeout: CALENDAR_RECOVERY_TIMEOUT_MS, retry: false }
+    );
+    if (direct.data.id !== deterministicEventId) {
+      throw new Error("Google Calendar returned an invalid booking event.");
+    }
     assertGoogleEventBookingId(direct.data, bookingId);
     if (direct.data.status !== "cancelled") return direct.data;
   } catch (error) {
     if (!isGoogleEventNotFound(error)) throw error;
   }
 
-  const response = await calendar.events.list({
-    calendarId,
-    maxResults: 1,
-    showDeleted: false,
-    singleEvents: true,
-    privateExtendedProperty: [`simplassist_booking_id=${bookingId}`],
-  });
+  const response = await calendar.events.list(
+    {
+      calendarId,
+      maxResults: 1,
+      showDeleted: false,
+      singleEvents: true,
+      privateExtendedProperty: [`simplassist_booking_id=${bookingId}`]
+    },
+    { timeout: CALENDAR_RECOVERY_TIMEOUT_MS, retry: false }
+  );
   const found =
     response.data.items?.find(
       (event) => Boolean(event.id) && event.status !== "cancelled"
@@ -846,7 +1655,11 @@ async function findReservedGoogleEvent(
 
 function googleEventIdForBooking(bookingId: string): string {
   const eventId = bookingId.replace(/-/g, "").toLowerCase();
-  if (!/^[0-9a-v]{5,1024}$/.test(eventId)) {
+  if (
+    eventId.length < 5 ||
+    eventId.length > 1024 ||
+    !/^[0-9a-v]+$/.test(eventId)
+  ) {
     throw new Error(
       `Calendar booking ${bookingId} cannot form a valid Google event ID.`
     );
@@ -858,9 +1671,7 @@ function assertGoogleEventBookingId(
   event: calendar_v3.Schema$Event,
   bookingId: string
 ): void {
-  if (
-    event.extendedProperties?.private?.simplassist_booking_id !== bookingId
-  ) {
+  if (event.extendedProperties?.private?.simplassist_booking_id !== bookingId) {
     throw new Error(
       `Google event ${event.id ?? "(missing id)"} does not belong to booking ${bookingId}.`
     );
@@ -882,7 +1693,7 @@ function googleErrorStatus(error: unknown): number | null {
   for (const value of [
     candidate.code,
     candidate.status,
-    candidate.response?.status,
+    candidate.response?.status
   ]) {
     const parsed =
       typeof value === "number"
@@ -901,9 +1712,7 @@ function isDefinitiveGoogleInsertFailure(error: unknown): boolean {
     status !== null &&
     status >= 400 &&
     status < 500 &&
-    status !== 408 &&
-    status !== 409 &&
-    status !== 429
+    ![408, 409, 425, 429, 499].includes(status)
   );
 }
 
@@ -951,7 +1760,10 @@ export async function recoverCalendarBookingConfirmation(
   }
   requireBookingClaimToken(parsed);
 
-  const client = await getAuthenticatedClient(parsed.business_id);
+  const client = await withCalendarDeadline(
+    getAuthenticatedClient(parsed.business_id),
+    CALENDAR_CREDENTIAL_TIMEOUT_MS
+  );
   if (!client) {
     throw new Error(
       `Google Calendar is not connected for booking ${parsed.id}.`
@@ -971,7 +1783,7 @@ export async function recoverCalendarBookingConfirmation(
     {
       contactId: parsed.contact_id,
       conversationId: parsed.conversation_id,
-      sourceMessageId: parsed.source_message_id,
+      sourceMessageId: parsed.source_message_id
     },
     parsed
   );
@@ -987,7 +1799,7 @@ export async function claimCalendarBookingReconciliation(
     {
       p_business_id: parsed.business_id,
       p_booking_id: parsed.id,
-      p_claim_token: requireBookingClaimToken(parsed),
+      p_claim_token: requireBookingClaimToken(parsed)
     }
   );
   if (error) {
@@ -1003,7 +1815,7 @@ export async function claimCalendarBookingReconciliation(
     {
       contactId: parsed.contact_id,
       conversationId: parsed.conversation_id,
-      sourceMessageId: parsed.source_message_id,
+      sourceMessageId: parsed.source_message_id
     },
     parsed
   );
@@ -1021,7 +1833,7 @@ export async function failCalendarBookingRecovery(
     p_booking_id: parsed.id,
     p_claim_token: requireBookingClaimToken(parsed),
     p_failure_reason:
-      "Google Calendar event was not found during booking reconciliation.",
+      "Google Calendar event was not found during booking reconciliation."
   });
   if (error) {
     throw new Error(
@@ -1036,7 +1848,7 @@ export async function failCalendarBookingRecovery(
     {
       contactId: parsed.contact_id,
       conversationId: parsed.conversation_id,
-      sourceMessageId: parsed.source_message_id,
+      sourceMessageId: parsed.source_message_id
     },
     parsed
   );
@@ -1063,6 +1875,27 @@ function eventDateTime(
   return fallback.toISOString();
 }
 
+async function withCalendarDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  promise.catch(() => undefined);
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Calendar credential lookup timed out.")),
+          timeoutMs
+        );
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function bookingResultFromRow(booking: CalendarBookingRow): BookingResult {
   if (booking.status !== "confirmed" || !booking.google_event_id) {
     throw new Error(
@@ -1073,34 +1906,31 @@ function bookingResultFromRow(booking: CalendarBookingRow): BookingResult {
     eventId: booking.google_event_id,
     summary: booking.event_summary,
     startTime: booking.starts_at,
-    endTime: booking.ends_at,
+    endTime: booking.ends_at
   };
 }
 
 async function markCalendarBookingFailedBestEffort(
   businessId: string,
   bookingId: string,
-  claimToken: string,
-  cause: unknown
+  claimToken: string
 ): Promise<void> {
-  const failureReason =
-    cause instanceof Error ? cause.message : "Google Calendar event creation failed";
+  const failureReason = "Google Calendar event creation was rejected.";
   try {
     const { error } = await supabaseAdmin.rpc("fail_calendar_booking", {
       p_business_id: businessId,
       p_booking_id: bookingId,
       p_claim_token: claimToken,
-      p_failure_reason: failureReason.slice(0, 1000),
+      p_failure_reason: failureReason.slice(0, 1000)
     });
     if (error) {
-      console.error(
-        `[calendar] Failed to mark booking ${bookingId} failed: ${error.message}`
-      );
+      console.error("[calendar] Booking failure-state update failed", {
+        category: "database_response"
+      });
     }
-  } catch (error) {
-    console.error(
-      `[calendar] Failed to mark booking ${bookingId} failed:`,
-      error
-    );
+  } catch {
+    console.error("[calendar] Booking failure-state update failed", {
+      category: "database_exception"
+    });
   }
 }

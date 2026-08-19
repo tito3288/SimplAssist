@@ -15,13 +15,14 @@ SELECT ok(
 
 SELECT ok(
   (
-    SELECT NOT procedure_row.prosecdef
-       AND procedure_row.proconfig @> ARRAY['search_path=public, pg_temp']
+    SELECT procedure_row.prosecdef
+       AND procedure_row.proconfig =
+         ARRAY['search_path=public, pg_temp']::text[]
     FROM pg_proc AS procedure_row
     WHERE procedure_row.oid =
       'public.complete_google_calendar_oauth_connection(uuid,uuid,uuid,uuid,text,text,text,timestamptz,text,text)'::regprocedure
   ),
-  'OAuth completion remains security-invoker with a fixed search path'
+  'OAuth completion uses its hardened definer boundary with a fixed search path'
 );
 
 SELECT ok(

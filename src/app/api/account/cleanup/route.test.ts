@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   deleteUser: vi.fn(),
   reconcile: vi.fn(),
+  reconcileProvider: vi.fn(),
   reconcileBookings: vi.fn(),
   purgeOAuthAttempts: vi.fn(),
   graceEq: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock("@/lib/stripe/accountDeletionReconciler", () => ({
 }));
 vi.mock("@/lib/google/bookingReconciler", () => ({
   reconcilePendingCalendarBookings: mocks.reconcileBookings,
+}));
+vi.mock("@/lib/google/providerOperationReconciler", () => ({
+  reconcileCalendarProviderOperations: mocks.reconcileProvider,
 }));
 vi.mock("@/lib/google/oauthAttempt.server", () => ({
   purgeExpiredGoogleCalendarOAuthAttempts: mocks.purgeOAuthAttempts,
@@ -179,6 +183,12 @@ beforeEach(() => {
     notFound: 0,
     failed: 0,
   });
+  mocks.reconcileProvider.mockResolvedValue({
+    attempted: 0,
+    finalized: 0,
+    failed: 0,
+    deferred: 0,
+  });
   mocks.purgeOAuthAttempts.mockResolvedValue(undefined);
 });
 
@@ -193,6 +203,7 @@ describe("POST /api/account/cleanup", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.reconcileProvider).not.toHaveBeenCalled();
     expect(mocks.reconcileBookings).not.toHaveBeenCalled();
     expect(mocks.purgeOAuthAttempts).not.toHaveBeenCalled();
   });
@@ -233,6 +244,42 @@ describe("POST /api/account/cleanup", () => {
     expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
   });
 
+  it("runs durable provider reconciliation before legacy booking reconciliation", async () => {
+    installDatabase({ expiredBusinesses: [] });
+
+    const response = await cleanupAccounts(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileProvider).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileProvider).toHaveBeenCalledBefore(
+      mocks.reconcileBookings,
+    );
+  });
+
+  it("caps the combined reconciliation prelude so core cleanup cannot be starved", async () => {
+    vi.useFakeTimers();
+    try {
+      installDatabase({ expiredBusinesses: [] });
+      mocks.reconcileProvider.mockReturnValue(new Promise(() => undefined));
+      mocks.reconcileBookings.mockReturnValue(new Promise(() => undefined));
+
+      const responsePromise = cleanupAccounts(request());
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      const response = await responsePromise;
+      await expect(response.json()).resolves.toMatchObject({
+        success: true,
+        calendar_provider_reconciliation: { deferred: 1 },
+        calendar_booking_reconciliation: { failed: 1 },
+      });
+      expect(mocks.from).toHaveBeenCalledWith("businesses");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("continues account cleanup when calendar booking reconciliation fails", async () => {
     installDatabase({ action: null, pendingAuthUserId: null });
     mocks.reconcileBookings.mockRejectedValueOnce(
@@ -241,15 +288,15 @@ describe("POST /api/account/cleanup", () => {
 
     const response = await cleanupAccounts(request());
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       success: true,
       deleted_count: 1,
       failed_count: 0,
       failed_ids: [],
     });
     expect(mocks.reconcileBookings).toHaveBeenCalledTimes(1);
-    expect(mocks.reconcileBookings.mock.invocationCallOrder[0]).toBeGreaterThan(
-      Math.max(...mocks.rpc.mock.invocationCallOrder),
+    expect(mocks.reconcileBookings.mock.invocationCallOrder[0]).toBeLessThan(
+      Math.min(...mocks.rpc.mock.invocationCallOrder),
     );
     expect(console.error).toHaveBeenCalledWith(
       "[cleanup] Calendar booking reconciliation failed",
@@ -267,7 +314,7 @@ describe("POST /api/account/cleanup", () => {
 
     const response = await cleanupAccounts(request());
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       success: true,
       deleted_count: 0,
       failed_count: 0,
@@ -298,7 +345,7 @@ describe("POST /api/account/cleanup", () => {
 
     const response = await cleanupAccounts(request());
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       success: false,
       deleted_count: 0,
       failed_count: 1,
@@ -355,7 +402,7 @@ describe("POST /api/account/cleanup", () => {
     const response = await cleanupAccounts(request());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       success: true,
       deleted_count: 1,
       failed_count: 0,
@@ -396,7 +443,7 @@ describe("POST /api/account/cleanup", () => {
 
       const response = await cleanupAccounts(request());
 
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         success: false,
         deleted_count: 0,
         failed_count: 1,
@@ -512,7 +559,7 @@ describe("POST /api/account/cleanup", () => {
 
     const response = await cleanupAccounts(request());
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       success: true,
       deleted_count: 0,
       failed_count: 0,

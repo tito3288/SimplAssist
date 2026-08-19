@@ -28,10 +28,27 @@ export async function GET() {
   var storageKey = 'sa-session-' + businessId;
   var timestampKey = 'sa-session-ts-' + businessId;
   var SESSION_TIMEOUT = 5 * 60 * 60 * 1000;
+  var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  function createId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      var bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 15) | 64;
+      bytes[8] = (bytes[8] & 63) | 128;
+      var hex = [];
+      for (var h = 0; h < bytes.length; h++) hex.push(bytes[h].toString(16).padStart(2, '0'));
+      return hex.slice(0, 4).join('') + '-' + hex.slice(4, 6).join('') + '-' + hex.slice(6, 8).join('') + '-' + hex.slice(8, 10).join('') + '-' + hex.slice(10).join('');
+    }
+    return '00000000-0000-4000-8000-' + Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12);
+  }
+
   var sessionId = null;
   var sessionExpired = false;
   try {
     sessionId = localStorage.getItem(storageKey);
+    if (sessionId && !UUID_PATTERN.test(sessionId)) sessionId = null;
     var lastTs = localStorage.getItem(timestampKey);
     if (sessionId && lastTs && (Date.now() - Number(lastTs)) > SESSION_TIMEOUT) {
       sessionId = null;
@@ -39,7 +56,7 @@ export async function GET() {
     }
   } catch(e) {}
   if (!sessionId) {
-    sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sa-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    sessionId = createId();
     try {
       localStorage.setItem(storageKey, sessionId);
       localStorage.setItem(timestampKey, String(Date.now()));
@@ -53,6 +70,13 @@ export async function GET() {
   var leadCaptured = false;
   var visitorName = '';
   var visitorEmail = '';
+  var widgetToken = null;
+  var widgetSessionNonce = null;
+  var pendingClientMessageId = null;
+  var pendingClientMessageText = null;
+  var pendingLeadClientId = null;
+  var pendingLeadMessage = null;
+  var pendingLeadSourceClientMessageId = null;
   var pendingPreviewPatch = null;
   var configInitialized = false;
   var configRequestInFlight = false;
@@ -124,7 +148,10 @@ export async function GET() {
     '.sa-widget-lead-input{border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:16px;outline:none;font-family:inherit;}',
     '.sa-widget-lead-input:focus{border-color:var(--sa-brand);box-shadow:0 0 0 2px rgba(0,0,0,0.06);}',
     '.sa-widget-lead-btn{border:none;color:#fff;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;}',
+    '.sa-widget-lead-btn:disabled{opacity:0.6;cursor:default;}',
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
+    '.sa-widget-lead-status{min-height:18px;margin:0!important;font-size:12px!important;color:#6b7280!important;text-align:left!important;}',
+    '.sa-widget-lead-status.sa-widget-lead-error{color:#b91c1c!important;}',
     '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
     '.sa-widget-btn.sa-btn-hidden{opacity:0;transform:scale(0.8);pointer-events:none;}',
     '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}',
@@ -166,7 +193,7 @@ export async function GET() {
   header.appendChild(headerActions);
   var messagesArea = el('div', { class: 'sa-widget-messages' });
   var inputArea = el('div', { class: 'sa-widget-input-area' });
-  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text' });
+  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text', maxlength: '2000' });
   var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
   sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   var footerEl = el('div', { class: 'sa-widget-footer' });
@@ -264,6 +291,8 @@ export async function GET() {
 
   function hideWidgetForUnavailable() {
     config = null;
+    widgetToken = null;
+    widgetSessionNonce = null;
     isOpen = false;
     isLoading = false;
     sendBtn.disabled = false;
@@ -277,11 +306,24 @@ export async function GET() {
   }
 
   function endConversation() {
+    if (!isPreview && (!widgetToken || !widgetSessionNonce)) {
+      showTransientNotice('We could not end this conversation yet. Please try again.');
+      loadWidgetConfig();
+      return;
+    }
     endBtn.disabled = true;
-    fetch(baseUrl + '/api/widget/end', {
+    var endHeaders = { 'Content-Type': 'application/json' };
+    if (!isPreview) endHeaders.Authorization = 'Bearer ' + widgetToken;
+    var endPayload = {
+      businessId: businessId,
+      sessionId: sessionId
+    };
+    if (isPreview) endPayload.preview = true;
+    else endPayload.sessionNonce = widgetSessionNonce;
+    fetch(baseUrl + '/api/widget/end?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessId: businessId, sessionId: sessionId })
+      headers: endHeaders,
+      body: JSON.stringify(endPayload)
     })
     .then(function(r) {
       return r.json()
@@ -295,6 +337,7 @@ export async function GET() {
         return;
       }
       if (!result.ok) {
+        if (result.status === 401 || result.status === 403) loadWidgetConfig();
         showTransientNotice('We could not end this conversation yet. Please try again.');
         return;
       }
@@ -316,9 +359,16 @@ export async function GET() {
     leadCaptured = false;
     visitorName = '';
     visitorEmail = '';
+    widgetToken = null;
+    widgetSessionNonce = null;
+    pendingClientMessageId = null;
+    pendingClientMessageText = null;
+    pendingLeadClientId = null;
+    pendingLeadMessage = null;
+    pendingLeadSourceClientMessageId = null;
 
     // Generate new session
-    sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'sa-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    sessionId = createId();
     try {
       localStorage.setItem(storageKey, sessionId);
       localStorage.setItem(timestampKey, String(Date.now()));
@@ -326,6 +376,7 @@ export async function GET() {
 
     // Show ended message then welcome
     addMsg('Conversation ended. Feel free to start a new one!', 'bot', showQuickReplies);
+    loadWidgetConfig();
   }
 
   function showTransientNotice(text) {
@@ -456,14 +507,16 @@ export async function GET() {
   }
 
   function showLeadForm() {
+    var existingForm = document.getElementById('sa-lead-form');
+    if (existingForm) existingForm.remove();
     inputArea.style.display = 'none';
     var form = el('div', { class: 'sa-widget-lead-form', id: 'sa-lead-form' });
     form.appendChild(el('p', null, "We'd love to know who we're chatting with!"));
-    var nameInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your name', type: 'text' });
-    var emailInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your email', type: 'email' });
-    var submitBtn = el('button', { class: 'sa-widget-lead-btn' }, 'Continue');
+    var nameInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your name', type: 'text', maxlength: '100' });
+    var emailInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your email', type: 'email', maxlength: '254' });
+    var submitBtn = el('button', { class: 'sa-widget-lead-btn', type: 'button' }, 'Continue');
     if (config) submitBtn.style.backgroundColor = config.brandColor;
-    var skipBtn = el('button', { class: 'sa-widget-lead-skip' }, 'Skip for now');
+    var skipBtn = el('button', { class: 'sa-widget-lead-skip', type: 'button' }, 'Skip for now');
     submitBtn.addEventListener('click', function() {
       visitorName = nameInput.value.trim();
       visitorEmail = emailInput.value.trim();
@@ -483,6 +536,153 @@ export async function GET() {
     form.appendChild(submitBtn);
     form.appendChild(skipBtn);
     panel.insertBefore(form, inputArea);
+  }
+
+  function showAssistantUnavailableLeadMode(message, sourceClientMessageId) {
+    pendingClientMessageId = null;
+    pendingClientMessageText = null;
+    isLoading = true;
+    addMsg(
+      'Our assistant is unavailable right now. Leave your name or email and the business can follow up about your message.',
+      'bot',
+      function() {
+        sendBtn.disabled = false;
+        isLoading = false;
+        if (!isPreview) showOfflineLeadForm(message, sourceClientMessageId);
+      }
+    );
+  }
+
+  function showOfflineLeadForm(message, sourceClientMessageId) {
+    var existingForm = document.getElementById('sa-lead-form');
+    if (existingForm) existingForm.remove();
+    if (!pendingLeadClientId || pendingLeadMessage !== message) {
+      pendingLeadClientId = createId();
+      pendingLeadMessage = message;
+      pendingLeadSourceClientMessageId = sourceClientMessageId;
+    }
+
+    inputArea.style.display = 'none';
+    var form = el('div', { class: 'sa-widget-lead-form', id: 'sa-lead-form' });
+    form.appendChild(el('p', null, 'Share a name or email so the business can respond.'));
+    var nameInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your name', type: 'text', maxlength: '100' });
+    var emailInput = el('input', { class: 'sa-widget-lead-input', placeholder: 'Your email', type: 'email', maxlength: '254' });
+    nameInput.value = visitorName;
+    emailInput.value = visitorEmail;
+    var status = el('p', { class: 'sa-widget-lead-status', 'aria-live': 'polite' });
+    var submitBtn = el('button', { class: 'sa-widget-lead-btn', type: 'button' }, 'Send contact information');
+    if (config) submitBtn.style.backgroundColor = config.brandColor;
+    var skipBtn = el('button', { class: 'sa-widget-lead-skip', type: 'button' }, 'Not now');
+
+    submitBtn.addEventListener('click', function() {
+      var submittedName = nameInput.value.trim();
+      var submittedEmail = emailInput.value.trim();
+      status.classList.remove('sa-widget-lead-error');
+      if (!submittedName && !submittedEmail) {
+        status.textContent = 'Enter a name or email to continue.';
+        status.classList.add('sa-widget-lead-error');
+        return;
+      }
+      if (submittedEmail && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(submittedEmail)) {
+        status.textContent = 'Enter a valid email address.';
+        status.classList.add('sa-widget-lead-error');
+        return;
+      }
+      submitOfflineLead({
+        form: form,
+        nameInput: nameInput,
+        emailInput: emailInput,
+        status: status,
+        submitBtn: submitBtn,
+        skipBtn: skipBtn,
+        visitorName: submittedName,
+        visitorEmail: submittedEmail,
+        message: message
+      });
+    });
+    skipBtn.addEventListener('click', function() {
+      leadCaptured = true;
+      form.remove();
+      inputArea.style.display = 'flex';
+      input.focus();
+    });
+
+    form.appendChild(nameInput);
+    form.appendChild(emailInput);
+    form.appendChild(status);
+    form.appendChild(submitBtn);
+    form.appendChild(skipBtn);
+    panel.insertBefore(form, inputArea);
+    if (visitorName) emailInput.focus();
+    else nameInput.focus();
+  }
+
+  function submitOfflineLead(fields) {
+    if (!widgetToken || !widgetSessionNonce || !pendingLeadClientId || !pendingLeadSourceClientMessageId || pendingLeadMessage !== fields.message) {
+      fields.status.textContent = 'We could not send your contact information. Please try again.';
+      fields.status.classList.add('sa-widget-lead-error');
+      loadWidgetConfig();
+      return;
+    }
+
+    fields.submitBtn.disabled = true;
+    fields.skipBtn.disabled = true;
+    fields.nameInput.disabled = true;
+    fields.emailInput.disabled = true;
+    fields.status.classList.remove('sa-widget-lead-error');
+    fields.status.textContent = 'Sending...';
+    var leadPayload = {
+      businessId: businessId,
+      sessionId: sessionId,
+      sessionNonce: widgetSessionNonce,
+      clientLeadId: pendingLeadClientId,
+      sourceClientMessageId: pendingLeadSourceClientMessageId,
+      message: fields.message,
+      visitorName: fields.visitorName || undefined,
+      visitorEmail: fields.visitorEmail || undefined
+    };
+
+    fetch(baseUrl + '/api/widget/lead?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + widgetToken
+      },
+      body: JSON.stringify(leadPayload)
+    })
+    .then(function(r) {
+      return r.json()
+        .catch(function() { return {}; })
+        .then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(result) {
+      if (!result.ok || result.data.success !== true) {
+        if (result.status === 401 || result.status === 403) loadWidgetConfig();
+        restoreOfflineLeadForm(fields);
+        return;
+      }
+      visitorName = fields.visitorName;
+      visitorEmail = fields.visitorEmail;
+      leadCaptured = true;
+      pendingLeadClientId = null;
+      pendingLeadMessage = null;
+      pendingLeadSourceClientMessageId = null;
+      fields.form.remove();
+      inputArea.style.display = 'flex';
+      showTransientNotice('Thanks. Your contact information was sent to the business.');
+      input.focus();
+    })
+    .catch(function() {
+      restoreOfflineLeadForm(fields);
+    });
+  }
+
+  function restoreOfflineLeadForm(fields) {
+    fields.submitBtn.disabled = false;
+    fields.skipBtn.disabled = false;
+    fields.submitBtn.textContent = 'Try again';
+    fields.status.textContent = 'We could not confirm your contact information was sent. Retry this submission or choose Not now.';
+    fields.status.classList.add('sa-widget-lead-error');
   }
 
   function resetPreviewConversation() {
@@ -558,6 +758,11 @@ export async function GET() {
   function sendMessage() {
     var text = input.value.trim();
     if (!text || isLoading || !config) return;
+    if (!isPreview && (!widgetToken || !widgetSessionNonce)) {
+      loadWidgetConfig();
+      showTransientNotice('The chat is reconnecting. Please try again in a moment.');
+      return;
+    }
     var qr = document.getElementById('sa-quick-replies'); if (qr) qr.remove();
     input.value = '';
     var userMessageEl = addMsg(text, 'user');
@@ -572,18 +777,27 @@ export async function GET() {
     showLoading();
     sendBtn.disabled = true;
 
+    if (!pendingClientMessageId || pendingClientMessageText !== text) {
+      pendingClientMessageId = createId();
+      pendingClientMessageText = text;
+    }
     var chatPayload = {
       businessId: businessId,
       message: text,
       sessionId: sessionId,
+      clientMessageId: pendingClientMessageId,
       visitorEmail: visitorEmail || undefined,
       visitorName: visitorName || undefined
     };
     if (isPreview) chatPayload.preview = true;
+    else chatPayload.sessionNonce = widgetSessionNonce;
 
-    fetch(baseUrl + '/api/widget/chat', {
+    var chatHeaders = { 'Content-Type': 'application/json' };
+    if (!isPreview) chatHeaders.Authorization = 'Bearer ' + widgetToken;
+
+    fetch(baseUrl + '/api/widget/chat?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: chatHeaders,
       body: JSON.stringify(chatPayload)
     })
     .then(function(r) {
@@ -599,16 +813,21 @@ export async function GET() {
         var lastUnavailableMessage = messages[messages.length - 1];
         if (lastUnavailableMessage && lastUnavailableMessage.type === 'user' && lastUnavailableMessage.text === text) messages.pop();
         messageCount = Math.max(0, messageCount - 1);
+        pendingClientMessageId = null;
+        pendingClientMessageText = null;
         isLoading = false;
         sendBtn.disabled = false;
         hideWidgetForUnavailable();
         return;
       }
       if (!result.ok) {
-        if (result.status >= 500 || data.retryable) {
+        if (result.status === 401 || result.status === 403) loadWidgetConfig();
+        if (result.status === 401 || result.status >= 500 || data.retryable) {
           restoreTypedMessage(text, userMessageEl);
           return;
         }
+        pendingClientMessageId = null;
+        pendingClientMessageText = null;
         isLoading = true;
         addMsg('Sorry, that message could not be sent. Please try again.', 'bot', function() {
           sendBtn.disabled = false;
@@ -616,8 +835,19 @@ export async function GET() {
         });
         return;
       }
+      if (
+        data.available === true &&
+        data.response === null &&
+        data.mode === 'lead_capture' &&
+        data.reason === 'assistant_unavailable'
+      ) {
+        showAssistantUnavailableLeadMode(text, pendingClientMessageId);
+        return;
+      }
       isLoading = true;
       if (data.response) {
+        pendingClientMessageId = null;
+        pendingClientMessageText = null;
         addMsg(data.response, 'bot', function() {
           sendBtn.disabled = false;
           isLoading = false;
@@ -625,6 +855,8 @@ export async function GET() {
           if (needsLeadCapture()) showLeadForm();
         });
       } else {
+        pendingClientMessageId = null;
+        pendingClientMessageText = null;
         addMsg('Sorry, something went wrong. Please try again.', 'bot', function() {
           sendBtn.disabled = false;
           isLoading = false;
@@ -677,6 +909,19 @@ export async function GET() {
   }
 
   function applyLoadedConfig(data) {
+    if (!isPreview) {
+      if (
+        typeof data.widgetToken !== 'string' ||
+        typeof data.widgetSessionNonce !== 'string' ||
+        !data.widgetToken ||
+        !data.widgetSessionNonce
+      ) {
+        hideWidgetForUnavailable();
+        return;
+      }
+      widgetToken = data.widgetToken;
+      widgetSessionNonce = data.widgetSessionNonce;
+    }
     var firstLoad = !configInitialized;
     config = data;
     configInitialized = true;
@@ -709,7 +954,9 @@ export async function GET() {
   function loadWidgetConfig() {
     if (configRequestInFlight) return;
     configRequestInFlight = true;
-    fetch(baseUrl + configPath + '?businessId=' + encodeURIComponent(businessId), { cache: 'no-store' })
+    var configQuery = '?businessId=' + encodeURIComponent(businessId);
+    if (!isPreview) configQuery += '&sessionId=' + encodeURIComponent(sessionId);
+    fetch(baseUrl + configPath + configQuery, { cache: 'no-store' })
       .then(function(r) {
         return r.json()
           .catch(function() { return {}; })
@@ -751,7 +998,7 @@ export async function GET() {
   return new NextResponse(js, {
     headers: {
       "Content-Type": "application/javascript",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "public, no-cache, must-revalidate",
       "Access-Control-Allow-Origin": "*",
     },
   });

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { inputField, btnPrimaryWide, body } from "@/lib/theme-v2/theme";
 import { Loader2 } from "lucide-react";
+import { nextCalendarMutationOperationId } from "./calendarMutationIdentity";
 
 interface CalendarEvent {
   id: string;
@@ -47,6 +48,8 @@ export default function EditEventModal({
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const operationIdRef = useRef("");
+  const submittedPayloadRef = useRef<string | null>(null);
 
   // Pre-populate form when modal opens with event data
   useEffect(() => {
@@ -57,6 +60,8 @@ export default function EditEventModal({
       setDescription(event.description ?? "");
       setError("");
       setSubmitting(false);
+      operationIdRef.current = globalThis.crypto.randomUUID();
+      submittedPayloadRef.current = null;
     }
   }, [open, event]);
 
@@ -90,27 +95,43 @@ export default function EditEventModal({
     setSubmitting(true);
 
     try {
+      const payload = {
+        eventId: event.id,
+        title: title.trim(),
+        description: description.trim(),
+        startTime: startDate.toISOString(),
+        endTime: endDate.toISOString(),
+      };
+      const payloadKey = JSON.stringify(payload);
+      operationIdRef.current = nextCalendarMutationOperationId(
+        operationIdRef.current,
+        submittedPayloadRef.current,
+        payloadKey
+      );
+      submittedPayloadRef.current = payloadKey;
+
       const res = await fetch("/api/calendar/events", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          eventId: event.id,
-          title: title.trim(),
-          description: description.trim(),
-          startTime: startDate.toISOString(),
-          endTime: endDate.toISOString(),
+          operationId: operationIdRef.current,
+          ...payload,
         }),
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to update event");
+        if (res.status === 409) {
+          operationIdRef.current = globalThis.crypto.randomUUID();
+          submittedPayloadRef.current = null;
+        }
+        setError("We couldn't update this event. Please try again.");
+        return;
       }
 
       onEventUpdated();
       onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update event");
+    } catch {
+      setError("We couldn't update this event. Please try again.");
     } finally {
       setSubmitting(false);
     }

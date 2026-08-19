@@ -553,6 +553,8 @@ export interface Message {
   conversation_id: string;
   business_id: string;
   provider_event_id: string | null;
+  ai_reply_reservation_id: string | null;
+  ai_reply_reservation_attempt_token: string | null;
   role: MessageRole;
   content: string;
   channel: Channel;
@@ -691,6 +693,82 @@ export interface BillingUsageEvent {
   created_at: string;
 }
 
+export type AIReplyReservationStatus =
+  | "reserved"
+  | "completed"
+  | "released"
+  | "expired";
+
+export interface AIReplyUsagePeriod {
+  id: string;
+  business_id: string;
+  period_start: string;
+  period_end: string;
+  billing_source: "subscription" | "partner_billing" | "billing_override";
+  plan: SubscriptionPlan;
+  /** NULL preserves the established uncapped behavior of existing plans. */
+  included_ai_replies: number | null;
+  completed_replies: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIReplyReservation {
+  id: string;
+  business_id: string;
+  usage_period_id: string;
+  channel: "web_chat";
+  client_message_id: string;
+  request_fingerprint: string;
+  source_message_id: string;
+  status: AIReplyReservationStatus;
+  attempt_token: string;
+  attempt_count: number;
+  reserved_at: string;
+  expires_at: string;
+  completed_at: string | null;
+  released_at: string | null;
+  release_reason: string | null;
+  assistant_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIReplyReservationAttempt {
+  reservation_id: string;
+  attempt_count: number;
+  attempt_token: string;
+  status: AIReplyReservationStatus;
+  reserved_at: string;
+  expires_at: string;
+  ended_at: string | null;
+  created_at: string;
+}
+
+export interface AnthropicProviderCall {
+  id: string;
+  business_id: string;
+  reservation_id: string | null;
+  reservation_attempt_count: number | null;
+  call_idempotency_key: string;
+  operation: string;
+  channel: Channel | null;
+  is_preview: boolean;
+  model: string;
+  provider_request_id: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  latency_ms: number;
+  stop_reason: string | null;
+  tool_use_count: number;
+  tool_result_count: number;
+  succeeded: boolean;
+  error_code: string | null;
+  created_at: string;
+}
+
 export interface GoogleCalendarToken {
   id: string;
   business_id: string;
@@ -699,6 +777,53 @@ export interface GoogleCalendarToken {
   token_expiry: string;
   calendar_id: string;
   google_email: string | null;
+  credential_version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CalendarProviderOperationKind = "create" | "update" | "delete";
+
+export type CalendarProviderOperationStatus =
+  | "holding"
+  | "provider_applied"
+  | "finalized"
+  | "failed";
+
+/** Private service-role state for idempotent dashboard calendar mutations. */
+export interface CalendarProviderOperationRecord {
+  id: string;
+  business_id: string;
+  operation_kind: CalendarProviderOperationKind;
+  google_calendar_id: string;
+  desired_starts_at: string | null;
+  desired_ends_at: string | null;
+  linked_booking_id: string | null;
+  deterministic_google_event_id: string | null;
+  target_google_event_id: string | null;
+  provider_target_event_id: string | null;
+  request_fingerprint: string;
+  status: CalendarProviderOperationStatus;
+  claim_token: string | null;
+  claimed_at: string | null;
+  claim_expires_at: string | null;
+  claim_released_at: string | null;
+  reconciliation_review_after_at: string;
+  attempt_count: number;
+  provider_submission_started_at: string | null;
+  provider_event_id: string | null;
+  provider_starts_at: string | null;
+  provider_ends_at: string | null;
+  provider_evidence: Record<string, unknown> | null;
+  provider_applied_at: string | null;
+  finalized_at: string | null;
+  failed_at: string | null;
+  failure_reason: string | null;
+  reconciliation_claim_token: string | null;
+  reconciliation_claimed_at: string | null;
+  reconciliation_claim_expires_at: string | null;
+  reconciliation_attempt_count: number;
+  reconciliation_attempted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -714,6 +839,7 @@ export interface WidgetConfig {
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
   quick_replies: string[];
+  allowed_hostnames: string[];
   is_active: boolean;
   created_at: string;
   updated_at: string;

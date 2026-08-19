@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { inputField, btnPrimaryWide, body } from "@/lib/theme-v2/theme";
 import { Loader2 } from "lucide-react";
+import { nextCalendarMutationOperationId } from "./calendarMutationIdentity";
 
 interface CreateEventModalProps {
   open: boolean;
@@ -96,6 +97,8 @@ export default function CreateEventModal({
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const operationIdRef = useRef("");
+  const submittedPayloadRef = useRef<string | null>(null);
 
   // Reset form when modal opens or date changes
   useEffect(() => {
@@ -107,6 +110,8 @@ export default function CreateEventModal({
       setDescription("");
       setError("");
       setSubmitting(false);
+      operationIdRef.current = globalThis.crypto.randomUUID();
+      submittedPayloadRef.current = null;
     }
   }, [open, selectedDate]);
 
@@ -138,14 +143,26 @@ export default function CreateEventModal({
     setSubmitting(true);
 
     try {
+      const payload = {
+        title: title.trim(),
+        description: description.trim() || undefined,
+        startTime: startDate.toISOString(),
+        endTime: endDate.toISOString(),
+      };
+      const payloadKey = JSON.stringify(payload);
+      operationIdRef.current = nextCalendarMutationOperationId(
+        operationIdRef.current,
+        submittedPayloadRef.current,
+        payloadKey
+      );
+      submittedPayloadRef.current = payloadKey;
+
       const res = await fetch("/api/calendar/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || undefined,
-          startTime: startDate.toISOString(),
-          endTime: endDate.toISOString(),
+          operationId: operationIdRef.current,
+          ...payload,
         }),
       });
 
@@ -159,6 +176,10 @@ export default function CreateEventModal({
           onCreationUnavailable(unavailableState);
           onClose();
           return;
+        }
+        if (res.status === 409) {
+          operationIdRef.current = globalThis.crypto.randomUUID();
+          submittedPayloadRef.current = null;
         }
         setError("We couldn't create this event. Please try again.");
         return;

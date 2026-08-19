@@ -6,6 +6,7 @@ import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 import { resolveConnectedBusinessPartner } from '@/lib/branding/businessPartner.server';
 import { getCanonicalAppOrigin } from '@/lib/branding/defaultBrand';
+import { normalizeHostHeader } from '@/lib/branding/hostname';
 
 export default async function WidgetPage() {
   await requireWorkspacePageAccess();
@@ -46,6 +47,9 @@ export default async function WidgetPage() {
 
   // Create default widget config if none exists
   if (!widgetConfig) {
+    const initialAllowedHostnames = allowedHostnamesFromWebsiteUrl(
+      business.website_url,
+    );
     const { data: newConfig } = await supabase
       .from('widget_configs')
       .insert({
@@ -58,7 +62,8 @@ export default async function WidgetPage() {
         lead_capture_enabled: true,
         lead_capture_timing: 'after_3_messages',
         quick_replies: ['Book a free consultation', 'What services do you offer?', 'What areas do you cover?'],
-        is_active: true,
+        allowed_hostnames: initialAllowedHostnames,
+        is_active: initialAllowedHostnames.length > 0,
       })
       .select()
       .single();
@@ -87,4 +92,30 @@ export default async function WidgetPage() {
       scriptOrigin={scriptOrigin}
     />
   );
+}
+
+function allowedHostnamesFromWebsiteUrl(value: string | null): string[] {
+  const candidate = value?.trim();
+  if (!candidate) return [];
+
+  let parsed: URL;
+  try {
+    parsed = new URL(
+      /^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)
+        ? candidate
+        : `https://${candidate}`,
+    );
+  } catch {
+    return [];
+  }
+
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username ||
+    parsed.password
+  ) {
+    return [];
+  }
+  const hostname = normalizeHostHeader(parsed.hostname);
+  return hostname ? [hostname] : [];
 }

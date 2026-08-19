@@ -46,4 +46,15 @@ describe("CreateEventModal operational failures", () => {
     );
     expect(source).toContain("onCreationUnavailable(unavailableState)");
   });
+
+  it("sends one stable operation identity with the canonical payload", () => {
+    const source = readFileSync(
+      new URL("./CreateEventModal.tsx", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("nextCalendarMutationOperationId(");
+    expect(source).toContain("operationId: operationIdRef.current");
+    expect(source).toContain("submittedPayloadRef.current = payloadKey");
+  });
 });

@@ -18,6 +18,7 @@ import {
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { secondaryCtaCompactClass } from '@/lib/glass';
 import { statusSuccess, statusWarning } from '@/lib/theme-v2/theme';
+import { normalizeHostHeader } from '@/lib/branding/hostname';
 
 const PRESET_COLORS = [
   { name: 'Blue', value: '#3B82F6' },
@@ -40,6 +41,7 @@ export interface WidgetConfigFormValues {
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
   quick_replies: string[];
+  allowed_hostnames: string[];
   is_active: boolean;
 }
 
@@ -180,6 +182,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       lead_capture_enabled: config.lead_capture_enabled,
       lead_capture_timing: config.lead_capture_timing,
       quick_replies: config.quick_replies || [],
+      allowed_hostnames: config.allowed_hostnames || [],
       is_active: config.is_active,
     },
   });
@@ -190,6 +193,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
   const welcomeMessage = watch('welcome_message');
   const leadCaptureEnabled = watch('lead_capture_enabled');
   const quickReplies = watch('quick_replies');
+  const allowedHostnames = watch('allowed_hostnames');
   const isActive = watch('is_active');
 
   useEffect(() => {
@@ -205,6 +209,24 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
     setSaved(false);
     setSaveError('');
 
+    const normalizedHostnames = normalizeAllowedHostnames(
+      data.allowed_hostnames,
+    );
+    if (!normalizedHostnames) {
+      setSaveError(
+        'Enter up to 10 valid website hostnames, such as example.com, without https://, paths, ports, or wildcards.',
+      );
+      setSaving(false);
+      return;
+    }
+    if (data.is_active && normalizedHostnames.length === 0) {
+      setSaveError(
+        'Add at least one allowed website hostname before switching the widget on.',
+      );
+      setSaving(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/widget/config', {
         method: 'PATCH',
@@ -218,6 +240,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           lead_capture_enabled: data.lead_capture_enabled,
           lead_capture_timing: data.lead_capture_timing,
           quick_replies: data.quick_replies.filter(q => q.trim() !== ''),
+          allowed_hostnames: normalizedHostnames,
           is_active: data.is_active,
         }),
       });
@@ -484,6 +507,36 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
 
       {/* Section 4: Widget Status */}
       <div>
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">
+          Allowed Websites
+        </h2>
+        <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">
+          The public widget will load only on these exact website hostnames.
+          Add both the root and www versions when you use both.
+        </p>
+        <textarea
+          value={allowedHostnames.join('\n')}
+          onChange={(event) =>
+            setValue('allowed_hostnames', event.target.value.split('\n'), {
+              shouldDirty: true,
+            })
+          }
+          rows={4}
+          maxLength={3000}
+          spellCheck={false}
+          autoCapitalize="none"
+          placeholder={'example.com\nwww.example.com'}
+          aria-label="Allowed website hostnames"
+          className="w-full rounded-lg bg-white text-stone-900 placeholder:text-stone-400 border border-[#e3dacc] focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:bg-white/[0.06] dark:text-[#f5f5f5] dark:placeholder:text-[#666] dark:border-white/[0.12] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] px-3 py-2 font-mono text-sm outline-none resize-y"
+        />
+        <p className="mt-2 text-xs text-stone-500 dark:text-[#bdbdbf]">
+          One hostname per line. Do not include https://, a page path, a port,
+          or * wildcards.
+        </p>
+      </div>
+
+      {/* Section 5: Widget Status */}
+      <div>
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Widget Status</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">Control whether the widget is visible on your website.</p>
 
@@ -550,4 +603,24 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       </div>
     </form>
   );
+}
+
+function normalizeAllowedHostnames(values: readonly string[]): string[] | null {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    const candidate = value.trim().toLowerCase();
+    if (!candidate) continue;
+    const hostname = normalizeHostHeader(candidate);
+    if (!hostname || hostname !== candidate || candidate.includes(':')) {
+      return null;
+    }
+    if (!seen.has(hostname)) {
+      seen.add(hostname);
+      normalized.push(hostname);
+    }
+  }
+
+  return normalized.length <= 10 ? normalized : null;
 }

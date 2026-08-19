@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ from: vi.fn() }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from },
 }));
 
 import {
+  addMessage,
   addInboundMessageOnce,
+  addWebChatInboundMessageOnce,
   getConversationHistory,
   getOrCreateConversation,
+  WebChatMessageIdempotencyConflictError,
 } from "./conversations";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
@@ -205,6 +209,111 @@ describe("addInboundMessageOnce", () => {
     expect(chains[2].or).toHaveBeenCalledWith(
       "last_message_at.is.null,last_message_at.lt.2026-07-18T12:00:00.000Z"
     );
+  });
+});
+
+describe("metered web-chat message persistence", () => {
+  it("persists assistant reservation proof only when explicitly supplied", async () => {
+    const assistant = {
+      id: "00000000-0000-4000-8000-000000000010",
+      conversation_id: CONVERSATION_ID,
+      business_id: BUSINESS_ID,
+      role: "assistant",
+      content: "Hello!",
+      channel: "web_chat",
+      created_at: "2026-08-18T12:00:00.000Z",
+    };
+    queueResults(
+      { data: assistant, error: null },
+      { data: null, error: null },
+    );
+
+    await addMessage(
+      CONVERSATION_ID,
+      BUSINESS_ID,
+      "assistant",
+      "Hello!",
+      "web_chat",
+      {
+        aiReplyReservationId: "00000000-0000-4000-8000-000000000011",
+        aiReplyReservationAttemptToken:
+          "00000000-0000-4000-8000-000000000012",
+      },
+    );
+
+    expect(chains[0].insert).toHaveBeenCalledWith({
+      conversation_id: CONVERSATION_ID,
+      business_id: BUSINESS_ID,
+      role: "assistant",
+      content: "Hello!",
+      channel: "web_chat",
+      ai_reply_reservation_id: "00000000-0000-4000-8000-000000000011",
+      ai_reply_reservation_attempt_token:
+        "00000000-0000-4000-8000-000000000012",
+    });
+  });
+
+  it("uses a content-free stable provider key and returns an exact retry", async () => {
+    const existing = {
+      id: "00000000-0000-4000-8000-000000000013",
+      conversation_id: CONVERSATION_ID,
+      business_id: BUSINESS_ID,
+      role: "customer",
+      content: "Can I book?",
+      channel: "web_chat",
+      provider_event_id: "widget:opaque",
+      created_at: "2026-08-18T12:00:00.000Z",
+    };
+    queueResults(
+      { data: null, error: { code: "23505", message: "duplicate" } },
+      { data: existing, error: null },
+      { data: null, error: null },
+    );
+
+    await expect(
+      addWebChatInboundMessageOnce(
+        "00000000-0000-4000-8000-000000000099",
+        BUSINESS_ID,
+        "Can I book?",
+        "00000000-0000-4000-8000-000000000014",
+      ),
+    ).resolves.toEqual(existing);
+
+    const inserted = chains[0].insert.mock.calls[0]?.[0] as {
+      provider_event_id: string;
+    };
+    expect(inserted.provider_event_id).toMatch(/^widget:[0-9a-f]{64}$/);
+    expect(inserted.provider_event_id).not.toContain("Can I book?");
+    expect(inserted.provider_event_id).not.toContain(BUSINESS_ID);
+    expect(chains[2].eq).toHaveBeenCalledWith("id", CONVERSATION_ID);
+    expect(chains[2].eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
+  });
+
+  it("fails closed when a client message id is reused with other content", async () => {
+    queueResults(
+      { data: null, error: { code: "23505", message: "duplicate" } },
+      {
+        data: {
+          id: "00000000-0000-4000-8000-000000000013",
+          conversation_id: CONVERSATION_ID,
+          business_id: BUSINESS_ID,
+          role: "customer",
+          content: "Original content",
+          channel: "web_chat",
+        },
+        error: null,
+      },
+    );
+
+    await expect(
+      addWebChatInboundMessageOnce(
+        CONVERSATION_ID,
+        BUSINESS_ID,
+        "Changed content",
+        "00000000-0000-4000-8000-000000000014",
+      ),
+    ).rejects.toBeInstanceOf(WebChatMessageIdempotencyConflictError);
+    expect(mocks.from).toHaveBeenCalledTimes(2);
   });
 });
 

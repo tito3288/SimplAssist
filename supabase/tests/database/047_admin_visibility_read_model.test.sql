@@ -330,11 +330,17 @@ VALUES (
   'schedule_direct'
 );
 
-INSERT INTO public.widget_configs (id, business_id, is_active)
+INSERT INTO public.widget_configs (
+  id,
+  business_id,
+  is_active,
+  allowed_hostnames
+)
 VALUES (
   '61000000-0000-4000-a047-000000000001',
   '10000000-0000-4000-a047-000000000001',
-  true
+  true,
+  ARRAY['av047-business-1.example.test']
 );
 
 INSERT INTO public.google_calendar_tokens (
@@ -343,6 +349,8 @@ INSERT INTO public.google_calendar_tokens (
   access_token,
   refresh_token,
   token_expiry,
+  calendar_id,
+  google_email,
   created_at
 )
 VALUES (
@@ -351,6 +359,8 @@ VALUES (
   'secret-access-av047',
   'secret-refresh-av047',
   '2027-01-01 00:00:00+00',
+  'primary',
+  'admin-visibility-a047@example.test',
   '2026-07-03 00:00:00+00'
 );
 

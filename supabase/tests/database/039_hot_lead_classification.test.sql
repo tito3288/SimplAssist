@@ -696,6 +696,40 @@ SET id = '10000000-0000-4000-a039-000000000002',
     slug = 'hot-lead-test-b-039'
 WHERE owner_id = '00000000-0000-4000-a039-000000000002';
 
+INSERT INTO public.google_calendar_tokens (
+  id,
+  business_id,
+  access_token,
+  refresh_token,
+  token_expiry,
+  calendar_id,
+  google_email,
+  created_at,
+  updated_at
+) VALUES
+  (
+    '62000000-0000-4000-a039-000000000001',
+    '10000000-0000-4000-a039-000000000001',
+    'fixture-access-a039-1',
+    'fixture-refresh-a039-1',
+    '2099-01-01 00:00:00+00',
+    'primary',
+    'hot-lead-a-039@example.test',
+    '2039-01-01 00:00:00+00',
+    '2039-01-01 00:00:00+00'
+  ),
+  (
+    '62000000-0000-4000-a039-000000000002',
+    '10000000-0000-4000-a039-000000000002',
+    'fixture-access-a039-2',
+    'fixture-refresh-a039-2',
+    '2099-01-01 00:00:00+00',
+    'primary',
+    'hot-lead-b-039@example.test',
+    '2039-01-01 00:00:00+00',
+    '2039-01-01 00:00:00+00'
+  );
+
 INSERT INTO public.contacts (
   id,
   business_id,
@@ -2344,6 +2378,24 @@ SELECT throws_ok(
   'a tombstoned business cannot recreate provider booking linkage'
 );
 RESET ROLE;
+
+DELETE FROM public.calendar_bookings
+WHERE business_id IN (
+  '10000000-0000-4000-a039-000000000001',
+  '10000000-0000-4000-a039-000000000002'
+);
+
+DELETE FROM public.google_calendar_tokens
+WHERE (id, business_id) IN (
+  (
+    '62000000-0000-4000-a039-000000000001',
+    '10000000-0000-4000-a039-000000000001'
+  ),
+  (
+    '62000000-0000-4000-a039-000000000002',
+    '10000000-0000-4000-a039-000000000002'
+  )
+);
 
 SELECT * FROM finish();
 

@@ -324,7 +324,7 @@ export async function completeGoogleCalendarOAuthConnection(input: {
       accessToken: z.string().min(1).max(32768),
       refreshToken: z.string().min(1).max(32768),
       tokenExpiry: z.string().refine(isFutureTimestamp),
-      googleEmail: z.string().email().max(254).nullable(),
+      googleEmail: z.string().trim().toLowerCase().email().max(254),
     })
     .strict()
     .safeParse({

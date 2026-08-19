@@ -35,6 +35,7 @@ const CONFIG: WidgetConfig = {
   lead_capture_enabled: true,
   lead_capture_timing: "after_3_messages",
   quick_replies: [],
+  allowed_hostnames: ["example.com"],
   is_active: true,
   created_at: "2026-08-03T00:00:00.000Z",
   updated_at: "2026-08-03T00:00:00.000Z",

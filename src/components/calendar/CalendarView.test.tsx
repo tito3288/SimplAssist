@@ -118,6 +118,11 @@ describe("CalendarView event creation controls", () => {
     expect(source).toContain(
       "onCreationUnavailable={handleEventCreationUnavailable}"
     );
+    expect(source).toContain(
+      "setDeleteOperationId(globalThis.crypto.randomUUID())"
+    );
+    expect(source).toContain("operationId: deleteOperationId");
+    expect(source).toContain("else if (res.status === 409)");
   });
 });
 

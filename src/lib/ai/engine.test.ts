@@ -43,6 +43,9 @@ const mocks = vi.hoisted(() => ({
       this.businessId = args.businessId;
     }
   },
+  AIReplyIdempotencyConflictError: class AIReplyIdempotencyConflictError extends Error {},
+  AIReplyMeteringStateError: class AIReplyMeteringStateError extends Error {},
+  WebChatMessageIdempotencyConflictError: class WebChatMessageIdempotencyConflictError extends Error {},
   anthropicCreate: vi.fn(),
   from: vi.fn(),
   resolveBusinessOperationalControls: vi.fn(),
@@ -54,6 +57,8 @@ const mocks = vi.hoisted(() => ({
   updateContactEmail: vi.fn(),
   getOrCreateConversation: vi.fn(),
   addMessage: vi.fn(),
+  addWebChatInboundMessageOnce: vi.fn(),
+  getConversationById: vi.fn(),
   getConversationAiState: vi.fn(),
   getConversationHistory: vi.fn(),
   buildSystemPrompt: vi.fn(),
@@ -64,10 +69,15 @@ const mocks = vi.hoisted(() => ({
   shouldIncludeCalendarTools: vi.fn(),
   checkAvailability: vi.fn(),
   createBooking: vi.fn(),
+  getCompletedAIReply: vi.fn(),
+  reserveAIReplyUnit: vi.fn(),
+  finalizeAIReplyUnit: vi.fn(),
+  releaseAIReplyUnit: vi.fn(),
+  recordAnthropicProviderCall: vi.fn(),
 }));
 
 vi.mock("@/lib/anthropic/client", () => ({
-  anthropic: { messages: { create: mocks.anthropicCreate } },
+  meteredAnthropic: { messages: { create: mocks.anthropicCreate } },
 }));
 vi.mock("@/lib/account/operationalControls.server", () => ({
   OperationalControlsResolutionError:
@@ -107,6 +117,15 @@ vi.mock("@/lib/billing/entitlements", () => ({
   resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
   canUseFeature: mocks.canUseFeature,
 }));
+vi.mock("@/lib/billing/aiReplyMeter.server", () => ({
+  AIReplyIdempotencyConflictError: mocks.AIReplyIdempotencyConflictError,
+  AIReplyMeteringStateError: mocks.AIReplyMeteringStateError,
+  getCompletedAIReply: mocks.getCompletedAIReply,
+  reserveAIReplyUnit: mocks.reserveAIReplyUnit,
+  finalizeAIReplyUnit: mocks.finalizeAIReplyUnit,
+  releaseAIReplyUnit: mocks.releaseAIReplyUnit,
+  recordAnthropicProviderCall: mocks.recordAnthropicProviderCall,
+}));
 vi.mock("./contacts", () => ({
   findOrCreateContact: mocks.findOrCreateContact,
   incrementLeadScore: mocks.incrementLeadScore,
@@ -116,8 +135,12 @@ vi.mock("./contacts", () => ({
 vi.mock("./conversations", () => ({
   getOrCreateConversation: mocks.getOrCreateConversation,
   addMessage: mocks.addMessage,
+  addWebChatInboundMessageOnce: mocks.addWebChatInboundMessageOnce,
+  getConversationById: mocks.getConversationById,
   getConversationAiState: mocks.getConversationAiState,
   getConversationHistory: mocks.getConversationHistory,
+  WebChatMessageIdempotencyConflictError:
+    mocks.WebChatMessageIdempotencyConflictError,
   isAiHandlingActive: (conversation: {
     status: string;
     is_ai_handling: boolean;
@@ -197,6 +220,8 @@ vi.mock("@/lib/google/bookingOperational.server", () => ({
 
 import {
   AIProcessingBlockedError,
+  AIProcessingIdempotencyConflictError,
+  AIProcessingInProgressError,
   AIProcessingStateError,
   processIncomingMessage,
   processIncomingMessageDetailed,
@@ -230,6 +255,24 @@ const CONVERSATION = {
   status: "active",
   is_ai_handling: true,
 };
+const WEB_CONTACT = {
+  ...CONTACT,
+  name: null,
+  phone_number: null,
+  email: "pat@example.com",
+  session_id: "00000000-0000-4000-8000-000000000004",
+  source_channel: "web_chat",
+};
+const WEB_CONVERSATION = {
+  ...CONVERSATION,
+  id: "00000000-0000-4000-8000-000000000005",
+  contact_id: WEB_CONTACT.id,
+  channel: "web_chat",
+};
+const WEB_SOURCE_MESSAGE_ID = "00000000-0000-4000-8000-000000000010";
+const WEB_RESERVATION_ID = "00000000-0000-4000-8000-000000000020";
+const WEB_ATTEMPT_TOKEN = "00000000-0000-4000-8000-000000000022";
+const WEB_USAGE_PERIOD_ID = "00000000-0000-4000-8000-000000000021";
 const GROWTH = {
   businessId: BUSINESS_ID,
   plan: "sms_and_chat",
@@ -294,6 +337,11 @@ const EXPECTED_BOOKING_REQUEST_TOOL = {
     required: ["requested_service", "requested_time_text"],
   },
 } as const;
+const EXPECTED_ANTHROPIC_CALL_OPTIONS = {
+  maxRetries: 0,
+  timeout: 60_000,
+} as const;
+const EXPECTED_ANTHROPIC_ACCOUNTING_WAIT_MS = 2_000;
 
 function operationalControls(
   overrides: Partial<{
@@ -415,6 +463,15 @@ function expectedGoalLinkIdempotencyKey(sourceMessageId: string): string {
     .digest("base64url");
 }
 
+function expectConsoleErrorsNotToContain(...sentinels: string[]): void {
+  const serializedCalls = JSON.stringify(
+    vi.mocked(console.error).mock.calls,
+  );
+  for (const sentinel of sentinels) {
+    expect(serializedCalls).not.toContain(sentinel);
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   tableResults.clear();
@@ -455,8 +512,13 @@ beforeEach(() => {
   );
   mocks.findOrCreateContact.mockResolvedValue(CONTACT);
   mocks.getOrCreateConversation.mockResolvedValue(CONVERSATION);
+  mocks.getConversationById.mockResolvedValue(CONVERSATION);
   mocks.getConversationAiState.mockResolvedValue(CONVERSATION);
   mocks.addMessage.mockResolvedValue({ id: "message_1" });
+  mocks.addWebChatInboundMessageOnce.mockResolvedValue({
+    id: "00000000-0000-4000-8000-000000000010",
+    conversation_id: CONVERSATION.id,
+  });
   mocks.getConversationHistory.mockResolvedValue([
     { role: "customer", content: "Can I book?" },
   ]);
@@ -492,6 +554,23 @@ beforeEach(() => {
   });
   mocks.incrementLeadScore.mockResolvedValue(undefined);
   mocks.recordBookingRequest.mockResolvedValue("inserted");
+  mocks.getCompletedAIReply.mockResolvedValue({ outcome: "not_found" });
+  mocks.finalizeAIReplyUnit.mockResolvedValue({
+    outcome: "completed",
+    reservationId: "00000000-0000-4000-8000-000000000020",
+    sourceMessageId: "00000000-0000-4000-8000-000000000010",
+    assistantMessageId: "message_1",
+    conversationId: CONVERSATION.id,
+    usagePeriodId: "00000000-0000-4000-8000-000000000021",
+    completedAt: "2026-08-18T12:00:00.000Z",
+  });
+  mocks.releaseAIReplyUnit.mockResolvedValue({
+    outcome: "released",
+    reservationId: "00000000-0000-4000-8000-000000000020",
+  });
+  mocks.recordAnthropicProviderCall.mockResolvedValue(
+    "00000000-0000-4000-8000-000000000030",
+  );
   setAiData();
 });
 
@@ -652,8 +731,12 @@ describe("processIncomingMessage operational controls", () => {
       reason: "ai_replies_paused",
     });
     expect(console.error).toHaveBeenCalledWith(
-      "Error processing incoming message:",
-      anthropicError
+      "[ai-engine] Operation failed",
+      {
+        category: "incoming_message_processing",
+        name: "Error",
+        status: null,
+      },
     );
     expect(mocks.addMessage).toHaveBeenCalledTimes(1);
     expect(mocks.updateContactName).not.toHaveBeenCalled();
@@ -687,15 +770,30 @@ describe("processIncomingMessage operational controls", () => {
 
     await expect(processing).rejects.toBe(resolutionError);
     expect(console.error).toHaveBeenCalledWith(
-      "Error processing incoming message:",
-      anthropicError
+      "[ai-engine] Operation failed",
+      {
+        category: "incoming_message_processing",
+        name: "Error",
+        status: null,
+      },
     );
     expect(mocks.addMessage).toHaveBeenCalledTimes(1);
     expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
   });
 
   it("keeps the generic fallback only when the fresh fallback-boundary check is active", async () => {
-    const anthropicError = new Error("Anthropic unavailable");
+    const sentinel = "pat@example.com bearer-provider-secret";
+    const nameSentinel = "PatExampleComBearerProviderSecret";
+    const anthropicError = Object.assign(
+      new Error(`Anthropic unavailable for ${sentinel}`),
+      {
+        name: nameSentinel,
+        status: 400,
+        request: { headers: { authorization: sentinel } },
+        response: { prompt: sentinel },
+        cause: new Error(sentinel),
+      },
+    );
     mocks.anthropicCreate.mockRejectedValueOnce(anthropicError);
 
     await expect(
@@ -712,9 +810,14 @@ describe("processIncomingMessage operational controls", () => {
     expect(mocks.addMessage).toHaveBeenCalledTimes(1);
     expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
-      "Error processing incoming message:",
-      anthropicError
+      "[ai-engine] Operation failed",
+      {
+        category: "incoming_message_processing",
+        name: "unknown_error",
+        status: 400,
+      },
     );
+    expectConsoleErrorsNotToContain(sentinel, nameSentinel);
   });
 
   it("freshly checks each contact tool execution in a multi-tool response", async () => {
@@ -878,7 +981,8 @@ describe("processIncomingMessage operational controls", () => {
             ],
           }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
   });
 
@@ -951,7 +1055,8 @@ describe("processIncomingMessage operational controls", () => {
             expect.objectContaining({ name: "save_contact_name" }),
             expect.objectContaining({ name: "save_contact_email" }),
           ]),
-        })
+        }),
+        EXPECTED_ANTHROPIC_CALL_OPTIONS,
       );
       const request = mocks.anthropicCreate.mock.calls[callNumber - 1]?.[0] as {
         tools: Array<{ name: string }>;
@@ -976,7 +1081,7 @@ describe("processIncomingMessage operational controls", () => {
             ],
           }),
         ]),
-      })
+      }),
     );
     expect(mocks.anthropicCreate.mock.calls[2]?.[0]).toEqual(
       expect.objectContaining({
@@ -991,7 +1096,7 @@ describe("processIncomingMessage operational controls", () => {
             ],
           }),
         ]),
-      })
+      }),
     );
   });
 
@@ -1048,11 +1153,12 @@ describe("processIncomingMessage operational controls", () => {
             ],
           }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
     expect(console.error).not.toHaveBeenCalledWith(
-      "[calendar-tool] Error executing create_booking:",
-      expect.anything()
+      "[ai-engine] Operation failed",
+      expect.objectContaining({ category: "calendar_tool_create_booking" }),
     );
   });
 
@@ -1132,8 +1238,8 @@ describe("processIncomingMessage operational controls", () => {
     expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
     expect(mocks.updateContactEmail).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalledWith(
-      "[calendar-tool] Error executing create_booking:",
-      stateError
+      "[ai-engine] Operation failed",
+      expect.objectContaining({ category: "calendar_tool_create_booking" }),
     );
   });
 
@@ -1188,8 +1294,8 @@ describe("processIncomingMessage operational controls", () => {
       expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
       expect(mocks.parseKnowledgeGapSignal).not.toHaveBeenCalled();
       expect(console.error).not.toHaveBeenCalledWith(
-        "[contact-tool] Error executing save_contact_name:",
-        typedError
+        "[ai-engine] Operation failed",
+        expect.objectContaining({ category: "contact_tool_save_name" }),
       );
     }
   );
@@ -1241,8 +1347,10 @@ describe("processIncomingMessage operational controls", () => {
       expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
       expect(mocks.parseKnowledgeGapSignal).not.toHaveBeenCalled();
       expect(console.error).not.toHaveBeenCalledWith(
-        "[calendar-tool] Error executing check_availability:",
-        typedError
+        "[ai-engine] Operation failed",
+        expect.objectContaining({
+          category: "calendar_tool_check_availability",
+        }),
       );
     }
   );
@@ -1265,7 +1373,15 @@ describe("processIncomingMessage operational controls", () => {
   ])(
     "feeds an honest $toolName failure result back to the model",
     async ({ toolName, input, updateMock, failureResult }) => {
-      const contactError = new Error("contact provider unavailable");
+      const sentinel = "pat@example.com contact-provider-secret";
+      const contactError = Object.assign(
+        new Error(`contact provider unavailable for ${sentinel}`),
+        {
+          status: 503,
+          request: { contact: sentinel },
+          cause: new Error(sentinel),
+        },
+      );
       mocks.anthropicCreate
         .mockResolvedValueOnce({
           stop_reason: "tool_use",
@@ -1304,18 +1420,36 @@ describe("processIncomingMessage operational controls", () => {
               content: [expect.objectContaining({ content: failureResult })],
             }),
           ]),
-        })
+        }),
+        EXPECTED_ANTHROPIC_CALL_OPTIONS,
       );
       expect(mocks.addMessage).toHaveBeenCalledTimes(2);
       expect(console.error).toHaveBeenCalledWith(
-        `[contact-tool] Error executing ${toolName}:`,
-        contactError
+        "[ai-engine] Operation failed",
+        {
+          category:
+            toolName === "save_contact_name"
+              ? "contact_tool_save_name"
+              : "contact_tool_save_email",
+          name: "Error",
+          status: 503,
+        },
       );
+      expectConsoleErrorsNotToContain(sentinel);
     }
   );
 
   it("retains friendly calendar fallback text for an ordinary provider failure", async () => {
-    const calendarError = new Error("calendar provider unavailable");
+    const sentinel = "customer@example.com google-oauth-token";
+    const calendarError = Object.assign(
+      new Error(`calendar provider unavailable for ${sentinel}`),
+      {
+        status: 503,
+        config: { headers: { authorization: sentinel } },
+        response: { event: sentinel },
+        cause: new Error(sentinel),
+      },
+    );
     mocks.anthropicCreate
       .mockResolvedValueOnce({
         stop_reason: "tool_use",
@@ -1359,13 +1493,19 @@ describe("processIncomingMessage operational controls", () => {
             ],
           }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
     expect(mocks.addMessage).toHaveBeenCalledTimes(2);
     expect(console.error).toHaveBeenCalledWith(
-      "[calendar-tool] Error executing check_availability:",
-      calendarError
+      "[ai-engine] Operation failed",
+      {
+        category: "calendar_tool_check_availability",
+        name: "Error",
+        status: 503,
+      },
     );
+    expectConsoleErrorsNotToContain(sentinel);
   });
 
   it("freshly checks before every Anthropic request in the tool loop", async () => {
@@ -1617,7 +1757,8 @@ describe("processIncomingMessage operational controls", () => {
             expect.objectContaining({ name: "check_availability" }),
             expect.objectContaining({ name: "create_booking" }),
           ]),
-        })
+        }),
+        EXPECTED_ANTHROPIC_CALL_OPTIONS,
       );
       expect(mocks.shouldIncludeCalendarTools).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1714,7 +1855,8 @@ describe("processIncomingMessage operational controls", () => {
           expect.objectContaining({ name: "check_availability" }),
           expect.objectContaining({ name: "create_booking" }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
     expect(
       mocks.getConversationHistory.mock.invocationCallOrder[0]
@@ -1724,6 +1866,643 @@ describe("processIncomingMessage operational controls", () => {
     expect(
       mocks.resolveBusinessOperationalControls.mock.invocationCallOrder[1]
     ).toBeLessThan(mocks.anthropicCreate.mock.invocationCallOrder[0]);
+  });
+});
+
+describe("processIncomingMessage live web-chat metering", () => {
+  const webRequest = {
+    clientMessageId: "00000000-0000-4000-8000-000000000011",
+    requestFingerprint: "a".repeat(64),
+  };
+  const reserved = {
+    outcome: "reserved" as const,
+    reservationId: WEB_RESERVATION_ID,
+    attemptToken: WEB_ATTEMPT_TOKEN,
+    attemptCount: 1,
+    sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+    usagePeriodId: WEB_USAGE_PERIOD_ID,
+    periodStart: "2026-08-01T00:00:00.000Z",
+    periodEnd: "2026-09-01T00:00:00.000Z",
+    plan: "chat_only" as const,
+    allowance: 200,
+    completedReplies: 199,
+    activeReservations: 1,
+    remainingReplies: 0,
+    allowanceRenewal: "scheduled" as const,
+    resetAt: "2026-09-01T00:00:00.000Z",
+    expiresAt: "2026-08-18T12:10:00.000Z",
+  };
+
+  function runWebTurn(
+    overrides: Partial<Parameters<typeof processIncomingMessageDetailed>[6]> = {},
+  ) {
+    return processIncomingMessageDetailed(
+      BUSINESS_ID,
+      null,
+      "pat@example.com",
+      "Can I book tomorrow?",
+      "web_chat",
+      WEB_CONTACT.session_id,
+      {
+        contact: WEB_CONTACT as never,
+        conversation: WEB_CONVERSATION as never,
+        webChatRequest: webRequest,
+        ...overrides,
+      },
+    );
+  }
+
+  beforeEach(() => {
+    mocks.addWebChatInboundMessageOnce.mockResolvedValue({
+      id: WEB_SOURCE_MESSAGE_ID,
+      conversation_id: WEB_CONVERSATION.id,
+    });
+    mocks.addMessage.mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000023",
+    });
+    mocks.reserveAIReplyUnit.mockResolvedValue(reserved);
+    mocks.finalizeAIReplyUnit.mockResolvedValue({
+      outcome: "completed",
+      reservationId: WEB_RESERVATION_ID,
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+      conversationId: WEB_CONVERSATION.id,
+      usagePeriodId: WEB_USAGE_PERIOD_ID,
+      completedAt: "2026-08-18T12:00:00.000Z",
+    });
+    mocks.anthropicCreate.mockResolvedValue({
+      id: "msg_provider_1",
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: 120,
+        output_tokens: 24,
+        cache_creation_input_tokens: 4,
+        cache_read_input_tokens: 10,
+      },
+      content: [{ type: "text", text: "Absolutely." }],
+    });
+  });
+
+  it("persists once, reserves before Anthropic, proves the assistant, and finalizes one unit", async () => {
+    await expect(runWebTurn({ contactName: "Pat" })).resolves.toMatchObject({
+      text: "Absolutely.",
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+
+    expect(mocks.updateContactName).toHaveBeenCalledWith(WEB_CONTACT.id, "Pat");
+    expect(mocks.addWebChatInboundMessageOnce).toHaveBeenCalledWith(
+      WEB_CONVERSATION.id,
+      BUSINESS_ID,
+      "Can I book tomorrow?",
+      webRequest.clientMessageId,
+    );
+    expect(mocks.reserveAIReplyUnit).toHaveBeenCalledWith({
+      mode: "live",
+      businessId: BUSINESS_ID,
+      clientMessageId: webRequest.clientMessageId,
+      requestFingerprint: webRequest.requestFingerprint,
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+    });
+    expect(mocks.addMessage).toHaveBeenLastCalledWith(
+      WEB_CONVERSATION.id,
+      BUSINESS_ID,
+      "assistant",
+      "Absolutely.",
+      "web_chat",
+      {
+        aiReplyReservationId: WEB_RESERVATION_ID,
+        aiReplyReservationAttemptToken: WEB_ATTEMPT_TOKEN,
+      },
+    );
+    expect(mocks.finalizeAIReplyUnit).toHaveBeenCalledWith({
+      reservationId: WEB_RESERVATION_ID,
+      attemptToken: WEB_ATTEMPT_TOKEN,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+    expect(mocks.releaseAIReplyUnit).not.toHaveBeenCalled();
+    expect(
+      mocks.reserveAIReplyUnit.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.anthropicCreate.mock.invocationCallOrder[0]);
+    expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: BUSINESS_ID,
+        reservationId: WEB_RESERVATION_ID,
+        attemptToken: WEB_ATTEMPT_TOKEN,
+        providerRequestId: "msg_provider_1",
+        inputTokens: 120,
+        outputTokens: 24,
+        cacheCreationInputTokens: 4,
+        cacheReadInputTokens: 10,
+        succeeded: true,
+      }),
+    );
+    expect(mocks.anthropicCreate.mock.calls[0]?.[1]).toEqual(
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
+    );
+  });
+
+  it("recovers the exact committed reply before a later pause or cancellation gate", async () => {
+    mocks.getCompletedAIReply.mockResolvedValue({
+      outcome: "completed",
+      reservationId: WEB_RESERVATION_ID,
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+      conversationId: WEB_CONVERSATION.id,
+      usagePeriodId: WEB_USAGE_PERIOD_ID,
+      completedAt: "2026-08-18T12:00:00.000Z",
+    });
+    mocks.resolveBusinessOperationalControls.mockResolvedValue(
+      operationalControls({ aiRepliesPausedAt: "2026-08-18T12:01:00.000Z" }),
+    );
+    mocks.resolveBusinessEntitlements.mockResolvedValue({
+      ...GROWTH,
+      status: "canceled",
+      active: false,
+    });
+    tableResults.set("messages", {
+      data: {
+        id: "00000000-0000-4000-8000-000000000023",
+        business_id: BUSINESS_ID,
+        conversation_id: WEB_CONVERSATION.id,
+        role: "assistant",
+        channel: "web_chat",
+        content: "The reply committed before the pause.",
+      },
+      error: null,
+    });
+
+    await expect(runWebTurn()).resolves.toMatchObject({
+      text: "The reply committed before the pause.",
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+
+    expect(mocks.getCompletedAIReply).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      clientMessageId: webRequest.clientMessageId,
+      requestFingerprint: webRequest.requestFingerprint,
+    });
+    expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
+    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.addWebChatInboundMessageOnce).not.toHaveBeenCalled();
+    expect(mocks.reserveAIReplyUnit).not.toHaveBeenCalled();
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns a finalized reply when operations pause at the post-commit boundary", async () => {
+    mocks.resolveBusinessOperationalControls.mockImplementation(async () =>
+      mocks.finalizeAIReplyUnit.mock.calls.length > 0
+        ? operationalControls({
+            aiRepliesPausedAt: "2026-08-18T12:01:00.000Z",
+          })
+        : ACTIVE_CONTROLS,
+    );
+
+    await expect(runWebTurn()).resolves.toMatchObject({
+      text: "Absolutely.",
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+
+    expect(mocks.finalizeAIReplyUnit).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(mocks.resolveBusinessOperationalControls).toHaveBeenCalled();
+    });
+    expect(mocks.incrementLeadScore).not.toHaveBeenCalled();
+    expect(mocks.releaseAIReplyUnit).not.toHaveBeenCalled();
+  });
+
+  it("contains post-commit lead-score failures without suppressing the reply", async () => {
+    mocks.incrementLeadScore.mockRejectedValueOnce(
+      new Error("lead score storage unavailable"),
+    );
+
+    await expect(runWebTurn()).resolves.toMatchObject({
+      text: "Absolutely.",
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.incrementLeadScore).toHaveBeenCalledOnce();
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "[ai-engine] Post-commit lead score enrichment failed",
+      expect.objectContaining({
+        businessId: BUSINESS_ID,
+        contactId: WEB_CONTACT.id,
+        error: "Error",
+      }),
+    );
+    expect(mocks.releaseAIReplyUnit).not.toHaveBeenCalled();
+  });
+
+  it("returns an already completed durable reply without another provider call", async () => {
+    mocks.reserveAIReplyUnit.mockResolvedValue({
+      outcome: "completed",
+      reservationId: WEB_RESERVATION_ID,
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+      conversationId: WEB_CONVERSATION.id,
+      usagePeriodId: WEB_USAGE_PERIOD_ID,
+      completedAt: "2026-08-18T12:00:00.000Z",
+    });
+    tableResults.set("messages", {
+      data: {
+        id: "00000000-0000-4000-8000-000000000023",
+        business_id: BUSINESS_ID,
+        conversation_id: WEB_CONVERSATION.id,
+        role: "assistant",
+        channel: "web_chat",
+        content: "The original durable reply.",
+      },
+      error: null,
+    });
+
+    await expect(runWebTurn()).resolves.toMatchObject({
+      text: "The original durable reply.",
+      assistantMessageId: "00000000-0000-4000-8000-000000000023",
+    });
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.finalizeAIReplyUnit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an in-flight duplicate without another provider call", async () => {
+    mocks.reserveAIReplyUnit.mockResolvedValue({
+      outcome: "in_progress",
+      reservationId: WEB_RESERVATION_ID,
+      sourceMessageId: WEB_SOURCE_MESSAGE_ID,
+      usagePeriodId: WEB_USAGE_PERIOD_ID,
+      expiresAt: "2026-08-18T12:10:00.000Z",
+      attemptCount: 1,
+    });
+
+    await expect(runWebTurn()).rejects.toBeInstanceOf(
+      AIProcessingInProgressError,
+    );
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    expect(mocks.releaseAIReplyUnit).not.toHaveBeenCalled();
+  });
+
+  it("returns the typed allowance boundary before Anthropic", async () => {
+    mocks.reserveAIReplyUnit.mockResolvedValue({
+      outcome: "limit_reached",
+      usagePeriodId: WEB_USAGE_PERIOD_ID,
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-09-01T00:00:00.000Z",
+      plan: "chat_only",
+      allowance: 200,
+      completedReplies: 200,
+      activeReservations: 0,
+      remainingReplies: 0,
+      allowanceRenewal: "scheduled",
+      resetAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    await expect(runWebTurn()).rejects.toMatchObject({
+      name: "AIReplyLimitReachedError",
+      resetAt: "2026-09-01T00:00:00.000Z",
+      allowanceRenewal: "scheduled",
+    });
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+  });
+
+  it("releases a provider failure and never returns the unpersisted fallback", async () => {
+    mocks.anthropicCreate.mockRejectedValueOnce(
+      Object.assign(new Error("provider rejected request"), { status: 400 }),
+    );
+
+    await expect(runWebTurn()).rejects.toBeInstanceOf(AIProcessingStateError);
+    expect(mocks.releaseAIReplyUnit).toHaveBeenCalledWith({
+      reservationId: WEB_RESERVATION_ID,
+      attemptToken: WEB_ATTEMPT_TOKEN,
+      reason: "processing_failed",
+    });
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        succeeded: false,
+        errorCode: "Error_400",
+      }),
+    );
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a provider success after a bounded accounting wait and safely drains a late failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T12:00:00.000Z"));
+    const startedAt = Date.now();
+    const pendingAccounting = deferred<string>();
+    mocks.recordAnthropicProviderCall.mockReturnValueOnce(
+      pendingAccounting.promise,
+    );
+
+    try {
+      const processing = runWebTurn();
+      let turnSettled = false;
+      void processing.then(
+        () => {
+          turnSettled = true;
+        },
+        () => {
+          turnSettled = true;
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+      });
+      expect(turnSettled).toBe(false);
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+
+      const accountingCall =
+        mocks.recordAnthropicProviderCall.mock.calls[0]?.[0];
+      expect(accountingCall).toMatchObject({
+        callIdempotencyKey: `ai:${WEB_RESERVATION_ID}:${WEB_ATTEMPT_TOKEN}:0`,
+        succeeded: true,
+      });
+      await vi.advanceTimersByTimeAsync(EXPECTED_ANTHROPIC_ACCOUNTING_WAIT_MS);
+
+      await expect(processing).resolves.toMatchObject({
+        text: "Absolutely.",
+        assistantMessageId: "00000000-0000-4000-8000-000000000023",
+      });
+      expect(turnSettled).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(4 * 60_000);
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+      expect(mocks.finalizeAIReplyUnit).toHaveBeenCalledOnce();
+      expect(console.error).toHaveBeenCalledWith(
+        "[ai-engine] Anthropic call accounting timed out",
+        expect.objectContaining({
+          businessId: BUSINESS_ID,
+          callIdempotencyKey: accountingCall?.callIdempotencyKey,
+          waitMs: EXPECTED_ANTHROPIC_ACCOUNTING_WAIT_MS,
+        }),
+      );
+
+      pendingAccounting.reject(new Error("late accounting failure"));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(console.error).toHaveBeenCalledWith(
+        "[ai-engine] Anthropic call accounting failed",
+        expect.objectContaining({
+          businessId: BUSINESS_ID,
+          callIdempotencyKey: accountingCall?.callIdempotencyKey,
+          error: "Error",
+        }),
+      );
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a provider failure after bounded accounting without a duplicate attempt or ledger key", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T12:00:00.000Z"));
+    const startedAt = Date.now();
+    const pendingAccounting = deferred<string>();
+    mocks.recordAnthropicProviderCall.mockReturnValueOnce(
+      pendingAccounting.promise,
+    );
+    mocks.anthropicCreate.mockRejectedValueOnce(
+      Object.assign(new Error("provider rejected request"), { status: 400 }),
+    );
+
+    try {
+      const processing = runWebTurn();
+      const rejected = expect(processing).rejects.toBeInstanceOf(
+        AIProcessingStateError,
+      );
+
+      await vi.waitFor(() => {
+        expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+      });
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+
+      const accountingCall =
+        mocks.recordAnthropicProviderCall.mock.calls[0]?.[0];
+      await vi.advanceTimersByTimeAsync(EXPECTED_ANTHROPIC_ACCOUNTING_WAIT_MS);
+      await rejected;
+
+      expect(Date.now() - startedAt).toBeLessThan(4 * 60_000);
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+      expect(accountingCall).toMatchObject({
+        callIdempotencyKey: `ai:${WEB_RESERVATION_ID}:${WEB_ATTEMPT_TOKEN}:0`,
+        succeeded: false,
+        errorCode: "Error_400",
+      });
+      expect(console.error).toHaveBeenCalledWith(
+        "[ai-engine] Anthropic call accounting timed out",
+        expect.objectContaining({
+          businessId: BUSINESS_ID,
+          callIdempotencyKey: accountingCall?.callIdempotencyKey,
+          waitMs: EXPECTED_ANTHROPIC_ACCOUNTING_WAIT_MS,
+        }),
+      );
+      expect(mocks.releaseAIReplyUnit).toHaveBeenCalledOnce();
+
+      pendingAccounting.resolve("00000000-0000-4000-8000-000000000030");
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(mocks.anthropicCreate).toHaveBeenCalledOnce();
+      expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records and bounds all three attempts before releasing on repeated timeouts", async () => {
+    const timeoutError = Object.assign(new Error("request timed out"), {
+      name: "APIConnectionTimeoutError",
+    });
+    mocks.anthropicCreate.mockRejectedValue(timeoutError);
+
+    await expect(runWebTurn()).rejects.toBeInstanceOf(AIProcessingStateError);
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(3);
+    expect(mocks.anthropicCreate.mock.calls.map((call) => call[1])).toEqual(
+      Array(3).fill(EXPECTED_ANTHROPIC_CALL_OPTIONS),
+    );
+    expect(mocks.recordAnthropicProviderCall).toHaveBeenCalledTimes(3);
+    const accountingCalls = mocks.recordAnthropicProviderCall.mock.calls.map(
+      ([call]) => call,
+    );
+    expect(accountingCalls).toEqual(
+      Array(3).fill(
+        expect.objectContaining({
+          succeeded: false,
+          errorCode: "APIConnectionTimeoutError",
+        }),
+      ),
+    );
+    expect(
+      new Set(accountingCalls.map((call) => call.callIdempotencyKey)).size,
+    ).toBe(3);
+    expect(mocks.releaseAIReplyUnit).toHaveBeenCalledOnce();
+  });
+
+  it("retries a transient failure for existing Growth SMS and accounts every HTTP attempt", async () => {
+    mocks.anthropicCreate
+      .mockRejectedValueOnce(
+        Object.assign(new Error("provider unavailable"), { status: 503 }),
+      )
+      .mockResolvedValueOnce({
+        id: "msg_provider_sms_retry",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 40, output_tokens: 12 },
+        content: [{ type: "text", text: "Recovered after retry." }],
+      });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Hello",
+        "sms",
+      ),
+    ).resolves.toBe("Recovered after retry.");
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    const accountingCalls = mocks.recordAnthropicProviderCall.mock.calls.map(
+      ([call]) => call,
+    );
+    expect(accountingCalls).toHaveLength(2);
+    expect(accountingCalls[0]).toMatchObject({
+      reservationId: null,
+      succeeded: false,
+      errorCode: "Error_503",
+    });
+    expect(accountingCalls[1]).toMatchObject({
+      reservationId: null,
+      succeeded: true,
+      providerRequestId: "msg_provider_sms_retry",
+    });
+    expect(accountingCalls[0]?.callIdempotencyKey).not.toBe(
+      accountingCalls[1]?.callIdempotencyKey,
+    );
+  });
+
+  it("does not continue a tool loop after the whole-turn deadline", async () => {
+    let now = Date.parse("2026-08-18T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    mocks.anthropicCreate.mockImplementationOnce(async () => {
+      now += 4 * 60_000 + 1;
+      return {
+        id: "msg_provider_late",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 20, output_tokens: 5 },
+        content: [
+          {
+            type: "tool_use",
+            id: "late_contact_tool",
+            name: "save_contact_name",
+            input: { name: "Too Late" },
+          },
+        ],
+      };
+    });
+
+    try {
+      await expect(runWebTurn()).rejects.toMatchObject({
+        name: "AIProcessingStateError",
+        message: "AI processing exceeded its bounded turn deadline.",
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.updateContactName).not.toHaveBeenCalled();
+    expect(mocks.finalizeAIReplyUnit).not.toHaveBeenCalled();
+    expect(mocks.releaseAIReplyUnit).toHaveBeenCalledOnce();
+  });
+
+  it("stops awaiting a hung tool before the shared lease and ignores its late resolution", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T12:00:00.000Z"));
+    const startedAt = Date.now();
+    const pendingBookingRequest = deferred<"inserted">();
+    setAiSettings({ booking_mode: "collect_info" });
+    mocks.recordBookingRequest.mockReturnValueOnce(pendingBookingRequest.promise);
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      id: "msg_provider_hung_tool",
+      stop_reason: "tool_use",
+      usage: { input_tokens: 40, output_tokens: 8 },
+      content: [
+        {
+          type: "tool_use",
+          id: "hung_booking_request",
+          name: "record_booking_request",
+          input: {
+            requested_service: "Estimate",
+            requested_time_text: "Tomorrow morning",
+          },
+        },
+      ],
+    });
+
+    try {
+      const processing = runWebTurn();
+      await vi.waitFor(() => {
+        expect(mocks.recordBookingRequest).toHaveBeenCalledOnce();
+      });
+
+      const rejectedAtDeadline = expect(processing).rejects.toMatchObject({
+        name: "AIProcessingStateError",
+        message: "AI processing exceeded its bounded turn deadline.",
+      });
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      await rejectedAtDeadline;
+
+      expect(Date.now() - startedAt).toBeLessThan(5 * 60_000);
+      expect(mocks.releaseAIReplyUnit).toHaveBeenCalledOnce();
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.finalizeAIReplyUnit).not.toHaveBeenCalled();
+      expect(mocks.addMessage).not.toHaveBeenCalled();
+
+      pendingBookingRequest.resolve("inserted");
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(mocks.anthropicCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.addMessage).not.toHaveBeenCalled();
+      expect(mocks.finalizeAIReplyUnit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases an empty model result instead of consuming a reply", async () => {
+    mocks.anthropicCreate.mockResolvedValueOnce({
+      id: "msg_provider_empty",
+      stop_reason: "end_turn",
+      usage: { input_tokens: 50, output_tokens: 0 },
+      content: [],
+    });
+
+    await expect(runWebTurn()).rejects.toBeInstanceOf(AIProcessingStateError);
+    expect(mocks.releaseAIReplyUnit).toHaveBeenCalledOnce();
+    expect(mocks.addMessage).not.toHaveBeenCalled();
+    expect(mocks.finalizeAIReplyUnit).not.toHaveBeenCalled();
+  });
+
+  it("maps a reused client id conflict to the route-safe typed error", async () => {
+    mocks.reserveAIReplyUnit.mockRejectedValueOnce(
+      new mocks.AIReplyIdempotencyConflictError(),
+    );
+
+    await expect(runWebTurn()).rejects.toBeInstanceOf(
+      AIProcessingIdempotencyConflictError,
+    );
+    expect(mocks.anthropicCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -1852,7 +2631,8 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
         tools: expect.arrayContaining([
           expect.objectContaining({ name: "check_availability" }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
     expect(mocks.buildConversationMessages).toHaveBeenCalledWith(
       expect.any(Array)
@@ -1911,7 +2691,8 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
         tools: expect.not.arrayContaining([
           expect.objectContaining({ name: "check_availability" }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
   });
 
@@ -2015,6 +2796,133 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
         conversationId: CONVERSATION.id,
         sourceMessageId: "message_1",
       }
+    );
+  });
+
+  it("passes normalized booking email and explicit invalid duration to the authoritative calendar validator", async () => {
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              customer_email: "  PAT@EXAMPLE.COM  ",
+              service_name: "Estimate",
+              start_time: "2026-08-01T10:00:00",
+              duration_minutes: 0,
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Booked." }],
+      });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Please book that.",
+      "sms",
+    );
+
+    expect(mocks.createBooking).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      expect.objectContaining({
+        customerEmail: "pat@example.com",
+        durationMinutes: 0,
+      }),
+      "America/New_York",
+      expect.anything(),
+    );
+    expect(mocks.updateContactEmail).not.toHaveBeenCalled();
+  });
+
+  it("permits at most one availability lookup and one booking attempt per inbound message", async () => {
+    mocks.checkAvailability.mockResolvedValue(["10:00 AM"]);
+    mocks.anthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "availability_1",
+            name: "check_availability",
+            input: { date: "2026-08-20" },
+          },
+          {
+            type: "tool_use",
+            id: "availability_2",
+            name: "check_availability",
+            input: { date: "2026-08-21" },
+          },
+          {
+            type: "tool_use",
+            id: "booking_1",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-20T10:00:00-04:00",
+            },
+          },
+          {
+            type: "tool_use",
+            id: "booking_2",
+            name: "create_booking",
+            input: {
+              customer_name: "Pat",
+              service_name: "Estimate",
+              start_time: "2026-08-20T11:00:00-04:00",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Your appointment is set." }],
+      });
+
+    await expect(
+      processIncomingMessage(
+        BUSINESS_ID,
+        "+15745550100",
+        null,
+        "Please find a time and book it.",
+        "sms",
+      ),
+    ).resolves.toBe("Your appointment is set.");
+
+    expect(mocks.checkAvailability).toHaveBeenCalledOnce();
+    expect(mocks.createBooking).toHaveBeenCalledOnce();
+    expect(mocks.anthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.anthropicCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                tool_use_id: "availability_2",
+                content:
+                  "That calendar action was already attempted for this message. Do not repeat it; continue using the result already returned.",
+              }),
+              expect.objectContaining({
+                tool_use_id: "booking_2",
+                content:
+                  "That calendar action was already attempted for this message. Do not repeat it; continue using the result already returned.",
+              }),
+            ]),
+          }),
+        ]),
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
   });
 
@@ -2177,9 +3085,9 @@ describe("processIncomingMessage collect-mode request persistence", () => {
       contactId: CONTACT.id,
       conversationId: CONVERSATION.id,
       sourceMessageId: "message_1",
-      requestedService: "  Kitchen estimate  ",
+      requestedService: "Kitchen estimate",
       requestedTimeText: "next Tuesday after lunch",
-      customerName: " Tool Pat ",
+      customerName: "Tool Pat",
       customerPhone: "+15745550199",
       customerEmail: "stored@example.com",
     });
@@ -2786,7 +3694,15 @@ describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
   });
 
   it("exact-strips the sentinel and disables classification if parsing throws", async () => {
-    const parserError = new Error("parser failure");
+    const sensitiveValue = "pat@example.com prompt-payload";
+    const parserError = Object.assign(
+      new Error(`parser failure for ${sensitiveValue}`),
+      {
+        status: 422,
+        rawResponse: sensitiveValue,
+        cause: new Error(sensitiveValue),
+      },
+    );
     mocks.parseKnowledgeGapSignal.mockImplementationOnce(() => {
       throw parserError;
     });
@@ -2813,9 +3729,14 @@ describe("processIncomingMessageDetailed knowledge-gap signaling", () => {
       knowledgeGapDetected: false,
     });
     expect(console.error).toHaveBeenCalledWith(
-      "[ai-engine] Knowledge-gap signal parsing failed:",
-      parserError
+      "[ai-engine] Operation failed",
+      {
+        category: "knowledge_gap_parser",
+        name: "Error",
+        status: 422,
+      },
     );
+    expectConsoleErrorsNotToContain(sensitiveValue);
   });
 });
 
@@ -3133,7 +4054,8 @@ describe("processIncomingMessageDetailed goal-aware behavior", () => {
             ],
           }),
         ]),
-      })
+      }),
+      EXPECTED_ANTHROPIC_CALL_OPTIONS,
     );
     expect(result.actions).toHaveLength(1);
     expect(result.actions[0]).toEqual({

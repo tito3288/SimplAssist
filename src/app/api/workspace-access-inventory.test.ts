@@ -87,7 +87,7 @@ describe("authenticated API workspace-access inventory", () => {
 
   it("keeps live widget and provider/auth callback routes exempt", () => {
     for (const path of [
-      "./widget/end/route.ts",
+      "./widget/lead/route.ts",
       "./stripe/webhook/route.ts",
       "./messaging/webhook/route.ts",
       "./messaging/registration/status/route.ts",
@@ -122,6 +122,29 @@ describe("authenticated API workspace-access inventory", () => {
     );
     expect(behavioralTests).toContain(
       'it("rejects a same-session preview marker for another workspace business before AI"',
+    );
+  });
+
+  it("keeps live widget end public while authenticating preview end", () => {
+    const route = routeSource("./widget/end/route.ts");
+    const behavioralTests = routeSource("./widget/routes.test.ts");
+    const previewFlag = route.indexOf("const verifiedPreview = preview === true");
+    const previewGuard = route.indexOf("if (verifiedPreview)", previewFlag);
+    const previewGate = route.indexOf(
+      "await requireWorkspaceRouteAccess()",
+      previewGuard,
+    );
+    const firstWidgetRead = route.indexOf('.from("widget_configs")');
+
+    expect(previewFlag).toBeGreaterThan(-1);
+    expect(previewGuard).toBeGreaterThan(previewFlag);
+    expect(previewGate).toBeGreaterThan(previewGuard);
+    expect(firstWidgetRead).toBeGreaterThan(previewGate);
+    expect(behavioralTests).toContain(
+      'it("requires the widget token on end-session before conversation reads"',
+    );
+    expect(behavioralTests).toContain(
+      'it("allows authenticated same-business preview end without a public token"',
     );
   });
 

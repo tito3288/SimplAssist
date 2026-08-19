@@ -17,6 +17,10 @@ import {
   resolveAssignedPartnerName,
 } from "@/lib/billing/partnerManagedBilling.server";
 import {
+  getCurrentAIReplyUsage,
+  type AIReplyUsageDecision,
+} from "@/lib/billing/aiReplyMeter.server";
+import {
   card,
   cardRecommended,
   statusSuccess,
@@ -27,6 +31,21 @@ import {
 type BillingPageProps = {
   searchParams?: Record<string, string | string[] | undefined>;
 };
+
+type ChatOnlyAIReplyUsage =
+  | {
+      status: "available";
+      allowance: number;
+      usedReplies: number;
+      capacityInUse: number;
+      activeReservations: number;
+      remainingReplies: number;
+      usagePercent: number;
+      allowanceRenewal: "scheduled" | "frozen_past_due";
+      resetDate: string | null;
+      level: "normal" | "warning" | "exhausted";
+    }
+  | { status: "unavailable" };
 
 export default async function BillingPage(_props: BillingPageProps) {
   void _props;
@@ -99,13 +118,22 @@ export default async function BillingPage(_props: BillingPageProps) {
     : 0;
   const includedSmsParts = usagePeriod?.included_sms_parts ?? 0;
   const usagePercent =
-    includedSmsParts > 0 ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100)) : 0;
-  const { brand } = await getRequestBrand();
+    includedSmsParts > 0
+      ? Math.min(100, Math.round((usedSmsParts / includedSmsParts) * 100))
+      : 0;
   const activePlan = subscription?.plan as SubscriptionPlan | undefined;
+  const [{ brand }, chatOnlyAIReplyUsage] = await Promise.all([
+    getRequestBrand(),
+    hasActiveSubscription && activePlan === "chat_only"
+      ? loadChatOnlyAIReplyUsage(business.id)
+      : Promise.resolve(null),
+  ]);
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">Billing</h1>
+      <h1 className="text-2xl font-bold text-stone-900 dark:text-[#f5f5f5]">
+        Billing
+      </h1>
       <p className="mt-2 text-stone-500 dark:text-[#bdbdbf]">
         {hasActiveSubscription
           ? "Manage your subscription"
@@ -124,7 +152,8 @@ export default async function BillingPage(_props: BillingPageProps) {
               <div className="mt-2 flex items-center gap-3">
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    subscription.status === "active" || subscription.status === "trialing"
+                    subscription.status === "active" ||
+                    subscription.status === "trialing"
                       ? statusSuccess
                       : subscription.status === "past_due"
                         ? statusWarning
@@ -136,7 +165,7 @@ export default async function BillingPage(_props: BillingPageProps) {
                 <span className="text-sm text-stone-500 dark:text-[#bdbdbf]">
                   Next billing date:{" "}
                   {new Date(
-                    subscription.current_period_end
+                    subscription.current_period_end,
                   ).toLocaleDateString()}
                 </span>
               </div>
@@ -177,7 +206,9 @@ export default async function BillingPage(_props: BillingPageProps) {
                   <span className="text-3xl font-bold text-stone-900 dark:text-[#f5f5f5]">
                     ${plan.price}
                   </span>
-                  <span className="text-stone-500 dark:text-[#bdbdbf]">/mo</span>
+                  <span className="text-stone-500 dark:text-[#bdbdbf]">
+                    /mo
+                  </span>
                 </p>
                 <ul className="mt-6 space-y-3">
                   {presentedPlan.features.map((feature) => (
@@ -225,11 +256,13 @@ export default async function BillingPage(_props: BillingPageProps) {
                 SMS usage
               </h2>
               <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
-                Current billing period usage counts inbound and outbound SMS parts.
+                Current billing period usage counts inbound and outbound SMS
+                parts.
               </p>
             </div>
             <div className="text-sm font-medium text-stone-700 dark:text-[#d8d8d8]">
-              {usedSmsParts.toLocaleString()} / {includedSmsParts.toLocaleString()} parts
+              {usedSmsParts.toLocaleString()} /{" "}
+              {includedSmsParts.toLocaleString()} parts
             </div>
           </div>
           <div className="mt-4 h-3 overflow-hidden rounded-full bg-stone-200 dark:bg-white/[0.10]">
@@ -253,6 +286,196 @@ export default async function BillingPage(_props: BillingPageProps) {
           </p>
         </div>
       )}
+
+      {hasActiveSubscription &&
+        activePlan === "chat_only" &&
+        chatOnlyAIReplyUsage && (
+          <section
+            className={`mt-6 p-6 ${card}`}
+            aria-labelledby="ai-reply-usage-heading"
+          >
+            <h2
+              id="ai-reply-usage-heading"
+              className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5]"
+            >
+              AI reply usage
+            </h2>
+            {chatOnlyAIReplyUsage.status === "unavailable" ? (
+              <p
+                role="status"
+                className={`mt-4 rounded-xl px-4 py-3 text-sm ${statusWarning}`}
+              >
+                AI reply usage is temporarily unavailable. No usage estimate is
+                shown until current billing data can be verified.
+              </p>
+            ) : (
+              <>
+                <div className="mt-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+                    Monthly included AI replies
+                  </p>
+                  <p className="text-sm font-semibold text-stone-700 dark:text-[#d8d8d8]">
+                    {chatOnlyAIReplyUsage.usedReplies.toLocaleString()} /{" "}
+                    {chatOnlyAIReplyUsage.allowance.toLocaleString()} replies
+                  </p>
+                </div>
+                <div className="mt-4 h-3 overflow-hidden rounded-full bg-stone-200 dark:bg-white/[0.10]">
+                  <div
+                    role="progressbar"
+                    aria-label="Monthly AI reply capacity in use"
+                    aria-valuemin={0}
+                    aria-valuemax={chatOnlyAIReplyUsage.allowance}
+                    aria-valuenow={chatOnlyAIReplyUsage.capacityInUse}
+                    className={`h-full rounded-full ${
+                      chatOnlyAIReplyUsage.level === "exhausted"
+                        ? "bg-red-500"
+                        : chatOnlyAIReplyUsage.level === "warning"
+                          ? "bg-amber-500"
+                          : "bg-green-500"
+                    }`}
+                    style={{ width: `${chatOnlyAIReplyUsage.usagePercent}%` }}
+                  />
+                </div>
+                <p className="mt-3 text-sm font-medium text-stone-700 dark:text-[#d8d8d8]">
+                  {chatOnlyAIReplyUsage.remainingReplies.toLocaleString()}{" "}
+                  replies remaining
+                  {chatOnlyAIReplyUsage.allowanceRenewal === "scheduled" &&
+                    chatOnlyAIReplyUsage.resetDate && (
+                      <>
+                        {" "}
+                        · Resets {chatOnlyAIReplyUsage.resetDate} (UTC)
+                      </>
+                    )}
+                </p>
+                {chatOnlyAIReplyUsage.allowanceRenewal ===
+                  "frozen_past_due" && (
+                  <p
+                    role="status"
+                    className={`mt-3 rounded-xl px-4 py-3 text-sm ${statusWarning}`}
+                  >
+                    Allowance renewal is paused while payment is past due. It
+                    will resume after payment recovery; manage billing above
+                    to update payment details.
+                  </p>
+                )}
+                {chatOnlyAIReplyUsage.activeReservations > 0 && (
+                  <p className="mt-2 text-sm text-stone-500 dark:text-[#bdbdbf]">
+                    {`${chatOnlyAIReplyUsage.activeReservations.toLocaleString()} ${
+                      chatOnlyAIReplyUsage.activeReservations === 1
+                        ? "reply is"
+                        : "replies are"
+                    } being prepared. This is not counted as used, but it temporarily reduces remaining capacity.`}
+                  </p>
+                )}
+                <p
+                  className={`mt-3 text-sm ${
+                    chatOnlyAIReplyUsage.level === "exhausted"
+                      ? `rounded-xl px-4 py-3 ${statusDanger}`
+                      : chatOnlyAIReplyUsage.level === "warning"
+                        ? `rounded-xl px-4 py-3 ${statusWarning}`
+                        : "text-stone-500 dark:text-[#bdbdbf]"
+                  }`}
+                >
+                  {chatOnlyAIReplyUsage.level === "exhausted"
+                    ? "No AI reply capacity is currently available. The widget remains available to collect follow-up details."
+                    : chatOnlyAIReplyUsage.level === "warning"
+                      ? "You are close to your monthly AI reply allowance."
+                      : "Your AI reply usage is within the included amount."}
+                </p>
+                {chatOnlyAIReplyUsage.level !== "normal" && (
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
+                      Contact support if you need more reply capacity.
+                    </p>
+                    <a
+                      href="/support"
+                      className={`${secondaryCtaClass} text-sm`}
+                    >
+                      Contact support
+                    </a>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        )}
     </div>
   );
+}
+
+async function loadChatOnlyAIReplyUsage(
+  businessId: string,
+): Promise<ChatOnlyAIReplyUsage> {
+  let usage: AIReplyUsageDecision;
+  try {
+    usage = await getCurrentAIReplyUsage(businessId);
+  } catch (error) {
+    console.error("Billing AI reply usage lookup failed:", error);
+    return { status: "unavailable" };
+  }
+
+  if (
+    usage.outcome === "not_entitled" ||
+    usage.billingSource !== "subscription" ||
+    usage.plan !== "chat_only" ||
+    usage.allowance !== 200 ||
+    usage.remainingReplies === null ||
+    (usage.allowanceRenewal !== "scheduled" &&
+      usage.allowanceRenewal !== "frozen_past_due") ||
+    (usage.allowanceRenewal === "scheduled" &&
+      typeof usage.resetAt !== "string") ||
+    (usage.allowanceRenewal === "frozen_past_due" &&
+      usage.resetAt !== null) ||
+    !Number.isInteger(usage.completedReplies) ||
+    usage.completedReplies < 0 ||
+    !Number.isInteger(usage.activeReservations) ||
+    usage.activeReservations < 0 ||
+    !Number.isInteger(usage.remainingReplies) ||
+    usage.remainingReplies < 0 ||
+    usage.remainingReplies > usage.allowance ||
+    usage.completedReplies + usage.activeReservations > usage.allowance ||
+    usage.completedReplies +
+      usage.activeReservations +
+      usage.remainingReplies !==
+      usage.allowance
+  ) {
+    console.error("Billing AI reply usage lookup returned incompatible state");
+    return { status: "unavailable" };
+  }
+
+  const usedReplies = usage.completedReplies;
+  const capacityInUse = Math.min(
+    usage.allowance,
+    usage.completedReplies + usage.activeReservations,
+  );
+  const resetAt = usage.resetAt === null ? null : new Date(usage.resetAt);
+  if (resetAt && Number.isNaN(resetAt.getTime())) {
+    console.error("Billing AI reply usage lookup returned an invalid reset date");
+    return { status: "unavailable" };
+  }
+  const usagePercent = Math.min(100, (capacityInUse / usage.allowance) * 100);
+  return {
+    status: "available",
+    allowance: usage.allowance,
+    usedReplies,
+    capacityInUse,
+    activeReservations: usage.activeReservations,
+    remainingReplies: usage.remainingReplies,
+    usagePercent,
+    allowanceRenewal: usage.allowanceRenewal,
+    resetDate: resetAt
+      ? new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "UTC",
+        }).format(resetAt)
+      : null,
+    level:
+      capacityInUse >= usage.allowance
+        ? "exhausted"
+        : capacityInUse / usage.allowance >= 0.8
+          ? "warning"
+          : "normal",
+  };
 }

@@ -269,6 +269,20 @@ class FakeTimers {
     timer.callback();
   }
 
+  drainIntervalsBelow(maxDelay: number, maxTicks = 1_000) {
+    for (let tick = 0; tick < maxTicks; tick += 1) {
+      const timer = this.scheduled.find(
+        (candidate) =>
+          candidate.active &&
+          candidate.kind === "interval" &&
+          candidate.delay < maxDelay,
+      );
+      if (!timer) return;
+      timer.callback();
+    }
+    throw new Error(`Active interval did not finish within ${maxTicks} ticks`);
+  }
+
   private schedule(kind: "timeout" | "interval", callback: TimerCallback, delay: number) {
     const id = this.nextId++;
     this.scheduled.push({ id, kind, callback, delay, active: true });
@@ -288,7 +302,11 @@ interface QueuedResponse {
 
 async function createHarness(
   responses: QueuedResponse[],
-  options: { preview?: boolean; homepageOnly?: boolean } = {},
+  options: {
+    preview?: boolean;
+    homepageOnly?: boolean;
+    uuids?: string[];
+  } = {},
 ) {
   const response = await GET();
   const script = await response.text();
@@ -297,6 +315,7 @@ async function createHarness(
   const requests: Array<{ url: string; init?: Record<string, unknown> }> = [];
   const storage = new Map<string, string>();
   const windowListeners = new Map<string, EventListener[]>();
+  const uuids = [...(options.uuids ?? [])];
 
   const fetch = (url: string, init?: Record<string, unknown>) => {
     requests.push({ url, init });
@@ -338,7 +357,10 @@ async function createHarness(
     window,
     document,
     localStorage,
-    { randomUUID: () => "session-123" },
+    {
+      randomUUID: () =>
+        uuids.shift() ?? "00000000-0000-4000-8000-000000000002",
+    },
     fetch,
     timers.setTimeout,
     timers.clearTimeout,
@@ -369,6 +391,9 @@ const availableConfig = {
   welcomeMessage: "How can we help?",
   quickReplies: [],
   leadCaptureEnabled: false,
+  widgetToken: "test-widget-token",
+  widgetSessionNonce: "abcdefghijklmnopqrstuvwx",
+  widgetTokenExpiresAt: "2026-08-18T12:05:00.000Z",
 };
 
 describe("widget embed runtime", () => {
@@ -391,7 +416,9 @@ describe("widget embed runtime", () => {
     );
 
     expect(await first.text()).toBe(await second.text());
-    expect(first.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(first.headers.get("cache-control")).toBe(
+      "public, no-cache, must-revalidate",
+    );
     expect(first.headers.get("access-control-allow-origin")).toBe("*");
   });
 
@@ -535,12 +562,13 @@ describe("widget embed runtime", () => {
     send.dispatch("click");
 
     expect(harness.requests[1]?.url).toBe(
-      "https://simplassist.test/api/widget/chat",
+      "https://simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
     );
     expect(requestJsonBody(harness.requests[1])).toMatchObject({
       businessId: "business-123",
       message: "How do I sign up?",
-      sessionId: "session-123",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      clientMessageId: "00000000-0000-4000-8000-000000000002",
       preview: true,
     });
   });
@@ -603,10 +631,170 @@ describe("widget embed runtime", () => {
       "please try again",
     );
     expect(harness.requests[1]).toMatchObject({
-      url: "https://simplassist.test/api/widget/chat",
+      url: "https://simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
       init: { method: "POST" },
     });
+    expect(requestJsonBody(harness.requests[1])).toMatchObject({
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+      clientMessageId: "00000000-0000-4000-8000-000000000002",
+    });
     expect(requestJsonBody(harness.requests[1])).not.toHaveProperty("preview");
+    expect(
+      (harness.requests[1]?.init?.headers as Record<string, string>)
+        .Authorization,
+    ).toBe("Bearer test-widget-token");
+  });
+
+  it("preserves the visitor message and submits the forced offline lead form", async () => {
+    const harness = await createHarness(
+      [
+        { status: 200, body: availableConfig },
+        {
+          status: 200,
+          body: {
+            available: true,
+            response: null,
+            mode: "lead_capture",
+            reason: "assistant_unavailable",
+          },
+        },
+        { status: 200, body: { success: true } },
+      ],
+      {
+        uuids: [
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000004",
+        ],
+      },
+    );
+    await flushPromises();
+    harness.timers.drainIntervalsBelow(1_000);
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!launcher || !panel || !input || !send) {
+      throw new Error("Widget controls were not rendered");
+    }
+    launcher.dispatch("click");
+    input.value = "Please contact me about weekly service.";
+    send.dispatch("click");
+    await flushPromises();
+    harness.timers.drainIntervalsBelow(1_000);
+
+    expect(
+      harness.document.querySelector(".sa-widget-msg-user")?.textContent,
+    ).toBe("Please contact me about weekly service.");
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(panel.classList.contains("sa-hidden")).toBe(false);
+    expect(launcher.classList.contains("sa-btn-hidden")).toBe(false);
+    expect(harness.document.querySelector(".sa-widget-messages")?.textContent)
+      .toContain("Our assistant is unavailable right now");
+
+    const leadForm = harness.document.querySelector(".sa-widget-lead-form");
+    const leadInputs = leadForm?.querySelectorAll(".sa-widget-lead-input") ?? [];
+    const leadSubmit = leadForm?.querySelector(".sa-widget-lead-btn");
+    const leadStatus = leadForm?.querySelector(".sa-widget-lead-status");
+    if (!leadForm || leadInputs.length !== 2 || !leadSubmit || !leadStatus) {
+      throw new Error("Offline lead form was not rendered");
+    }
+    expect(leadForm.textContent).toContain(
+      "Share a name or email so the business can respond.",
+    );
+    leadSubmit.dispatch("click");
+    expect(harness.requests).toHaveLength(2);
+    expect(leadStatus.textContent).toContain("Enter a name or email");
+
+    leadInputs[0].value = "Jordan Lee";
+    leadSubmit.dispatch("click");
+    await flushPromises();
+
+    expect(harness.requests[2]?.url).toBe(
+      "https://simplassist.test/api/widget/lead?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+    expect(requestJsonBody(harness.requests[2])).toEqual({
+      businessId: "business-123",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+      clientLeadId: "00000000-0000-4000-8000-000000000004",
+      sourceClientMessageId: "00000000-0000-4000-8000-000000000003",
+      message: "Please contact me about weekly service.",
+      visitorName: "Jordan Lee",
+    });
+    expect(
+      (harness.requests[2]?.init?.headers as Record<string, string>)
+        .Authorization,
+    ).toBe("Bearer test-widget-token");
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBeNull();
+    expect(harness.document.querySelector(".sa-widget-messages")?.textContent)
+      .toContain("Your contact information was sent to the business");
+  });
+
+  it("keeps the same offline lead id and form values after a failed submission", async () => {
+    const harness = await createHarness(
+      [
+        { status: 200, body: availableConfig },
+        {
+          status: 200,
+          body: {
+            available: true,
+            response: null,
+            mode: "lead_capture",
+            reason: "assistant_unavailable",
+          },
+        },
+        { status: 503, body: { error: "service_unavailable", retryable: true } },
+        { status: 200, body: { success: true } },
+      ],
+      {
+        uuids: [
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000003",
+          "00000000-0000-4000-8000-000000000004",
+        ],
+      },
+    );
+    await flushPromises();
+    harness.timers.drainIntervalsBelow(1_000);
+
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!input || !send) throw new Error("Widget input controls were not rendered");
+    input.value = "Please call me.";
+    send.dispatch("click");
+    await flushPromises();
+    harness.timers.drainIntervalsBelow(1_000);
+
+    const leadForm = harness.document.querySelector(".sa-widget-lead-form");
+    const leadInputs = leadForm?.querySelectorAll(".sa-widget-lead-input") ?? [];
+    const leadSubmit = leadForm?.querySelector(".sa-widget-lead-btn");
+    const leadStatus = leadForm?.querySelector(".sa-widget-lead-status");
+    if (leadInputs.length !== 2 || !leadSubmit || !leadStatus) {
+      throw new Error("Offline lead form was not rendered");
+    }
+    leadInputs[1].value = "jordan@example.com";
+    leadSubmit.dispatch("click");
+    await flushPromises();
+
+    expect(leadInputs[1].value).toBe("jordan@example.com");
+    expect(leadSubmit.disabled).toBe(false);
+    expect(leadInputs[0].disabled).toBe(true);
+    expect(leadInputs[1].disabled).toBe(true);
+    expect(leadStatus.textContent).toContain("could not confirm");
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBe(leadForm);
+
+    leadSubmit.dispatch("click");
+    await flushPromises();
+
+    expect(requestJsonBody(harness.requests[2]).clientLeadId).toBe(
+      "00000000-0000-4000-8000-000000000004",
+    );
+    expect(requestJsonBody(harness.requests[3]).clientLeadId).toBe(
+      "00000000-0000-4000-8000-000000000004",
+    );
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBeNull();
   });
 
   it("closes and hides an open widget when a config refresh reports unavailable", async () => {
@@ -632,5 +820,96 @@ describe("widget embed runtime", () => {
     expect(panel.classList.contains("sa-visible")).toBe(false);
     expect(container.classList.contains("sa-open")).toBe(false);
     expect(launcher.classList.contains("sa-btn-hidden")).toBe(true);
+  });
+
+  it("fails closed when a public config omits its signed session credential", async () => {
+    const unsafeConfig: Record<string, unknown> = { ...availableConfig };
+    delete unsafeConfig.widgetToken;
+    delete unsafeConfig.widgetSessionNonce;
+    const harness = await createHarness([{ status: 200, body: unsafeConfig }]);
+    await flushPromises();
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    expect(launcher === null || launcher.classList.contains("sa-btn-hidden"))
+      .toBe(true);
+    expect(harness.requests).toHaveLength(1);
+  });
+
+  it("binds public config, chat, and retry to one session and client message id", async () => {
+    const harness = await createHarness([
+      { status: 200, body: availableConfig },
+      { status: 503, body: { error: "service_unavailable", retryable: true } },
+      { status: 200, body: { available: true, response: "We can help." } },
+    ]);
+    await flushPromises();
+
+    expect(harness.requests[0]?.url).toBe(
+      "https://simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!input || !send) throw new Error("Widget input controls were not rendered");
+
+    input.value = "Can you help?";
+    send.dispatch("click");
+    await flushPromises();
+    const firstBody = requestJsonBody(harness.requests[1]);
+    expect(firstBody).toMatchObject({
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+      clientMessageId: "00000000-0000-4000-8000-000000000002",
+    });
+
+    send.dispatch("click");
+    await flushPromises();
+    const retryBody = requestJsonBody(harness.requests[2]);
+    expect(retryBody.clientMessageId).toBe(firstBody.clientMessageId);
+    expect(
+      (harness.requests[2]?.init?.headers as Record<string, string>)
+        .Authorization,
+    ).toBe("Bearer test-widget-token");
+  });
+
+  it("ends with the signed credential and refreshes it for the new session", async () => {
+    const refreshedConfig = {
+      ...availableConfig,
+      widgetToken: "refreshed-widget-token",
+      widgetSessionNonce: "zyxwvutsrqponmlkjihgfedc",
+    };
+    const harness = await createHarness(
+      [
+        { status: 200, body: availableConfig },
+        { status: 200, body: { success: true, available: true } },
+        { status: 200, body: refreshedConfig },
+      ],
+      {
+        uuids: [
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000004",
+        ],
+      },
+    );
+    await flushPromises();
+
+    const end = harness.document.querySelector(".sa-widget-end");
+    if (!end) throw new Error("End control was not rendered");
+    end.dispatch("click");
+    await flushPromises();
+
+    expect(harness.requests[1]?.url).toBe(
+      "https://simplassist.test/api/widget/end?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+    expect(requestJsonBody(harness.requests[1])).toEqual({
+      businessId: "business-123",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+    });
+    expect(
+      (harness.requests[1]?.init?.headers as Record<string, string>)
+        .Authorization,
+    ).toBe("Bearer test-widget-token");
+    expect(harness.requests[2]?.url).toBe(
+      "https://simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000004",
+    );
   });
 });

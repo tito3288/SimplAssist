@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getGoogleOAuth2Client } from "@/lib/google/client";
+import {
+  getGoogleOAuth2Client,
+  withGoogleAuthDeadline,
+} from "@/lib/google/client";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 export async function POST() {
@@ -8,42 +11,48 @@ export async function POST() {
   if (!workspace.ok) return workspace.response;
   const businessId = workspace.access.business.id;
 
-  // Get the token to revoke it
-  const { data: token, error: tokenError } = await supabaseAdmin
-    .from("google_calendar_tokens")
-    .select("access_token")
-    .eq("business_id", businessId)
-    .maybeSingle();
+  // Fence local provider work and delete the token atomically before any
+  // external revocation. The sensitive token is kept server-side only.
+  const { data: accessToken, error: tokenError } = await supabaseAdmin.rpc(
+    "disconnect_google_calendar_token",
+    { p_business_id: businessId }
+  );
 
   if (tokenError) {
-    console.error("[google-disconnect] Token lookup failed:", tokenError);
+    if (
+      tokenError.code === "55P03" ||
+      tokenError.message?.includes("calendar_provider_operation_busy")
+    ) {
+      return NextResponse.json(
+        { error: "calendar_operation_unavailable", retryable: true },
+        { status: 503 }
+      );
+    }
+    console.error("[google-disconnect] Token fencing failed", {
+      code: tokenError.code ?? null,
+    });
     return NextResponse.json(
       { error: "service_unavailable", retryable: true },
       { status: 503 }
     );
   }
 
-  if (token) {
+  if (accessToken !== null && typeof accessToken !== "string") {
+    console.error("[google-disconnect] Invalid token fencing response");
+    return NextResponse.json(
+      { error: "service_unavailable", retryable: true },
+      { status: 503 }
+    );
+  }
+
+  if (accessToken) {
     // Try to revoke the token with Google
     try {
       const client = getGoogleOAuth2Client();
-      await client.revokeToken(token.access_token);
+      await withGoogleAuthDeadline(client.revokeToken(accessToken), 5_000);
     } catch {
-      // Token may already be invalid — continue with deletion
-    }
-
-    // Delete from database
-    const { error: deleteError } = await supabaseAdmin
-      .from("google_calendar_tokens")
-      .delete()
-      .eq("business_id", businessId);
-
-    if (deleteError) {
-      console.error("[google-disconnect] Token delete failed:", deleteError);
-      return NextResponse.json(
-        { error: "service_unavailable", retryable: true },
-        { status: 503 }
-      );
+      // The local fence is authoritative. Google may report an already-invalid
+      // token; a later provider call cannot start without a replacement row.
     }
   }
 

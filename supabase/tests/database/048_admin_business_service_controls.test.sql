@@ -1215,6 +1215,28 @@ SELECT ok(
   'the suspended filter excludes deletion-scheduled accounts'
 );
 
+INSERT INTO public.google_calendar_tokens (
+  id,
+  business_id,
+  access_token,
+  refresh_token,
+  token_expiry,
+  calendar_id,
+  google_email,
+  created_at,
+  updated_at
+) VALUES (
+  '62000000-0000-4000-a048-000000000001',
+  '10000000-0000-4000-a048-000000000001',
+  'fixture-access-a048-1',
+  'fixture-refresh-a048-1',
+  '2099-01-01 00:00:00+00',
+  'primary',
+  'service-controls-a048@example.test',
+  '2048-01-01 00:00:00+00',
+  '2048-01-01 00:00:00+00'
+);
+
 INSERT INTO public.contacts (
   id, business_id, name, phone_number, source_channel, lead_score
 ) VALUES (
@@ -1350,6 +1372,13 @@ SELECT ok(
   ),
   'operational transitions do not mutate Stripe, subscription, or deletion state'
 );
+
+DELETE FROM public.calendar_bookings
+WHERE business_id = '10000000-0000-4000-a048-000000000001';
+
+DELETE FROM public.google_calendar_tokens
+WHERE id = '62000000-0000-4000-a048-000000000001'
+  AND business_id = '10000000-0000-4000-a048-000000000001';
 
 SELECT * FROM finish();
 

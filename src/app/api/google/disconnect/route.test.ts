@@ -3,12 +3,9 @@ import { NextResponse } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   requireWorkspaceRouteAccess: vi.fn(),
-  adminFrom: vi.fn(),
-  tokenLookup: vi.fn(),
-  tokenDeleteEq: vi.fn(),
+  rpc: vi.fn(),
   revokeToken: vi.fn(),
-  requireAuthenticatedFeature: vi.fn(),
-  resolveBusinessEntitlements: vi.fn(),
+  withGoogleAuthDeadline: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -16,18 +13,13 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
   requireWorkspaceRouteAccess: mocks.requireWorkspaceRouteAccess,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.adminFrom },
+  supabaseAdmin: { rpc: mocks.rpc },
 }));
 vi.mock("@/lib/google/client", () => ({
   getGoogleOAuth2Client: vi.fn(() => ({
     revokeToken: mocks.revokeToken,
   })),
-}));
-vi.mock("@/lib/google/routeAccess", () => ({
-  requireAuthenticatedFeature: mocks.requireAuthenticatedFeature,
-}));
-vi.mock("@/lib/billing/entitlements", () => ({
-  resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
+  withGoogleAuthDeadline: mocks.withGoogleAuthDeadline,
 }));
 
 import { POST } from "./route";
@@ -37,6 +29,7 @@ const BUSINESS_ID = "00000000-0000-4000-8000-000000000002";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.requireWorkspaceRouteAccess.mockResolvedValue({
     ok: true,
     access: {
@@ -49,27 +42,19 @@ beforeEach(() => {
       hostKind: "partner",
     },
   });
-
-  mocks.tokenLookup.mockResolvedValue({
-    data: { access_token: "google-access-token" },
+  mocks.rpc.mockResolvedValue({
+    data: "google-access-token",
     error: null,
   });
-  mocks.tokenDeleteEq.mockResolvedValue({ error: null });
   mocks.revokeToken.mockResolvedValue(undefined);
-
-  mocks.adminFrom.mockImplementation(() => {
-    const tokenChain: Record<string, ReturnType<typeof vi.fn>> = {};
-    tokenChain.select = vi.fn(() => tokenChain);
-    tokenChain.eq = vi.fn(() => tokenChain);
-    tokenChain.maybeSingle = mocks.tokenLookup;
-    tokenChain.delete = vi.fn(() => ({ eq: mocks.tokenDeleteEq }));
-    return tokenChain;
-  });
+  mocks.withGoogleAuthDeadline.mockImplementation(
+    async (promise: Promise<unknown>) => promise,
+  );
 });
 
 describe("Google Calendar disconnect", () => {
   it.each([401, 403, 503] as const)(
-    "maps workspace %s before token lookup or Google revocation",
+    "maps workspace %s before token fencing or Google revocation",
     async (status) => {
       mocks.requireWorkspaceRouteAccess.mockResolvedValue({
         ok: false,
@@ -79,41 +64,112 @@ describe("Google Calendar disconnect", () => {
             : status === 403
               ? { error: "workspace_access_denied" }
               : { error: "workspace_access_unavailable", retryable: true },
-          { status }
+          { status },
         ),
       });
 
       const response = await POST();
 
       expect(response.status).toBe(status);
-      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
       expect(mocks.revokeToken).not.toHaveBeenCalled();
-    }
+    },
   );
 
-  it("remains available without entitlement and revokes then deletes the saved token", async () => {
+  it("atomically removes the local token before bounded best-effort revocation", async () => {
     const response = await POST();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
-    expect(mocks.requireAuthenticatedFeature).not.toHaveBeenCalled();
-    expect(mocks.resolveBusinessEntitlements).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "disconnect_google_calendar_token",
+      { p_business_id: BUSINESS_ID },
+    );
+    expect(mocks.rpc).toHaveBeenCalledBefore(mocks.revokeToken);
     expect(mocks.revokeToken).toHaveBeenCalledWith("google-access-token");
-    expect(mocks.tokenDeleteEq).toHaveBeenCalledWith(
-      "business_id",
-      BUSINESS_ID
+    expect(mocks.withGoogleAuthDeadline).toHaveBeenCalledWith(
+      expect.any(Promise),
+      5_000,
     );
   });
 
-  it("still deletes a saved token when Google says it is already invalid", async () => {
-    mocks.revokeToken.mockRejectedValue(new Error("invalid token"));
+  it("returns retryable 503 and does not revoke while provider or AI work is unresolved", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "55P03",
+        message: "calendar_provider_operation_busy",
+      },
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "calendar_operation_unavailable",
+      retryable: true,
+    });
+    expect(mocks.revokeToken).not.toHaveBeenCalled();
+  });
+
+  it("does not call Google when there is no saved token", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
 
     const response = await POST();
 
     expect(response.status).toBe(200);
-    expect(mocks.tokenDeleteEq).toHaveBeenCalledWith(
-      "business_id",
-      BUSINESS_ID
+    expect(mocks.revokeToken).not.toHaveBeenCalled();
+  });
+
+  it("keeps local deletion authoritative when bounded Google revocation fails", async () => {
+    mocks.withGoogleAuthDeadline.mockRejectedValue(
+      new Error("patient@example.test bearer-secret"),
+    );
+
+    const response = await POST();
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on malformed service RPC output without exposing it", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { access_token: "private-token" },
+      error: null,
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "service_unavailable",
+      retryable: true,
+    });
+    expect(mocks.revokeToken).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(
+      "private-token",
+    );
+  });
+
+  it("logs only a database error code for an unexpected fencing failure", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "XX000",
+        message: "patient@example.test bearer-secret provider-body",
+      },
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(503);
+    expect(console.error).toHaveBeenCalledWith(
+      "[google-disconnect] Token fencing failed",
+      { code: "XX000" },
+    );
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(
+      "patient@example.test",
     );
   });
 });

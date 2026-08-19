@@ -123,6 +123,15 @@ BEGIN
       PERFORM extensions.dblink_exec(
         'test_039_lead_setup',
         $cleanup_sql$
+          DELETE FROM public.calendar_bookings
+          WHERE business_id =
+            '10000000-0000-4000-a039-000000000091';
+
+          DELETE FROM public.google_calendar_tokens
+          WHERE id = '62000000-0000-4000-a039-000000000091'
+            AND business_id =
+              '10000000-0000-4000-a039-000000000091';
+
           DELETE FROM auth.users
           WHERE id = '00000000-0000-4000-a039-000000000091'
         $cleanup_sql$
@@ -190,6 +199,28 @@ BEGIN
               name = 'Hot Lead Concurrency 039',
               slug = 'hot-lead-concurrency-039'
           WHERE owner_id = '00000000-0000-4000-a039-000000000091';
+
+          INSERT INTO public.google_calendar_tokens (
+            id,
+            business_id,
+            access_token,
+            refresh_token,
+            token_expiry,
+            calendar_id,
+            google_email,
+            created_at,
+            updated_at
+          ) VALUES (
+            '62000000-0000-4000-a039-000000000091',
+            '10000000-0000-4000-a039-000000000091',
+            'fixture-access-a039-91',
+            'fixture-refresh-a039-91',
+            '2099-01-01 00:00:00+00',
+            'primary',
+            'hot-lead-concurrency-039@example.test',
+            '2039-01-01 00:00:00+00',
+            '2039-01-01 00:00:00+00'
+          );
 
           INSERT INTO public.contacts (
             id,
@@ -1111,6 +1142,11 @@ SELECT is(
       SELECT 1
       FROM public.calendar_bookings
       WHERE business_id = '10000000-0000-4000-a039-000000000091'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.google_calendar_tokens
+      WHERE id = '62000000-0000-4000-a039-000000000091'
     )
     AND NOT EXISTS (
       SELECT 1

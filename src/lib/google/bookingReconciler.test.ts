@@ -92,7 +92,7 @@ afterEach(() => {
 });
 
 describe("reconcilePendingCalendarBookings", () => {
-  it("queries stale claimed rows for active businesses, oldest first, in a bounded batch", async () => {
+  it("queries stale claimed rows for owner-linked businesses, oldest first, in a bounded batch", async () => {
     await expect(reconcilePendingCalendarBookings()).resolves.toEqual({
       confirmed: 0,
       notFound: 0,
@@ -112,10 +112,7 @@ describe("reconcilePendingCalendarBookings", () => {
       "is",
       null
     );
-    expect(mocks.is).toHaveBeenCalledWith(
-      "businesses.deleted_at",
-      null
-    );
+    expect(mocks.is).not.toHaveBeenCalledWith("businesses.deleted_at", null);
     expect(mocks.lt).toHaveBeenCalledWith(
       "operation_claimed_at",
       STALE_BEFORE
@@ -204,6 +201,48 @@ describe("reconcilePendingCalendarBookings", () => {
       "businesses.bookings_paused_at",
       null
     );
+  });
+
+  it("continues read-only provider recovery for an owner-linked soft-deleted business", async () => {
+    const softDeleted = {
+      ...booking("soft-deleted"),
+      businesses: {
+        owner_id: "owner-soft-deleted",
+        deleted_at: "2026-08-01T14:00:00.000Z",
+      },
+    };
+    installQuery([softDeleted]);
+    mocks.recover.mockResolvedValueOnce(true);
+
+    await expect(reconcilePendingCalendarBookings()).resolves.toEqual({
+      confirmed: 1,
+      notFound: 0,
+      failed: 0,
+    });
+
+    expect(mocks.claim).toHaveBeenCalledWith(softDeleted);
+    expect(mocks.recover).toHaveBeenCalledWith(softDeleted);
+  });
+
+  it("stops before claiming another row after a caller deadline without reducing the default batch", async () => {
+    const first = booking("first");
+    const second = booking("second");
+    installQuery([first, second]);
+    mocks.recover.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date("2026-08-01T15:00:01.000Z"));
+      return true;
+    });
+
+    await expect(
+      reconcilePendingCalendarBookings({
+        deadlineAt: new Date(NOW).getTime() + 100,
+      }),
+    ).resolves.toEqual({ confirmed: 1, notFound: 0, failed: 0 });
+
+    expect(mocks.claim).toHaveBeenCalledTimes(1);
+    expect(mocks.claim).toHaveBeenCalledWith(first);
+    expect(mocks.claim).not.toHaveBeenCalledWith(second);
+    expect(mocks.limit).toHaveBeenCalledWith(10);
   });
 
   it("throws a batch query failure without attempting row recovery", async () => {

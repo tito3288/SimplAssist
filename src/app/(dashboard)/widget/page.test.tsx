@@ -64,7 +64,11 @@ beforeEach(() => {
   mocks.getDashboardEntitledContext.mockResolvedValue({
     status: "resolved",
     supabase: { from: mocks.from },
-    business: { id: BUSINESS_ID, name: "Acme" },
+    business: {
+      id: BUSINESS_ID,
+      name: "Acme",
+      website_url: "https://www.example.com/services",
+    },
     entitlements: {
       businessId: BUSINESS_ID,
       plan: "sms_and_chat",
@@ -118,8 +122,57 @@ describe("WidgetPage defaults", () => {
     expect(mocks.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         business_id: BUSINESS_ID,
+        allowed_hostnames: ["www.example.com"],
         is_active: true,
       })
+    );
+  });
+
+  it("keeps a new widget off until the business has an allowed website", async () => {
+    mocks.getDashboardEntitledContext.mockResolvedValueOnce({
+      status: "resolved",
+      supabase: { from: mocks.from },
+      business: {
+        id: BUSINESS_ID,
+        name: "Acme",
+        website_url: null,
+      },
+      entitlements: {
+        businessId: BUSINESS_ID,
+        plan: "chat_only",
+        status: "active",
+        source: "subscription",
+        active: true,
+        cancelAtPeriodEnd: false,
+      },
+    });
+    const existingQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      single: vi.fn().mockResolvedValue({ data: null }),
+    };
+    existingQuery.select.mockReturnValue(existingQuery);
+    existingQuery.eq.mockReturnValue(existingQuery);
+    const insertQuery = {
+      insert: mocks.insert,
+      select: vi.fn(),
+      single: vi.fn().mockResolvedValue({
+        data: { business_id: BUSINESS_ID, is_active: false },
+      }),
+    };
+    mocks.insert.mockReturnValue(insertQuery);
+    insertQuery.select.mockReturnValue(insertQuery);
+    mocks.from
+      .mockReturnValueOnce(existingQuery)
+      .mockReturnValueOnce(insertQuery);
+
+    renderToStaticMarkup(await WidgetPage());
+
+    expect(mocks.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowed_hostnames: [],
+        is_active: false,
+      }),
     );
   });
 

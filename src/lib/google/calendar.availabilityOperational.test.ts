@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   hoursSelect: vi.fn(),
   hoursEq: vi.fn(),
   hoursSingle: vi.fn(),
-  freeBusyQuery: vi.fn(),
+  freeBusyQuery: vi.fn()
 }));
 
 vi.mock("server-only", () => ({}));
@@ -22,25 +22,22 @@ vi.mock("./bookingOperational.server", async (importOriginal) => {
     await importOriginal<typeof import("./bookingOperational.server")>();
   return {
     ...actual,
-    assertBookingOperationallyAllowed:
-      mocks.assertBookingOperationallyAllowed,
+    assertBookingOperationallyAllowed: mocks.assertBookingOperationallyAllowed
   };
 });
 vi.mock("@/lib/billing/entitlements", () => ({
   resolveBusinessEntitlements: mocks.resolveBusinessEntitlements,
-  canUseFeature: mocks.canUseFeature,
+  canUseFeature: mocks.canUseFeature
 }));
 vi.mock("./client", () => ({
   getAuthenticatedClient: mocks.getAuthenticatedClient,
-  getCalendarService: mocks.getCalendarService,
+  getCalendarService: mocks.getCalendarService
 }));
 vi.mock("@/lib/supabase/admin", () => ({
-  supabaseAdmin: { from: mocks.from },
+  supabaseAdmin: { from: mocks.from }
 }));
 
-import {
-  BookingOperationalBlockedError,
-} from "./bookingOperational.server";
+import { BookingOperationalBlockedError } from "./bookingOperational.server";
 import { checkAvailability } from "./calendar";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
@@ -53,7 +50,7 @@ const BUSINESS_HOURS = {
   day_of_week: 1,
   open_time: "09:00:00",
   close_time: "10:00:00",
-  is_closed: false,
+  is_closed: false
 };
 
 function deferred<T>() {
@@ -68,30 +65,33 @@ function deferred<T>() {
 
 beforeEach(() => {
   process.env.TZ = "UTC";
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-01T12:00:00.000Z"));
+  vi.stubEnv("CALENDAR_BOOKING_MAX_HORIZON_DAYS", "365");
   vi.resetAllMocks();
 
   const tokenQuery = {
     select: mocks.tokenSelect,
     eq: mocks.tokenEq,
-    single: mocks.tokenSingle,
+    single: mocks.tokenSingle
   };
   mocks.tokenSelect.mockReturnValue(tokenQuery);
   mocks.tokenEq.mockReturnValue(tokenQuery);
   mocks.tokenSingle.mockResolvedValue({
     data: { calendar_id: CALENDAR_ID },
-    error: null,
+    error: null
   });
 
   const hoursQuery = {
     select: mocks.hoursSelect,
     eq: mocks.hoursEq,
-    single: mocks.hoursSingle,
+    single: mocks.hoursSingle
   };
   mocks.hoursSelect.mockReturnValue(hoursQuery);
   mocks.hoursEq.mockReturnValue(hoursQuery);
   mocks.hoursSingle.mockResolvedValue({
     data: BUSINESS_HOURS,
-    error: null,
+    error: null
   });
 
   mocks.from.mockImplementation((table: string) => {
@@ -105,21 +105,22 @@ beforeEach(() => {
     status: "active",
     source: "subscription",
     active: true,
-    cancelAtPeriodEnd: false,
+    cancelAtPeriodEnd: false
   });
   mocks.canUseFeature.mockReturnValue(true);
   mocks.getAuthenticatedClient.mockResolvedValue({ credentials: {} });
   mocks.getCalendarService.mockReturnValue({
-    freebusy: { query: mocks.freeBusyQuery },
+    freebusy: { query: mocks.freeBusyQuery }
   });
   mocks.freeBusyQuery.mockResolvedValue({
-    data: { calendars: { [CALENDAR_ID]: { busy: [] } } },
+    data: { calendars: { [CALENDAR_ID]: { busy: [] } } }
   });
   mocks.assertBookingOperationallyAllowed.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   if (ORIGINAL_HOST_TIMEZONE === undefined) {
     delete process.env.TZ;
   } else {
@@ -132,9 +133,9 @@ describe("availability business timezone handling", () => {
     mocks.hoursSingle.mockResolvedValueOnce({
       data: {
         ...BUSINESS_HOURS,
-        close_time: "10:30:00",
+        close_time: "10:30:00"
       },
-      error: null,
+      error: null
     });
     mocks.freeBusyQuery.mockResolvedValueOnce({
       data: {
@@ -143,30 +144,29 @@ describe("availability business timezone handling", () => {
             busy: [
               {
                 start: "2026-08-03T13:30:00.000Z",
-                end: "2026-08-03T14:00:00.000Z",
-              },
-            ],
-          },
-        },
-      },
+                end: "2026-08-03T14:00:00.000Z"
+              }
+            ]
+          }
+        }
+      }
     });
 
     await expect(
-      checkAvailability(
-        BUSINESS_ID,
-        "2026-08-03",
-        BUSINESS_TIMEZONE,
-      ),
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
     ).resolves.toEqual(["9:00 AM", "10:00 AM"]);
 
-    expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
-      requestBody: {
-        timeMin: "2026-08-03T13:00:00.000Z",
-        timeMax: "2026-08-03T14:30:00.000Z",
-        timeZone: BUSINESS_TIMEZONE,
-        items: [{ id: CALENDAR_ID }],
+    expect(mocks.freeBusyQuery).toHaveBeenCalledWith(
+      {
+        requestBody: {
+          timeMin: "2026-08-03T13:00:00.000Z",
+          timeMax: "2026-08-03T14:30:00.000Z",
+          timeZone: BUSINESS_TIMEZONE,
+          items: [{ id: CALENDAR_ID }]
+        }
       },
-    });
+      { retry: false, timeout: 10_000 }
+    );
   });
 
   it.each([
@@ -176,7 +176,7 @@ describe("availability business timezone handling", () => {
       closeTime: "04:00:00",
       timeMin: "2026-03-08T06:00:00.000Z",
       timeMax: "2026-03-08T08:00:00.000Z",
-      slots: ["1:00 AM", "1:30 AM", "3:00 AM", "3:30 AM"],
+      slots: ["1:00 AM", "1:30 AM", "3:00 AM", "3:30 AM"]
     },
     {
       date: "2026-11-01",
@@ -184,8 +184,8 @@ describe("availability business timezone handling", () => {
       closeTime: "03:00:00",
       timeMin: "2026-11-01T05:00:00.000Z",
       timeMax: "2026-11-01T08:00:00.000Z",
-      slots: ["1:00 AM", "1:30 AM", "2:00 AM", "2:30 AM"],
-    },
+      slots: ["1:00 AM", "1:30 AM", "2:00 AM", "2:30 AM"]
+    }
   ])(
     "constructs $date transition-day windows and candidate starts deterministically",
     async ({ date, openTime, closeTime, timeMin, timeMax, slots }) => {
@@ -194,50 +194,167 @@ describe("availability business timezone handling", () => {
           ...BUSINESS_HOURS,
           day_of_week: 0,
           open_time: openTime,
-          close_time: closeTime,
+          close_time: closeTime
         },
-        error: null,
+        error: null
       });
 
       await expect(
-        checkAvailability(BUSINESS_ID, date, BUSINESS_TIMEZONE),
+        checkAvailability(BUSINESS_ID, date, BUSINESS_TIMEZONE)
       ).resolves.toEqual(slots);
 
-      expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
-        requestBody: {
-          timeMin,
-          timeMax,
-          timeZone: BUSINESS_TIMEZONE,
-          items: [{ id: CALENDAR_ID }],
+      expect(mocks.freeBusyQuery).toHaveBeenCalledWith(
+        {
+          requestBody: {
+            timeMin,
+            timeMax,
+            timeZone: BUSINESS_TIMEZONE,
+            items: [{ id: CALENDAR_ID }]
+          }
         },
-      });
-    },
+        { retry: false, timeout: 10_000 }
+      );
+    }
   );
 
-  it("resolves today in the business timezone across the UTC midnight boundary", async () => {
+  it("resolves today in the business timezone across the UTC midnight boundary and excludes elapsed slots", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-03T02:30:00.000Z"));
     mocks.hoursSingle.mockResolvedValueOnce({
       data: {
         ...BUSINESS_HOURS,
-        day_of_week: 0,
+        day_of_week: 0
       },
-      error: null,
+      error: null
     });
 
     await expect(
-      checkAvailability(BUSINESS_ID, "today", BUSINESS_TIMEZONE),
-    ).resolves.toEqual(["9:00 AM", "9:30 AM"]);
+      checkAvailability(BUSINESS_ID, "today", BUSINESS_TIMEZONE)
+    ).resolves.toEqual([]);
 
     expect(mocks.hoursEq).toHaveBeenCalledWith("day_of_week", 0);
-    expect(mocks.freeBusyQuery).toHaveBeenCalledWith({
-      requestBody: {
-        timeMin: "2026-08-02T13:00:00.000Z",
-        timeMax: "2026-08-02T14:00:00.000Z",
-        timeZone: BUSINESS_TIMEZONE,
-        items: [{ id: CALENDAR_ID }],
+    expect(mocks.freeBusyQuery).toHaveBeenCalledWith(
+      {
+        requestBody: {
+          timeMin: "2026-08-02T13:00:00.000Z",
+          timeMax: "2026-08-02T14:00:00.000Z",
+          timeZone: BUSINESS_TIMEZONE,
+          items: [{ id: CALENDAR_ID }]
+        }
       },
+      { retry: false, timeout: 10_000 }
+    );
+  });
+
+  it("rejects a past date before OAuth, token, hours, or Google work", async () => {
+    vi.setSystemTime(new Date("2026-08-03T12:00:00.000Z"));
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-02", BUSINESS_TIMEZONE)
+    ).rejects.toThrow("cannot be checked in the past");
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.freeBusyQuery).not.toHaveBeenCalled();
+  });
+
+  it("rejects a date beyond the default 90-day horizon before OAuth or Google work", async () => {
+    vi.stubEnv("CALENDAR_BOOKING_MAX_HORIZON_DAYS", "");
+    vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-11-01", BUSINESS_TIMEZONE)
+    ).rejects.toThrow("outside the booking horizon");
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.freeBusyQuery).not.toHaveBeenCalled();
+  });
+
+  it("filters same-day slots using the configured minimum lead time", async () => {
+    vi.stubEnv("CALENDAR_BOOKING_MIN_LEAD_MINUTES", "60");
+    vi.setSystemTime(new Date("2026-08-03T12:30:00.000Z"));
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
+    ).resolves.toEqual(["9:30 AM"]);
+  });
+
+  it("advertises only 30-minute-aligned starts when business hours open off-grid", async () => {
+    mocks.hoursSingle.mockResolvedValueOnce({
+      data: {
+        ...BUSINESS_HOURS,
+        open_time: "09:15:00",
+        close_time: "10:15:00"
+      },
+      error: null
     });
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
+    ).resolves.toEqual(["9:30 AM"]);
+  });
+
+  it("fails closed before Google when configured hours have no forward range", async () => {
+    mocks.hoursSingle.mockResolvedValueOnce({
+      data: {
+        ...BUSINESS_HOURS,
+        open_time: "10:00:00",
+        close_time: "09:00:00"
+      },
+      error: null
+    });
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
+    ).rejects.toThrow("invalid time range");
+    expect(mocks.freeBusyQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["CALENDAR_BOOKING_MIN_LEAD_MINUTES", "-1"],
+    ["CALENDAR_BOOKING_MIN_LEAD_MINUTES", "1.5"],
+    ["CALENDAR_BOOKING_MAX_HORIZON_DAYS", "not-a-number"],
+    ["CALENDAR_BOOKING_MAX_HORIZON_DAYS", "366"]
+  ])("fails closed for malformed %s=%s", async (name, value) => {
+    vi.stubEnv(name, value);
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
+    ).rejects.toThrow(`Invalid ${name} calendar configuration.`);
+    expect(mocks.getAuthenticatedClient).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.freeBusyQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing calendar result", { data: { calendars: {} } }],
+    [
+      "calendar-level provider error",
+      {
+        data: {
+          calendars: {
+            [CALENDAR_ID]: { errors: [{ reason: "notFound" }] }
+          }
+        }
+      }
+    ],
+    [
+      "malformed busy period",
+      {
+        data: {
+          calendars: {
+            [CALENDAR_ID]: {
+              busy: [{ start: "not-a-date", end: "also-not-a-date" }]
+            }
+          }
+        }
+      }
+    ]
+  ])("fails closed on %s", async (_label, response) => {
+    mocks.freeBusyQuery.mockResolvedValueOnce(response);
+
+    await expect(
+      checkAvailability(BUSINESS_ID, "2026-08-03", BUSINESS_TIMEZONE)
+    ).rejects.toThrow(/availability|invalid/i);
   });
 });
 
@@ -249,7 +366,7 @@ describe("availability operational races", () => {
     }>();
     const blocked = new BookingOperationalBlockedError(
       BUSINESS_ID,
-      "bookings_paused",
+      "bookings_paused"
     );
     let paused = false;
     mocks.hoursSingle.mockReturnValueOnce(hoursRead.promise);
@@ -257,11 +374,7 @@ describe("availability operational races", () => {
       if (paused) throw blocked;
     });
 
-    const availability = checkAvailability(
-      BUSINESS_ID,
-      "2026-08-03",
-      "UTC",
-    );
+    const availability = checkAvailability(BUSINESS_ID, "2026-08-03", "UTC");
     await vi.waitFor(() => {
       expect(mocks.hoursSingle).toHaveBeenCalledOnce();
     });
@@ -269,7 +382,7 @@ describe("availability operational races", () => {
     paused = true;
     hoursRead.resolve({
       data: { ...BUSINESS_HOURS, is_closed: true },
-      error: null,
+      error: null
     });
 
     await expect(availability).rejects.toBe(blocked);
@@ -284,7 +397,7 @@ describe("availability operational races", () => {
     }>();
     const blocked = new BookingOperationalBlockedError(
       BUSINESS_ID,
-      "bookings_paused",
+      "bookings_paused"
     );
     let paused = false;
     mocks.hoursSingle.mockReturnValueOnce(hoursRead.promise);
@@ -292,11 +405,7 @@ describe("availability operational races", () => {
       if (paused) throw blocked;
     });
 
-    const availability = checkAvailability(
-      BUSINESS_ID,
-      "2026-08-03",
-      "UTC",
-    );
+    const availability = checkAvailability(BUSINESS_ID, "2026-08-03", "UTC");
     await vi.waitFor(() => {
       expect(mocks.hoursSingle).toHaveBeenCalledOnce();
     });
@@ -315,7 +424,7 @@ describe("availability operational races", () => {
     }>();
     const blocked = new BookingOperationalBlockedError(
       BUSINESS_ID,
-      "account_suspended",
+      "account_suspended"
     );
     let paused = false;
     mocks.freeBusyQuery.mockReturnValueOnce(providerRead.promise);
@@ -323,18 +432,14 @@ describe("availability operational races", () => {
       if (paused) throw blocked;
     });
 
-    const availability = checkAvailability(
-      BUSINESS_ID,
-      "2026-08-03",
-      "UTC",
-    );
+    const availability = checkAvailability(BUSINESS_ID, "2026-08-03", "UTC");
     await vi.waitFor(() => {
       expect(mocks.freeBusyQuery).toHaveBeenCalledOnce();
     });
 
     paused = true;
     providerRead.resolve({
-      data: { calendars: { [CALENDAR_ID]: { busy: [] } } },
+      data: { calendars: { [CALENDAR_ID]: { busy: [] } } }
     });
 
     await expect(availability).rejects.toBe(blocked);
