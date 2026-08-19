@@ -1025,7 +1025,8 @@ plan_family_evidence AS (
       job.business_id,
       CASE WHEN job.partner_plan = 'chat_only' THEN 'chat_only' ELSE 'sms' END
     FROM public.partner_client_provisioning_jobs AS job
-    WHERE job.partner_plan IN (
+    WHERE job.business_id IS NOT NULL
+      AND job.partner_plan IN (
       'chat_only', 'sms_only', 'sms_and_chat', 'full'
     )
 

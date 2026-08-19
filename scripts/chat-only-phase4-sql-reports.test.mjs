@@ -248,6 +248,14 @@ describe("Phase 4 SQL report safety contract", () => {
     }
   });
 
+  it("does not treat unbound partner jobs as business family evidence", async () => {
+    const [, { sql }] = await loadReports();
+
+    expect(sql).toMatch(
+      /FROM public\.partner_client_provisioning_jobs AS job\s+WHERE job\.business_id IS NOT NULL\s+AND job\.partner_plan IN/
+    );
+  });
+
   it("uses only deterministic status labels", async () => {
     for (const { sql } of await loadReports()) {
       const statuses = [...sql.matchAll(/'(PASS|BLOCKER|NOT_APPLICABLE)'/g)].map(
