@@ -9,6 +9,12 @@ import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
 import {
+  ChatOnlyCheckoutAttemptConflictError,
+  ChatOnlyCheckoutAttemptRecoveryRequiredError,
+  ChatOnlyCheckoutAttemptUnavailableError,
+  ChatOnlyCheckoutInProgressError,
+  ChatOnlyCheckoutRecoveredCompletionError,
+  ChatOnlyCheckoutSessionExpiredError,
   ChatOnlyStripePriceConfigurationError,
   createCheckoutSession,
 } from "@/lib/stripe/checkout";
@@ -19,7 +25,7 @@ import {
 } from "@/lib/stripe/config";
 import { getExistingTelnyxBrandLinkState } from "@/lib/messaging/registration/existingBrand";
 import { publicAppOrigin } from "@/lib/billing/publicAppOrigin";
-import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import {
@@ -48,6 +54,7 @@ type CheckoutBusinessRow = {
   billing_pilot: boolean;
   billing_comped: boolean;
   billing_exempt: boolean;
+  operations_suspended_at: string | null;
   onboarding_completed_at: string | null;
   onboarding_selected_plan: string | null;
   onboarding_registration_status: OnboardingRegistrationStatus | null;
@@ -85,7 +92,7 @@ export async function POST(request: NextRequest) {
     const { data: business, error: bizError } = await supabase
       .from("businesses")
       .select(
-        "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, onboarding_completed_at, onboarding_selected_plan, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status",
+        "id, partner_id, billing_mode, has_ein, billing_pilot, billing_comped, billing_exempt, operations_suspended_at, onboarding_completed_at, onboarding_selected_plan, onboarding_registration_status, telnyx_brand_id, brand_status, campaign_status",
       )
       .eq("id", workspace.access.business.id)
       .eq("owner_id", workspace.access.user.id)
@@ -126,7 +133,8 @@ export async function POST(request: NextRequest) {
 
     const subscription = await readCheckoutSubscription(supabase, business.id);
     const directSelectionFlowEnabled =
-      isChatOnlyDirectSalesEnabled() && hasValidChatOnlyStripePrice();
+      isChatOnlyDirectAcquisitionEnabledForBusiness(business.id) &&
+      hasValidChatOnlyStripePrice();
     if (hasCrossFamilyTransition(subscription, selectedPlan)) {
       return NextResponse.json(
         {
@@ -170,6 +178,51 @@ export async function POST(request: NextRequest) {
       selectedPlan === "chat_only" &&
       subscription?.plan === "chat_only" &&
       (subscription.status === "active" || subscription.status === "trialing");
+
+    if (
+      selectedPlan === "chat_only" &&
+      !hasActiveChatAuthority &&
+      business.operations_suspended_at != null
+    ) {
+      return NextResponse.json(
+        {
+          error: "This workspace is temporarily unavailable.",
+          code: "account_suspended",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      selectedPlan === "chat_only" &&
+      subscription?.plan === "chat_only" &&
+      subscription.status === "canceled"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Chat Only subscription recovery needs support before a new Checkout can begin.",
+          code: "chat_only_reacquisition_not_supported",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      selectedPlan === "chat_only" &&
+      !hasActiveChatAuthority &&
+      (business.billing_pilot ||
+        business.billing_comped ||
+        business.billing_exempt)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Chat Only billing is not available for this workspace.",
+          code: "chat_only_not_available",
+        },
+        { status: 409 },
+      );
+    }
 
     if (
       hasActiveChatAuthority &&
@@ -371,6 +424,92 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: checkoutUrl });
   } catch (error) {
+    if (error instanceof ChatOnlyCheckoutRecoveredCompletionError) {
+      try {
+        const launch = await finalizePaidCheckout(
+          error.synced,
+          "stripe_finalize",
+        );
+        const state = await getOnboardingStateForBusinessId(
+          error.synced.businessId,
+        );
+        if (
+          launch.status === "completed" ||
+          launch.status === "submitted" ||
+          launch.status === "already_submitted"
+        ) {
+          return NextResponse.json({ success: true, state });
+        }
+        if (launch.status === "in_progress") {
+          return NextResponse.json({ success: true, inProgress: true, state });
+        }
+        return NextResponse.json(
+          { error: launch.message, code: launch.status, state },
+          { status: 400 },
+        );
+      } catch (completionError) {
+        console.error("Recovered Chat Checkout finalization failed", {
+          error: checkoutFailureSummary(completionError),
+        });
+        return NextResponse.json(
+          {
+            error: "Your payment is still synchronizing. Try again shortly.",
+            code: "subscription_payment_sync_required",
+          },
+          { status: 503 },
+        );
+      }
+    }
+    if (error instanceof ChatOnlyCheckoutInProgressError) {
+      return NextResponse.json(
+        {
+          error: "Checkout is being prepared. Try again shortly.",
+          code: "chat_only_checkout_in_progress",
+        },
+        {
+          status: 409,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof ChatOnlyCheckoutSessionExpiredError) {
+      return NextResponse.json(
+        {
+          error: "Your previous Checkout expired. Try again to continue.",
+          code: "chat_only_checkout_expired",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof ChatOnlyCheckoutAttemptConflictError) {
+      return NextResponse.json(
+        {
+          error:
+            "An existing Chat Checkout uses different billing details. Contact support.",
+          code: "chat_only_checkout_attempt_conflict",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof ChatOnlyCheckoutAttemptRecoveryRequiredError) {
+      return NextResponse.json(
+        {
+          error:
+            "We could not safely recover the previous Chat Checkout. Contact support before trying again.",
+          code: "chat_only_checkout_recovery_required",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof ChatOnlyCheckoutAttemptUnavailableError) {
+      return NextResponse.json(
+        {
+          error: "Your setup changed. Refresh before trying Checkout again.",
+          code: "checkout_plan_state_changed",
+        },
+        { status: 409 },
+      );
+    }
     if (error instanceof DirectCheckoutPlanClaimUnavailableError) {
       return NextResponse.json(
         {
@@ -399,12 +538,33 @@ export async function POST(request: NextRequest) {
         { status: 503 },
       );
     }
-    console.error("Checkout error:", error);
+    console.error("Checkout failed", { error: checkoutFailureSummary(error) });
     return NextResponse.json(
       { error: "Failed to create checkout session" },
       { status: 500 },
     );
   }
+}
+
+function checkoutFailureSummary(error: unknown): {
+  name: string;
+  status: number | null;
+} {
+  const rawName = error instanceof Error ? error.name : "UnknownError";
+  const name = /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(rawName)
+    ? rawName
+    : "Error";
+  const statusValue =
+    typeof error === "object" && error !== null && "statusCode" in error
+      ? error.statusCode
+      : null;
+  const status =
+    Number.isInteger(statusValue) &&
+    (statusValue as number) >= 400 &&
+    (statusValue as number) <= 599
+      ? (statusValue as number)
+      : null;
+  return { name, status };
 }
 
 async function readCheckoutSubscription(
@@ -481,11 +641,13 @@ function onboardingSelectionMatches(
   selectedPlan: SubscriptionPlan,
   directSelectionFlowEnabled: boolean,
 ): boolean {
-  // When the complete early-flow gate (flag plus valid Chat Price config) is
-  // enabled, the durable advisory intent must match exactly. If that gate is
-  // rolled back, plan selection is no longer available, so stale intent must
-  // not strand legacy SMS onboarding. New Chat acquisition is independently
-  // rejected by the acquisition gate above.
+  // A persisted Chat choice must survive an acquisition rollback. Otherwise a
+  // crafted SMS Checkout can claim the opposite family while the UI correctly
+  // presents the account as paused Chat onboarding. Legacy null/SMS intent
+  // keeps the pre-Chat rollback behavior until direct selection is available.
+  if (business.onboarding_selected_plan === "chat_only") {
+    return selectedPlan === "chat_only";
+  }
   if (!directSelectionFlowEnabled) {
     return selectedPlan !== "chat_only";
   }

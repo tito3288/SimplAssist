@@ -20,6 +20,8 @@ function state(
       directIntent: "chat_only",
       canChooseDirectPlan: false,
       chatOnlyDirectSalesAvailable: false,
+      chatOnlyCheckoutAvailable: true,
+      chatOnlyCheckoutPaused: false,
       ...planSelection,
     },
     ...stateOverrides,

@@ -23,6 +23,7 @@ import {
 import { ALL_FEATURES } from "./features";
 
 const BUSINESS_ID = "10000000-0000-4000-a000-000000000031";
+const OTHER_BUSINESS_ID = "20000000-0000-4000-a000-000000000032";
 const BUSINESS = {
   id: BUSINESS_ID,
   billing_mode: "stripe",
@@ -631,6 +632,51 @@ describe("resolveSmsProvisioningAccess", () => {
     });
   });
 
+  it("denies SMS pre-checkout for the exact direct canary while the broad flag is off", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+    vi.stubEnv("CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID", BUSINESS_ID);
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: "chat_only",
+    });
+  });
+
+  it.each([OTHER_BUSINESS_ID, "malformed-canary-id"])(
+    "keeps a saved Chat intent out of SMS after canary value %s is unavailable",
+    async (canaryBusinessId) => {
+      vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+      vi.stubEnv("CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID", canaryBusinessId);
+      mocks.results.set("businesses", {
+        data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: true,
+        }),
+      ).resolves.toEqual({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source: "direct_precheckout",
+        plan: "chat_only",
+      });
+    },
+  );
+
   it("denies SMS pre-checkout after a canceled Chat Checkout left a durable family lock", async () => {
     vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
     mocks.results.set("businesses", {
@@ -691,12 +737,57 @@ describe("resolveSmsProvisioningAccess", () => {
     ["rollout is disabled", "0", "price_chat_only_test"],
     ["the Chat Price is missing", "1", ""],
   ] as const)(
-    "restores legacy direct SMS pre-checkout when %s",
+    "keeps a saved Chat intent denied for SMS when %s",
     async (_label, rollout, chatPrice) => {
       vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", rollout);
       vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", chatPrice);
       mocks.results.set("businesses", {
         data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+        error: null,
+      });
+      mocks.results.set("subscriptions", { data: null, error: null });
+
+      await expect(
+        resolveSmsProvisioningAccess(BUSINESS_ID, {
+          allowDirectPrecheckout: true,
+        }),
+      ).resolves.toEqual({
+        allowed: false,
+        reason: "plan_not_entitled",
+        source: "direct_precheckout",
+        plan: "chat_only",
+      });
+    },
+  );
+
+  it("keeps a saved Chat intent denied for SMS when the Chat Price collides with an existing billing Price", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_collision");
+    vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_collision");
+    mocks.results.set("businesses", {
+      data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
+      error: null,
+    });
+    mocks.results.set("subscriptions", { data: null, error: null });
+
+    await expect(
+      resolveSmsProvisioningAccess(BUSINESS_ID, {
+        allowDirectPrecheckout: true,
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: "chat_only",
+    });
+  });
+
+  it.each([null, "sms_only", "sms_and_chat", "full"] as const)(
+    "keeps legacy %s SMS pre-checkout unchanged after acquisition rollback",
+    async (intent) => {
+      vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+      vi.stubEnv("CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID", OTHER_BUSINESS_ID);
+      mocks.results.set("businesses", {
+        data: { ...BUSINESS, onboarding_selected_plan: intent },
         error: null,
       });
       mocks.results.set("subscriptions", { data: null, error: null });
@@ -712,26 +803,6 @@ describe("resolveSmsProvisioningAccess", () => {
       });
     },
   );
-
-  it("restores legacy direct SMS pre-checkout when the Chat Price collides with an existing billing Price", async () => {
-    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_collision");
-    vi.stubEnv("STRIPE_PRICE_SMS_ONLY", "price_collision");
-    mocks.results.set("businesses", {
-      data: { ...BUSINESS, onboarding_selected_plan: "chat_only" },
-      error: null,
-    });
-    mocks.results.set("subscriptions", { data: null, error: null });
-
-    await expect(
-      resolveSmsProvisioningAccess(BUSINESS_ID, {
-        allowDirectPrecheckout: true,
-      }),
-    ).resolves.toEqual({
-      allowed: true,
-      source: "direct_precheckout",
-      plan: null,
-    });
-  });
 
   it("fails closed when pre-checkout plan intent is malformed", async () => {
     mocks.results.set("businesses", {

@@ -6,6 +6,10 @@ import { stripe } from "./client";
 import { planFromStripePriceId } from "./config";
 import { subscriptionPlanSchema } from "@/lib/billing/planSchema";
 import { assertApprovedChatOnlyStripePrice } from "./chatOnlyPrice";
+import {
+  completeChatOnlyCheckoutAttempt,
+  expireChatOnlyCheckoutAttempt,
+} from "./chatOnlyCheckoutAttempt.server";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/types/database";
 
 export type SyncedCheckout = {
@@ -18,11 +22,29 @@ export type SyncedCheckout = {
 export async function syncCheckoutSession(
   session: Stripe.Checkout.Session,
 ): Promise<SyncedCheckout | null> {
+  const isChatOnlyCheckout =
+    session.metadata?.plan === "chat_only" ||
+    hasChatOnlyCheckoutAttemptMarker(session);
+  const chatBinding = isChatOnlyCheckout
+    ? requireChatOnlyCheckoutBinding(session, "complete")
+    : null;
   const businessId = session.metadata?.business_id;
   const customerId =
     typeof session.customer === "string" ? session.customer : null;
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : null;
+
+  if (
+    chatBinding &&
+    (!customerId ||
+      !/^cus_[A-Za-z0-9]+$/.test(customerId) ||
+      !subscriptionId ||
+      !/^sub_[A-Za-z0-9]+$/.test(subscriptionId))
+  ) {
+    throw new Error(
+      `[stripe:sync] Chat Only Checkout Session ${session.id} has invalid customer or subscription linkage`,
+    );
+  }
 
   if (!businessId || !customerId || !subscriptionId) {
     return null;
@@ -36,6 +58,14 @@ export async function syncCheckoutSession(
   }
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (chatBinding) {
+    assertChatOnlySubscriptionBinding(
+      subscription,
+      chatBinding,
+      customerId,
+      subscriptionId,
+    );
+  }
   const completedAt =
     session.payment_status === "paid" || session.status === "complete"
       ? new Date().toISOString()
@@ -52,7 +82,136 @@ export async function syncCheckoutSession(
     expectedPlan: metadataPlan.data,
   });
 
+  if (synced?.plan === "chat_only") {
+    await completeChatOnlyCheckoutAttempt({
+      businessId: synced.businessId,
+      attemptId: chatBinding!.attemptId,
+      sessionId: session.id,
+      customerId: synced.customerId,
+      subscriptionId: synced.subscriptionId,
+      requestFingerprint: chatBinding!.requestFingerprint,
+      sessionExpiresAt: chatBinding!.sessionExpiresAt,
+    });
+  }
+
   return synced;
+}
+
+export async function syncExpiredCheckoutSession(
+  session: Stripe.Checkout.Session,
+): Promise<boolean> {
+  if (
+    session.metadata?.plan !== "chat_only" &&
+    !hasChatOnlyCheckoutAttemptMarker(session)
+  ) {
+    return false;
+  }
+
+  const binding = requireChatOnlyCheckoutBinding(session, "expired");
+
+  await expireChatOnlyCheckoutAttempt({
+    businessId: binding.businessId,
+    attemptId: binding.attemptId,
+    sessionId: session.id,
+    requestFingerprint: binding.requestFingerprint,
+    sessionExpiresAt: binding.sessionExpiresAt,
+  });
+  return true;
+}
+
+type ChatOnlyCheckoutBinding = {
+  businessId: string;
+  attemptId: string;
+  requestFingerprint: string;
+  sessionExpiresAt: string;
+};
+
+function requireChatOnlyCheckoutBinding(
+  session: Stripe.Checkout.Session,
+  expectedStatus: "complete" | "expired",
+): ChatOnlyCheckoutBinding {
+  const businessId = session.metadata?.business_id;
+  const attemptId = session.metadata?.checkout_attempt_id;
+  const requestFingerprint =
+    session.metadata?.checkout_request_fingerprint;
+  const sessionExpiresAt =
+    session.metadata?.checkout_session_expires_at;
+  if (
+    typeof businessId !== "string" ||
+    !isUuid(businessId) ||
+    typeof attemptId !== "string" ||
+    !isUuid(attemptId) ||
+    typeof requestFingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(requestFingerprint) ||
+    typeof sessionExpiresAt !== "string" ||
+    !isSecondAlignedTimestamp(sessionExpiresAt) ||
+    Date.parse(sessionExpiresAt) !== session.expires_at * 1_000 ||
+    !/^cs_[A-Za-z0-9_]+$/.test(session.id) ||
+    session.metadata?.mode !== "onboarding" ||
+    session.metadata?.plan !== "chat_only" ||
+    session.client_reference_id !== businessId ||
+    session.mode !== "subscription" ||
+    session.status !== expectedStatus ||
+    !Number.isInteger(session.expires_at) ||
+    session.expires_at <= 0 ||
+    (expectedStatus === "complete" &&
+      session.payment_status !== "paid" &&
+      session.payment_status !== "no_payment_required")
+  ) {
+    throw new Error(
+      `[stripe:sync] Chat Only Checkout Session ${session.id} has invalid single-flight binding`,
+    );
+  }
+
+  return {
+    businessId,
+    attemptId,
+    requestFingerprint,
+    sessionExpiresAt,
+  };
+}
+
+function hasChatOnlyCheckoutAttemptMarker(
+  session: Stripe.Checkout.Session,
+): boolean {
+  return Boolean(
+    session.metadata?.checkout_attempt_id ||
+      session.metadata?.checkout_request_fingerprint ||
+      session.metadata?.checkout_session_expires_at,
+  );
+}
+
+function assertChatOnlySubscriptionBinding(
+  subscription: Stripe.Subscription,
+  checkout: ChatOnlyCheckoutBinding,
+  sessionCustomerId: string,
+  sessionSubscriptionId: string,
+): void {
+  const subscriptionCustomerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : null;
+  const subscriptionAttempt = requireChatOnlySubscriptionAttemptMetadata(
+    subscription,
+    checkout.businessId,
+  );
+  if (
+    subscriptionCustomerId !== sessionCustomerId ||
+    subscription.id !== sessionSubscriptionId ||
+    subscriptionAttempt.attemptId !== checkout.attemptId ||
+    subscriptionAttempt.requestFingerprint !== checkout.requestFingerprint ||
+    subscriptionAttempt.sessionExpiresAt !== checkout.sessionExpiresAt
+  ) {
+    throw new Error(
+      `[stripe:sync] Chat Only subscription ${subscription.id} does not match Checkout single-flight binding`,
+    );
+  }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 export async function syncStripeSubscription(
@@ -71,7 +230,21 @@ export async function syncStripeSubscription(
   const subscriptionId = subscription.id;
   const primaryItem = subscription.items.data[0];
   const priceId = primaryItem?.price.id ?? null;
-  const plan = planFromStripePriceId(priceId);
+  const hasChatOnlyAttemptAuthority =
+    subscription.metadata?.plan === "chat_only" ||
+    hasChatOnlySubscriptionAttemptMarker(subscription);
+  const configuredPlan = hasChatOnlyAttemptAuthority
+    ? null
+    : planFromStripePriceId(priceId);
+  const isChatOnlySubscription =
+    hasChatOnlyAttemptAuthority || configuredPlan === "chat_only";
+  // Exact attempt metadata remains a recovery authority if the acquisition
+  // Price environment value is accidentally removed after Stripe has already
+  // created payable work. The embedded Price terms are still validated below,
+  // and the service RPC binds its Price ID to the private attempt ledger.
+  const plan: SubscriptionPlan | null = isChatOnlySubscription
+    ? "chat_only"
+    : configuredPlan;
   // Normalize BEFORE the linkage early-return: an absent/unknown status
   // must throw unconditionally (the guarantee the old route-level guard
   // provided), never be silently acked because linkage also failed to
@@ -99,6 +272,27 @@ export async function syncStripeSubscription(
     });
   }
 
+  const chatAttempt = isChatOnlySubscription
+    ? (() => {
+        if (
+          typeof businessId !== "string" ||
+          !isUuid(businessId) ||
+          !customerId ||
+          !/^cus_[A-Za-z0-9]+$/.test(customerId) ||
+          !subscriptionId ||
+          !/^sub_[A-Za-z0-9]+$/.test(subscriptionId)
+        ) {
+          throw new Error(
+            `[stripe:sync] Chat Only subscription ${String(subscriptionId)} has invalid business, customer, or subscription linkage`,
+          );
+        }
+        return requireChatOnlySubscriptionAttemptMetadata(
+          subscription,
+          businessId,
+        );
+      })()
+    : null;
+
   if (!businessId || !customerId || !subscriptionId || !plan) {
     return null;
   }
@@ -114,24 +308,40 @@ export async function syncStripeSubscription(
     : null;
   const now = new Date().toISOString();
 
-  const { data: synced, error } = await supabaseAdmin.rpc(
-    "sync_stripe_subscription_if_business_active",
-    {
-      p_business_id: businessId,
-      p_stripe_customer_id: customerId,
-      p_stripe_subscription_id: subscriptionId,
-      p_plan: plan,
-      p_status: status,
-      p_current_period_start: periodStart,
-      p_current_period_end: periodEnd,
-      p_stripe_price_id: priceId,
-      p_stripe_setup_fee_price_id: setupFeePriceId,
-      p_stripe_checkout_session_id: options.checkoutSessionId ?? null,
-      p_setup_fee_paid_at: setupFeePaidAt,
-      p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
-      p_updated_at: now,
-    },
-  );
+  const { data: synced, error } = chatAttempt
+    ? await supabaseAdmin.rpc("sync_chat_only_subscription_from_attempt", {
+        p_business_id: businessId,
+        p_attempt_id: chatAttempt.attemptId,
+        p_request_fingerprint: chatAttempt.requestFingerprint,
+        p_checkout_session_expires_at: chatAttempt.sessionExpiresAt,
+        p_stripe_customer_id: customerId,
+        p_stripe_subscription_id: subscriptionId,
+        p_status: status,
+        p_current_period_start: periodStart,
+        p_current_period_end: periodEnd,
+        p_stripe_price_id: priceId,
+        p_stripe_checkout_session_id: options.checkoutSessionId ?? null,
+        p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+        p_updated_at: now,
+      })
+    : await supabaseAdmin.rpc(
+        "sync_stripe_subscription_if_business_active",
+        {
+          p_business_id: businessId,
+          p_stripe_customer_id: customerId,
+          p_stripe_subscription_id: subscriptionId,
+          p_plan: plan,
+          p_status: status,
+          p_current_period_start: periodStart,
+          p_current_period_end: periodEnd,
+          p_stripe_price_id: priceId,
+          p_stripe_setup_fee_price_id: setupFeePriceId,
+          p_stripe_checkout_session_id: options.checkoutSessionId ?? null,
+          p_setup_fee_paid_at: setupFeePaidAt,
+          p_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+          p_updated_at: now,
+        },
+      );
 
   if (error) {
     throw new Error(
@@ -149,6 +359,56 @@ export async function syncStripeSubscription(
   }
 
   return { businessId, customerId, subscriptionId, plan };
+}
+
+function requireChatOnlySubscriptionAttemptMetadata(
+  subscription: Stripe.Subscription,
+  expectedBusinessId: string,
+): ChatOnlyCheckoutBinding {
+  const businessId = subscription.metadata?.business_id;
+  const attemptId = subscription.metadata?.checkout_attempt_id;
+  const requestFingerprint =
+    subscription.metadata?.checkout_request_fingerprint;
+  const sessionExpiresAt =
+    subscription.metadata?.checkout_session_expires_at;
+  if (
+    businessId !== expectedBusinessId ||
+    !isUuid(businessId) ||
+    subscription.metadata?.plan !== "chat_only" ||
+    subscription.metadata?.mode !== "onboarding" ||
+    typeof attemptId !== "string" ||
+    !isUuid(attemptId) ||
+    typeof requestFingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(requestFingerprint) ||
+    typeof sessionExpiresAt !== "string" ||
+    !isSecondAlignedTimestamp(sessionExpiresAt)
+  ) {
+    throw new Error(
+      `[stripe:sync] Chat Only subscription ${subscription.id} has invalid Checkout attempt metadata`,
+    );
+  }
+
+  return { businessId, attemptId, requestFingerprint, sessionExpiresAt };
+}
+
+function hasChatOnlySubscriptionAttemptMarker(
+  subscription: Stripe.Subscription,
+): boolean {
+  return Boolean(
+    subscription.metadata?.checkout_attempt_id ||
+      subscription.metadata?.checkout_request_fingerprint ||
+      subscription.metadata?.checkout_session_expires_at,
+  );
+}
+
+function isSecondAlignedTimestamp(value: string): boolean {
+  const milliseconds = Date.parse(value);
+  return (
+    value.length >= 20 &&
+    value.length <= 40 &&
+    Number.isFinite(milliseconds) &&
+    milliseconds % 1_000 === 0
+  );
 }
 
 // Deliberate projection of Stripe's full documented status union onto the

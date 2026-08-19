@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:db:local": "node scripts/test-database-local.mjs",
     "audit:chat-only-phase0": "node scripts/chat-only-phase0-inventory.mjs",
+    "audit:chat-only-phase4": "node scripts/chat-only-phase4-readiness.mjs",
     "test:stripe-account-deletion-e2e": "node scripts/account-deletion-stripe-e2e.mjs"
   },
   "dependencies": {

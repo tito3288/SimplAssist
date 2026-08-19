@@ -769,6 +769,37 @@ export interface AnthropicProviderCall {
   created_at: string;
 }
 
+export type ChatOnlyCheckoutAttemptState =
+  | "creating"
+  | "open"
+  | "completed"
+  | "expired";
+
+/** Private service-role state for one-payable-Checkout single-flight. */
+export interface ChatOnlyCheckoutAttempt {
+  id: string;
+  business_id: string;
+  plan: "chat_only";
+  checkout_mode: "onboarding";
+  stripe_price_id: string;
+  request_fingerprint: string;
+  state: ChatOnlyCheckoutAttemptState;
+  claim_token: string;
+  claimed_at: string;
+  claim_expires_at: string;
+  attempt_count: number;
+  stripe_checkout_session_id: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  /** Sensitive bearer-like provider URL; never expose to a customer role. */
+  checkout_url: string | null;
+  checkout_session_expires_at: string;
+  completed_at: string | null;
+  expired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GoogleCalendarToken {
   id: string;
   business_id: string;

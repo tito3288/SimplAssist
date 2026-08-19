@@ -8,7 +8,6 @@ import Stripe from "stripe";
 const STRIPE_API_VERSION = "2026-02-25.clover";
 const PAGE_SIZE = 100;
 const DATABASE_PAGE_SIZE = 1000;
-const CURRENT_PLANS = new Set(["sms_only", "sms_and_chat", "full"]);
 const CURRENT_BILLING_MODES = new Set(["stripe", "invoiced", "comped"]);
 const TERMINAL_STRIPE_STATUSES = new Set(["canceled", "incomplete_expired"]);
 const AUTHORITATIVE_DATABASE_STATUSES = new Set([
@@ -191,7 +190,7 @@ export async function loadDatabaseState(supabase) {
     readAllRows(
       supabase,
       "businesses",
-      "id, partner_id, billing_mode, partner_plan, deleted_at, telnyx_resource_state",
+      "id, owner_id, partner_id, billing_mode, partner_plan, billing_pilot, billing_comped, billing_exempt, deleted_at, operations_suspended_at, telnyx_brand_id, telnyx_campaign_id, telnyx_messaging_profile_id, telnyx_voice_application_id, active_telnyx_release_run_id, telnyx_resource_state",
       "id"
     ),
     readAllRows(
@@ -331,6 +330,11 @@ export function analyzeInventory({
 }) {
   const blockers = [];
   const warnings = [];
+  // Phase 0 supplies the original three-plan catalog. Later read-only audits
+  // may reuse this reconciler with an explicitly validated expanded catalog;
+  // deriving the set from that catalog preserves Phase 0 behavior while
+  // avoiding a second copy of the billing/Telnyx authority analysis.
+  const currentPlans = new Set(Object.keys(config.planPriceIds));
   const businessById = new Map(database.businesses.map((row) => [row.id, row]));
   const partnerById = new Map(database.partners.map((row) => [row.id, row]));
   const dbSubscriptionByBusiness = new Map(
@@ -390,7 +394,7 @@ export function analyzeInventory({
       addIssue(blockers, "split_billing_authority", "Stripe business also has a partner plan", [ref]);
     }
     if (business.billing_mode !== "stripe") {
-      if (!CURRENT_PLANS.has(business.partner_plan)) {
+      if (!currentPlans.has(business.partner_plan)) {
         addIssue(blockers, "invalid_partner_plan", "Partner-managed business lacks a valid current plan", [ref]);
       }
       if (!business.partner_id || !partnerById.has(business.partner_id)) {
@@ -404,7 +408,7 @@ export function analyzeInventory({
 
   for (const subscription of database.subscriptions) {
     const ref = stableRef("business", subscription.business_id);
-    if (!CURRENT_PLANS.has(subscription.plan)) {
+    if (!currentPlans.has(subscription.plan)) {
       addIssue(blockers, "invalid_subscription_plan", "Database subscription has an unknown plan", [ref]);
     }
     const business = businessById.get(subscription.business_id);
@@ -758,7 +762,7 @@ export function analyzeInventory({
   for (const business of alphaDogBusinesses) {
     if (
       business.billing_mode === "stripe" ||
-      !CURRENT_PLANS.has(business.partner_plan)
+      !currentPlans.has(business.partner_plan)
     ) {
       addIssue(blockers, "alpha_dog_client_authority_invalid", "Alpha Dog client is not partner-managed on a valid plan", [stableRef("business", business.id)]);
     }
@@ -839,7 +843,7 @@ export function analyzeInventory({
         valid_partner_authority: alphaDogBusinesses.filter(
           (business) =>
             business.billing_mode !== "stripe" &&
-            CURRENT_PLANS.has(business.partner_plan)
+            currentPlans.has(business.partner_plan)
         ).length,
         assigned_business_refs: alphaDogBusinesses.map((row) =>
           stableRef("business", row.id)

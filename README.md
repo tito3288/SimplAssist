@@ -37,6 +37,7 @@ Phase 9 billing/admin and Phase 3 calendar/operations use these deployment varia
 - `STRIPE_PRICE_SMS_OVERAGE_PART` - Stripe test-mode Price ID for $0.03 per extra SMS part after opt-in.
 - `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` - server-only ID of the reviewed Stripe Billing Portal configuration (`bpc_...`) for this Stripe account and mode. Portal session creation fails closed when this pin is missing or malformed; never expose it through a `NEXT_PUBLIC_` variable.
 - `CHAT_ONLY_DIRECT_SALES_ENABLED` - server-only, exact-`1` rollout switch reserved for new direct chat-only sales. Leave unset or `0` until the chat-only implementation and launch gates are complete.
+- `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only canary while the broad flag remains off. It accepts no list, whitespace, wildcard, or public/browser variant; remove it after the canary. Never create a `NEXT_PUBLIC_` copy.
 - `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` - independent server-only, exact-`1` rollout switch reserved for new partner-admin chat-only assignments. Leave unset or `0` until partner acceptance testing is complete.
 - `WIDGET_TOKEN_SECRET` - server-only secret used to sign short-lived public widget sessions and derive opaque traffic keys. Use at least 32 cryptographically random bytes, keep it identical across all application instances, and never expose it through a `NEXT_PUBLIC_` variable. Rotation immediately invalidates existing five-minute widget sessions and changes the traffic-key namespace, effectively starting new rate buckets; rotate deliberately across every instance at once.
 - `GOOGLE_CLIENT_ID` - server-side Google OAuth client ID for Calendar access.
@@ -55,7 +56,7 @@ for the pre-implementation inventory and regression gate.
 
 The switches gate new acquisition and partner assignment only. They do not
 turn off the metering, widget-security, or calendar-lifecycle code used by
-existing plans, so migrations 060-063 and their existing-plan regression gates
+existing plans, so migrations 060-064 and their existing-plan regression gates
 must be treated as production changes even while both switches remain `0`.
 
 Before setting either switch to `1`, configure managed edge/WAF rate limiting
@@ -75,6 +76,9 @@ deployment contract is documented in
 The authenticated Railway account-cleanup heartbeat, including calendar
 provider reconciliation and its exact cron-job.org configuration, is documented
 in [`docs/account-cleanup-scheduler-operations.md`](docs/account-cleanup-scheduler-operations.md).
+The Phase 4 isolated direct-canary, Checkout single-flight, rollback, and
+hosted approval boundaries are documented in
+[`docs/chat-only-phase4-direct-canary.md`](docs/chat-only-phase4-direct-canary.md).
 
 The Full Suite waitlist uses these server-only deployment variables:
 
@@ -102,7 +106,7 @@ Supabase and must precede any Railway application version that calls their new
 RPCs or reads their new columns. Migration 063 is not safe as an ordinary
 rolling change: block and drain old calendar create/update/delete, AI booking,
 OAuth-completion, refresh, and disconnect traffic; run the documented
-preflights; apply migrations through 063; deploy the compatible application and
+preflights; apply migrations through 064; deploy the compatible application and
 reconciler; then reopen calendar traffic only after verification.
 
 Railway does not schedule account cleanup. Keep exactly one external

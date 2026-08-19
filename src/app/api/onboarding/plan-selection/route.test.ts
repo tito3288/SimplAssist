@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
   requireWorkspaceRouteAccess: vi.fn(),
-  directFlag: vi.fn(),
+  directAcquisition: vi.fn(),
   validChatPrice: vi.fn(),
   isPlanAvailable: vi.fn(),
 }));
@@ -18,7 +18,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   supabaseAdmin: { from: mocks.from, rpc: mocks.rpc },
 }));
 vi.mock("@/lib/billing/chatOnlyRollout.server", () => ({
-  isChatOnlyDirectSalesEnabled: mocks.directFlag,
+  isChatOnlyDirectAcquisitionEnabledForBusiness: mocks.directAcquisition,
 }));
 vi.mock("@/lib/stripe/config", () => ({
   hasValidChatOnlyStripePrice: mocks.validChatPrice,
@@ -66,6 +66,11 @@ function business(
       | "full"
       | "chat_only"
       | null;
+    deleted_at: string | null;
+    operations_suspended_at: string | null;
+    billing_pilot: boolean;
+    billing_comped: boolean;
+    billing_exempt: boolean;
   }> = {},
 ) {
   return {
@@ -75,6 +80,11 @@ function business(
     billing_mode: "stripe" as const,
     partner_plan: null,
     onboarding_selected_plan: null,
+    deleted_at: null,
+    operations_suspended_at: null,
+    billing_pilot: false,
+    billing_comped: false,
+    billing_exempt: false,
     ...overrides,
   };
 }
@@ -97,7 +107,7 @@ beforeEach(() => {
       business: { id: BUSINESS_ID },
     },
   });
-  mocks.directFlag.mockReturnValue(false);
+  mocks.directAcquisition.mockReturnValue(false);
   mocks.validChatPrice.mockReturnValue(false);
   mocks.isPlanAvailable.mockImplementation(
     (plan: string) => plan === "sms_only" || plan === "sms_and_chat",
@@ -140,7 +150,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   ])(
     "keeps Chat Only unavailable with flag=%s validPrice=%s",
     async (flag, price) => {
-      mocks.directFlag.mockReturnValue(flag);
+      mocks.directAcquisition.mockReturnValue(flag);
       mocks.validChatPrice.mockReturnValue(price);
       queueResults(
         { data: business(), error: null },
@@ -170,6 +180,33 @@ describe("POST /api/onboarding/plan-selection", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["deleted", { deleted_at: "2026-08-19T12:00:00.000Z" }],
+    [
+      "operations-suspended",
+      { operations_suspended_at: "2026-08-19T12:00:00.000Z" },
+    ],
+    ["billing-pilot", { billing_pilot: true }],
+    ["billing-comped", { billing_comped: true }],
+    ["billing-exempt", { billing_exempt: true }],
+  ] as const)("rejects an otherwise matching %s business", async (_label, overrides) => {
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+    queueResults(
+      { data: business(overrides), error: null },
+      { data: null, error: null },
+    );
+
+    const response = await POST(request({ plan: "chat_only" }));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "That plan is not available for selection",
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.directAcquisition).not.toHaveBeenCalled();
+  });
+
   it("never lets advisory intent outrank an existing subscription", async () => {
     queueResults(
       { data: business(), error: null },
@@ -197,7 +234,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   });
 
   it("preserves selectable SMS plans when the new direct flow is enabled", async () => {
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     queueResults(
       { data: business(), error: null },
@@ -219,7 +256,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   });
 
   it("persists Chat Only only when both server acquisition gates pass", async () => {
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     queueResults(
       {
@@ -236,6 +273,7 @@ describe("POST /api/onboarding/plan-selection", () => {
       success: true,
       plan: "chat_only",
     });
+    expect(mocks.directAcquisition).toHaveBeenCalledWith(BUSINESS_ID);
     expect(mocks.rpc).toHaveBeenCalledWith(
       "save_direct_onboarding_plan_intent",
       {
@@ -248,7 +286,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   });
 
   it("fails a missed compare-and-swap instead of overwriting new state", async () => {
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     queueResults(
       { data: business(), error: null },
@@ -265,7 +303,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   });
 
   it("surfaces an opposing durable plan-family claim as a stable conflict", async () => {
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     queueResults(
       {
@@ -293,7 +331,7 @@ describe("POST /api/onboarding/plan-selection", () => {
   });
 
   it("fails closed when the atomic intent writer cannot run", async () => {
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     queueResults(
       { data: business(), error: null },

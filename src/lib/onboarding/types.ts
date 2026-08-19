@@ -172,7 +172,8 @@ export interface OnboardingBillingSnapshot {
 export type OnboardingPlanSource =
   | "subscription"
   | "partner_plan"
-  | "direct_intent";
+  | "direct_intent"
+  | "family_lock";
 
 export interface OnboardingPlanSelectionSnapshot {
   effectivePlan: SubscriptionPlan | null;
@@ -180,6 +181,8 @@ export interface OnboardingPlanSelectionSnapshot {
   directIntent: SubscriptionPlan | null;
   canChooseDirectPlan: boolean;
   chatOnlyDirectSalesAvailable: boolean;
+  chatOnlyCheckoutAvailable: boolean;
+  chatOnlyCheckoutPaused: boolean;
 }
 
 export interface OnboardingRiskReviewSnapshot {

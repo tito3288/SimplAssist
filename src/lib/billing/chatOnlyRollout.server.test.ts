@@ -5,9 +5,13 @@ vi.mock("server-only", () => ({}));
 import {
   CHAT_ONLY_ROLLOUT_ENV,
   getChatOnlyRolloutSnapshot,
+  isChatOnlyDirectAcquisitionEnabledForBusiness,
   isChatOnlyDirectSalesEnabled,
   isChatOnlyPartnerAssignmentEnabled,
 } from "./chatOnlyRollout.server";
+
+const CANARY_BUSINESS_ID = "10000000-0000-4000-a000-000000000001";
+const OTHER_BUSINESS_ID = "20000000-0000-4000-a000-000000000002";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -62,5 +66,69 @@ describe("chat-only acquisition rollout", () => {
 
     vi.stubEnv(CHAT_ONLY_ROLLOUT_ENV.directSales, "1");
     expect(isChatOnlyDirectSalesEnabled()).toBe(true);
+  });
+
+  it("admits only the exact canary business while broad direct sales stay off", () => {
+    const environment = {
+      [CHAT_ONLY_ROLLOUT_ENV.directSales]: "0",
+      [CHAT_ONLY_ROLLOUT_ENV.directCanaryBusinessId]: CANARY_BUSINESS_ID,
+    };
+
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness(
+        CANARY_BUSINESS_ID,
+        environment,
+      ),
+    ).toBe(true);
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness(
+        OTHER_BUSINESS_ID,
+        environment,
+      ),
+    ).toBe(false);
+    expect(isChatOnlyDirectSalesEnabled(environment)).toBe(false);
+  });
+
+  it("compares canonical UUIDs case-insensitively", () => {
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness(CANARY_BUSINESS_ID, {
+        [CHAT_ONLY_ROLLOUT_ENV.directCanaryBusinessId]:
+          CANARY_BUSINESS_ID.toUpperCase(),
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    "",
+    "business-1",
+    "10000000-0000-0000-a000-000000000001",
+    "10000000-0000-4000-7000-000000000001",
+    ` ${CANARY_BUSINESS_ID}`,
+    `${CANARY_BUSINESS_ID} `,
+    `${CANARY_BUSINESS_ID},${OTHER_BUSINESS_ID}`,
+    `{${CANARY_BUSINESS_ID}}`,
+  ])("fails closed for malformed canary value %j", (value) => {
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness(CANARY_BUSINESS_ID, {
+        [CHAT_ONLY_ROLLOUT_ENV.directCanaryBusinessId]: value,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves broad direct-sales authority independently of canary syntax", () => {
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness(OTHER_BUSINESS_ID, {
+        [CHAT_ONLY_ROLLOUT_ENV.directSales]: "1",
+        [CHAT_ONLY_ROLLOUT_ENV.directCanaryBusinessId]: "malformed",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a malformed server-resolved business ID even under the broad flag", () => {
+    expect(
+      isChatOnlyDirectAcquisitionEnabledForBusiness("business-1", {
+        [CHAT_ONLY_ROLLOUT_ENV.directSales]: "1",
+      }),
+    ).toBe(false);
   });
 });

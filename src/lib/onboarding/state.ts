@@ -29,7 +29,7 @@ import type {
   SubscriptionStatus,
 } from "@/types/database";
 import { resolveAssignedPartnerName } from "@/lib/billing/partnerManagedBilling.server";
-import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
 import {
   hashA2pRiskInput,
@@ -75,6 +75,11 @@ type BusinessRow = {
   billing_mode: BillingMode;
   partner_plan: SubscriptionPlan | null;
   onboarding_selected_plan: SubscriptionPlan | null;
+  deleted_at: string | null;
+  operations_suspended_at: string | null;
+  billing_pilot: boolean;
+  billing_comped: boolean;
+  billing_exempt: boolean;
   primary_goal: PrimaryGoal | null;
   goal_url: string | null;
   name: string | null;
@@ -190,6 +195,11 @@ type SubscriptionRow = {
   current_period_end: string | null;
 };
 
+type PlanFamilyLockRow = {
+  family: string;
+  claimed_by: string;
+};
+
 export async function getOnboardingStateForOwner(
   ownerId: string
 ): Promise<OnboardingState | null> {
@@ -216,6 +226,11 @@ async function getOnboardingStateForOwnerInternal(
         "billing_mode",
         "partner_plan",
         "onboarding_selected_plan",
+        "deleted_at",
+        "operations_suspended_at",
+        "billing_pilot",
+        "billing_comped",
+        "billing_exempt",
         "primary_goal",
         "goal_url",
         "name",
@@ -286,7 +301,7 @@ async function getOnboardingStateForOwnerInternal(
     .eq("owner_id", ownerId)
     .single<BusinessRow>();
 
-  if (error || !business) {
+  if (error || !business || business.deleted_at !== null) {
     return null;
   }
 
@@ -306,6 +321,11 @@ export async function getOnboardingStateForBusinessId(
         "billing_mode",
         "partner_plan",
         "onboarding_selected_plan",
+        "deleted_at",
+        "operations_suspended_at",
+        "billing_pilot",
+        "billing_comped",
+        "billing_exempt",
         "primary_goal",
         "goal_url",
         "name",
@@ -376,7 +396,7 @@ export async function getOnboardingStateForBusinessId(
     .eq("id", businessId)
     .single<BusinessRow>();
 
-  if (error || !business) {
+  if (error || !business || business.deleted_at !== null) {
     return null;
   }
 
@@ -399,6 +419,7 @@ async function getOnboardingStateForBusiness(
     { data: widgetConfig },
     { data: phoneNumber },
     subscriptionResult,
+    familyLockResult,
     handledByName,
   ] = await Promise.all([
     supabaseAdmin
@@ -448,6 +469,11 @@ async function getOnboardingStateForBusiness(
       .select("plan, status, setup_fee_paid_at, current_period_start, current_period_end")
       .eq("business_id", business.id)
       .maybeSingle<SubscriptionRow>(),
+    supabaseAdmin
+      .from("business_plan_family_locks")
+      .select("family, claimed_by")
+      .eq("business_id", business.id)
+      .maybeSingle<PlanFamilyLockRow>(),
     assignedPartnerNamePromise,
   ]);
 
@@ -457,33 +483,92 @@ async function getOnboardingStateForBusiness(
     );
   }
   const subscription = subscriptionResult.data;
+  if (familyLockResult.error) {
+    throw new Error(
+      `[onboarding:state] Failed to read plan-family lock for ${business.id}: ${familyLockResult.error.message}`,
+    );
+  }
+  const familyLock = familyLockResult.data;
+  if (
+    familyLock &&
+    ((familyLock.family !== "sms" && familyLock.family !== "chat_only") ||
+      typeof familyLock.claimed_by !== "string" ||
+      familyLock.claimed_by.trim() === "")
+  ) {
+    throw new Error(
+      `[onboarding:state] Malformed plan-family lock for ${business.id}`,
+    );
+  }
 
   // Resolve the plan before consulting SMS readiness. The side-effectful
   // readiness helper can lazily assign a phone number to a Telnyx campaign;
   // Chat Only must never enter that provider lifecycle, even when legacy SMS
   // rows are still attached to the business.
-  const directFlow =
-    business.billing_mode === "stripe" && business.partner_id === null;
+  const directBillingFlow =
+    business.billing_mode === "stripe" &&
+    business.partner_id === null &&
+    business.partner_plan === null;
   const partnerAuthorityPlan =
     business.partner_id !== null &&
     (business.billing_mode === "invoiced" || business.billing_mode === "comped")
       ? business.partner_plan
       : null;
-  const directSalesEnabled =
-    isChatOnlyDirectSalesEnabled() && hasValidChatOnlyStripePrice();
+  const hasProtectedBillingOverride =
+    business.billing_pilot !== false ||
+    business.billing_comped !== false ||
+    business.billing_exempt !== false;
+  const directAcquisitionBusinessEligible =
+    directBillingFlow &&
+    business.deleted_at === null &&
+    business.operations_suspended_at === null &&
+    !hasProtectedBillingOverride;
+  const directAcquisitionAvailable =
+    directAcquisitionBusinessEligible &&
+    isChatOnlyDirectAcquisitionEnabledForBusiness(business.id) &&
+    hasValidChatOnlyStripePrice();
+  const hasDurableDirectChatIntent =
+    directBillingFlow &&
+    !hasProtectedBillingOverride &&
+    business.onboarding_selected_plan === "chat_only";
+  const gatedDirectIntent =
+    hasDurableDirectChatIntent
+      ? "chat_only"
+      : directAcquisitionAvailable
+        ? business.onboarding_selected_plan
+        : null;
+  const authoritativePlan = subscription?.plan ?? partnerAuthorityPlan;
+  if (
+    familyLock &&
+    authoritativePlan &&
+    (authoritativePlan === "chat_only" ? "chat_only" : "sms") !==
+      familyLock.family
+  ) {
+    throw new Error(
+      `[onboarding:state] Plan-family authority conflict for ${business.id}`,
+    );
+  }
   const directIntent =
-    directFlow && directSalesEnabled
-      ? business.onboarding_selected_plan
+    gatedDirectIntent &&
+    (!familyLock ||
+      (gatedDirectIntent === "chat_only" ? "chat_only" : "sms") ===
+        familyLock.family)
+      ? gatedDirectIntent
       : null;
+  const hasDurableChatFamilyLock = familyLock?.family === "chat_only";
   const effectivePlan =
-    subscription?.plan ?? partnerAuthorityPlan ?? directIntent ?? null;
+    authoritativePlan ??
+    (hasDurableChatFamilyLock ? "chat_only" : null) ??
+    directIntent ??
+    null;
   const planSource = subscription
     ? "subscription"
     : partnerAuthorityPlan
       ? "partner_plan"
-      : directIntent
-        ? "direct_intent"
-        : null;
+      : hasDurableChatFamilyLock
+        ? "family_lock"
+        : directIntent
+          ? "direct_intent"
+          : null;
   const smsReadiness =
     effectivePlan === "chat_only"
       ? CHAT_ONLY_SMS_READINESS
@@ -515,10 +600,26 @@ async function getOnboardingStateForBusiness(
       ? null
       : activePhone ?? business.pending_phone_number ?? null;
   const canChooseDirectPlan =
-    directFlow &&
-    directSalesEnabled &&
+    directAcquisitionAvailable &&
     !subscription &&
-    business.partner_plan === null;
+    !hasDurableChatFamilyLock;
+  const chatOnlySubscriptionStatus =
+    subscription?.plan === "chat_only" ? subscription.status : null;
+  const chatOnlyCheckoutAvailable =
+    effectivePlan === "chat_only" &&
+    directBillingFlow &&
+    (chatOnlySubscriptionStatus === "active" ||
+      chatOnlySubscriptionStatus === "trialing" ||
+      (subscription === null &&
+        directAcquisitionAvailable));
+  const chatOnlyCheckoutPaused =
+    effectivePlan === "chat_only" &&
+    !chatOnlyCheckoutAvailable &&
+    chatOnlySubscriptionStatus !== "past_due" &&
+    planSource !== "partner_plan" &&
+    (hasDurableChatFamilyLock ||
+      hasDurableDirectChatIntent ||
+      chatOnlySubscriptionStatus === "canceled");
   const chatOnlyAuthorityActive =
     effectivePlan === "chat_only" &&
     (planSource === "partner_plan" ||
@@ -616,7 +717,9 @@ async function getOnboardingStateForBusiness(
       directIntent,
       canChooseDirectPlan,
       chatOnlyDirectSalesAvailable:
-        canChooseDirectPlan && directSalesEnabled,
+        canChooseDirectPlan && directAcquisitionAvailable,
+      chatOnlyCheckoutAvailable,
+      chatOnlyCheckoutPaused,
     },
     registration: {
       status: normalizeRegistrationStatus(business),

@@ -104,7 +104,8 @@ export function verifyPasswordResetState(
 ): boolean {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(state)) return false;
-    const provided = Buffer.from(state, "base64url");
+    const provided = decodeCanonicalBase64Url(state);
+    if (!provided) return false;
     const expected = Buffer.from(
       createPasswordResetState(origin, tokenHash),
       "base64url",
@@ -164,7 +165,8 @@ export function verifyPasswordResetIntent(
     const expectedSignature = createHmac("sha256", passwordResetIntentKey())
       .update(payload)
       .digest("base64url");
-    const provided = Buffer.from(providedSignature, "base64url");
+    const provided = decodeCanonicalBase64Url(providedSignature);
+    if (!provided) return false;
     const expected = Buffer.from(expectedSignature, "base64url");
     if (
       provided.length !== expected.length ||
@@ -197,6 +199,11 @@ export function verifyPasswordResetIntent(
   } catch {
     return false;
   }
+}
+
+function decodeCanonicalBase64Url(value: string): Buffer | null {
+  const decoded = Buffer.from(value, "base64url");
+  return decoded.toString("base64url") === value ? decoded : null;
 }
 
 export function passwordResetOriginForWorkspaceHost(

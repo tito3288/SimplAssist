@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -25,6 +25,11 @@ type BusinessPlanSelectionRow = {
   billing_mode: BillingMode;
   partner_plan: SubscriptionPlan | null;
   onboarding_selected_plan: SubscriptionPlan | null;
+  deleted_at: string | null;
+  operations_suspended_at: string | null;
+  billing_pilot: boolean;
+  billing_comped: boolean;
+  billing_exempt: boolean;
 };
 
 type SubscriptionAuthorityRow = {
@@ -32,9 +37,13 @@ type SubscriptionAuthorityRow = {
   status: SubscriptionStatus;
 };
 
-function canStartDirectSale(plan: SubscriptionPlan): boolean {
+function canStartDirectSale(
+  businessId: string,
+  plan: SubscriptionPlan,
+): boolean {
   const selectionFlowEnabled =
-    isChatOnlyDirectSalesEnabled() && hasValidChatOnlyStripePrice();
+    isChatOnlyDirectAcquisitionEnabledForBusiness(businessId) &&
+    hasValidChatOnlyStripePrice();
   if (!selectionFlowEnabled) return false;
   return plan === "chat_only" || isPlanAvailable(plan);
 }
@@ -68,7 +77,7 @@ export async function POST(request: NextRequest) {
     supabaseAdmin
       .from("businesses")
       .select(
-        "id, owner_id, partner_id, billing_mode, partner_plan, onboarding_selected_plan",
+        "id, owner_id, partner_id, billing_mode, partner_plan, onboarding_selected_plan, deleted_at, operations_suspended_at, billing_pilot, billing_comped, billing_exempt",
       )
       .eq("id", businessId)
       .eq("owner_id", user.id)
@@ -107,6 +116,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (
+    business.deleted_at !== null ||
+    business.operations_suspended_at !== null ||
+    business.billing_pilot !== false ||
+    business.billing_comped !== false ||
+    business.billing_exempt !== false
+  ) {
+    return NextResponse.json(
+      { error: "That plan is not available for selection" },
+      { status: 403 },
+    );
+  }
+
   if (subscriptionResult.data) {
     return NextResponse.json(
       {
@@ -118,7 +140,7 @@ export async function POST(request: NextRequest) {
   }
 
   const plan = parsed.data.plan as SubscriptionPlan;
-  if (!canStartDirectSale(plan)) {
+  if (!canStartDirectSale(business.id, plan)) {
     return NextResponse.json(
       { error: "That plan is not available for selection" },
       { status: 403 },

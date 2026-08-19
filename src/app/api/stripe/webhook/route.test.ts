@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   rpc: vi.fn(),
   syncCheckoutSession: vi.fn(),
+  syncExpiredCheckoutSession: vi.fn(),
   syncStripeSubscription: vi.fn(),
   finalizePaidCheckout: vi.fn(),
 }));
@@ -29,6 +30,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("@/lib/stripe/subscriptionSync", () => ({
   syncCheckoutSession: mocks.syncCheckoutSession,
+  syncExpiredCheckoutSession: mocks.syncExpiredCheckoutSession,
   syncStripeSubscription: mocks.syncStripeSubscription,
 }));
 vi.mock("@/lib/billing/finalizePaidCheckout.server", () => ({
@@ -226,6 +228,50 @@ describe("POST /api/stripe/webhook", () => {
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({ processed_at: expect.any(String) }),
     );
+  });
+
+  it("records exact Chat Checkout expiry before acknowledging the event", async () => {
+    const expiredSession = {
+      id: "cs_test_chat_expired",
+      status: "expired",
+      metadata: { plan: "chat_only" },
+    };
+    mocks.constructEvent.mockReturnValue(
+      event("checkout.session.expired", expiredSession),
+    );
+    mocks.syncExpiredCheckoutSession.mockResolvedValue(true);
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncExpiredCheckoutSession).toHaveBeenCalledWith(expiredSession);
+    expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed_at: expect.any(String),
+        processing_error: null,
+      }),
+    );
+  });
+
+  it("keeps a failed Chat Checkout expiry retryable", async () => {
+    mocks.constructEvent.mockReturnValue(
+      event("checkout.session.expired", {
+        id: "cs_test_chat_expiry_retry",
+        status: "expired",
+        metadata: { plan: "chat_only" },
+      }),
+    );
+    mocks.syncExpiredCheckoutSession.mockRejectedValue(
+      new Error("attempt evidence mismatch"),
+    );
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(500);
+    expect(mocks.update).toHaveBeenCalledWith({
+      processing_error: expect.stringContaining("attempt evidence mismatch"),
+    });
   });
 
   it("propagates a 3+3 launch hold without failing the Stripe event", async () => {

@@ -4,6 +4,7 @@ import { stripe } from "@/lib/stripe/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   syncCheckoutSession,
+  syncExpiredCheckoutSession,
   syncStripeSubscription,
 } from "@/lib/stripe/subscriptionSync";
 import {
@@ -68,6 +69,13 @@ async function processStripeEvent(
       if (synced) {
         return finalizePaidCheckout(synced, "stripe_webhook");
       }
+      return null;
+    }
+
+    case "checkout.session.expired": {
+      await syncExpiredCheckoutSession(
+        event.data.object as Stripe.Checkout.Session,
+      );
       return null;
     }
 

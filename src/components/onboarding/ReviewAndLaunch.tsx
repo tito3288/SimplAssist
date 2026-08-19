@@ -17,7 +17,10 @@ import type { SubscriptionPlan } from '@/types/database';
 import { primaryCtaInlineClass, secondaryCtaClass } from "@/lib/glass";
 import { partnerManagedBillingMessage } from "@/lib/billing/partnerManagedBilling";
 import { BillingPortalButton } from "@/components/billing/BillingPortalButton";
-import { SETUP_FEE_EXPLAINER_PATH } from "@/lib/support/constants";
+import {
+  SETUP_FEE_EXPLAINER_PATH,
+  supportHref,
+} from "@/lib/support/constants";
 import { tile, statusSuccess, statusWarning, statusDanger, statusNeutral } from "@/lib/theme-v2/theme";
 import { cn } from "@/lib/utils";
 import {
@@ -111,6 +114,7 @@ interface ReviewAndLaunchProps {
   registration: OnboardingState["registration"];
   effectivePlan?: SubscriptionPlan | null;
   chatOnly?: boolean;
+  chatOnlyCheckoutPaused?: boolean;
   canEditPlan?: boolean;
   pendingPhoneNumberFailureReason: string | null;
   onEditStep: (step: number) => void;
@@ -183,6 +187,7 @@ export default function ReviewAndLaunch({
   registration,
   effectivePlan = null,
   chatOnly = false,
+  chatOnlyCheckoutPaused = false,
   canEditPlan = false,
   pendingPhoneNumberFailureReason,
   onEditStep,
@@ -215,6 +220,12 @@ export default function ReviewAndLaunch({
     isChatOnly &&
     billing.plan === "chat_only" &&
     billing.status === "past_due";
+  const isChatOnlyCheckoutPaused =
+    isChatOnly &&
+    !isPartnerManaged &&
+    !isPaidSubscription &&
+    !isPastDueChatOnly &&
+    chatOnlyCheckoutPaused;
   const paidPlan = paidPlanKey
     ? getPlanPresentation(paidPlanKey, brand.name)
     : null;
@@ -236,6 +247,7 @@ export default function ReviewAndLaunch({
   const showPrimaryButton =
     !isPartnerChatOnly &&
     !isPastDueChatOnly &&
+    !isChatOnlyCheckoutPaused &&
     (!launchHold || launchHold.action !== 'none');
 
   useEffect(() => {
@@ -324,6 +336,8 @@ export default function ReviewAndLaunch({
         <h2 className="text-xl font-semibold text-stone-900 dark:text-[#f5f5f5]">
           {isPastDueChatOnly
             ? "Payment needs attention"
+            : isChatOnlyCheckoutPaused
+            ? "Chat Only checkout paused"
             : isPartnerChatOnly
             ? "Chat setup pending"
             : isChatOnly && isPaidSubscription
@@ -339,6 +353,8 @@ export default function ReviewAndLaunch({
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf]">
           {isPastDueChatOnly
             ? "Update your payment method to finish Chat Only activation."
+            : isChatOnlyCheckoutPaused
+            ? "Your Chat Only selection is safely saved while checkout is temporarily unavailable."
             : isPartnerChatOnly
             ? "Review your assistant. Your partner will finish Chat Only activation."
             : isChatOnly && isPaidSubscription
@@ -447,6 +463,23 @@ export default function ReviewAndLaunch({
                   label="Manage billing"
                   loadingLabel="Opening billing..."
                 />
+              </div>
+            ) : isChatOnlyCheckoutPaused ? (
+              <div className={cn("rounded-[16px] p-3 text-sm", statusNeutral)}>
+                <p className="font-medium text-stone-800 dark:text-[#f5f5f5]">
+                  Checkout is temporarily paused
+                </p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Your Chat Only setup remains saved, and no phone or texting
+                  setup will start. Contact support when you&apos;re ready to
+                  continue.
+                </p>
+                <a
+                  href={supportHref("billing")}
+                  className="mt-3 inline-block text-xs font-medium underline underline-offset-2 hover:text-[var(--brand-primary)] dark:hover:text-[var(--brand-primary-dark)]"
+                >
+                  Contact support
+                </a>
               </div>
             ) : isChatOnly ? (
               <div className={cn("rounded-[16px] p-3 text-xs", statusNeutral)}>

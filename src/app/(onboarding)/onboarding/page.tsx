@@ -423,6 +423,9 @@ export default function OnboardingPage() {
             registration={state.registration}
             effectivePlan={state.planSelection.effectivePlan}
             chatOnly={state.planSelection.effectivePlan === 'chat_only'}
+            chatOnlyCheckoutPaused={
+              state.planSelection.chatOnlyCheckoutPaused
+            }
             canEditPlan={
               state.planSelection.canChooseDirectPlan &&
               state.billing.plan === null

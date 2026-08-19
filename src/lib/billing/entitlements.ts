@@ -1,7 +1,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { isChatOnlyDirectSalesEnabled } from "@/lib/billing/chatOnlyRollout.server";
+import { isChatOnlyDirectAcquisitionEnabledForBusiness } from "@/lib/billing/chatOnlyRollout.server";
 import { hasValidChatOnlyStripePrice } from "@/lib/stripe/config";
 import type {
   BillingMode,
@@ -192,7 +192,7 @@ export async function resolveSmsProvisioningAccess(
       error.code === "subscription_missing" &&
       options.allowDirectPrecheckout
     ) {
-      return directPrecheckoutSmsAccess(snapshot!, familyLock!);
+      return directPrecheckoutSmsAccess(businessId, snapshot!, familyLock!);
     }
 
     if (error instanceof EntitlementResolutionError) {
@@ -235,6 +235,7 @@ export async function resolveSmsProvisioningAccess(
  * narrow exception; it still never grants runtime entitlements.
  */
 function directPrecheckoutSmsAccess(
+  businessId: string,
   snapshot: BusinessEntitlementSnapshot,
   familyLock: BusinessPlanFamilyLock | null,
 ): SmsProvisioningAccessDecision {
@@ -266,14 +267,24 @@ function directPrecheckoutSmsAccess(
     return { allowed: false, reason: "billing_state_unavailable" };
   }
 
-  // This advisory intent narrows the legacy exception only while the guarded
-  // early-selection flow is actually available. If rollout is rolled back
-  // (or its Chat Price becomes unavailable), onboarding deliberately returns
-  // to the legacy SMS wizard; a previously saved valid intent must not strand
-  // that no-subscription account at number search. Authoritative subscription
-  // and partner Chat plans are resolved before this reducer and remain denied.
+  // A Chat choice written through the guarded server route is a durable denial
+  // signal for SMS/Telnyx work. Acquisition rollback pauses Chat Checkout; it
+  // must never silently reinterpret that saved choice as legacy SMS setup.
+  if (intent === "chat_only") {
+    return {
+      allowed: false,
+      reason: "plan_not_entitled",
+      source: "direct_precheckout",
+      plan: intent,
+    };
+  }
+
+  // Current acquisition authority is still consulted for valid SMS-family
+  // advisory intents, but rollback leaves their established SMS onboarding
+  // behavior unchanged. Authoritative subscription and partner plans were
+  // resolved before this narrow reducer.
   if (
-    !isChatOnlyDirectSalesEnabled() ||
+    !isChatOnlyDirectAcquisitionEnabledForBusiness(businessId) ||
     !hasValidChatOnlyStripePrice()
   ) {
     return {

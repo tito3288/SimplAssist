@@ -14,11 +14,40 @@ const mocks = vi.hoisted(() => ({
   requireWorkspaceRouteAccess: vi.fn(),
   isPlanAvailable: vi.fn(),
   hasValidChatOnlyStripePrice: vi.fn(),
+  isChatOnlyDirectAcquisitionEnabledForBusiness: vi.fn(),
   stripePriceIdForPlan: vi.fn(),
   stripeSetupFeePriceId: vi.fn(),
   ChatOnlyStripePriceConfigurationError: class extends Error {
     constructor() {
       super("chat_only_stripe_price_invalid");
+    }
+  },
+  ChatOnlyCheckoutAttemptConflictError: class extends Error {},
+  ChatOnlyCheckoutAttemptRecoveryRequiredError: class extends Error {},
+  ChatOnlyCheckoutAttemptUnavailableError: class extends Error {},
+  ChatOnlyCheckoutInProgressError: class extends Error {
+    retryAfterSeconds: number;
+    constructor(retryAfterSeconds: number) {
+      super("chat_only_checkout_in_progress");
+      this.retryAfterSeconds = retryAfterSeconds;
+    }
+  },
+  ChatOnlyCheckoutSessionExpiredError: class extends Error {},
+  ChatOnlyCheckoutRecoveredCompletionError: class extends Error {
+    synced: {
+      businessId: string;
+      customerId: string;
+      subscriptionId: string;
+      plan: "chat_only";
+    };
+    constructor(synced: {
+      businessId: string;
+      customerId: string;
+      subscriptionId: string;
+      plan: "chat_only";
+    }) {
+      super("chat_only_checkout_recovered_completion");
+      this.synced = synced;
     }
   },
   PlanFamilyTransitionNotSupportedError: class extends Error {
@@ -58,11 +87,26 @@ vi.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: mocks.createCheckoutSession,
   ChatOnlyStripePriceConfigurationError:
     mocks.ChatOnlyStripePriceConfigurationError,
+  ChatOnlyCheckoutAttemptConflictError:
+    mocks.ChatOnlyCheckoutAttemptConflictError,
+  ChatOnlyCheckoutAttemptRecoveryRequiredError:
+    mocks.ChatOnlyCheckoutAttemptRecoveryRequiredError,
+  ChatOnlyCheckoutAttemptUnavailableError:
+    mocks.ChatOnlyCheckoutAttemptUnavailableError,
+  ChatOnlyCheckoutInProgressError: mocks.ChatOnlyCheckoutInProgressError,
+  ChatOnlyCheckoutSessionExpiredError:
+    mocks.ChatOnlyCheckoutSessionExpiredError,
+  ChatOnlyCheckoutRecoveredCompletionError:
+    mocks.ChatOnlyCheckoutRecoveredCompletionError,
 }));
 vi.mock("@/lib/stripe/config", () => ({
   hasValidChatOnlyStripePrice: mocks.hasValidChatOnlyStripePrice,
   stripePriceIdForPlan: mocks.stripePriceIdForPlan,
   stripeSetupFeePriceId: mocks.stripeSetupFeePriceId,
+}));
+vi.mock("@/lib/billing/chatOnlyRollout.server", () => ({
+  isChatOnlyDirectAcquisitionEnabledForBusiness:
+    mocks.isChatOnlyDirectAcquisitionEnabledForBusiness,
 }));
 vi.mock("@/lib/billing/planAvailability", () => ({
   isPlanAvailable: mocks.isPlanAvailable,
@@ -177,6 +221,12 @@ beforeEach(() => {
     (plan: string) => plan === "sms_only" || plan === "sms_and_chat",
   );
   mocks.hasValidChatOnlyStripePrice.mockReturnValue(false);
+  mocks.isChatOnlyDirectAcquisitionEnabledForBusiness.mockImplementation(
+    (businessId: string) =>
+      process.env.CHAT_ONLY_DIRECT_SALES_ENABLED === "1" ||
+      process.env.CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID?.toLowerCase() ===
+        businessId.toLowerCase(),
+  );
   mocks.resolveAssignedPartnerName.mockResolvedValue(null);
   mocks.stripePriceIdForPlan.mockImplementation(
     (plan: string) =>
@@ -293,10 +343,11 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
 
     const response = await POST(request("onboarding", "chat_only"));
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    const payload = await response.json();
+    expect(payload).toEqual({
       url: "https://checkout.test/session",
     });
+    expect(response.status).toBe(200);
     expect(mocks.isPlanAvailable).not.toHaveBeenCalledWith("chat_only");
     expect(mocks.stripePriceIdForPlan).toHaveBeenCalledWith("chat_only");
     expect(mocks.stripeSetupFeePriceId).not.toHaveBeenCalled();
@@ -325,6 +376,7 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     queueResults({
       data: {
         ...BUSINESS,
+        billing_exempt: false,
         has_ein: false,
         onboarding_selected_plan: "chat_only",
       },
@@ -347,6 +399,7 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     queueResults({
       data: {
         ...BUSINESS,
+        billing_exempt: false,
         onboarding_selected_plan: "sms_and_chat",
       },
       error: null,
@@ -385,16 +438,16 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it.each(["chat_only", "sms_only"])(
-    "ignores stale %s intent for legacy SMS checkout after the early-flow flag is rolled back",
-    async (staleIntent) => {
+  it(
+    "preserves legacy SMS checkout after rollback when the stored intent is already SMS",
+    async () => {
       vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
       queueResults(
         {
           data: {
             ...BUSINESS,
             billing_exempt: false,
-            onboarding_selected_plan: staleIntent,
+            onboarding_selected_plan: "sms_only",
           },
           error: null,
         },
@@ -417,7 +470,30 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     },
   );
 
-  it("ignores stale intent for legacy SMS checkout when the flag is on but Chat Price readiness is invalid", async () => {
+  it("rejects crafted SMS checkout when a saved Chat intent survives flag rollback", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+    queueResults(
+      {
+        data: {
+          ...BUSINESS,
+          billing_exempt: false,
+          onboarding_selected_plan: "chat_only",
+        },
+        error: null,
+      },
+      { data: null, error: null },
+    );
+
+    const response = await POST(request("onboarding", "sms_and_chat"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "onboarding_plan_mismatch",
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects crafted SMS checkout when saved Chat intent survives invalid Price readiness", async () => {
     vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
     mocks.hasValidChatOnlyStripePrice.mockReturnValue(false);
     queueResults(
@@ -434,17 +510,11 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
 
     const response = await POST(request("onboarding", "sms_and_chat"));
 
-    expect(response.status).toBe(200);
-    expect(mocks.createCheckoutSession).toHaveBeenCalledWith(
-      BUSINESS.id,
-      "sms_and_chat",
-      "price_growth",
-      "price_setup",
-      expect.any(String),
-      expect.any(String),
-      "onboarding",
-      false,
-    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "onboarding_plan_mismatch",
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
   });
 
   it("keeps Chat acquisition blocked after rollback even when stale Chat intent remains", async () => {
@@ -687,9 +757,75 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
-      code: "chat_only_not_available",
+      code: "chat_only_reacquisition_not_supported",
     });
     expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new Chat Checkout when the workspace is suspended", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(true);
+    queueResults(
+      {
+        data: {
+          ...BUSINESS,
+          billing_exempt: false,
+          operations_suspended_at: "2026-08-19T12:00:00.000Z",
+          onboarding_selected_plan: "chat_only",
+        },
+        error: null,
+      },
+      { data: null, error: null },
+    );
+
+    const response = await POST(request("onboarding", "chat_only"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This workspace is temporarily unavailable.",
+      code: "account_suspended",
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("lets a suspended paid Chat account finish exact local finalization without new Checkout", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(false);
+    queueResults(
+      {
+        data: {
+          ...BUSINESS,
+          billing_exempt: false,
+          operations_suspended_at: "2026-08-19T12:00:00.000Z",
+          onboarding_selected_plan: "chat_only",
+        },
+        error: null,
+      },
+      {
+        data: {
+          plan: "chat_only",
+          status: "active",
+          setup_fee_paid_at: null,
+          stripe_customer_id: "cus_paid_suspended",
+          stripe_subscription_id: "sub_paid_suspended",
+        },
+        error: null,
+      },
+    );
+
+    const response = await POST(request("onboarding", "chat_only"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      {
+        businessId: BUSINESS.id,
+        customerId: "cus_paid_suspended",
+        subscriptionId: "sub_paid_suspended",
+        plan: "chat_only",
+      },
+      "stripe_finalize",
+    );
     expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
   });
 
@@ -780,6 +916,34 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     });
   });
 
+  it("keeps an aged ambiguous Chat Checkout support-only", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(true);
+    queueResults(
+      {
+        data: {
+          ...BUSINESS,
+          billing_exempt: false,
+          onboarding_selected_plan: "chat_only",
+        },
+        error: null,
+      },
+      { data: null, error: null },
+    );
+    mocks.createCheckoutSession.mockRejectedValue(
+      new mocks.ChatOnlyCheckoutAttemptRecoveryRequiredError(),
+    );
+
+    const response = await POST(request("onboarding", "chat_only"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "We could not safely recover the previous Chat Checkout. Contact support before trying again.",
+      code: "chat_only_checkout_recovery_required",
+    });
+  });
+
   it("surfaces an invalid runtime Chat Price as unavailable instead of creating Checkout", async () => {
     vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
     mocks.hasValidChatOnlyStripePrice.mockReturnValue(true);
@@ -804,6 +968,25 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
     expect(await response.json()).toMatchObject({
       code: "chat_only_price_configuration_invalid",
     });
+  });
+
+  it("logs only bounded error metadata for an unexpected Checkout failure", async () => {
+    const sentinel = "customer@example.com sk_test_do_not_log";
+    queueResults(
+      { data: { ...BUSINESS, billing_exempt: false }, error: null },
+      { data: null, error: null },
+    );
+    mocks.createCheckoutSession.mockRejectedValue(new Error(sentinel));
+
+    const response = await POST(request("onboarding", "sms_and_chat"));
+
+    expect(response.status).toBe(500);
+    expect(console.error).toHaveBeenCalledWith("Checkout failed", {
+      error: { name: "Error", status: null },
+    });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(
+      sentinel,
+    );
   });
 
   it.each([

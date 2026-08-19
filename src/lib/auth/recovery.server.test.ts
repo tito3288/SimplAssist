@@ -70,6 +70,16 @@ const DIRECT_BRAND = {
   from: "SimplAssist <notifications@simplassist.com>",
   usedFallbackSender: false,
 };
+const BASE64URL_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+function nonCanonicalBase64UrlAlias(value: string): string {
+  const finalIndex = BASE64URL_ALPHABET.indexOf(value.at(-1) ?? "");
+  if (finalIndex < 0 || finalIndex % 4 !== 0 || finalIndex >= 63) {
+    throw new Error("Expected a canonical unpadded 32-byte base64url value");
+  }
+  return `${value.slice(0, -1)}${BASE64URL_ALPHABET[finalIndex + 1]}`;
+}
 
 function authUser(overrides: Record<string, unknown> = {}) {
   return {
@@ -180,6 +190,13 @@ describe("password reset callback state", () => {
         `${state.slice(0, -1)}!`,
       ),
     ).toBe(false);
+    expect(
+      verifyPasswordResetState(
+        DIRECT_ORIGIN.origin,
+        "hashed-recovery-token",
+        nonCanonicalBase64UrlAlias(state),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -239,7 +256,8 @@ describe("password reset intent", () => {
       PARTNER_ORIGIN.origin,
       issuedAt,
     );
-    const tampered = `${intent.slice(0, -1)}${intent.endsWith("A") ? "B" : "A"}`;
+    const [payload, signature] = intent.split(".");
+    const tampered = `${payload}.${nonCanonicalBase64UrlAlias(signature)}`;
 
     expect(
       verifyPasswordResetIntent(

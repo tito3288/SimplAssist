@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getSmsReadinessForBusiness: vi.fn(),
   getSmsReadinessForBusinessReadOnly: vi.fn(),
-  directFlag: vi.fn(),
+  directAcquisition: vi.fn(),
   validChatPrice: vi.fn(),
   selectedColumns: new Map<string, string>(),
   rowsByTable: {} as Record<string, unknown>,
@@ -25,7 +25,7 @@ vi.mock("@/lib/messaging/registration/riskScreening", () => ({
   registrationHasStartedForRisk: vi.fn(() => false),
 }));
 vi.mock("@/lib/billing/chatOnlyRollout.server", () => ({
-  isChatOnlyDirectSalesEnabled: mocks.directFlag,
+  isChatOnlyDirectAcquisitionEnabledForBusiness: mocks.directAcquisition,
 }));
 vi.mock("@/lib/stripe/config", () => ({
   hasValidChatOnlyStripePrice: mocks.validChatPrice,
@@ -59,11 +59,11 @@ describe("onboarding knowledge provenance resume loading", () => {
     mocks.from.mockReset();
     mocks.getSmsReadinessForBusiness.mockReset();
     mocks.getSmsReadinessForBusinessReadOnly.mockReset();
-    mocks.directFlag.mockReset();
+    mocks.directAcquisition.mockReset();
     mocks.validChatPrice.mockReset();
     mocks.selectedColumns.clear();
     mocks.errorsByTable = {};
-    mocks.directFlag.mockReturnValue(false);
+    mocks.directAcquisition.mockReturnValue(false);
     mocks.validChatPrice.mockReturnValue(false);
 
     mocks.rowsByTable = {
@@ -74,6 +74,11 @@ describe("onboarding knowledge provenance resume loading", () => {
         billing_mode: "stripe",
         partner_plan: null,
         onboarding_selected_plan: null,
+        deleted_at: null,
+        operations_suspended_at: null,
+        billing_pilot: false,
+        billing_comped: false,
+        billing_exempt: false,
         primary_goal: "signup",
         goal_url: "https://example.test/signup?source=ai#form",
         name: "Provenance Test",
@@ -109,6 +114,7 @@ describe("onboarding knowledge provenance resume loading", () => {
       widget_configs: null,
       phone_numbers: null,
       subscriptions: null,
+      business_plan_family_locks: null,
     };
 
     mocks.from.mockImplementation((table: string) =>
@@ -374,10 +380,10 @@ describe("onboarding knowledge provenance resume loading", () => {
     ]);
   });
 
-  it("keeps the direct intent and extra step hidden until flag and Price are valid", async () => {
+  it("keeps the direct plan picker hidden until scoped acquisition and Price are valid", async () => {
     configureCoreReadyBusiness({
       primary_goal: null,
-      onboarding_selected_plan: "chat_only",
+      onboarding_selected_plan: null,
     });
 
     const hiddenState = await getOnboardingStateForOwnerReadOnly("owner-1");
@@ -391,21 +397,256 @@ describe("onboarding knowledge provenance resume loading", () => {
     expect(hiddenState?.currentStep).toBe("ai_settings");
     expect(hiddenState?.steps).toHaveLength(9);
 
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     const missingPriceState = await getOnboardingStateForOwnerReadOnly("owner-1");
     expect(missingPriceState?.planSelection.effectivePlan).toBeNull();
+    expect(missingPriceState?.planSelection.canChooseDirectPlan).toBe(false);
     expect(missingPriceState?.currentStep).toBe("ai_settings");
 
     mocks.validChatPrice.mockReturnValue(true);
     const enabledState = await getOnboardingStateForOwnerReadOnly("owner-1");
     expect(enabledState?.planSelection).toMatchObject({
-      effectivePlan: "chat_only",
-      directIntent: "chat_only",
+      effectivePlan: null,
+      directIntent: null,
       canChooseDirectPlan: true,
       chatOnlyDirectSalesAvailable: true,
+      chatOnlyCheckoutAvailable: false,
+      chatOnlyCheckoutPaused: false,
     });
-    expect(enabledState?.currentStep).toBe("ai_settings");
-    expect(enabledState?.steps).toHaveLength(6);
+    expect(enabledState?.steps).toContain("plan_selection");
+    expect(mocks.directAcquisition).toHaveBeenCalledWith("business-1");
+  });
+
+  it.each([
+    ["acquisition rollback", false, true],
+    ["missing Chat Price", true, false],
+  ] as const)(
+    "keeps an unlocked Chat intent paused through %s without SMS readiness",
+    async (_label, acquisitionEnabled, validPrice) => {
+      configureCoreReadyBusiness({
+        onboarding_selected_plan: "chat_only",
+        onboarding_completed_at: null,
+        pending_phone_number: "+13175550124",
+      });
+      mocks.directAcquisition.mockReturnValue(acquisitionEnabled);
+      mocks.validChatPrice.mockReturnValue(validPrice);
+
+      const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+      expect(state).toMatchObject({
+        currentStep: "review_submit",
+        dashboardReady: false,
+        phoneNumber: null,
+        activePhoneNumber: null,
+        planSelection: {
+          effectivePlan: "chat_only",
+          source: "direct_intent",
+          directIntent: "chat_only",
+          canChooseDirectPlan: false,
+          chatOnlyDirectSalesAvailable: false,
+          chatOnlyCheckoutAvailable: false,
+          chatOnlyCheckoutPaused: true,
+        },
+        registration: {
+          smsReady: false,
+          assignmentStatus: null,
+        },
+      });
+      expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+      expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      "operations-suspended",
+      { operations_suspended_at: "2026-08-19T12:00:00.000Z" },
+    ],
+    ["billing-pilot", { billing_pilot: true }],
+    ["billing-comped", { billing_comped: true }],
+    ["billing-exempt", { billing_exempt: true }],
+    ["partner-linked", { partner_id: "partner-1" }],
+    ["non-Stripe", { billing_mode: "invoiced" }],
+  ] as const)(
+    "does not expose direct acquisition for a %s business",
+    async (_label, overrides) => {
+      configureCoreReadyBusiness({
+        primary_goal: null,
+        onboarding_selected_plan: null,
+        ...overrides,
+      });
+      mocks.directAcquisition.mockReturnValue(true);
+      mocks.validChatPrice.mockReturnValue(true);
+
+      const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+      expect(state?.planSelection).toMatchObject({
+        effectivePlan: null,
+        directIntent: null,
+        canChooseDirectPlan: false,
+        chatOnlyDirectSalesAvailable: false,
+        chatOnlyCheckoutAvailable: false,
+        chatOnlyCheckoutPaused: false,
+      });
+      expect(mocks.directAcquisition).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a suspended saved Chat intent paused instead of entering SMS readiness", async () => {
+    configureCoreReadyBusiness({
+      onboarding_selected_plan: "chat_only",
+      operations_suspended_at: "2026-08-19T12:00:00.000Z",
+    });
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+
+    const state = await getOnboardingStateForBusinessId("business-1");
+
+    expect(state?.planSelection).toMatchObject({
+      effectivePlan: "chat_only",
+      source: "direct_intent",
+      directIntent: "chat_only",
+      canChooseDirectPlan: false,
+      chatOnlyCheckoutAvailable: false,
+      chatOnlyCheckoutPaused: true,
+    });
+    expect(mocks.directAcquisition).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+  });
+
+  it("returns no onboarding state for a deleted business", async () => {
+    configureCoreReadyBusiness({
+      deleted_at: "2026-08-19T12:00:00.000Z",
+      onboarding_selected_plan: "chat_only",
+    });
+
+    await expect(
+      getOnboardingStateForBusinessId("business-1"),
+    ).resolves.toBeNull();
+    expect(mocks.directAcquisition).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["acquisition rollback", false, true],
+    ["missing Chat Price", true, false],
+  ] as const)(
+    "projects a durable Chat family lock through %s without SMS readiness",
+    async (_label, acquisitionEnabled, validPrice) => {
+      configureCoreReadyBusiness({
+        onboarding_selected_plan: "chat_only",
+        onboarding_completed_at: null,
+        pending_phone_number: "+13175550124",
+      });
+      mocks.rowsByTable.business_plan_family_locks = {
+        family: "chat_only",
+        claimed_by: "direct_checkout",
+      };
+      mocks.directAcquisition.mockReturnValue(acquisitionEnabled);
+      mocks.validChatPrice.mockReturnValue(validPrice);
+
+      const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+      expect(state).toMatchObject({
+        currentStep: "review_submit",
+        dashboardReady: false,
+        phoneNumber: null,
+        activePhoneNumber: null,
+        planSelection: {
+          effectivePlan: "chat_only",
+          source: "family_lock",
+          directIntent: "chat_only",
+          canChooseDirectPlan: false,
+          chatOnlyDirectSalesAvailable: false,
+          chatOnlyCheckoutAvailable: false,
+          chatOnlyCheckoutPaused: true,
+        },
+        registration: {
+          smsReady: false,
+          assignmentStatus: null,
+        },
+      });
+      expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+      expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps same-family Chat checkout available after the durable lock is claimed", async () => {
+    configureCoreReadyBusiness({
+      onboarding_selected_plan: "chat_only",
+      onboarding_completed_at: null,
+    });
+    mocks.rowsByTable.business_plan_family_locks = {
+      family: "chat_only",
+      claimed_by: "direct_checkout",
+    };
+    mocks.directAcquisition.mockReturnValue(true);
+    mocks.validChatPrice.mockReturnValue(true);
+
+    const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+    expect(state?.planSelection).toMatchObject({
+      effectivePlan: "chat_only",
+      source: "family_lock",
+      directIntent: "chat_only",
+      canChooseDirectPlan: false,
+      chatOnlyDirectSalesAvailable: false,
+      chatOnlyCheckoutAvailable: true,
+      chatOnlyCheckoutPaused: false,
+    });
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+  });
+
+  it("keeps a durable SMS family lock on the legacy onboarding path", async () => {
+    configureCoreReadyBusiness({ onboarding_selected_plan: null });
+    mocks.rowsByTable.business_plan_family_locks = {
+      family: "sms",
+      claimed_by: "direct_checkout",
+    };
+
+    const state = await getOnboardingStateForOwnerReadOnly("owner-1");
+
+    expect(state?.planSelection).toMatchObject({
+      effectivePlan: null,
+      source: null,
+      chatOnlyCheckoutAvailable: false,
+      chatOnlyCheckoutPaused: false,
+    });
+    expect(mocks.getSmsReadinessForBusinessReadOnly).toHaveBeenCalledWith(
+      "business-1",
+    );
+  });
+
+  it("fails closed on a plan-family lock lookup error before SMS readiness", async () => {
+    configureCoreReadyBusiness();
+    mocks.errorsByTable.business_plan_family_locks = {
+      message: "family lock unavailable",
+    };
+
+    await expect(
+      getOnboardingStateForBusinessId("business-1"),
+    ).rejects.toThrow(
+      "Failed to read plan-family lock for business-1: family lock unavailable",
+    );
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a malformed plan-family lock before SMS readiness", async () => {
+    configureCoreReadyBusiness();
+    mocks.rowsByTable.business_plan_family_locks = {
+      family: "voice",
+      claimed_by: "direct_checkout",
+    };
+
+    await expect(
+      getOnboardingStateForBusinessId("business-1"),
+    ).rejects.toThrow("Malformed plan-family lock for business-1");
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
   });
 
   it.each(["active", "trialing"] as const)(
@@ -414,6 +655,9 @@ describe("onboarding knowledge provenance resume loading", () => {
       configureCoreReadyBusiness({
         onboarding_completed_at: "2026-08-18T12:00:00.000Z",
         onboarding_selected_plan: "sms_only",
+        operations_suspended_at:
+          status === "active" ? "2026-08-19T12:00:00.000Z" : null,
+        billing_pilot: status === "trialing",
       });
       mocks.rowsByTable.subscriptions = {
         plan: "chat_only",
@@ -428,6 +672,8 @@ describe("onboarding knowledge provenance resume loading", () => {
       expect(state?.planSelection).toMatchObject({
         effectivePlan: "chat_only",
         source: "subscription",
+        chatOnlyCheckoutAvailable: true,
+        chatOnlyCheckoutPaused: false,
       });
       expect(state).toMatchObject({
         currentStep: "complete",
@@ -436,6 +682,7 @@ describe("onboarding knowledge provenance resume loading", () => {
       });
       expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
       expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
+      expect(mocks.directAcquisition).not.toHaveBeenCalled();
     },
   );
 
@@ -473,7 +720,7 @@ describe("onboarding knowledge provenance resume loading", () => {
       telnyx_campaign_assignment_status: "assigned",
       telnyx_campaign_assignment_failure_reason: null,
     };
-    mocks.directFlag.mockReturnValue(true);
+    mocks.directAcquisition.mockReturnValue(true);
     mocks.validChatPrice.mockReturnValue(true);
     mocks.getSmsReadinessForBusiness.mockResolvedValue({
       phoneNumber: "+13175550123",
@@ -529,7 +776,44 @@ describe("onboarding knowledge provenance resume loading", () => {
       currentStep: "complete",
       dashboardReady: true,
       completedAt: "2026-08-18T12:00:00.000Z",
+      planSelection: {
+        chatOnlyCheckoutAvailable: false,
+        chatOnlyCheckoutPaused: false,
+      },
     });
+  });
+
+  it("pauses canceled Chat checkout after acquisition rollback", async () => {
+    configureCoreReadyBusiness({ onboarding_completed_at: null });
+    mocks.rowsByTable.subscriptions = {
+      plan: "chat_only",
+      status: "canceled",
+      setup_fee_paid_at: null,
+      current_period_start: null,
+      current_period_end: null,
+    };
+    mocks.rowsByTable.business_plan_family_locks = {
+      family: "chat_only",
+      claimed_by: "stripe_sync",
+    };
+    mocks.directAcquisition.mockReturnValue(false);
+    mocks.validChatPrice.mockReturnValue(true);
+
+    const state = await getOnboardingStateForBusinessId("business-1");
+
+    expect(state).toMatchObject({
+      currentStep: "review_submit",
+      dashboardReady: false,
+      planSelection: {
+        effectivePlan: "chat_only",
+        source: "subscription",
+        canChooseDirectPlan: false,
+        chatOnlyCheckoutAvailable: false,
+        chatOnlyCheckoutPaused: true,
+      },
+    });
+    expect(mocks.getSmsReadinessForBusiness).not.toHaveBeenCalled();
+    expect(mocks.getSmsReadinessForBusinessReadOnly).not.toHaveBeenCalled();
   });
 
   it("does not let past-due Chat Only create initial completion", async () => {

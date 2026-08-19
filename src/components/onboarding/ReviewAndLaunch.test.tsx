@@ -407,6 +407,7 @@ describe("buildOnboardingLaunchRequest", () => {
       ...baseProps,
       effectivePlan: "chat_only",
       chatOnly: true,
+      chatOnlyCheckoutPaused: true,
       billing: {
         ...baseProps.billing,
         plan: "chat_only",
@@ -459,6 +460,40 @@ describe("ReviewAndLaunch Chat Only review", () => {
     expect(markup.toLowerCase()).not.toContain("setup");
   });
 
+  it.each([
+    ["unpaid family lock", null],
+    ["canceled subscription", "canceled"],
+  ] as const)(
+    "shows a neutral support hold with no payment action for %s",
+    (_label, status) => {
+      const markup = renderReview(DEFAULT_REQUEST_BRAND, {
+        ...baseProps,
+        effectivePlan: "chat_only",
+        chatOnly: true,
+        chatOnlyCheckoutPaused: true,
+        billing: {
+          ...baseProps.billing,
+          plan: status ? "chat_only" : null,
+          status,
+        },
+      });
+
+      expect(markup).toContain("Chat Only checkout paused");
+      expect(markup).toContain("Your Chat Only selection is safely saved");
+      expect(markup).toContain("no phone or texting setup will start");
+      expect(markup).toContain("Checkout is temporarily paused");
+      expect(markup).toContain('href="/support?category=billing"');
+      expect(markup).not.toContain("Pay $10");
+      expect(markup).not.toContain("$10 due today");
+      expect(markup).not.toContain("launch web chat");
+      const planSection = markup.slice(
+        markup.indexOf("Chat Only Plan"),
+        markup.indexOf("Business Info"),
+      );
+      expect(planSection).not.toContain(">Edit<");
+    },
+  );
+
   it.each(["active", "trialing"] as const)(
     "finishes already-paid %s Chat Only without purchase copy",
     (status) => {
@@ -466,6 +501,7 @@ describe("ReviewAndLaunch Chat Only review", () => {
         ...baseProps,
         effectivePlan: "chat_only",
         chatOnly: true,
+        chatOnlyCheckoutPaused: true,
         billing: {
           ...baseProps.billing,
           plan: "chat_only",

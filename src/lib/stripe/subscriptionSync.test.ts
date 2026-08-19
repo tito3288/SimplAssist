@@ -17,12 +17,27 @@ vi.mock("./client", () => ({
 import {
   normalizeStripeSubscriptionStatus,
   syncCheckoutSession,
+  syncExpiredCheckoutSession,
   syncStripeSubscription,
 } from "./subscriptionSync";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
-const CUSTOMER_ID = "cus_test_guard";
-const SUBSCRIPTION_ID = "sub_test_guard";
+const CUSTOMER_ID = "cus_testguard";
+const SUBSCRIPTION_ID = "sub_testguard";
+const ATTEMPT_ID = "20000000-0000-4000-a000-000000000002";
+const REQUEST_FINGERPRINT = "a".repeat(64);
+const SESSION_EXPIRES_AT = 1_787_143_600;
+
+const CHAT_CHECKOUT_METADATA = {
+  business_id: BUSINESS_ID,
+  plan: "chat_only",
+  mode: "onboarding",
+  checkout_attempt_id: ATTEMPT_ID,
+  checkout_request_fingerprint: REQUEST_FINGERPRINT,
+  checkout_session_expires_at: new Date(
+    SESSION_EXPIRES_AT * 1_000,
+  ).toISOString(),
+};
 
 function approvedChatOnlyPrice(
   overrides: Record<string, unknown> = {},
@@ -69,6 +84,7 @@ function chatOnlySubscription(
   extraItems: unknown[] = [],
 ): Stripe.Subscription {
   return subscription({
+    metadata: CHAT_CHECKOUT_METADATA,
     items: {
       data: [
         {
@@ -217,6 +233,102 @@ describe("syncStripeSubscription", () => {
     expect(mocks.rpc).toHaveBeenCalledOnce();
   });
 
+  it("recovers an exact Chat attempt when the acquisition Price environment value is missing", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "");
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    await expect(
+      syncStripeSubscription(chatOnlySubscription()),
+    ).resolves.toMatchObject({ plan: "chat_only" });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_chat_only_subscription_from_attempt",
+      expect.objectContaining({
+        p_attempt_id: ATTEMPT_ID,
+        p_stripe_price_id: "price_chat_only_test",
+      }),
+    );
+  });
+
+  it("recovers an exact Chat attempt despite malformed acquisition Price configuration", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", " price_chat_only_test ");
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    await expect(
+      syncStripeSubscription(chatOnlySubscription()),
+    ).resolves.toMatchObject({ plan: "chat_only" });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_chat_only_subscription_from_attempt",
+      expect.objectContaining({ p_attempt_id: ATTEMPT_ID }),
+    );
+  });
+
+  it("keeps an ordinary unknown Price unclassified without attempt evidence", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "");
+    const unknown = subscription({
+      items: {
+        data: [
+          {
+            price: { id: "price_unknown" },
+            current_period_start: 1_700_000_000,
+            current_period_end: 1_702_592_000,
+          },
+        ],
+      },
+    });
+
+    await expect(syncStripeSubscription(unknown)).resolves.toBeNull();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a terminal Chat event when guarded authority is now inactive", async () => {
+    mocks.rpc.mockResolvedValue({ data: false, error: null });
+
+    await expect(
+      syncStripeSubscription(chatOnlySubscription()),
+    ).resolves.toBeNull();
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_chat_only_subscription_from_attempt",
+      expect.objectContaining({ p_attempt_id: ATTEMPT_ID }),
+    );
+  });
+
+  it("keeps an exact Chat attempt mismatch retryable", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "chat_only_subscription_attempt_mismatch" },
+    });
+
+    await expect(
+      syncStripeSubscription(chatOnlySubscription()),
+    ).rejects.toThrow("chat_only_subscription_attempt_mismatch");
+  });
+
+  it("rejects a Chat-shaped subscription with missing business linkage", async () => {
+    const malformed = chatOnlySubscription();
+    malformed.metadata = {
+      ...CHAT_CHECKOUT_METADATA,
+      business_id: "",
+    };
+
+    await expect(syncStripeSubscription(malformed)).rejects.toThrow(
+      /invalid business, customer, or subscription linkage/,
+    );
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "customer_bad", "cus_bad-value"])(
+    "rejects Chat-shaped customer linkage %j",
+    async (customer) => {
+      const malformed = chatOnlySubscription();
+      malformed.customer = customer as Stripe.Subscription["customer"];
+
+      await expect(syncStripeSubscription(malformed)).rejects.toThrow(
+        /invalid business, customer, or subscription linkage/,
+      );
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects Chat Only quantity other than one before persistence", async () => {
     await expect(
       syncStripeSubscription(chatOnlySubscription({ quantity: 2 })),
@@ -304,6 +416,7 @@ describe("syncCheckoutSession", () => {
   it("never stamps setup-fee fields for a completed Chat Only checkout", async () => {
     mocks.retrieve.mockResolvedValue(
       subscription({
+        metadata: CHAT_CHECKOUT_METADATA,
         items: {
           data: [
             {
@@ -323,9 +436,11 @@ describe("syncCheckoutSession", () => {
       subscription: SUBSCRIPTION_ID,
       payment_status: "paid",
       status: "complete",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
       metadata: {
-        business_id: BUSINESS_ID,
-        plan: "chat_only",
+        ...CHAT_CHECKOUT_METADATA,
         // Defense in depth: even unexpected fee metadata cannot stamp a
         // no-fee plan after the subscription Price resolves Chat Only.
         setup_fee_price_id: "price_setup_test",
@@ -335,15 +450,96 @@ describe("syncCheckoutSession", () => {
     await expect(syncCheckoutSession(session)).resolves.toMatchObject({
       plan: "chat_only",
     });
-    expect(mocks.rpc).toHaveBeenCalledWith(
-      "sync_stripe_subscription_if_business_active",
+    expect(mocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "sync_chat_only_subscription_from_attempt",
       expect.objectContaining({
-        p_plan: "chat_only",
-        p_stripe_setup_fee_price_id: null,
-        p_setup_fee_paid_at: null,
+        p_stripe_price_id: "price_chat_only_test",
       }),
     );
+    const syncArgs = mocks.rpc.mock.calls[0]?.[1];
+    expect(syncArgs).not.toHaveProperty("p_stripe_setup_fee_price_id");
+    expect(syncArgs).not.toHaveProperty("p_setup_fee_paid_at");
   });
+
+  it("recovers exact completed Chat Checkout after Price configuration rollback", async () => {
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "");
+    mocks.retrieve.mockResolvedValue(chatOnlySubscription());
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    const session = {
+      id: "cs_test_chat_price_rollback",
+      customer: CUSTOMER_ID,
+      subscription: SUBSCRIPTION_ID,
+      payment_status: "paid",
+      status: "complete",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
+      metadata: CHAT_CHECKOUT_METADATA,
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncCheckoutSession(session)).resolves.toMatchObject({
+      plan: "chat_only",
+    });
+    expect(mocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "sync_chat_only_subscription_from_attempt",
+      expect.objectContaining({ p_attempt_id: ATTEMPT_ID }),
+    );
+    expect(mocks.rpc).toHaveBeenNthCalledWith(
+      2,
+      "complete_chat_only_checkout_attempt",
+      expect.objectContaining({ p_attempt_id: ATTEMPT_ID }),
+    );
+  });
+
+  it.each(["past_due", "canceled"] as const)(
+    "terminalizes a delayed paid Checkout whose subscription is now %s",
+    async (status) => {
+      mocks.retrieve.mockResolvedValue(
+        subscription({
+          status,
+          metadata: CHAT_CHECKOUT_METADATA,
+          items: {
+            data: [
+              {
+                price: approvedChatOnlyPrice(),
+                quantity: 1,
+                current_period_start: 1_700_000_000,
+                current_period_end: 1_702_592_000,
+              },
+            ],
+          },
+        }),
+      );
+      mocks.rpc.mockResolvedValue({ data: true, error: null });
+      const session = {
+        id: `cs_test_chat_delayed_${status}`,
+        customer: CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+        payment_status: "paid",
+        status: "complete",
+        mode: "subscription",
+        client_reference_id: BUSINESS_ID,
+        expires_at: SESSION_EXPIRES_AT,
+        metadata: CHAT_CHECKOUT_METADATA,
+      } as unknown as Stripe.Checkout.Session;
+
+      await expect(syncCheckoutSession(session)).resolves.toMatchObject({
+        plan: "chat_only",
+      });
+      expect(mocks.rpc).toHaveBeenNthCalledWith(
+        1,
+        "sync_chat_only_subscription_from_attempt",
+        expect.objectContaining({ p_status: status }),
+      );
+      expect(mocks.rpc).toHaveBeenNthCalledWith(
+        2,
+        "complete_chat_only_checkout_attempt",
+        expect.objectContaining({ p_attempt_id: ATTEMPT_ID }),
+      );
+    },
+  );
 
   it("fails closed instead of inventing a setup-fee stamp when SMS checkout metadata is absent", async () => {
     mocks.retrieve.mockResolvedValue(subscription());
@@ -486,22 +682,67 @@ describe("syncCheckoutSession", () => {
   );
 
   it("rejects signed Chat metadata when the subscription Price resolves to SMS", async () => {
-    mocks.retrieve.mockResolvedValue(subscription());
+    mocks.retrieve.mockResolvedValue(
+      subscription({ metadata: CHAT_CHECKOUT_METADATA }),
+    );
     const session = {
       id: "cs_test_mismatched_plan",
       customer: CUSTOMER_ID,
       subscription: SUBSCRIPTION_ID,
       payment_status: "paid",
       status: "complete",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
+      metadata: CHAT_CHECKOUT_METADATA,
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncCheckoutSession(session)).rejects.toThrow(
+      "chat_only_stripe_price_invalid",
+    );
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("treats any single-flight marker as Chat-shaped and rejects a missing plan", async () => {
+    const session = {
+      id: "cs_test_marker_without_plan",
+      customer: CUSTOMER_ID,
+      subscription: SUBSCRIPTION_ID,
+      payment_status: "paid",
+      status: "complete",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
       metadata: {
-        business_id: BUSINESS_ID,
-        plan: "chat_only",
+        ...CHAT_CHECKOUT_METADATA,
+        plan: undefined,
       },
     } as unknown as Stripe.Checkout.Session;
 
     await expect(syncCheckoutSession(session)).rejects.toThrow(
-      /Checkout plan metadata chat_only does not match subscription Price plan sms_only/,
+      /invalid single-flight binding/,
     );
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects Chat completion linkage before retrieving Stripe", async () => {
+    const session = {
+      id: "cs_test_missing_chat_linkage",
+      customer: null,
+      subscription: null,
+      payment_status: "paid",
+      status: "complete",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
+      metadata: CHAT_CHECKOUT_METADATA,
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncCheckoutSession(session)).rejects.toThrow(
+      /invalid customer or subscription linkage/,
+    );
+    expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
@@ -535,6 +776,60 @@ describe("syncCheckoutSession", () => {
 
     await expect(syncCheckoutSession(session)).rejects.toThrow(
       /Checkout plan metadata sms_only does not match subscription Price plan chat_only/,
+    );
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncExpiredCheckoutSession", () => {
+  it("ignores an ordinary SMS Checkout expiry", async () => {
+    const session = {
+      id: "cs_test_sms_expired",
+      status: "expired",
+      metadata: { business_id: BUSINESS_ID, plan: "sms_only" },
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncExpiredCheckoutSession(session)).resolves.toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("expires only the exact bound Chat attempt", async () => {
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    const session = {
+      id: "cs_test_chat_expired",
+      status: "expired",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
+      metadata: CHAT_CHECKOUT_METADATA,
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncExpiredCheckoutSession(session)).resolves.toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "expire_chat_only_checkout_attempt",
+      {
+        p_business_id: BUSINESS_ID,
+        p_attempt_id: ATTEMPT_ID,
+        p_stripe_checkout_session_id: "cs_test_chat_expired",
+        p_request_fingerprint: REQUEST_FINGERPRINT,
+        p_checkout_session_expires_at:
+          CHAT_CHECKOUT_METADATA.checkout_session_expires_at,
+      },
+    );
+  });
+
+  it("rejects a marked expiry whose Chat plan metadata was removed", async () => {
+    const session = {
+      id: "cs_test_marked_expired",
+      status: "expired",
+      mode: "subscription",
+      client_reference_id: BUSINESS_ID,
+      expires_at: SESSION_EXPIRES_AT,
+      metadata: { ...CHAT_CHECKOUT_METADATA, plan: undefined },
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(syncExpiredCheckoutSession(session)).rejects.toThrow(
+      /invalid single-flight binding/,
     );
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
