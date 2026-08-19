@@ -47,10 +47,15 @@ function event(
   type: Stripe.Event.Type,
   object: Record<string, unknown>,
   id = `evt_test_${type.replaceAll(".", "_")}`,
+  provenance: Partial<
+    Pick<Stripe.Event, "livemode" | "account" | "context">
+  > = {},
 ): Stripe.Event {
   return {
     id,
     type,
+    livemode: false,
+    ...provenance,
     data: { object },
   } as unknown as Stripe.Event;
 }
@@ -67,6 +72,7 @@ function request(withSignature = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_unit_only");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test_only");
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.insert.mockResolvedValue({ error: null });
@@ -114,6 +120,87 @@ describe("POST /api/stripe/webhook", () => {
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      caseName: "a live event under a test key",
+      secretKey: "sk_test_unit_only",
+      livemode: true,
+    },
+    {
+      caseName: "a test event under a live key",
+      secretKey: "sk_live_unit_only",
+      livemode: false,
+    },
+  ])("rejects $caseName before claiming or processing", async (testCase) => {
+    vi.stubEnv("STRIPE_SECRET_KEY", testCase.secretKey);
+    mocks.constructEvent.mockReturnValue(
+      event(
+        "customer.subscription.updated",
+        { id: SUBSCRIPTION_ID },
+        "evt_wrong_mode",
+        { livemode: testCase.livemode },
+      ),
+    );
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid event provenance",
+    });
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      caseName: "a connected-account origin",
+      provenance: { account: "acct_connected" },
+    },
+    {
+      caseName: "an organization context",
+      provenance: { context: "acct_organization_context" },
+    },
+  ])("rejects $caseName before claiming or processing", async (testCase) => {
+    mocks.constructEvent.mockReturnValue(
+      event(
+        "customer.subscription.updated",
+        { id: SUBSCRIPTION_ID },
+        "evt_non_direct",
+        testCase.provenance,
+      ),
+    );
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid event provenance",
+    });
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "rk_test_unit_only", "not_a_stripe_key"])(
+    "rejects an unrecognized configured key mode (%s) before claiming",
+    async (secretKey) => {
+      vi.stubEnv("STRIPE_SECRET_KEY", secretKey);
+      mocks.constructEvent.mockReturnValue(
+        event("customer.subscription.updated", { id: SUBSCRIPTION_ID }),
+      );
+
+      const response = await stripeWebhook(request());
+
+      expect(response.status).toBe(400);
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.syncStripeSubscription).not.toHaveBeenCalled();
+    },
+  );
+
   it("acknowledges a guarded stale partner-assignment Checkout skip without attempting paid launch", async () => {
     const checkoutEvent = event("checkout.session.completed", {
       id: "cs_test_deleted_business",
@@ -135,10 +222,14 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
-  it("processes a live-mode checkout session (Phase 9 guard removed)", async () => {
-    const checkoutEvent = event("checkout.session.completed", {
-      id: "cs_live_real_customer",
-    });
+  it("processes a direct live-mode checkout under a live key", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_unit_only");
+    const checkoutEvent = event(
+      "checkout.session.completed",
+      { id: "cs_live_real_customer" },
+      "evt_live_checkout",
+      { livemode: true },
+    );
     mocks.constructEvent.mockReturnValue(checkoutEvent);
     mocks.syncCheckoutSession.mockResolvedValue({
       businessId: BUSINESS_ID,

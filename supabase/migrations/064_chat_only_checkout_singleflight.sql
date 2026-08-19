@@ -130,11 +130,91 @@ REVOKE ALL ON TABLE public.chat_only_checkout_attempts
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON TABLE public.chat_only_checkout_attempts TO service_role;
 
+-- Permanent account cleanup keeps the business row as an analytics tombstone,
+-- so the attempt FK cannot provide retention by cascading. Remove bearer-like
+-- Checkout URLs and Stripe identifiers when the existing 60-day cleanup marks
+-- PII as scrubbed. A subscription-bound attempt is removed only after the
+-- durable account-deletion action owns the exact cancellation identity; that
+-- action remains until provider-confirmed cancellation completes.
+CREATE FUNCTION public.purge_chat_only_checkout_attempts_on_tombstone()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- Other cleanup triggers also use this tombstone transition. Businesses
+  -- without Chat Checkout history are outside this trigger's authority.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = NEW.id
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.deleted_at IS NULL
+     OR NEW.deletion_scheduled_for IS NULL
+     OR NEW.deletion_scheduled_for >= now()
+     OR NEW.owner_id IS NOT NULL THEN
+    RAISE EXCEPTION 'chat_only_checkout_retention_invalid_tombstone'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = NEW.id
+      AND attempt.state IN ('creating', 'open')
+  ) THEN
+    RAISE EXCEPTION 'chat_only_checkout_retention_nonterminal_attempt'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = NEW.id
+      AND attempt.stripe_subscription_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.account_deletion_stripe_actions AS action
+        WHERE action.business_id = NEW.id
+          AND action.stripe_subscription_id =
+                attempt.stripe_subscription_id
+          AND action.desired_action = 'cancel'
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat_only_checkout_retention_missing_cancel_authority'
+      USING ERRCODE = '55000';
+  END IF;
+
+  DELETE FROM public.chat_only_checkout_attempts
+  WHERE business_id = NEW.id;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER purge_chat_only_checkout_attempts_on_tombstone
+AFTER UPDATE OF cleanup_pii_scrubbed_at
+ON public.businesses
+FOR EACH ROW
+WHEN (
+  OLD.cleanup_pii_scrubbed_at IS NULL
+  AND NEW.cleanup_pii_scrubbed_at IS NOT NULL
+)
+EXECUTE FUNCTION public.purge_chat_only_checkout_attempts_on_tombstone();
+
+REVOKE ALL
+  ON FUNCTION public.purge_chat_only_checkout_attempts_on_tombstone()
+  FROM PUBLIC, anon, authenticated, service_role;
+
 -- Direct billing ownership cannot change while an external Checkout outcome
--- is still payable or unknown. The business-row UPDATE is the shared mutex:
--- authority-change-first makes acquisition unavailable, while attempt-first
--- keeps every direct/partner/deletion writer fenced until exact Stripe
--- evidence closes the attempt.
+-- is still payable or unknown. Hard deletion is never a cleanup shortcut: any
+-- retained attempt, including terminal history, still owns Stripe and family
+-- authority that ON DELETE CASCADE must not erase. The normal tombstone scrub
+-- purges terminal attempts through the guarded retention trigger instead.
 CREATE FUNCTION public.guard_business_chat_checkout_attempt_authority()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -147,7 +227,6 @@ BEGIN
       SELECT 1
       FROM public.chat_only_checkout_attempts AS attempt
       WHERE attempt.business_id = OLD.id
-        AND attempt.state IN ('creating', 'open')
     ) THEN
       RAISE EXCEPTION 'chat_only_checkout_attempt_authority_locked'
         USING ERRCODE = '55000';
@@ -929,7 +1008,9 @@ GRANT EXECUTE ON FUNCTION public.expire_chat_only_checkout_attempt(
 ) TO service_role;
 
 COMMENT ON TABLE public.chat_only_checkout_attempts IS
-  'Private Chat Only Checkout single-flight ledger; checkout_url is sensitive and service-readable only.';
+  'Private Chat Only Checkout single-flight ledger; checkout_url is sensitive, service-readable only, and purged with terminal attempt identifiers during permanent account cleanup.';
+COMMENT ON FUNCTION public.purge_chat_only_checkout_attempts_on_tombstone() IS
+  'Purges terminal Chat Checkout evidence at the 60-day tombstone boundary only after exact durable Stripe cancellation authority exists.';
 COMMENT ON FUNCTION public.acquire_chat_only_checkout_attempt(
   uuid, text, text, uuid
 ) IS

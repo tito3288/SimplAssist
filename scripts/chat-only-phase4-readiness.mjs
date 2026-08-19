@@ -39,6 +39,7 @@ const HELP = `Usage:
     --stripe-mode <test|live> \\
     --supabase-project-ref <project-ref> \\
     --chat-price-state <absent|required> \\
+    --widget-secret-state <absent|required> \\
     --canary-state <absent|required>
 
 This pre-enable readiness audit is strictly read-only. It has no apply,
@@ -52,10 +53,10 @@ Required environment variables:
   STRIPE_PRICE_SMS_AND_CHAT
   STRIPE_PRICE_FULL
   STRIPE_BILLING_PORTAL_CONFIGURATION_ID
-  WIDGET_TOKEN_SECRET
 
 Stage-dependent server-only environment variables:
   STRIPE_PRICE_CHAT_ONLY
+  WIDGET_TOKEN_SECRET
   CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID
 
 Use --chat-price-state absent for the Stage A pre-Price baseline. In that
@@ -64,10 +65,16 @@ a Chat Only Price, and any Chat-shaped Stripe subscription or open Checkout is
 a blocker. Use --chat-price-state required after Stage B configures the Price;
 the exact Price ID and full immutable contract are then required and verified.
 
+Use --widget-secret-state absent for Stage A while WIDGET_TOKEN_SECRET is not
+yet configured. In that state the variable must be unset or empty. Use
+--widget-secret-state required after Stage B configures the shared secret; the
+value must then contain at least 32 bytes and remain server-only.
+
 Use --canary-state absent through Stages A-C. Use --canary-state required only
 after Stage D configures the exact direct canary. A configured canary in an
 absent state or a missing canary in the required state is a blocker; malformed
-input makes the audit incomplete.
+input makes the audit incomplete. The required canary state also requires both
+the Chat Price and widget-secret states to be required.
 
 The three release switches may be unset or exact 0 for a passing pre-enable
 audit. Exact 1 is reported as a blocker. Any other configured spelling makes
@@ -80,19 +87,27 @@ export function parseArguments(argv) {
   const baselineArguments = [];
   let canaryState = null;
   let chatPriceState = null;
+  let widgetSecretState = null;
   const supplied = new Set();
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const canaryInline = argument.startsWith("--canary-state=");
     const priceInline = argument.startsWith("--chat-price-state=");
+    const widgetInline = argument.startsWith("--widget-secret-state=");
     const isCanary = argument === "--canary-state" || canaryInline;
     const isPrice = argument === "--chat-price-state" || priceInline;
-    if (!isCanary && !isPrice) {
+    const isWidget =
+      argument === "--widget-secret-state" || widgetInline;
+    if (!isCanary && !isPrice && !isWidget) {
       baselineArguments.push(argument);
       continue;
     }
-    const flag = isCanary ? "--canary-state" : "--chat-price-state";
+    const flag = isCanary
+      ? "--canary-state"
+      : isPrice
+        ? "--chat-price-state"
+        : "--widget-secret-state";
     if (supplied.has(flag)) {
       throw new Error(`${flag} may be supplied only once`);
     }
@@ -101,23 +116,33 @@ export function parseArguments(argv) {
       ? argument.slice("--canary-state=".length)
       : priceInline
         ? argument.slice("--chat-price-state=".length)
-        : argv[++index];
+        : widgetInline
+          ? argument.slice("--widget-secret-state=".length)
+          : argv[++index];
     if (!value || value.startsWith("--")) {
       throw new Error(`${flag} requires a value`);
     }
     if (isCanary) canaryState = value;
     if (isPrice) chatPriceState = value;
+    if (isWidget) widgetSecretState = value;
   }
 
   const parsed = parseTargetArguments(baselineArguments);
-  if (parsed.help) return { ...parsed, chatPriceState, canaryState };
+  if (parsed.help) {
+    return { ...parsed, chatPriceState, widgetSecretState, canaryState };
+  }
   if (chatPriceState !== "absent" && chatPriceState !== "required") {
     throw new Error("--chat-price-state must be exactly absent or required");
+  }
+  if (widgetSecretState !== "absent" && widgetSecretState !== "required") {
+    throw new Error(
+      "--widget-secret-state must be exactly absent or required"
+    );
   }
   if (canaryState !== "absent" && canaryState !== "required") {
     throw new Error("--canary-state must be exactly absent or required");
   }
-  return { ...parsed, chatPriceState, canaryState };
+  return { ...parsed, chatPriceState, widgetSecretState, canaryState };
 }
 
 export function validateEnvironment(arguments_, environment) {
@@ -139,6 +164,22 @@ export function validateEnvironment(arguments_, environment) {
   ) {
     throw new Error(
       "--canary-state required requires --chat-price-state required"
+    );
+  }
+  if (
+    arguments_.widgetSecretState !== "absent" &&
+    arguments_.widgetSecretState !== "required"
+  ) {
+    throw new Error(
+      "--widget-secret-state must be exactly absent or required"
+    );
+  }
+  if (
+    arguments_.canaryState === "required" &&
+    arguments_.widgetSecretState !== "required"
+  ) {
+    throw new Error(
+      "--canary-state required requires --widget-secret-state required"
     );
   }
   const baseline = validateBaselineEnvironment(arguments_, environment);
@@ -183,11 +224,21 @@ export function validateEnvironment(arguments_, environment) {
     );
   }
   const widgetTokenSecret = environment.WIDGET_TOKEN_SECRET;
-  if (
-    typeof widgetTokenSecret !== "string" ||
-    Buffer.byteLength(widgetTokenSecret, "utf8") < 32
-  ) {
-    throw new Error("WIDGET_TOKEN_SECRET must contain at least 32 bytes");
+  let widgetTokenSecretConfigured = false;
+  if (arguments_.widgetSecretState === "absent") {
+    if (widgetTokenSecret !== undefined && widgetTokenSecret !== "") {
+      throw new Error(
+        "WIDGET_TOKEN_SECRET must be unset or empty when --widget-secret-state is absent"
+      );
+    }
+  } else {
+    if (
+      typeof widgetTokenSecret !== "string" ||
+      Buffer.byteLength(widgetTokenSecret, "utf8") < 32
+    ) {
+      throw new Error("WIDGET_TOKEN_SECRET must contain at least 32 bytes");
+    }
+    widgetTokenSecretConfigured = true;
   }
 
   const switchValues = Object.fromEntries(
@@ -203,9 +254,10 @@ export function validateEnvironment(arguments_, environment) {
     planPriceIds,
     chatOnlyPriceId,
     chatPriceState: arguments_.chatPriceState,
+    widgetSecretState: arguments_.widgetSecretState,
     canaryState: arguments_.canaryState,
     directCanaryBusinessId,
-    widgetTokenSecretConfigured: true,
+    widgetTokenSecretConfigured,
     chatOnlyDirectSalesEnabled:
       switchValues.CHAT_ONLY_DIRECT_SALES_ENABLED,
     chatOnlyPartnerAssignmentEnabled:
@@ -314,6 +366,7 @@ export function analyzeReadiness({
   config,
   now = new Date(),
 }) {
+  assertWidgetSecretState(config);
   const baseline = analyzeBaselineInventory({
     account,
     stripeSubscriptions,
@@ -352,6 +405,7 @@ export function analyzeReadiness({
     verdict: blockers.length === 0 ? "pass" : "blocked",
     environment: {
       chat_price_state: config.chatPriceState,
+      widget_secret_state: config.widgetSecretState,
       widget_token_secret_configured:
         config.widgetTokenSecretConfigured === true,
       pre_enable_switch_values_valid: true,
@@ -367,6 +421,24 @@ export function analyzeReadiness({
     blockers,
     warnings,
   };
+}
+
+function assertWidgetSecretState(config) {
+  if (
+    config.widgetSecretState !== "absent" &&
+    config.widgetSecretState !== "required"
+  ) {
+    throw new Error("Widget-secret readiness state is missing or invalid");
+  }
+  const configured = config.widgetTokenSecretConfigured === true;
+  if (
+    (config.widgetSecretState === "absent" && configured) ||
+    (config.widgetSecretState === "required" && !configured)
+  ) {
+    throw new Error(
+      "Widget-secret readiness state conflicts with validated environment evidence"
+    );
+  }
 }
 
 function analyzePinnedPortalContract(configurations, config, blockers) {

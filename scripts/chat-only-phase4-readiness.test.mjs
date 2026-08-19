@@ -36,11 +36,16 @@ function environment(overrides = {}) {
   };
 }
 
-function target(canaryState = "absent", chatPriceState = "required") {
+function target(
+  canaryState = "absent",
+  chatPriceState = "required",
+  widgetSecretState = "required"
+) {
   return {
     stripeMode: "test",
     projectRef: "example-project",
     chatPriceState,
+    widgetSecretState,
     canaryState,
   };
 }
@@ -57,6 +62,7 @@ function configuration(overrides = {}) {
     },
     chatOnlyPriceId: "price_chat",
     chatPriceState: "required",
+    widgetSecretState: "required",
     canaryState: "absent",
     directCanaryBusinessId: null,
     portalConfigurationId: "bpc_default",
@@ -77,6 +83,8 @@ function prePriceConfiguration(overrides = {}) {
     },
     chatOnlyPriceId: null,
     chatPriceState: "absent",
+    widgetSecretState: "absent",
+    widgetTokenSecretConfigured: false,
     ...overrides,
   });
 }
@@ -308,6 +316,7 @@ describe("Phase 4 readiness CLI safety", () => {
         "--supabase-project-ref",
         "example-project",
         "--chat-price-state=required",
+        "--widget-secret-state=required",
         "--canary-state=absent",
       ])
     ).toEqual({
@@ -315,6 +324,7 @@ describe("Phase 4 readiness CLI safety", () => {
       stripeMode: "test",
       projectRef: "example-project",
       chatPriceState: "required",
+      widgetSecretState: "required",
       canaryState: "absent",
     });
     expect(() =>
@@ -322,12 +332,14 @@ describe("Phase 4 readiness CLI safety", () => {
         "--stripe-mode=test",
         "--supabase-project-ref=example-project",
         "--chat-price-state=required",
+        "--widget-secret-state=required",
       ])
     ).toThrow("--canary-state must be exactly absent or required");
     expect(() =>
       parseArguments([
         "--stripe-mode=test",
         "--supabase-project-ref=example-project",
+        "--widget-secret-state=required",
         "--canary-state=absent",
       ])
     ).toThrow("--chat-price-state must be exactly absent or required");
@@ -336,6 +348,15 @@ describe("Phase 4 readiness CLI safety", () => {
         "--stripe-mode=test",
         "--supabase-project-ref=example-project",
         "--chat-price-state=required",
+        "--canary-state=absent",
+      ])
+    ).toThrow("--widget-secret-state must be exactly absent or required");
+    expect(() =>
+      parseArguments([
+        "--stripe-mode=test",
+        "--supabase-project-ref=example-project",
+        "--chat-price-state=required",
+        "--widget-secret-state=required",
         "--canary-state=optional",
       ])
     ).toThrow("--canary-state must be exactly absent or required");
@@ -356,8 +377,11 @@ describe("Phase 4 readiness CLI safety", () => {
 
   it("requires an exact independent Chat Price state", () => {
     const absent = validateEnvironment(
-      target("absent", "absent"),
-      environment({ STRIPE_PRICE_CHAT_ONLY: undefined })
+      target("absent", "absent", "absent"),
+      environment({
+        STRIPE_PRICE_CHAT_ONLY: undefined,
+        WIDGET_TOKEN_SECRET: undefined,
+      })
     );
     expect(absent).toMatchObject({
       chatPriceState: "absent",
@@ -394,6 +418,87 @@ describe("Phase 4 readiness CLI safety", () => {
         environment({ STRIPE_PRICE_CHAT_ONLY: undefined })
       )
     ).toThrow("--canary-state required requires --chat-price-state required");
+  });
+
+  it("requires an exact independent widget-secret state", () => {
+    const absent = validateEnvironment(
+      target("absent", "absent", "absent"),
+      environment({
+        STRIPE_PRICE_CHAT_ONLY: undefined,
+        WIDGET_TOKEN_SECRET: undefined,
+      })
+    );
+    expect(absent).toMatchObject({
+      widgetSecretState: "absent",
+      widgetTokenSecretConfigured: false,
+    });
+
+    expect(
+      validateEnvironment(
+        target("absent", "absent", "absent"),
+        environment({
+          STRIPE_PRICE_CHAT_ONLY: undefined,
+          WIDGET_TOKEN_SECRET: "",
+        })
+      ).widgetTokenSecretConfigured
+    ).toBe(false);
+    expect(() =>
+      validateEnvironment(
+        target("absent", "absent", "absent"),
+        environment({
+          STRIPE_PRICE_CHAT_ONLY: undefined,
+          WIDGET_TOKEN_SECRET: "w".repeat(32),
+        })
+      )
+    ).toThrow("must be unset or empty");
+    expect(() =>
+      validateEnvironment(
+        target(),
+        environment({ WIDGET_TOKEN_SECRET: undefined })
+      )
+    ).toThrow("at least 32 bytes");
+    expect(() =>
+      validateEnvironment(
+        { ...target(), widgetSecretState: "optional" },
+        environment()
+      )
+    ).toThrow("--widget-secret-state must be exactly absent or required");
+    expect(() =>
+      validateEnvironment(
+        target("required", "required", "absent"),
+        environment({ WIDGET_TOKEN_SECRET: undefined })
+      )
+    ).toThrow(
+      "--canary-state required requires --widget-secret-state required"
+    );
+  });
+
+  it("accepts the production-live Stage A target without a widget secret", () => {
+    const arguments_ = parseArguments([
+      "--stripe-mode=live",
+      "--supabase-project-ref=inmgpkurctttsofpywuz",
+      "--chat-price-state=absent",
+      "--widget-secret-state=absent",
+      "--canary-state=absent",
+    ]);
+    const result = validateEnvironment(arguments_, {
+      ...environment({
+        STRIPE_SECRET_KEY: "sk_live_secret",
+        NEXT_PUBLIC_SUPABASE_URL:
+          "https://inmgpkurctttsofpywuz.supabase.co",
+        STRIPE_PRICE_CHAT_ONLY: undefined,
+        WIDGET_TOKEN_SECRET: undefined,
+      }),
+    });
+
+    expect(result).toMatchObject({
+      stripeMode: "live",
+      projectRef: "inmgpkurctttsofpywuz",
+      chatPriceState: "absent",
+      widgetSecretState: "absent",
+      widgetTokenSecretConfigured: false,
+      canaryState: "absent",
+    });
   });
 
   it("distinguishes an open switch from malformed fail-closed spelling", () => {
@@ -516,6 +621,8 @@ describe("Phase 4 readiness analysis", () => {
 
     expect(report.verdict).toBe("pass");
     expect(report.environment.chat_price_state).toBe("absent");
+    expect(report.environment.widget_secret_state).toBe("absent");
+    expect(report.environment.widget_token_secret_configured).toBe(false);
     expect(report.chat_only_price).toEqual({
       ref: null,
       configured: false,
@@ -1097,6 +1204,17 @@ describe("Phase 4 readiness analysis", () => {
     expect(() =>
       analyze({ config: configuration({ canaryState: undefined }) })
     ).toThrow("Canary readiness state is missing or invalid");
+    expect(() =>
+      analyze({ config: configuration({ widgetSecretState: undefined }) })
+    ).toThrow("Widget-secret readiness state is missing or invalid");
+    expect(() =>
+      analyze({
+        config: configuration({
+          widgetSecretState: "absent",
+          widgetTokenSecretConfigured: true,
+        }),
+      })
+    ).toThrow("conflicts with validated environment evidence");
   });
 });
 

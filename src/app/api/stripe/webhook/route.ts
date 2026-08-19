@@ -35,6 +35,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  const provenanceFailure = stripeEventProvenanceFailure(event);
+  if (provenanceFailure) {
+    // This endpoint owns one direct Stripe account in one fixed mode. A
+    // correctly signed event from a connected account, organization context,
+    // or the opposite Stripe mode still has no authority here. Reject it
+    // before writing an event claim or touching subscription state.
+    console.error(
+      `[stripe:webhook] Rejected event provenance (${provenanceFailure})`,
+    );
+    return NextResponse.json(
+      { error: "Invalid event provenance" },
+      { status: 400 },
+    );
+  }
+
   const claimed = await claimStripeEvent(event);
   if (!claimed) {
     return NextResponse.json({ received: true, duplicate: true });
@@ -57,6 +72,27 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+function stripeEventProvenanceFailure(event: Stripe.Event): string | null {
+  if (event.account !== undefined || event.context !== undefined) {
+    return "non-direct account context";
+  }
+
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const expectedLivemode = secretKey?.startsWith("sk_live_")
+    ? true
+    : secretKey?.startsWith("sk_test_")
+      ? false
+      : null;
+
+  if (expectedLivemode === null) {
+    return "unrecognized key mode";
+  }
+  if (event.livemode !== expectedLivemode) {
+    return "livemode mismatch";
+  }
+  return null;
 }
 
 async function processStripeEvent(

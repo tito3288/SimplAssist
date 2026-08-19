@@ -27,17 +27,17 @@ Phase 8 A2P screening uses these deployment variables:
 Phase 9 billing/admin and Phase 3 calendar/operations use these deployment variables:
 
 - `NEXT_PUBLIC_APP_URL` - canonical public HTTP(S) origin for SimplAssist. Production Stripe redirects, Telnyx webhooks, Google OAuth, branding, and public URLs must all resolve to this exact origin.
-- `STRIPE_SECRET_KEY` - Stripe test-mode secret key only (`sk_test_...`). Live-mode keys are intentionally rejected until SimplAssist explicitly switches billing live.
-- `STRIPE_WEBHOOK_SECRET` - Stripe test-mode webhook signing secret for `/api/stripe/webhook`.
-- `STRIPE_PRICE_SMS_ONLY` - Stripe test-mode recurring Price ID for Starter / SMS Only.
-- `STRIPE_PRICE_SMS_AND_CHAT` - Stripe test-mode recurring Price ID for Growth / SMS + Web Chat.
-- `STRIPE_PRICE_FULL` - Stripe test-mode recurring Price ID for Pro / Full Suite.
-- `STRIPE_PRICE_CHAT_ONLY` - server-only Stripe recurring Price ID for Chat Only. Before enabling direct acquisition, verify in the same Stripe account and mode that it is an active, non-metered USD Price for exactly $10 every month. It must be distinct from every SMS base, setup-fee, and overage Price. Once a Chat Only subscription exists, keep this value configured even when direct acquisition is disabled so signed webhook events can continue to resolve the historical plan.
-- `STRIPE_PRICE_SETUP_FEE` - Stripe test-mode one-time Price ID for the $25 setup and SMS activation fee.
-- `STRIPE_PRICE_SMS_OVERAGE_PART` - Stripe test-mode Price ID for $0.03 per extra SMS part after opt-in.
+- `STRIPE_SECRET_KEY` - Stripe secret key for the deployment's fixed account and mode. Production uses its existing `sk_live_...` key. Never switch the production application to a test key, even temporarily, or mix test and live Stripe objects in the production database.
+- `STRIPE_WEBHOOK_SECRET` - signing secret for `/api/stripe/webhook` from the endpoint in the same Stripe account and mode as `STRIPE_SECRET_KEY`. Production uses the live endpoint secret.
+- `STRIPE_PRICE_SMS_ONLY` - recurring Price ID for Starter / SMS Only in the same Stripe account and mode as the secret key; production uses the live Price.
+- `STRIPE_PRICE_SMS_AND_CHAT` - recurring Price ID for Growth / SMS + Web Chat in the same Stripe account and mode as the secret key; production uses the live Price.
+- `STRIPE_PRICE_FULL` - recurring Price ID for Pro / Full Suite in the same Stripe account and mode as the secret key; production uses the live Price.
+- `STRIPE_PRICE_CHAT_ONLY` - server-only recurring Price ID for Chat Only in the same Stripe account and mode as the secret key. Before exact-business acquisition, verify that it is an active, licensed/non-metered USD Price for exactly $10 every month and distinct from every SMS base, setup-fee, and overage Price. Production Phase 4B uses one real owner-performed $10 live subscription; keep this value configured after the first Session even when acquisition is disabled so signed webhooks and historical plan recovery continue to work.
+- `STRIPE_PRICE_SETUP_FEE` - one-time Price ID for the $25 setup and SMS activation fee in the same Stripe account and mode; production uses the live Price.
+- `STRIPE_PRICE_SMS_OVERAGE_PART` - Price ID for $0.03 per extra SMS part after opt-in in the same Stripe account and mode; production uses the live Price.
 - `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` - server-only ID of the reviewed Stripe Billing Portal configuration (`bpc_...`) for this Stripe account and mode. Portal session creation fails closed when this pin is missing or malformed; never expose it through a `NEXT_PUBLIC_` variable.
-- `CHAT_ONLY_DIRECT_SALES_ENABLED` - server-only, exact-`1` rollout switch reserved for new direct chat-only sales. Leave unset or `0` until the chat-only implementation and launch gates are complete.
-- `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only canary while the broad flag remains off. It accepts no list, whitespace, wildcard, or public/browser variant; remove it after the canary. Never create a `NEXT_PUBLIC_` copy.
+- `CHAT_ONLY_DIRECT_SALES_ENABLED` - server-only, exact-`1` rollout switch reserved for a later public direct Chat Only launch. Leave unset or `0` throughout the production Phase 4 exact-business canary and closeout.
+- `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only canary while the broad flag remains off. In production, setting it with the live Chat Price authorizes that exact eligible business to begin a real-charge Checkout, so configure it only for the separately approved Stage D window and remove it during Stage E closeout. It accepts no list, whitespace, wildcard, or public/browser variant. Never create a `NEXT_PUBLIC_` copy.
 - `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` - independent server-only, exact-`1` rollout switch reserved for new partner-admin chat-only assignments. Leave unset or `0` until partner acceptance testing is complete.
 - `WIDGET_TOKEN_SECRET` - server-only secret used to sign short-lived public widget sessions and derive opaque traffic keys. Use at least 32 cryptographically random bytes, keep it identical across all application instances, and never expose it through a `NEXT_PUBLIC_` variable. Rotation immediately invalidates existing five-minute widget sessions and changes the traffic-key namespace, effectively starting new rate buckets; rotate deliberately across every instance at once.
 - `GOOGLE_CLIENT_ID` - server-side Google OAuth client ID for Calendar access.
@@ -53,6 +53,14 @@ They remain separate because direct Stripe sales and externally invoiced partner
 assignments have independent release schedules. See
 [`docs/chat-only-phase0-safety-baseline.md`](docs/chat-only-phase0-safety-baseline.md)
 for the pre-implementation inventory and regression gate.
+
+Production Stripe mode is fixed for the lifetime of a deployment and its
+database evidence. The production Phase 4B canary remains on the existing live
+key, live Prices, and live webhook endpoint; it never swaps to test mode. The
+owner alone performs the one approved real $10 payment. After validation, the
+exact canary is removed, the subscription is canceled and optionally refunded
+under the recorded accounting procedure, both broad flags remain `0`, and no
+public Chat Only launch occurs in Phase 4.
 
 The switches gate new acquisition and partner assignment only. They do not
 turn off the metering, widget-security, or calendar-lifecycle code used by

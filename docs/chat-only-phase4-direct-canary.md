@@ -1,4 +1,4 @@
-# Chat Only Phase 4 direct canary
+# Chat Only Phase 4 production-live direct canary
 
 Execution and release contract for hardening one isolated direct Chat Only
 canary before any broad sale or partner assignment.
@@ -11,20 +11,31 @@ Phase 4 proves the direct $10 Chat Only acquisition path with one explicitly
 named disposable business. It is divided into two separately authorized parts:
 
 - **Phase 4A** is local implementation, testing, read-only release tooling, and
-  documentation. It makes no hosted change.
-- **Phase 4B** is a later, separately approved hosted release window. Its stages
-  are approval boundaries, not actions authorized by this document.
+  documentation. It made no hosted change and never accessed live Stripe.
+- **Phase 4B** is the later, separately approved production release window for
+  one exact-business canary. Its stages are approval boundaries, not actions
+  authorized merely by this document.
+
+The owner selected the Phase 4B topology on 2026-08-19: keep the production
+Railway service on the production Supabase project and its already configured
+Stripe **live mode**, then perform one real $10 subscription manually at the
+very end through one exact disposable business. Never replace the production
+live key, live Price IDs, or live webhook secret with test-mode values, even
+temporarily. A Railway staging or local application must never point at the
+production database for this canary.
 
 `CHAT_ONLY_DIRECT_SALES_ENABLED` and
 `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` remain unset or `0` throughout Phase 4A.
-The broad direct-sales switch also remains off during an isolated Phase 4B
-canary. Only the exact disposable business named by the server-only canary
-configuration may enter the new direct flow.
+The broad direct-sales switch also remains off during the production Phase 4B
+canary and its closeout. Only the exact disposable business named by the
+server-only canary configuration may enter the new direct flow.
 
-Phase 4 does not advertise Chat Only, open public sales, enable partner
+Phase 4A did not advertise Chat Only, open public sales, enable partner
 assignment, apply a hosted migration, create a hosted Stripe object, change a
 Railway variable, deploy, edit an edge or scheduler configuration, call a
-provider, or mutate a customer account.
+provider, or mutate a customer account. Phase 4B may perform only the exact
+production reads and mutations separately approved in Stages A-E below. It
+does not authorize a public launch.
 
 ## Phase 4A local objectives
 
@@ -256,6 +267,11 @@ Phase 4A deliberately does not include:
 - hosted reads, migrations, configuration, deployment, traffic changes,
   provider calls, test accounts, or cleanup.
 
+Those are historical Phase 4A boundaries: the completed local phase did none
+of them. They do not imply that the later Phase 4B canary uses test mode. The
+owner subsequently selected the separately approved production-live topology
+defined below.
+
 Partner Chat Only remains a later independent phase. Before its flag can open,
 the partner billing mutation must receive the shared same-origin admin mutation
 guard and the partner flow must receive its own atomic activation and canary
@@ -290,7 +306,7 @@ Phase 4A is complete only when all of the following are true:
    proof, four-plan catalog, Price validation, Portal validation, protected
    baseline, and blocker behavior have local fixture coverage.
 7. A fresh disposable local database replay applies every migration in numeric
-   order through the Phase 4 tip; the new migration 064 suites pass exactly 117
+   order through the Phase 4 tip; the new migration 064 suites pass exactly 139
    main assertions plus 32 concurrency assertions, and the complete pgTAP run
    passes without durable fixture leakage.
 8. Full Vitest, TypeScript, ESLint, optimized production build, and
@@ -308,22 +324,28 @@ Phase 4A is complete only when all of the following are true:
 This section defines ordering only. It grants no permission to perform a remote
 read or mutation. Each stage requires explicit owner approval naming the target
 and Stripe mode; an approval may bundle stages only when it clearly names every
-included action.
+included action. Every Phase 4B Stripe action uses the existing production live
+account and production Supabase project. Never switch the production application
+to test mode or mix test and live Stripe objects in the shared database.
 
 ### Stage A — remote read-only preflight
 
 - Confirm both broad Chat Only flags, the canary value, and Telnyx remote release
-  are off before the first read.
+  are off before the first read, and confirm `STRIPE_PRICE_CHAT_ONLY` remains
+  unset or empty. `WIDGET_TOKEN_SECRET` must likewise remain unset or empty for
+  this pre-configuration baseline.
 - Run the Phase 4 pre-Price baseline audit against the explicitly named
-  Stripe-test account and Supabase project. It must prove the expected absence
-  of a Chat Only Price/subscription or reconcile any already-reviewed object;
-  absence is not treated as canary readiness.
+  production Stripe-live account and production Supabase project. It must prove
+  the expected absence of configured Chat Only Price/subscription evidence or
+  reconcile any already-reviewed object; absence is not treated as canary
+  readiness.
 
   ```bash
   npm run audit:chat-only-phase4 -- \
-    --stripe-mode test \
-    --supabase-project-ref <test-project-ref> \
+    --stripe-mode live \
+    --supabase-project-ref inmgpkurctttsofpywuz \
     --chat-price-state absent \
+    --widget-secret-state absent \
     --canary-state absent
   ```
 
@@ -333,16 +355,19 @@ included action.
   delta stops the release.
 
 Remote read-only access is itself approval-gated. Stage A does not authorize a
-repair, migration, provider lookup, or broader credential.
+repair, migration, provider lookup, credential change, Stripe mode change, or
+broader use of the production service-role credential.
 
 ### Stage B — hosted configuration preparation
 
 Separately approve and verify:
 
-- creation or selection of the Stripe-test Chat Only Product/Price and the
-  exact immutable terms;
-- the signed Stripe endpoint is subscribed to `checkout.session.expired` in
-  addition to the existing completion, subscription, and invoice events;
+- creation or selection of the production-live Chat Only Product and one active
+  USD $10 monthly recurring licensed Price, distinct from every live SMS base,
+  setup-fee, and overage Price;
+- the production-live signed Stripe endpoint is subscribed to
+  `checkout.session.expired` in addition to the existing completion,
+  subscription, and invoice events;
 - `STRIPE_PRICE_CHAT_ONLY`, the existing pinned Billing Portal configuration,
   one shared `WIDGET_TOKEN_SECRET`, Google credentials, and `CRON_SECRET` in
   Railway;
@@ -350,10 +375,17 @@ Separately approve and verify:
   forwarded-address behavior; and
 - the existing single cron-job.org account-cleanup scheduler configuration.
 
-Both broad Chat Only flags remain `0`. A scheduler edit or test request, cache
-purge, secret rotation, WAF/CDN change, Railway variable change, Stripe object
-mutation, or canary-business creation is a hosted mutation and must be named in
-the approval.
+Both broad Chat Only flags remain `0`, and the exact canary remains unset. A
+scheduler edit or test request, cache purge, secret rotation, WAF/CDN change,
+Railway variable change, Stripe object mutation, or canary-business creation is
+a hosted mutation and must be named in the approval.
+
+This configuration prepares a real billing path. Once Stage D begins, Checkout
+will create a live Customer, live invoice, live subscription, and real $10 card
+charge with ordinary Stripe processing and accounting consequences. Stage B
+must record that disclosure and the approved cardholder, cancellation timing,
+refund choice, and accounting owner before the Price can be used. It does not
+authorize anyone to enter payment details or create a Checkout Session.
 
 After the Price and configuration are present, rerun the canary-ready audit in
 GET/read-only mode. It must validate the Price, Portal, configuration, and
@@ -362,9 +394,10 @@ value remains unset until Stage D has an exact disposable business to name.
 
 ```bash
 npm run audit:chat-only-phase4 -- \
-  --stripe-mode test \
-  --supabase-project-ref <test-project-ref> \
+  --stripe-mode live \
+  --supabase-project-ref inmgpkurctttsofpywuz \
   --chat-price-state required \
+  --widget-secret-state required \
   --canary-state absent
 ```
 
@@ -399,6 +432,11 @@ Within the approved stopped/drained window:
    headers; and
 7. reopen Calendar traffic only after every check passes.
 
+Keep `CHAT_ONLY_DIRECT_SALES_ENABLED=0`,
+`CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED=0`, and the exact canary unset throughout
+the cutover. Stage C performs no Checkout, payment, Google event, Anthropic
+request, Telnyx request, or authenticated cleanup run.
+
 Once 063 is applied, rollback is **roll-forward only**. Never restore an older
 schema, restart an old application replica, or reopen an old Calendar writer.
 If a later check fails, keep affected traffic closed, preserve durable
@@ -407,54 +445,80 @@ provider-operation evidence, and deploy a reviewed forward fix.
 ### Stage D — exact disposable canary
 
 After the compatible deployment is healthy, separately approve the provider
-and customer mutations needed for one disposable direct business:
+and customer mutations needed for one production disposable direct business:
 
 - create or identify the exact disposable direct/unpartnered business and set
   only its server-side canary UUID through an approved Railway change;
 - leave both broad acquisition flags at `0`;
-- exercise one Stripe-test Checkout, signed webhook synchronization, atomic
-  finalization, dashboard entry, exact-host widget install, a small number of
-  real AI replies, lead fallback, Billing usage, Google OAuth, and one reviewed
-  Calendar booking lifecycle;
+- run the required-canary readiness audit **after** setting the UUID and
+  **before** opening Checkout; any existing subscription or unsafe durable
+  attempt makes the business ineligible;
+- have the owner manually open the exact production Checkout and personally
+  enter the approved card details. No agent, operator, log, screenshot, or
+  evidence artifact may receive the card number, CVC, or payment link;
+- acknowledge and complete exactly one real live-mode $10 subscription, then
+  verify signed webhook synchronization, atomic finalization, dashboard entry,
+  exact-host widget install, a small number of real AI replies, lead fallback,
+  Billing usage, Google OAuth, and one reviewed Calendar booking lifecycle;
 - verify that no Telnyx client or provider resource was touched;
 - run an explicitly approved authenticated cleanup heartbeat only if its
   destructive account-cleanup potential and nested Calendar results have been
-  reviewed;
-- remove the canary UUID and prove that new unpaid acquisition stops while the
-  paid canary's entitlements, signed webhook recovery, and finalization remain
-  available; and
-- perform only the separately approved teardown. Respect the 60-day deletion
-  grace and durable Stripe/Calendar cleanup rules rather than deleting linkage
-  manually.
+  reviewed; and
+- retain a sanitized release artifact plus a restricted finance record of the
+  exact live invoice/payment. Do not put raw customer, payment, invoice, or
+  subscription identifiers in the sanitized engineering report.
 
 The required-canary readiness invocation is:
 
 ```bash
 npm run audit:chat-only-phase4 -- \
-  --stripe-mode test \
-  --supabase-project-ref <test-project-ref> \
+  --stripe-mode live \
+  --supabase-project-ref inmgpkurctttsofpywuz \
   --chat-price-state required \
+  --widget-secret-state required \
   --canary-state required
 ```
 
-Anthropic calls, Stripe-test Customers/Sessions/subscriptions, Google OAuth or
-event mutations, widget traffic, scheduler requests, account deletion, and
-cleanup are real hosted actions even when the account is disposable. None is
-authorized by a successful local Phase 4A pass.
+Anthropic calls, Stripe-live Customers/Sessions/subscriptions/invoices, the $10
+charge, Google OAuth or event mutations, widget traffic, scheduler requests,
+account deletion, and cleanup are real production actions even when the account
+is disposable. None is authorized by a successful local Phase 4A pass or by an
+earlier Phase 4B stage.
 
-### Stage E — later broad direct release
+### Stage E — canary closeout; no public release
 
-The canary ends with the public direct flag still off. A later release must
-separately approve:
+After all paid-canary evidence is captured, close the canary in this order:
 
-- canonical public pricing, metadata, structured data, FAQ, and CTA changes;
-- a fresh sanitized preflight and review of canary evidence;
-- removal of the single-business canary configuration;
-- `CHAT_ONLY_DIRECT_SALES_ENABLED=1`, old-replica drain, and effective gate
-  verification; and
-- monitoring and an explicit stop/disable decision for the first public
-  acquisition window.
+1. Remove `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` from Railway. Keep
+   `STRIPE_PRICE_CHAT_ONLY` configured so signed webhook recovery and historical
+   plan resolution remain available.
+2. Prove new unpaid Chat acquisition is unavailable without the canary while
+   the paid business retains its expected entitlement and exact recovery path.
+3. Keep `CHAT_ONLY_DIRECT_SALES_ENABLED=0` and
+   `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED=0`. Do not change public pricing,
+   metadata, structured data, FAQ, CTA, or catalog visibility.
+4. Cancel the exact live Stripe subscription at the owner-approved time so it
+   cannot renew. Cancellation and refund are separate operations: a refund does
+   not cancel a subscription, and cancellation does not refund the $10 charge.
+5. If the owner approved a refund, refund only the exact original $10 payment
+   through Stripe, verify the refund reaches a terminal succeeded state, and
+   preserve the Stripe receipt. Never delete the Customer or database linkage
+   as a substitute for cancellation or refund.
+6. Wait for the signed subscription cancellation webhook and verify the local
+   subscription becomes canceled. If synchronization fails, preserve evidence
+   and repair the webhook path; never hand-edit the subscription, Checkout
+   attempt, or family lock.
+7. Record the original invoice, gross $10 charge, Stripe processing fee, refund,
+   any fee retained or returned, any tax/credit-note artifact, cancellation
+   effective date, and final net amount in the restricted accounting record.
+   The accounting owner decides the appropriate bookkeeping treatment.
+8. Perform account teardown only under a separate approval. Respect the 60-day
+   deletion grace and durable Stripe/Calendar cleanup rules rather than deleting
+   linkage manually.
 
-`CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` remains off after broad direct release.
-Partner assignment requires its own implementation, acceptance pass, hosted
-preflight, and disposable canary.
+Phase 4 ends after this closeout with both broad flags off and Chat Only still
+hidden from public sale. Any public direct launch, including public copy changes
+or `CHAT_ONLY_DIRECT_SALES_ENABLED=1`, is a later independent phase requiring a
+fresh audit, release contract, approval, and monitored launch window. Partner
+assignment likewise requires its own implementation, acceptance pass, hosted
+preflight, and canary.

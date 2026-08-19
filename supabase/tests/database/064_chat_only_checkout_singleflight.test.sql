@@ -3,7 +3,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = public, extensions;
 
-SELECT plan(117);
+SELECT plan(139);
 
 -- ---------------------------------------------------------------------------
 -- Private ledger, exact shape, and service-only mutation surface
@@ -350,7 +350,105 @@ SELECT has_trigger(
   'public',
   'businesses',
   'guard_business_delete_chat_checkout_attempt_authority',
-  'hard business deletion is fenced during an active Checkout attempt'
+  'hard business deletion is fenced while any Checkout attempt remains'
+);
+
+SELECT has_function(
+  'public',
+  'purge_chat_only_checkout_attempts_on_tombstone',
+  ARRAY[]::text[],
+  'permanent cleanup has a dedicated Chat Checkout retention trigger function'
+);
+
+SELECT has_trigger(
+  'public',
+  'businesses',
+  'purge_chat_only_checkout_attempts_on_tombstone',
+  'the 60-day tombstone scrub purges retained Chat Checkout evidence'
+);
+
+SELECT ok(
+  (
+    SELECT procedure.prosecdef
+       AND procedure.provolatile = 'v'
+       AND procedure.proconfig =
+             ARRAY['search_path=public, pg_temp']::text[]
+    FROM pg_proc AS procedure
+    WHERE procedure.oid =
+          'public.purge_chat_only_checkout_attempts_on_tombstone()'
+            ::regprocedure
+  )
+  AND NOT has_function_privilege(
+    'anon',
+    'public.purge_chat_only_checkout_attempts_on_tombstone()',
+    'EXECUTE'
+  )
+  AND NOT has_function_privilege(
+    'authenticated',
+    'public.purge_chat_only_checkout_attempts_on_tombstone()',
+    'EXECUTE'
+  )
+  AND NOT has_function_privilege(
+    'service_role',
+    'public.purge_chat_only_checkout_attempts_on_tombstone()',
+    'EXECUTE'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_proc AS retention_procedure
+    CROSS JOIN LATERAL aclexplode(
+      COALESCE(
+        retention_procedure.proacl,
+        acldefault('f', retention_procedure.proowner)
+      )
+    ) AS retention_acl
+    WHERE retention_procedure.oid =
+          'public.purge_chat_only_checkout_attempts_on_tombstone()'
+            ::regprocedure
+      AND retention_acl.grantee = 0
+      AND retention_acl.privilege_type = 'EXECUTE'
+  )
+  AND pg_get_triggerdef(
+    (
+      SELECT trigger.oid
+      FROM pg_trigger AS trigger
+      WHERE trigger.tgrelid = 'public.businesses'::regclass
+        AND trigger.tgname =
+              'purge_chat_only_checkout_attempts_on_tombstone'
+    )
+  ) LIKE ALL (ARRAY[
+    '%AFTER UPDATE OF cleanup_pii_scrubbed_at ON public.businesses%',
+    '%old.cleanup_pii_scrubbed_at IS NULL%',
+    '%new.cleanup_pii_scrubbed_at IS NOT NULL%'
+  ])
+  AND pg_get_functiondef(
+    'public.purge_chat_only_checkout_attempts_on_tombstone()'
+      ::regprocedure
+  ) LIKE ALL (ARRAY[
+    '%IF NOT EXISTS (%',
+    '%WHERE attempt.business_id = NEW.id%',
+    '%RETURN NEW;%',
+    '%deletion_scheduled_for >= now()%',
+    '%attempt.state IN (''creating'', ''open'')%',
+    '%action.stripe_subscription_id =%',
+    '%attempt.stripe_subscription_id%',
+    '%action.desired_action = ''cancel''%',
+    '%DELETE FROM public.chat_only_checkout_attempts%'
+  ])
+  AND strpos(
+    pg_get_functiondef(
+      'public.purge_chat_only_checkout_attempts_on_tombstone()'
+        ::regprocedure
+    ),
+    'IF NOT EXISTS'
+  ) < strpos(
+    pg_get_functiondef(
+      'public.purge_chat_only_checkout_attempts_on_tombstone()'
+        ::regprocedure
+    ),
+    'IF NEW.deleted_at IS NULL'
+  ),
+  'retention is an uncallable fixed-path definer that requires terminal evidence and exact cancel authority'
 );
 
 SELECT ok(
@@ -524,6 +622,34 @@ INSERT INTO public.businesses (
     'Chat Checkout Generic Event 064', 'general',
     'chat-checkout-generic-event-a064', 'chat_only',
     NULL, NULL, 'stripe', NULL, NULL, false, false, false
+  ),
+  (
+    '10000000-0000-4000-a064-000000000019',
+    '00000000-0000-4000-a064-000000000001',
+    'Chat Checkout Creating Retention 064', 'general',
+    'chat-checkout-creating-retention-a064', 'chat_only',
+    NULL, NULL, 'stripe', NULL, NULL, false, false, false
+  ),
+  (
+    '10000000-0000-4000-a064-000000000020',
+    '00000000-0000-4000-a064-000000000001',
+    'Chat Checkout Open Retention 064', 'general',
+    'chat-checkout-open-retention-a064', 'chat_only',
+    NULL, NULL, 'stripe', NULL, NULL, false, false, false
+  ),
+  (
+    '10000000-0000-4000-a064-000000000021',
+    '00000000-0000-4000-a064-000000000001',
+    'Chat Checkout Hard Delete 064', 'general',
+    'chat-checkout-hard-delete-a064', 'chat_only',
+    NULL, NULL, 'stripe', NULL, NULL, false, false, false
+  ),
+  (
+    '10000000-0000-4000-a064-000000000022',
+    '00000000-0000-4000-a064-000000000001',
+    'Non Chat Cleanup Passthrough 064', 'general',
+    'non-chat-cleanup-passthrough-a064', 'sms_only',
+    NULL, NULL, 'stripe', NULL, NULL, false, false, false
   );
 
 INSERT INTO public.business_plan_family_locks (
@@ -536,7 +662,10 @@ INSERT INTO public.business_plan_family_locks (
   ('10000000-0000-4000-a064-000000000012', 'chat_only', 'stripe_sync'),
   ('10000000-0000-4000-a064-000000000013', 'chat_only', 'direct_checkout'),
   ('10000000-0000-4000-a064-000000000014', 'chat_only', 'direct_checkout'),
-  ('10000000-0000-4000-a064-000000000017', 'chat_only', 'direct_checkout');
+  ('10000000-0000-4000-a064-000000000017', 'chat_only', 'direct_checkout'),
+  ('10000000-0000-4000-a064-000000000019', 'chat_only', 'direct_checkout'),
+  ('10000000-0000-4000-a064-000000000020', 'chat_only', 'direct_checkout'),
+  ('10000000-0000-4000-a064-000000000021', 'chat_only', 'direct_checkout');
 
 INSERT INTO public.subscriptions (
   id, business_id, stripe_customer_id, stripe_subscription_id,
@@ -565,6 +694,33 @@ CREATE TEMP TABLE checkout_064_state (
   name text PRIMARY KEY,
   payload jsonb
 ) ON COMMIT DROP;
+
+SELECT lives_ok(
+  $$
+    UPDATE public.businesses
+    SET cleanup_pii_scrubbed_at = clock_timestamp()
+    WHERE id = '10000000-0000-4000-a064-000000000022'
+  $$,
+  'non-Chat cleanup transitions bypass Chat-specific tombstone validation'
+);
+
+SELECT ok(
+  (
+    SELECT business.cleanup_pii_scrubbed_at IS NOT NULL
+       AND business.owner_id =
+             '00000000-0000-4000-a064-000000000001'
+       AND business.deleted_at IS NULL
+    FROM public.businesses AS business
+    WHERE business.id = '10000000-0000-4000-a064-000000000022'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id =
+          '10000000-0000-4000-a064-000000000022'
+  ),
+  'the no-attempt passthrough preserves the unrelated cleanup update exactly'
+);
 
 CREATE FUNCTION pg_temp.capture_chat_subscription_attempt_mismatch(
   p_business_id uuid,
@@ -1321,6 +1477,16 @@ SELECT is(
   'exact provider evidence, not the old timestamp, closes the attempt'
 );
 
+SELECT throws_ok(
+  $$
+    DELETE FROM public.businesses
+    WHERE id = '10000000-0000-4000-a064-000000000014'
+  $$,
+  '55000',
+  'chat_only_checkout_attempt_authority_locked',
+  'migration-role hard deletion cannot cascade away a terminal attempt'
+);
+
 SELECT lives_ok(
   $$
     UPDATE public.businesses
@@ -1877,6 +2043,539 @@ SELECT throws_ok(
   '23505',
   NULL,
   'one Stripe Subscription cannot be bound to two Checkout attempts'
+);
+
+-- ---------------------------------------------------------------------------
+-- Permanent-account-cleanup retention and durable cancellation authority
+-- ---------------------------------------------------------------------------
+
+SELECT is(
+  public.sync_chat_only_subscription_from_attempt(
+    '10000000-0000-4000-a064-000000000018',
+    (SELECT (payload->>'attempt_id')::uuid
+     FROM checkout_064_state WHERE name = 'generic_event_attempt'),
+    repeat('8', 64),
+    (SELECT (payload->>'checkout_session_expires_at')::timestamptz
+     FROM checkout_064_state WHERE name = 'generic_event_attempt'),
+    'cus_GenericA064', 'sub_GenericA064', 'active',
+    '2064-03-01 00:00:00+00', '2064-04-01 00:00:00+00',
+    'price_chat_a064', 'cs_generic_a064', false,
+    '2064-03-02 00:00:00+00'
+  ),
+  true,
+  'exact Session evidence terminalizes the retention cleanup fixture'
+);
+
+INSERT INTO public.chat_only_checkout_attempts (
+  id, business_id, stripe_price_id, request_fingerprint, state,
+  claim_token, claimed_at, claim_expires_at, attempt_count,
+  stripe_checkout_session_id, stripe_customer_id, checkout_url,
+  checkout_session_expires_at, expired_at, created_at, updated_at
+) VALUES (
+  '50000000-0000-4000-a064-000000000018',
+  '10000000-0000-4000-a064-000000000018',
+  'price_chat_expired_a064', repeat('9', 64), 'expired',
+  '60000000-0000-4000-a064-000000000018',
+  clock_timestamp() - interval '3 hours',
+  clock_timestamp() - interval '2 hours',
+  1,
+  'cs_expired_retention_a064', 'cus_ExpiredRetentionA064',
+  'https://checkout.stripe.test/expired-retention-a064',
+  clock_timestamp() - interval '1 hour',
+  clock_timestamp() - interval '30 minutes',
+  clock_timestamp() - interval '3 hours',
+  clock_timestamp() - interval '30 minutes'
+);
+
+SELECT ok(
+  (
+    SELECT count(*) = 2
+       AND bool_and(stripe_price_id IS NOT NULL)
+       AND bool_and(stripe_checkout_session_id IS NOT NULL)
+       AND bool_and(stripe_customer_id IS NOT NULL)
+       AND bool_and(checkout_url IS NOT NULL)
+       AND count(*) FILTER (
+             WHERE stripe_subscription_id = 'sub_GenericA064'
+           ) = 1
+    FROM public.chat_only_checkout_attempts
+    WHERE business_id = '10000000-0000-4000-a064-000000000018'
+  ),
+  'the retention fixture holds completed and expired bearer/provider evidence before cleanup'
+);
+
+UPDATE public.businesses
+SET deleted_at = statement_timestamp(),
+    deletion_scheduled_for = statement_timestamp() + interval '60 days'
+WHERE id = '10000000-0000-4000-a064-000000000018';
+
+SELECT ok(
+  (
+    SELECT business.owner_id =
+             '00000000-0000-4000-a064-000000000001'
+       AND business.cleanup_pii_scrubbed_at IS NULL
+       AND business.name = 'Chat Checkout Generic Event 064'
+       AND business.deletion_scheduled_for > now()
+    FROM public.businesses AS business
+    WHERE business.id = '10000000-0000-4000-a064-000000000018'
+  )
+  AND (
+    SELECT count(*) = 2
+       AND bool_and(attempt.stripe_checkout_session_id IS NOT NULL)
+       AND bool_and(attempt.checkout_url IS NOT NULL)
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id =
+          '10000000-0000-4000-a064-000000000018'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.account_deletion_stripe_actions AS action
+    WHERE action.business_id = '10000000-0000-4000-a064-000000000018'
+      AND action.stripe_subscription_id = 'sub_GenericA064'
+      AND action.desired_action = 'pause'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.business_plan_family_locks AS family_lock
+    WHERE family_lock.business_id =
+          '10000000-0000-4000-a064-000000000018'
+      AND family_lock.family = 'chat_only'
+  ),
+  'the 60-day grace period retains exact Checkout, pause, family, and owner evidence before scrub eligibility'
+);
+
+DO $expire_chat_checkout_retention_fixture$
+DECLARE
+  v_deleted_at timestamptz := now() - interval '60 days 1 second';
+  v_release_at timestamptz := v_deleted_at + interval '60 days';
+BEGIN
+
+  UPDATE public.businesses
+  SET deleted_at = v_deleted_at,
+      deletion_scheduled_for = v_release_at
+  WHERE id = '10000000-0000-4000-a064-000000000018';
+
+  UPDATE public.telnyx_resource_release_reasons
+  SET triggered_at = v_deleted_at,
+      release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id = '10000000-0000-4000-a064-000000000018'
+    AND reason_type = 'account_deletion'
+    AND status = 'active';
+
+  UPDATE public.telnyx_resource_release_runs
+  SET effective_release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id = '10000000-0000-4000-a064-000000000018'
+    AND status = 'parked';
+END;
+$expire_chat_checkout_retention_fixture$;
+
+SELECT is(
+  public.cleanup_expired_business(
+    '10000000-0000-4000-a064-000000000018'
+  ),
+  '00000000-0000-4000-a064-000000000001'::uuid,
+  'the existing 60-day account cleanup invokes Chat Checkout retention'
+);
+
+SELECT is(
+  (
+    SELECT count(*)::integer
+    FROM public.chat_only_checkout_attempts
+    WHERE business_id = '10000000-0000-4000-a064-000000000018'
+  ),
+  0,
+  'permanent cleanup removes every Checkout URL and retained Stripe identifier'
+);
+
+SELECT ok(
+  (
+    SELECT action.desired_action = 'cancel'
+       AND action.stripe_subscription_id = 'sub_GenericA064'
+    FROM public.account_deletion_stripe_actions AS action
+    WHERE action.business_id = '10000000-0000-4000-a064-000000000018'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.subscriptions
+    WHERE business_id = '10000000-0000-4000-a064-000000000018'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.business_plan_family_locks
+    WHERE business_id = '10000000-0000-4000-a064-000000000018'
+      AND family = 'chat_only'
+  )
+  AND (
+    SELECT owner_id IS NULL
+       AND cleanup_pii_scrubbed_at IS NOT NULL
+    FROM public.businesses
+    WHERE id = '10000000-0000-4000-a064-000000000018'
+  ),
+  'cleanup retains exact cancellation authority and the family lock while scrubbing local billing evidence'
+);
+
+INSERT INTO checkout_064_state (name, payload)
+SELECT
+  'retention_retry_evidence',
+  jsonb_build_object(
+    'action', to_jsonb(action),
+    'family_lock', to_jsonb(family_lock)
+  )
+FROM public.account_deletion_stripe_actions AS action
+JOIN public.business_plan_family_locks AS family_lock
+  ON family_lock.business_id = action.business_id
+WHERE action.business_id = '10000000-0000-4000-a064-000000000018'
+  AND family_lock.family = 'chat_only';
+
+SELECT is(
+  public.cleanup_expired_business(
+    '10000000-0000-4000-a064-000000000018'
+  ),
+  '00000000-0000-4000-a064-000000000001'::uuid,
+  'retention remains idempotent when permanent cleanup retries'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM checkout_064_state AS snapshot
+    JOIN public.account_deletion_stripe_actions AS action
+      ON action.business_id =
+         '10000000-0000-4000-a064-000000000018'
+    JOIN public.business_plan_family_locks AS family_lock
+      ON family_lock.business_id = action.business_id
+     AND family_lock.family = 'chat_only'
+    WHERE snapshot.name = 'retention_retry_evidence'
+      AND snapshot.payload = jsonb_build_object(
+        'action', to_jsonb(action),
+        'family_lock', to_jsonb(family_lock)
+      )
+  ),
+  'a cleanup retry preserves the exact cancel generation, idempotency, result, subscription, and family evidence'
+);
+
+DO $expire_live_chat_checkout_retention_fixtures$
+DECLARE
+  v_initial_deleted_at timestamptz := now();
+  v_deleted_at timestamptz := now() - interval '60 days 1 second';
+  v_release_at timestamptz := v_deleted_at + interval '60 days';
+BEGIN
+  UPDATE public.businesses
+  SET deleted_at = v_initial_deleted_at,
+      deletion_scheduled_for = v_initial_deleted_at + interval '60 days'
+  WHERE id IN (
+    '10000000-0000-4000-a064-000000000019',
+    '10000000-0000-4000-a064-000000000020'
+  );
+
+  UPDATE public.businesses
+  SET deleted_at = v_deleted_at,
+      deletion_scheduled_for = v_release_at
+  WHERE id IN (
+    '10000000-0000-4000-a064-000000000019',
+    '10000000-0000-4000-a064-000000000020'
+  );
+
+  UPDATE public.telnyx_resource_release_reasons
+  SET triggered_at = v_deleted_at,
+      release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id IN (
+    '10000000-0000-4000-a064-000000000019',
+    '10000000-0000-4000-a064-000000000020'
+  )
+    AND reason_type = 'account_deletion'
+    AND status = 'active';
+
+  UPDATE public.telnyx_resource_release_runs
+  SET effective_release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id IN (
+    '10000000-0000-4000-a064-000000000019',
+    '10000000-0000-4000-a064-000000000020'
+  )
+    AND status = 'parked';
+END;
+$expire_live_chat_checkout_retention_fixtures$;
+
+INSERT INTO public.chat_only_checkout_attempts (
+  id, business_id, stripe_price_id, request_fingerprint, state,
+  claim_token, claimed_at, claim_expires_at, attempt_count,
+  stripe_checkout_session_id, stripe_customer_id, checkout_url,
+  checkout_session_expires_at, created_at, updated_at
+) VALUES
+  (
+    '50000000-0000-4000-a064-000000000019',
+    '10000000-0000-4000-a064-000000000019',
+    'price_chat_creating_retention_a064', repeat('1', 64), 'creating',
+    '60000000-0000-4000-a064-000000000019',
+    clock_timestamp() - interval '3 hours',
+    clock_timestamp() - interval '2 hours',
+    1, NULL, NULL, NULL,
+    clock_timestamp() - interval '1 hour',
+    clock_timestamp() - interval '4 hours',
+    clock_timestamp() - interval '3 hours'
+  ),
+  (
+    '50000000-0000-4000-a064-000000000020',
+    '10000000-0000-4000-a064-000000000020',
+    'price_chat_open_retention_a064', repeat('2', 64), 'open',
+    '60000000-0000-4000-a064-000000000020',
+    clock_timestamp() - interval '3 hours',
+    clock_timestamp() - interval '2 hours',
+    1, 'cs_open_retention_a064', 'cus_OpenRetentionA064',
+    'https://checkout.stripe.test/open-retention-a064',
+    clock_timestamp() - interval '1 hour',
+    clock_timestamp() - interval '4 hours',
+    clock_timestamp() - interval '3 hours'
+  );
+
+SELECT throws_ok(
+  $$
+    SELECT public.cleanup_expired_business(
+      '10000000-0000-4000-a064-000000000019'
+    )
+  $$,
+  '55000',
+  'chat_only_checkout_attempt_authority_locked',
+  'the existing authority fence blocks cleanup of a creating attempt with an unknown Stripe outcome'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = '10000000-0000-4000-a064-000000000019'
+      AND attempt.state = 'creating'
+      AND attempt.stripe_price_id = 'price_chat_creating_retention_a064'
+      AND attempt.request_fingerprint = repeat('1', 64)
+  )
+  AND (
+    SELECT business.owner_id =
+             '00000000-0000-4000-a064-000000000001'
+       AND business.cleanup_pii_scrubbed_at IS NULL
+       AND business.name = 'Chat Checkout Creating Retention 064'
+    FROM public.businesses AS business
+    WHERE business.id = '10000000-0000-4000-a064-000000000019'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.business_plan_family_locks AS family_lock
+    WHERE family_lock.business_id =
+          '10000000-0000-4000-a064-000000000019'
+      AND family_lock.family = 'chat_only'
+  ),
+  'creating-attempt cleanup failure rolls back the scrub and preserves exact recovery and family evidence'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT public.cleanup_expired_business(
+      '10000000-0000-4000-a064-000000000020'
+    )
+  $$,
+  '55000',
+  'chat_only_checkout_attempt_authority_locked',
+  'the existing authority fence blocks cleanup of an open Session without terminal provider evidence'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = '10000000-0000-4000-a064-000000000020'
+      AND attempt.state = 'open'
+      AND attempt.stripe_checkout_session_id = 'cs_open_retention_a064'
+      AND attempt.stripe_customer_id = 'cus_OpenRetentionA064'
+      AND attempt.checkout_url =
+            'https://checkout.stripe.test/open-retention-a064'
+  )
+  AND (
+    SELECT business.owner_id =
+             '00000000-0000-4000-a064-000000000001'
+       AND business.cleanup_pii_scrubbed_at IS NULL
+       AND business.name = 'Chat Checkout Open Retention 064'
+    FROM public.businesses AS business
+    WHERE business.id = '10000000-0000-4000-a064-000000000020'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.business_plan_family_locks AS family_lock
+    WHERE family_lock.business_id =
+          '10000000-0000-4000-a064-000000000020'
+      AND family_lock.family = 'chat_only'
+  ),
+  'open-attempt cleanup failure rolls back the scrub and preserves exact provider and family evidence'
+);
+
+INSERT INTO public.subscriptions (
+  id, business_id, stripe_customer_id, stripe_subscription_id,
+  stripe_checkout_session_id, stripe_price_id, plan, status
+) VALUES (
+  '30000000-0000-4000-a064-000000000021',
+  '10000000-0000-4000-a064-000000000021',
+  'cus_HardDeleteA064', 'sub_HardDeleteA064',
+  'cs_hard_delete_a064', 'price_chat_hard_delete_a064',
+  'chat_only', 'active'
+);
+
+INSERT INTO public.chat_only_checkout_attempts (
+  id, business_id, stripe_price_id, request_fingerprint, state,
+  claim_token, claimed_at, claim_expires_at, attempt_count,
+  stripe_checkout_session_id, stripe_customer_id,
+  stripe_subscription_id, checkout_url, checkout_session_expires_at,
+  completed_at, created_at, updated_at
+) VALUES (
+  '50000000-0000-4000-a064-000000000021',
+  '10000000-0000-4000-a064-000000000021',
+  'price_chat_hard_delete_a064', repeat('3', 64), 'completed',
+  '60000000-0000-4000-a064-000000000021',
+  clock_timestamp() - interval '4 hours',
+  clock_timestamp() - interval '1 hour',
+  1, 'cs_hard_delete_a064', 'cus_HardDeleteA064',
+  'sub_HardDeleteA064',
+  'https://checkout.stripe.test/hard-delete-a064',
+  clock_timestamp() - interval '2 hours',
+  clock_timestamp() - interval '1 hour',
+  clock_timestamp() - interval '5 hours',
+  clock_timestamp() - interval '1 hour'
+);
+
+UPDATE public.businesses
+SET deleted_at = statement_timestamp(),
+    deletion_scheduled_for = statement_timestamp() + interval '60 days'
+WHERE id = '10000000-0000-4000-a064-000000000021';
+
+DO $queue_hard_delete_cancel_authority$
+BEGIN
+  PERFORM public.queue_account_deletion_stripe_action(
+    '10000000-0000-4000-a064-000000000021',
+    'sub_HardDeleteA064',
+    'cancel'
+  );
+END;
+$queue_hard_delete_cancel_authority$;
+
+SELECT set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-4000-a064-000000000001',
+  true
+);
+SET LOCAL ROLE authenticated;
+
+SELECT throws_ok(
+  $$
+    DELETE FROM public.businesses
+    WHERE id = '10000000-0000-4000-a064-000000000021'
+  $$,
+  '55000',
+  'chat_only_checkout_attempt_authority_locked',
+  'authenticated hard deletion cannot cascade away terminal Chat Checkout authority'
+);
+
+RESET ROLE;
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.businesses AS business
+    WHERE business.id = '10000000-0000-4000-a064-000000000021'
+      AND business.owner_id =
+            '00000000-0000-4000-a064-000000000001'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts AS attempt
+    WHERE attempt.business_id = '10000000-0000-4000-a064-000000000021'
+      AND attempt.state = 'completed'
+      AND attempt.stripe_subscription_id = 'sub_HardDeleteA064'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.subscriptions AS subscription
+    WHERE subscription.business_id =
+          '10000000-0000-4000-a064-000000000021'
+      AND subscription.stripe_subscription_id = 'sub_HardDeleteA064'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.account_deletion_stripe_actions AS action
+    WHERE action.business_id = '10000000-0000-4000-a064-000000000021'
+      AND action.stripe_subscription_id = 'sub_HardDeleteA064'
+      AND action.desired_action = 'cancel'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.business_plan_family_locks AS family_lock
+    WHERE family_lock.business_id =
+          '10000000-0000-4000-a064-000000000021'
+      AND family_lock.family = 'chat_only'
+  ),
+  'failed authenticated hard deletion preserves business, attempt, subscription, cancel, and family rows'
+);
+
+DO $expire_chat_checkout_missing_authority_fixture$
+DECLARE
+  v_deleted_at timestamptz := now() - interval '60 days 1 second';
+  v_release_at timestamptz := v_deleted_at + interval '60 days';
+BEGIN
+  UPDATE public.businesses
+  SET deleted_at = v_deleted_at,
+      deletion_scheduled_for = v_release_at
+  WHERE id = '10000000-0000-4000-a064-000000000016';
+
+  UPDATE public.telnyx_resource_release_reasons
+  SET triggered_at = v_deleted_at,
+      release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id = '10000000-0000-4000-a064-000000000016'
+    AND reason_type = 'account_deletion'
+    AND status = 'active';
+
+  UPDATE public.telnyx_resource_release_runs
+  SET effective_release_at = v_release_at,
+      updated_at = clock_timestamp()
+  WHERE business_id = '10000000-0000-4000-a064-000000000016'
+    AND status = 'parked';
+END;
+$expire_chat_checkout_missing_authority_fixture$;
+
+SELECT throws_ok(
+  $$
+    SELECT public.cleanup_expired_business(
+      '10000000-0000-4000-a064-000000000016'
+    )
+  $$,
+  '55000',
+  'chat_only_checkout_retention_missing_cancel_authority',
+  'cleanup refuses to discard a subscription identity without exact durable cancel authority'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.chat_only_checkout_attempts
+    WHERE business_id = '10000000-0000-4000-a064-000000000016'
+      AND stripe_price_id = 'price_chat_a064'
+      AND stripe_checkout_session_id = 'cs_canceled_a064'
+      AND stripe_customer_id = 'cus_CanceledA064'
+      AND stripe_subscription_id = 'sub_CanceledA064'
+      AND checkout_url = 'https://checkout.stripe.test/canceled-a064'
+  )
+  AND (
+    SELECT owner_id = '00000000-0000-4000-a064-000000000001'
+       AND cleanup_pii_scrubbed_at IS NULL
+       AND name = 'Chat Checkout Completion 064'
+    FROM public.businesses
+    WHERE id = '10000000-0000-4000-a064-000000000016'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.account_deletion_stripe_actions
+    WHERE business_id = '10000000-0000-4000-a064-000000000016'
+  ),
+  'missing cancellation authority rolls back both evidence deletion and the tombstone scrub'
 );
 
 -- ---------------------------------------------------------------------------

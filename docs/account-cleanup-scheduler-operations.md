@@ -97,6 +97,42 @@ soft-deleted business, it performs this sequence:
 5. Complete cleanup only after cancellation is proven applied, clearing the
    remaining external-work linkage.
 
+Migration 064's private Chat Checkout ledger follows that same boundary. Step
+2 removes terminal attempt rows, including the bearer-like Checkout URL and
+attempt-local Stripe Price, Session, Customer, and Subscription identifiers,
+only after any subscription-bound attempt matches the exact durable `cancel`
+action. That action retains the Subscription identity through step 3 and is
+removed only by step 5 after cancellation is proven; the non-PII plan-family
+lock remains on the tombstone. Never delete either linkage manually.
+
+A `creating` or `open` Chat Checkout attempt normally stops the atomic scrub at
+the existing owner/authority transition with
+`chat_only_checkout_attempt_authority_locked`. The tombstone retention trigger
+also fails closed with `chat_only_checkout_retention_nonterminal_attempt` if an
+already-detached or otherwise defensive path reaches it. Treat either error as
+the same unresolved-provider stop and resolve it from exact evidence before
+retrying cleanup:
+
+- For `creating`, preserve the attempt UUID, request fingerprint, claim and
+  Stripe idempotency evidence. Reconcile the same live/test Stripe account and
+  mode to determine whether that exact request created a Session; elapsed time
+  alone never proves that it did not.
+- For `open`, retrieve the exact saved Checkout Session, verify its mode,
+  business/attempt metadata, Price, and persisted expiry, then use the normal
+  signed completion or exact-expiration RPC path to terminalize it. Never infer
+  expiration from the database clock or substitute a different Session.
+- If the scrub reports
+  `chat_only_checkout_retention_missing_cancel_authority`, reconcile the exact
+  retained Subscription ID to the durable account-deletion `cancel` action.
+  Do not edit or delete the attempt, action, subscription, or family lock to
+  make the retry pass.
+
+Direct business deletion is not a recovery path. Any retained Chat Checkout
+attempt—`creating`, `open`, `completed`, or `expired`—fails closed with
+`chat_only_checkout_attempt_authority_locked` before cascading foreign keys can
+erase provider or billing authority. Only the normal 60-day tombstone scrub may
+remove terminal attempts, after the evidence checks above pass.
+
 Account deletion has an established 60-day soft-delete grace period. The route
 only selects rows whose `deletion_scheduled_for` has elapsed. Even then, a
 `pending` calendar booking or provider operation still in `holding` or
