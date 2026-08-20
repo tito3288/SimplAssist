@@ -4,11 +4,22 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 const UUID = z.string().uuid();
-const SESSION_ID = z.string().min(8).max(128).regex(/^[A-Za-z0-9_-]+$/);
+const SESSION_ID = z
+  .string()
+  .min(8)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
 const SESSION_NONCE = z.string().regex(/^[A-Za-z0-9_-]{24}$/);
 const MAX_BODY_BYTES = 12 * 1024;
 const NO_TEXT_CONTROLS = /^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$/;
 const NO_SINGLE_LINE_CONTROLS = /^[^\u0000-\u001f\u007f]*$/;
+const PROACTIVE_WIDGET_SOURCE = z.enum(["proactive_timer", "proactive_scroll"]);
+const WIDGET_ENGAGEMENT_SOURCE = z.enum([
+  "manual",
+  "proactive_timer",
+  "proactive_scroll",
+]);
+const WIDGET_DEVICE_BUCKET = z.enum(["mobile", "desktop"]);
 
 export const publicWidgetQuerySchema = z
   .object({ businessId: UUID, sessionId: SESSION_ID })
@@ -64,6 +75,53 @@ export const widgetLeadRequestSchema = z
     message: "A lead name or email is required",
   });
 
+const widgetTelemetryBaseSchema = z.object({
+  businessId: UUID,
+  sessionId: SESSION_ID,
+  sessionNonce: SESSION_NONCE,
+  deviceBucket: WIDGET_DEVICE_BUCKET,
+  promptVersion: z.number().int().min(1).max(1000),
+});
+
+/**
+ * Public telemetry is deliberately closed to five content-free funnel events.
+ * A load establishes the eligible-session denominator, invitation events can
+ * only identify their proactive trigger, and engagement/message events may
+ * also be manual.
+ */
+export const widgetTelemetryRequestSchema = z.discriminatedUnion("eventType", [
+  widgetTelemetryBaseSchema
+    .extend({
+      eventType: z.literal("widget_loaded"),
+      source: z.literal("widget_load"),
+    })
+    .strict(),
+  widgetTelemetryBaseSchema
+    .extend({
+      eventType: z.literal("invitation_shown"),
+      source: PROACTIVE_WIDGET_SOURCE,
+    })
+    .strict(),
+  widgetTelemetryBaseSchema
+    .extend({
+      eventType: z.literal("invitation_dismissed"),
+      source: PROACTIVE_WIDGET_SOURCE,
+    })
+    .strict(),
+  widgetTelemetryBaseSchema
+    .extend({
+      eventType: z.literal("widget_engaged"),
+      source: WIDGET_ENGAGEMENT_SOURCE,
+    })
+    .strict(),
+  widgetTelemetryBaseSchema
+    .extend({
+      eventType: z.literal("first_message_submitted"),
+      source: WIDGET_ENGAGEMENT_SOURCE,
+    })
+    .strict(),
+]);
+
 export type WidgetErrorCode =
   | "invalid_request"
   | "unauthorized"
@@ -94,7 +152,10 @@ export function applyWidgetResponseHeaders(
   response: NextResponse,
   allowedOrigin?: string,
 ): NextResponse {
-  response.headers.set("Vary", appendVary(response.headers.get("Vary"), "Origin"));
+  response.headers.set(
+    "Vary",
+    appendVary(response.headers.get("Vary"), "Origin"),
+  );
   response.headers.set("Cache-Control", "no-store");
   if (allowedOrigin) {
     response.headers.set("Access-Control-Allow-Origin", allowedOrigin);
@@ -119,9 +180,9 @@ export function widgetOptionsResponse(
   return applyWidgetResponseHeaders(response, allowedOrigin);
 }
 
-export function parseExactWidgetQuery(request: Request):
-  | { ok: true; data: z.infer<typeof publicWidgetQuerySchema> }
-  | { ok: false } {
+export function parseExactWidgetQuery(
+  request: Request,
+): { ok: true; data: z.infer<typeof publicWidgetQuerySchema> } | { ok: false } {
   const params = new URL(request.url).searchParams;
   const keys = Array.from(params.keys());
   if (
@@ -143,7 +204,9 @@ export async function parseWidgetJson<T extends z.ZodType>(
   request: Request,
   schema: T,
 ): Promise<{ ok: true; data: z.infer<T> } | { ok: false }> {
-  const contentType = request.headers.get("content-type")?.split(";", 1)[0]
+  const contentType = request.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
     ?.trim()
     .toLowerCase();
   if (contentType !== "application/json") return { ok: false };
@@ -154,7 +217,10 @@ export async function parseWidgetJson<T extends z.ZodType>(
 
   const declaredLength = request.headers.get("content-length");
   if (declaredLength) {
-    if (!/^\d+$/.test(declaredLength) || Number(declaredLength) > MAX_BODY_BYTES) {
+    if (
+      !/^\d+$/.test(declaredLength) ||
+      Number(declaredLength) > MAX_BODY_BYTES
+    ) {
       return { ok: false };
     }
   }

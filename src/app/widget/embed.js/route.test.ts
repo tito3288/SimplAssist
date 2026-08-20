@@ -57,13 +57,20 @@ class FakeElement {
   disabled = false;
   scrollTop = 0;
   focused = false;
+  isContentEditable = false;
+  inert = false;
+  tabIndex = 0;
   src = "";
+  private explicitScrollHeight: number | null = null;
   private attributes = new Map<string, string>();
   private listeners = new Map<string, EventListener[]>();
   private ownText = "";
   private markup = "";
 
-  constructor(readonly tagName: string) {
+  constructor(
+    readonly tagName: string,
+    private readonly ownerDocument?: FakeDocument,
+  ) {
     const style = {} as FakeElement["style"];
     style.setProperty = (name, value) => {
       style[name] = value;
@@ -96,7 +103,11 @@ class FakeElement {
   }
 
   get scrollHeight() {
-    return this.children.length;
+    return this.explicitScrollHeight ?? this.children.length;
+  }
+
+  set scrollHeight(value: number) {
+    this.explicitScrollHeight = value;
   }
 
   setAttribute(name: string, value: unknown) {
@@ -160,22 +171,16 @@ class FakeElement {
 
   focus() {
     this.focused = true;
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+    this.dispatch("focus");
   }
 
   querySelectorAll(selector: string): FakeElement[] {
     const matches: FakeElement[] = [];
-    const className = selector.startsWith(".") ? selector.slice(1) : null;
-    const id = selector.startsWith("#") ? selector.slice(1) : null;
 
     for (const child of this.children) {
       if (!(child instanceof FakeElement)) continue;
-      if (
-        (className && child.classList.contains(className)) ||
-        (id && child.id === id) ||
-        (!className && !id && child.tagName.toLowerCase() === selector.toLowerCase())
-      ) {
-        matches.push(child);
-      }
+      if (child.matchesSelector(selector)) matches.push(child);
       matches.push(...child.querySelectorAll(selector));
     }
 
@@ -190,19 +195,44 @@ class FakeElement {
     for (const child of this.children) child.parentNode = null;
     this.children.length = 0;
   }
+
+  private matchesSelector(selector: string) {
+    if (selector.startsWith(".")) return this.classList.contains(selector.slice(1));
+    if (selector.startsWith("#")) return this.id === selector.slice(1);
+
+    const tag = selector.split("[")[0];
+    if (tag && this.tagName.toLowerCase() !== tag.toLowerCase()) return false;
+    const attributes = Array.from(
+      selector.matchAll(/\[([^=\]]+)(?:="([^"]*)")?\]/g),
+    );
+    if (attributes.length === 0) {
+      return this.tagName.toLowerCase() === selector.toLowerCase();
+    }
+    return attributes.every((match) => {
+      const actual = this.getAttribute(match[1]);
+      return match[2] === undefined ? actual !== null : actual === match[2];
+    });
+  }
 }
 
 class FakeDocument {
-  readonly head = new FakeElement("head");
-  readonly body = new FakeElement("body");
+  readonly head: FakeElement;
+  readonly body: FakeElement;
+  readonly documentElement: FakeElement;
   readonly currentScript: FakeElement;
+  activeElement: FakeElement | null = null;
+  visibilityState = "visible";
+  private listeners = new Map<string, EventListener[]>();
 
   constructor(
     preview = false,
     homepageOnly = false,
     scriptOrigin = "https://simplassist.test",
   ) {
-    this.currentScript = new FakeElement("script");
+    this.head = new FakeElement("head", this);
+    this.body = new FakeElement("body", this);
+    this.documentElement = new FakeElement("html", this);
+    this.currentScript = new FakeElement("script", this);
     this.currentScript.src = `${scriptOrigin}/widget/embed.js`;
     this.currentScript.setAttribute("data-business-id", "business-123");
     if (preview) this.currentScript.setAttribute("data-preview", "true");
@@ -212,7 +242,7 @@ class FakeDocument {
   }
 
   createElement(tag: string) {
-    return new FakeElement(tag);
+    return new FakeElement(tag, this);
   }
 
   createTextNode(text: string) {
@@ -230,6 +260,31 @@ class FakeDocument {
 
   querySelector(selector: string) {
     return this.head.querySelector(selector) ?? this.body.querySelector(selector);
+  }
+
+  querySelectorAll(selector: string) {
+    return [
+      ...this.head.querySelectorAll(selector),
+      ...this.body.querySelectorAll(selector),
+    ];
+  }
+
+  addEventListener(type: string, listener: EventListener) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListener) {
+    const listeners = this.listeners.get(type) ?? [];
+    this.listeners.set(
+      type,
+      listeners.filter((candidate) => candidate !== listener),
+    );
+  }
+
+  dispatch(type: string, event: Record<string, unknown> = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 }
 
@@ -313,8 +368,20 @@ async function createHarness(
   options: {
     preview?: boolean;
     homepageOnly?: boolean;
+    homepageRouteVisible?: boolean;
     scriptOrigin?: string;
     uuids?: string[];
+    width?: number;
+    height?: number;
+    visualViewportHeight?: number;
+    scrollHeight?: number;
+    now?: number;
+    storage?: Record<string, string>;
+    storageThrows?: boolean;
+    telemetryFailure?: "throw" | "reject";
+    reducedMotion?: boolean;
+    coarsePointer?: boolean;
+    visibilityState?: "visible" | "hidden";
   } = {},
 ) {
   const response = await GET();
@@ -324,34 +391,129 @@ async function createHarness(
     options.homepageOnly,
     options.scriptOrigin,
   );
+  if (options.homepageRouteVisible) {
+    document.body.classList.add("sa-homepage-widget-route");
+  }
+  document.visibilityState = options.visibilityState ?? "visible";
+  document.documentElement.scrollHeight = options.scrollHeight ?? 2_000;
+  document.body.scrollHeight = options.scrollHeight ?? 2_000;
   const timers = new FakeTimers();
   const requests: Array<{ url: string; init?: Record<string, unknown> }> = [];
-  const storage = new Map<string, string>();
+  const telemetryRequests: Array<{ url: string; init?: Record<string, unknown> }> = [];
+  const storage = new Map<string, string>(Object.entries(options.storage ?? {}));
   const windowListeners = new Map<string, EventListener[]>();
+  const visualViewportListeners = new Map<string, EventListener[]>();
+  const mutationObservers: Array<{
+    active: boolean;
+    target: FakeElement | null;
+    callback: () => void;
+  }> = [];
+  class FakeMutationObserver {
+    private readonly record: (typeof mutationObservers)[number];
+
+    constructor(callback: () => void) {
+      this.record = { active: true, target: null, callback };
+      mutationObservers.push(this.record);
+    }
+
+    observe(target: FakeElement) {
+      this.record.target = target;
+    }
+
+    disconnect() {
+      this.record.active = false;
+      this.record.target = null;
+    }
+  }
   const uuids = [...(options.uuids ?? [])];
+  let now = options.now ?? 1_800_000_000_000;
 
   const fetch = (url: string, init?: Record<string, unknown>) => {
+    if (url.includes("/api/widget/telemetry")) {
+      telemetryRequests.push({ url, init });
+      if (options.telemetryFailure === "throw") {
+        throw new Error("Telemetry unavailable");
+      }
+      if (options.telemetryFailure === "reject") {
+        return Promise.reject(new Error("Telemetry unavailable"));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 202,
+        json: () => Promise.resolve({ accepted: true }),
+      });
+    }
     requests.push({ url, init });
     const queued = responses.shift();
     if (!queued) return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     return Promise.resolve({
       ok: queued.status >= 200 && queued.status < 300,
       status: queued.status,
-      json: () => Promise.resolve(queued.body),
+      json: () => Promise.resolve(JSON.parse(JSON.stringify(queued.body))),
     });
   };
 
   const window = {
     __saWidgetLoaded: false,
+    MutationObserver: FakeMutationObserver,
+    innerWidth: options.width ?? 1_280,
+    innerHeight: options.height ?? 800,
+    scrollY: 0,
+    pageYOffset: 0,
+    matchMedia: (query: string) => ({
+      matches: query.includes("prefers-reduced-motion")
+        ? (options.reducedMotion ?? false)
+        : query.includes("pointer: coarse")
+          ? (options.coarsePointer ?? false)
+          : false,
+    }),
+    visualViewport: {
+      width: options.width ?? 1_280,
+      height: options.visualViewportHeight ?? options.height ?? 800,
+      offsetTop: 0,
+      addEventListener(type: string, listener: EventListener) {
+        const listeners = visualViewportListeners.get(type) ?? [];
+        listeners.push(listener);
+        visualViewportListeners.set(type, listeners);
+      },
+      removeEventListener(type: string, listener: EventListener) {
+        const listeners = visualViewportListeners.get(type) ?? [];
+        visualViewportListeners.set(
+          type,
+          listeners.filter((candidate) => candidate !== listener),
+        );
+      },
+      dispatch(type: string, event: Record<string, unknown> = {}) {
+        for (const listener of visualViewportListeners.get(type) ?? []) {
+          listener(event);
+        }
+      },
+    },
     addEventListener(type: string, listener: EventListener) {
       const listeners = windowListeners.get(type) ?? [];
       listeners.push(listener);
       windowListeners.set(type, listeners);
     },
+    removeEventListener(type: string, listener: EventListener) {
+      const listeners = windowListeners.get(type) ?? [];
+      windowListeners.set(
+        type,
+        listeners.filter((candidate) => candidate !== listener),
+      );
+    },
+    dispatch(type: string, event: Record<string, unknown> = {}) {
+      for (const listener of windowListeners.get(type) ?? []) listener(event);
+    },
   };
   const localStorage = {
-    getItem: (key: string) => storage.get(key) ?? null,
-    setItem: (key: string, value: string) => storage.set(key, value),
+    getItem: (key: string) => {
+      if (options.storageThrows) throw new Error("Storage unavailable");
+      return storage.get(key) ?? null;
+    },
+    setItem: (key: string, value: string) => {
+      if (options.storageThrows) throw new Error("Storage unavailable");
+      storage.set(key, value);
+    },
   };
 
   const execute = new Function(
@@ -364,6 +526,7 @@ async function createHarness(
     "clearTimeout",
     "setInterval",
     "clearInterval",
+    "Date",
     script,
   );
   execute(
@@ -379,9 +542,31 @@ async function createHarness(
     timers.clearTimeout,
     timers.setInterval,
     timers.clearInterval,
+    { now: () => now },
   );
 
-  return { document, requests, script, timers };
+  return {
+    document,
+    requests,
+    script,
+    storage,
+    telemetryRequests,
+    timers,
+    window,
+    advanceTime(milliseconds: number) {
+      now += milliseconds;
+    },
+    notifyBodyClassChange() {
+      for (const observer of mutationObservers) {
+        if (observer.active && observer.target === document.body) {
+          observer.callback();
+        }
+      }
+    },
+    activeMutationObserverCount() {
+      return mutationObservers.filter((observer) => observer.active).length;
+    },
+  };
 }
 
 async function flushPromises() {
@@ -445,6 +630,16 @@ describe("widget embed runtime", () => {
 
     expect(footerLink?.textContent).toBe("Powered by SimplAssist");
     expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    expect(panel?.getAttribute("inert")).toBe("");
+    expect(panel?.inert).toBe(true);
+    expect(harness.script).toContain("visibility:hidden");
+    expect(launcher?.tagName).toBe("button");
+    expect(launcher?.disabled).toBe(true);
+    expect(launcher?.getAttribute("aria-hidden")).toBe("true");
+    expect(launcher?.getAttribute("tabindex")).toBe("-1");
+    expect(launcher?.tabIndex).toBe(-1);
   });
 
   it("keeps partner script branding while routing public traffic through the canonical API", async () => {
@@ -617,6 +812,11 @@ describe("widget embed runtime", () => {
         .querySelector(".sa-widget-btn")
         ?.classList.contains("sa-btn-visible"),
     ).toBe(true);
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    expect(launcher?.disabled).toBe(false);
+    expect(launcher?.getAttribute("aria-hidden")).toBe("false");
+    expect(launcher?.getAttribute("tabindex")).toBe("0");
+    expect(launcher?.tabIndex).toBe(0);
 
     const input = harness.document.querySelector(".sa-widget-input");
     const send = harness.document.querySelector(".sa-widget-send");
@@ -665,6 +865,10 @@ describe("widget embed runtime", () => {
 
     await flushPromises();
     expect(harness.timers.pendingTimeoutDelays()).toContain(750);
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    expect(launcher?.disabled).toBe(true);
+    expect(launcher?.getAttribute("aria-hidden")).toBe("true");
+    expect(launcher?.tabIndex).toBe(-1);
 
     harness.timers.runTimeout(750);
     await flushPromises();
@@ -687,6 +891,9 @@ describe("widget embed runtime", () => {
     expect(harness.document.querySelector(".sa-widget-header-center")?.textContent).toContain(
       "Acme Landscaping",
     );
+    expect(launcher?.disabled).toBe(false);
+    expect(launcher?.getAttribute("aria-hidden")).toBe("false");
+    expect(launcher?.tabIndex).toBe(0);
   });
 
   it("restores a typed message and re-enables send after a transient chat failure", async () => {
@@ -902,6 +1109,10 @@ describe("widget embed runtime", () => {
     expect(panel.classList.contains("sa-visible")).toBe(false);
     expect(container.classList.contains("sa-open")).toBe(false);
     expect(launcher.classList.contains("sa-btn-hidden")).toBe(true);
+    expect(launcher.disabled).toBe(true);
+    expect(launcher.getAttribute("aria-hidden")).toBe("true");
+    expect(launcher.getAttribute("tabindex")).toBe("-1");
+    expect(launcher.tabIndex).toBe(-1);
   });
 
   it("fails closed when a public config omits its signed session credential", async () => {
@@ -914,6 +1125,9 @@ describe("widget embed runtime", () => {
     const launcher = harness.document.querySelector(".sa-widget-btn");
     expect(launcher === null || launcher.classList.contains("sa-btn-hidden"))
       .toBe(true);
+    expect(launcher?.disabled).toBe(true);
+    expect(launcher?.getAttribute("aria-hidden")).toBe("true");
+    expect(launcher?.tabIndex).toBe(-1);
     expect(harness.requests).toHaveLength(1);
   });
 
@@ -993,5 +1207,1133 @@ describe("widget embed runtime", () => {
     expect(harness.requests[2]?.url).toBe(
       "https://api.simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000004",
     );
+  });
+
+  it("reveals on desktop at the eight-second dwell without creating a conversation", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactive_invitation_enabled: true },
+      },
+    ]);
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const input = harness.document.querySelector(".sa-widget-input");
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    if (!panel || !input || !launcher) throw new Error("Widget shell was not rendered");
+
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(8_000);
+
+    harness.timers.runTimeout(8_000);
+
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(false);
+    expect(input.focused).toBe(false);
+    expect(launcher.getAttribute("aria-expanded")).toBe("true");
+    expect(panel.getAttribute("aria-hidden")).toBe("false");
+    expect(panel.getAttribute("inert")).toBeNull();
+    expect(panel.inert).toBe(false);
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.storage.get("sa-proactive-v1-shown-business-123")).toBe(
+      "1800000000000",
+    );
+    expect(harness.telemetryRequests).toHaveLength(2);
+    expect(requestJsonBody(harness.telemetryRequests[0])).toMatchObject({
+      eventType: "widget_loaded",
+      source: "widget_load",
+      deviceBucket: "desktop",
+    });
+    expect(requestJsonBody(harness.telemetryRequests[1])).toEqual({
+      businessId: "business-123",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      sessionNonce: "abcdefghijklmnopqrstuvwx",
+      eventType: "invitation_shown",
+      source: "proactive_timer",
+      deviceBucket: "desktop",
+      promptVersion: 1,
+    });
+  });
+
+  it("records widget_loaded once for repeated public config refreshes in one session", async () => {
+    const harness = await createHarness([
+      { status: 200, body: availableConfig },
+      { status: 200, body: availableConfig },
+    ]);
+    await flushPromises();
+    harness.timers.runInterval(60_000);
+    await flushPromises();
+
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "widget_loaded"),
+    ).toHaveLength(1);
+  });
+
+  it("honors the desktop scroll trigger but never before five active seconds", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!panel) throw new Error("Widget panel was not rendered");
+    harness.window.scrollY = 360;
+    harness.window.dispatch("scroll");
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+
+    harness.timers.runTimeout(5_000);
+
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(harness.requests).toHaveLength(1);
+    expect(requestJsonBody(harness.telemetryRequests[1]).source).toBe(
+      "proactive_scroll",
+    );
+  });
+
+  it("uses a compact mobile sheet after twelve seconds and expands only on interaction", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 375, height: 800 },
+    );
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const input = harness.document.querySelector(".sa-widget-input");
+    const close = harness.document.querySelector(".sa-widget-close");
+    if (!panel || !input || !close) throw new Error("Widget controls were not rendered");
+
+    expect(harness.timers.pendingTimeoutDelays()).toContain(8_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(12_000);
+    harness.timers.runTimeout(12_000);
+
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(true);
+    expect(panel.classList.contains("sa-mobile-expanded")).toBe(false);
+    expect(panel.classList.contains("sa-viewport-constrained")).toBe(false);
+    expect(panel.style["--sa-mobile-compact-height"]).toBe("384px");
+    expect(input.focused).toBe(false);
+    expect(close.focused).toBe(false);
+    expect(harness.document.activeElement).toBeNull();
+    expect(harness.requests).toHaveLength(1);
+
+    const controlPointerPrevented = vi.fn();
+    panel.dispatch("pointerdown", {
+      target: input,
+      button: 0,
+      isPrimary: true,
+      preventDefault: controlPointerPrevented,
+    });
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(true);
+    expect(controlPointerPrevented).not.toHaveBeenCalled();
+
+    input.focus();
+
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(false);
+    expect(panel.classList.contains("sa-mobile-expanded")).toBe(true);
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.telemetryRequests.map(requestJsonBody)).toMatchObject([
+      {
+        eventType: "widget_loaded",
+        source: "widget_load",
+        deviceBucket: "mobile",
+      },
+      {
+        eventType: "invitation_shown",
+        source: "proactive_timer",
+        deviceBucket: "mobile",
+      },
+      {
+        eventType: "widget_engaged",
+        source: "proactive_timer",
+        deviceBucket: "mobile",
+      },
+    ]);
+
+    harness.window.visualViewport.height = 500;
+    harness.window.visualViewport.dispatch("resize");
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(false);
+    expect(panel.classList.contains("sa-mobile-expanded")).toBe(true);
+  });
+
+  it("moves manual mobile-open focus to the close control without opening the keyboard", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: {
+            ...availableConfig,
+            leadCaptureEnabled: true,
+            leadCaptureTiming: "start",
+          },
+        },
+      ],
+      { width: 390, height: 800 },
+    );
+    await flushPromises();
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const close = harness.document.querySelector(".sa-widget-close");
+    const input = harness.document.querySelector(".sa-widget-input");
+    if (!launcher || !panel || !close || !input) {
+      throw new Error("Widget controls were not rendered");
+    }
+    launcher.focus();
+    launcher.dispatch("click");
+
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(panel.classList.contains("sa-mobile-expanded")).toBe(true);
+    expect(close.focused).toBe(true);
+    expect(harness.document.activeElement).toBe(close);
+    expect(input.focused).toBe(false);
+    expect(harness.document.querySelector(".sa-widget-lead-form")).not.toBeNull();
+  });
+
+  it("focuses the first start-timed lead field on a manual desktop open", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: {
+          ...availableConfig,
+          leadCaptureEnabled: true,
+          leadCaptureTiming: "start",
+        },
+      },
+    ]);
+    await flushPromises();
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const input = harness.document.querySelector(".sa-widget-input");
+    if (!launcher || !input) throw new Error("Widget controls were not rendered");
+    launcher.focus();
+    launcher.dispatch("click");
+
+    const leadForm = harness.document.querySelector(".sa-widget-lead-form");
+    const firstLeadInput = leadForm?.querySelector(".sa-widget-lead-input");
+    expect(leadForm).not.toBeNull();
+    expect(firstLeadInput?.focused).toBe(true);
+    expect(harness.document.activeElement).toBe(firstLeadInput);
+    expect(input.focused).toBe(false);
+  });
+
+  it("uses the mobile scroll threshold only after its eight-second minimum", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 390, height: 800 },
+    );
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!panel) throw new Error("Widget panel was not rendered");
+    harness.window.scrollY = 480;
+    harness.window.dispatch("scroll");
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+
+    harness.timers.runTimeout(8_000);
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(true);
+  });
+
+  it("treats a coarse-pointer phone in landscape as mobile without overflowing", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 844, height: 390, coarsePointer: true },
+    );
+    await flushPromises();
+
+    expect(harness.timers.pendingTimeoutDelays()).toContain(8_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(12_000);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(5_000);
+    harness.timers.runTimeout(12_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    expect(panel?.classList.contains("sa-mobile-compact")).toBe(true);
+    expect(panel?.classList.contains("sa-viewport-constrained")).toBe(false);
+    expect(panel?.style["--sa-mobile-compact-height"]).toBe("260px");
+    expect(panel?.style.width).toBe("min(560px, calc(100vw - 24px))");
+    expect(requestJsonBody(harness.telemetryRequests.at(-1)).deviceBucket).toBe(
+      "mobile",
+    );
+    expect(harness.script).toContain(
+      "(max-height:500px) and (max-width:950px) and (pointer:coarse)",
+    );
+  });
+
+  it("uses the constrained visual viewport fallback for a genuinely tiny landscape phone", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 844, height: 350, coarsePointer: true },
+    );
+    await flushPromises();
+    harness.timers.runTimeout(12_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    expect(panel?.classList.contains("sa-viewport-constrained")).toBe(true);
+    expect(panel?.style.width).toBe("100vw");
+    expect(panel?.style["--sa-visual-height"]).toBe("350px");
+  });
+
+  it("shows the welcome at the top on a short-landscape automatic open while manual opens keep the bottom", async () => {
+    const automaticHarness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      {
+        width: 844,
+        height: 390,
+        coarsePointer: true,
+        reducedMotion: true,
+      },
+    );
+    await flushPromises();
+
+    const automaticMessages = automaticHarness.document.querySelector(
+      ".sa-widget-messages",
+    );
+    if (!automaticMessages) throw new Error("Widget messages were not rendered");
+    automaticMessages.scrollHeight = 1_000;
+    while (automaticHarness.timers.pendingTimeoutDelays().includes(50)) {
+      automaticHarness.timers.runTimeout(50);
+    }
+    automaticMessages.scrollTop = 1_000;
+
+    automaticHarness.timers.runTimeout(12_000);
+
+    expect(automaticMessages.scrollTop).toBe(0);
+    automaticMessages.scrollTop = 700;
+    automaticHarness.timers.runTimeout(50);
+    expect(automaticMessages.scrollTop).toBe(0);
+
+    const manualHarness = await createHarness(
+      [{ status: 200, body: availableConfig }],
+      {
+        width: 844,
+        height: 390,
+        coarsePointer: true,
+        reducedMotion: true,
+      },
+    );
+    await flushPromises();
+
+    const manualMessages = manualHarness.document.querySelector(
+      ".sa-widget-messages",
+    );
+    const launcher = manualHarness.document.querySelector(".sa-widget-btn");
+    if (!manualMessages || !launcher) {
+      throw new Error("Manual widget controls were not rendered");
+    }
+    manualMessages.scrollHeight = 1_000;
+    while (manualHarness.timers.pendingTimeoutDelays().includes(50)) {
+      manualHarness.timers.runTimeout(50);
+    }
+    manualMessages.scrollTop = 0;
+
+    launcher.dispatch("click");
+    manualHarness.timers.runTimeout(50);
+
+    expect(manualMessages.scrollTop).toBe(1_000);
+  });
+
+  it("keeps an ordinary short fine-pointer desktop window on desktop behavior", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 844, height: 390, coarsePointer: false },
+    );
+    await flushPromises();
+
+    expect(harness.timers.pendingTimeoutDelays()).toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(8_000);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(12_000);
+    harness.timers.runTimeout(8_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    expect(panel?.classList.contains("sa-mobile-compact")).toBe(false);
+    expect(panel?.style.width).toBe("");
+    expect(requestJsonBody(harness.telemetryRequests.at(-1)).deviceBucket).toBe(
+      "desktop",
+    );
+  });
+
+  it("does not expose start-timed lead capture until the visitor intentionally engages", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: {
+            ...availableConfig,
+            proactiveInvitationEnabled: true,
+            leadCaptureEnabled: true,
+            leadCaptureTiming: "start",
+          },
+        },
+      ],
+      { width: 390, height: 800 },
+    );
+    await flushPromises();
+
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBeNull();
+    harness.timers.runTimeout(12_000);
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBeNull();
+    expect(harness.requests).toHaveLength(1);
+
+    const input = harness.document.querySelector(".sa-widget-input");
+    input?.focus();
+
+    const leadForm = harness.document.querySelector(".sa-widget-lead-form");
+    const firstLeadInput = leadForm?.querySelector(".sa-widget-lead-input");
+    expect(leadForm).not.toBeNull();
+    expect(firstLeadInput).not.toBeNull();
+    expect(firstLeadInput?.focused).toBe(true);
+    expect(harness.document.activeElement).toBe(firstLeadInput);
+    expect(harness.requests).toHaveLength(1);
+  });
+
+  it("moves keyboard focus from an activated quick reply into the start-timed lead form", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: {
+            ...availableConfig,
+            proactiveInvitationEnabled: true,
+            quickReplies: ["Book an appointment"],
+            leadCaptureEnabled: true,
+            leadCaptureTiming: "start",
+          },
+        },
+      ],
+      { reducedMotion: true },
+    );
+    await flushPromises();
+    harness.timers.runTimeout(8_000);
+
+    const quickReply = harness.document.querySelector(
+      ".sa-widget-quick-reply-btn",
+    );
+    if (!quickReply) throw new Error("Quick reply was not rendered");
+    expect(harness.document.activeElement).toBeNull();
+    quickReply.focus();
+    quickReply.dispatch("click");
+
+    const leadForm = harness.document.querySelector(".sa-widget-lead-form");
+    const firstLeadInput = leadForm?.querySelector(".sa-widget-lead-input");
+    expect(leadForm).not.toBeNull();
+    expect(firstLeadInput?.focused).toBe(true);
+    expect(harness.document.activeElement).toBe(firstLeadInput);
+  });
+
+  it("pauses dwell time while hidden and resumes with only active time remaining", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!panel) throw new Error("Widget panel was not rendered");
+    harness.advanceTime(2_000);
+    harness.document.visibilityState = "hidden";
+    harness.document.dispatch("visibilitychange");
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+
+    harness.advanceTime(20_000);
+    harness.document.visibilityState = "visible";
+    harness.document.dispatch("visibilitychange");
+    expect(harness.timers.pendingTimeoutDelays()).toContain(3_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(6_000);
+
+    harness.timers.runTimeout(6_000);
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+  });
+
+  it("pauses a homepage-only invitation off-route and resumes only its remaining active time", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { homepageOnly: true, homepageRouteVisible: true },
+    );
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!panel) throw new Error("Widget panel was not rendered");
+    expect(harness.activeMutationObserverCount()).toBe(1);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(8_000);
+
+    harness.advanceTime(2_000);
+    harness.document.body.classList.remove("sa-homepage-widget-route");
+    harness.notifyBodyClassChange();
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+
+    harness.window.scrollY = 1_200;
+    harness.window.dispatch("scroll");
+    harness.advanceTime(20_000);
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(harness.storage.has("sa-proactive-v1-shown-business-123")).toBe(false);
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "invitation_shown"),
+    ).toHaveLength(0);
+
+    harness.document.body.classList.add("sa-homepage-widget-route");
+    harness.notifyBodyClassChange();
+    expect(harness.timers.pendingTimeoutDelays()).toContain(3_000);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(6_000);
+
+    harness.timers.runTimeout(3_000);
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    harness.timers.runTimeout(6_000);
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "invitation_shown"),
+    ).toHaveLength(1);
+    expect(harness.activeMutationObserverCount()).toBe(0);
+  });
+
+  it("defers homepage-only loaded telemetry when navigation hides the route during config load", async () => {
+    const harness = await createHarness(
+      [{ status: 200, body: availableConfig }],
+      { homepageOnly: true, homepageRouteVisible: true },
+    );
+
+    harness.document.body.classList.remove("sa-homepage-widget-route");
+    harness.notifyBodyClassChange();
+    await flushPromises();
+
+    expect(harness.telemetryRequests).toHaveLength(0);
+    expect(harness.activeMutationObserverCount()).toBe(1);
+
+    harness.document.body.classList.add("sa-homepage-widget-route");
+    harness.notifyBodyClassChange();
+
+    expect(harness.telemetryRequests.map(requestJsonBody)).toMatchObject([
+      { eventType: "widget_loaded", source: "widget_load" },
+    ]);
+    expect(harness.activeMutationObserverCount()).toBe(0);
+
+    harness.notifyBodyClassChange();
+    expect(harness.telemetryRequests).toHaveLength(1);
+  });
+
+  it("defers the reveal while the visitor types or another modal is open", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!panel) throw new Error("Widget panel was not rendered");
+    const outsideInput = harness.document.createElement("input");
+    harness.document.body.appendChild(outsideInput);
+    outsideInput.focus();
+    harness.timers.runTimeout(8_000);
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(harness.timers.pendingTimeoutDelays()).toContain(1_000);
+
+    harness.document.activeElement = harness.document.body;
+    const modal = harness.document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    harness.document.body.appendChild(modal);
+    harness.timers.runTimeout(1_000);
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+
+    modal.remove();
+    harness.timers.runTimeout(1_000);
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+  });
+
+  it("treats every valid focused contenteditable shape and inherited editor as typing", async () => {
+    const variants = [
+      "empty-attribute",
+      "plaintext-only",
+      "inherited-descendant",
+      "dom-property",
+      "focused-iframe",
+    ] as const;
+
+    for (const variant of variants) {
+      const harness = await createHarness([
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ]);
+      await flushPromises();
+      const panel = harness.document.querySelector(".sa-widget-panel");
+      if (!panel) throw new Error("Widget panel was not rendered");
+
+      let editor = harness.document.createElement("div");
+      let focusTarget = editor;
+      if (variant === "empty-attribute") {
+        editor.setAttribute("contenteditable", "");
+      } else if (variant === "plaintext-only") {
+        editor.setAttribute("contenteditable", "plaintext-only");
+      } else if (variant === "inherited-descendant") {
+        editor.setAttribute("contenteditable", "true");
+        focusTarget = harness.document.createElement("span");
+        editor.appendChild(focusTarget);
+      } else if (variant === "dom-property") {
+        editor.isContentEditable = true;
+      } else {
+        editor = harness.document.createElement("iframe");
+        focusTarget = editor;
+      }
+      harness.document.body.appendChild(editor);
+      focusTarget.focus();
+
+      harness.timers.runTimeout(8_000);
+      expect(panel.classList.contains("sa-hidden"), variant).toBe(true);
+      expect(
+        harness.telemetryRequests
+          .map(requestJsonBody)
+          .some((body) => body.eventType === "invitation_shown"),
+        variant,
+      ).toBe(false);
+
+      harness.document.activeElement = harness.document.body;
+      harness.timers.runTimeout(1_000);
+      expect(panel.classList.contains("sa-visible"), variant).toBe(true);
+    }
+  });
+
+  it("expands and records engagement for a non-control panel pointer only once", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: {
+            ...availableConfig,
+            proactiveInvitationEnabled: true,
+            leadCaptureEnabled: true,
+            leadCaptureTiming: "start",
+          },
+        },
+      ],
+      { width: 390, height: 800 },
+    );
+    await flushPromises();
+    harness.timers.runTimeout(12_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const header = harness.document.querySelector(".sa-widget-header-center");
+    const messageArea = harness.document.querySelector(".sa-widget-messages");
+    const input = harness.document.querySelector(".sa-widget-input");
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+    if (!panel || !header || !messageArea || !input || !footerLink) {
+      throw new Error("Widget panel content was not rendered");
+    }
+
+    const linkPreventDefault = vi.fn();
+    const linkStopPropagation = vi.fn();
+    panel.dispatch("pointerdown", {
+      target: footerLink,
+      button: 0,
+      isPrimary: true,
+      preventDefault: linkPreventDefault,
+      stopPropagation: linkStopPropagation,
+    });
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(true);
+    expect(linkPreventDefault).not.toHaveBeenCalled();
+    expect(linkStopPropagation).not.toHaveBeenCalled();
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    panel.dispatch("pointerdown", {
+      target: header,
+      button: 0,
+      isPrimary: true,
+      preventDefault,
+      stopPropagation,
+    });
+
+    expect(panel.classList.contains("sa-mobile-compact")).toBe(false);
+    expect(panel.classList.contains("sa-mobile-expanded")).toBe(true);
+    expect(harness.document.querySelector(".sa-widget-lead-form")).toBeNull();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "widget_engaged"),
+    ).toHaveLength(1);
+
+    panel.dispatch("pointerdown", {
+      target: messageArea,
+      button: 0,
+      isPrimary: true,
+    });
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "widget_engaged"),
+    ).toHaveLength(1);
+
+    input.focus();
+    expect(harness.document.querySelector(".sa-widget-lead-form")).not.toBeNull();
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .filter((body) => body.eventType === "widget_engaged"),
+    ).toHaveLength(1);
+  });
+
+  it("suppresses repeat invitations for 24 hours and explicit dismissals for seven days", async () => {
+    const now = 1_800_000_000_000;
+    const shownHarness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      {
+        now,
+        storage: {
+          "sa-proactive-v1-shown-business-123": String(now - 60_000),
+        },
+      },
+    );
+    await flushPromises();
+    expect(shownHarness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+
+    const dismissalHarness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { now },
+    );
+    await flushPromises();
+    dismissalHarness.timers.runTimeout(8_000);
+    const close = dismissalHarness.document.querySelector(".sa-widget-close");
+    const panel = dismissalHarness.document.querySelector(".sa-widget-panel");
+    if (!close || !panel) throw new Error("Widget close control was not rendered");
+    const closePreventDefault = vi.fn();
+    const closeStopPropagation = vi.fn();
+    panel.dispatch("pointerdown", {
+      target: close,
+      button: 0,
+      isPrimary: true,
+      preventDefault: closePreventDefault,
+      stopPropagation: closeStopPropagation,
+    });
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(closePreventDefault).not.toHaveBeenCalled();
+    expect(closeStopPropagation).not.toHaveBeenCalled();
+    close.focus();
+    close.dispatch("click");
+
+    expect(dismissalHarness.storage.get("sa-proactive-v1-dismissed-business-123"))
+      .toBe(String(now));
+    expect(panel.getAttribute("inert")).toBe("");
+    expect(panel.inert).toBe(true);
+    expect(
+      dismissalHarness.document.querySelector(".sa-widget-btn")?.focused,
+    ).toBe(true);
+    expect(dismissalHarness.telemetryRequests.map(requestJsonBody)).toMatchObject([
+      { eventType: "widget_loaded", source: "widget_load" },
+      { eventType: "invitation_shown", source: "proactive_timer" },
+      { eventType: "invitation_dismissed", source: "proactive_timer" },
+    ]);
+    expect(
+      dismissalHarness.telemetryRequests
+        .map(requestJsonBody)
+        .some((body) => body.eventType === "widget_engaged"),
+    ).toBe(false);
+    dismissalHarness.window.scrollY = 1_000;
+    dismissalHarness.window.dispatch("scroll");
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+
+    const suppressedHarness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      {
+        now: now + 2 * 24 * 60 * 60 * 1_000,
+        storage: Object.fromEntries(dismissalHarness.storage),
+      },
+    );
+    await flushPromises();
+    expect(suppressedHarness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+  });
+
+  it("rechecks shared storage immediately before revealing in a second tab", async () => {
+    const now = 1_800_000_000_000;
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { now },
+    );
+    await flushPromises();
+
+    harness.storage.set("sa-proactive-v1-shown-business-123", String(now));
+    harness.timers.runTimeout(8_000);
+
+    expect(harness.document.querySelector(".sa-widget-panel")?.classList.contains("sa-hidden"))
+      .toBe(true);
+    expect(
+      harness.telemetryRequests
+        .map(requestJsonBody)
+        .some((body) => body.eventType === "invitation_shown"),
+    ).toBe(false);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(5_000);
+  });
+
+  it.each([
+    "sa-proactive-v1-shown-business-123",
+    "sa-proactive-v1-dismissed-business-123",
+  ])("cancels pending scheduling when another tab updates %s", async (key) => {
+    const now = 1_800_000_000_000;
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { now },
+    );
+    await flushPromises();
+
+    harness.storage.set(key, String(now));
+    harness.window.dispatch("storage", { key, newValue: String(now) });
+
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+    expect(harness.document.querySelector(".sa-widget-panel")?.classList.contains("sa-hidden"))
+      .toBe(true);
+  });
+
+  it("keeps manual opening available while cancelling the pending automatic reveal", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    if (!launcher || !panel) throw new Error("Widget shell was not rendered");
+    launcher.dispatch("click");
+
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(5_000);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.telemetryRequests.map(requestJsonBody)).toMatchObject([
+      { eventType: "widget_loaded", source: "widget_load" },
+      { eventType: "widget_engaged", source: "manual" },
+    ]);
+  });
+
+  it("records the first real message once without including visitor content in telemetry", async () => {
+    const harness = await createHarness([
+      { status: 200, body: availableConfig },
+      { status: 200, body: { available: true, response: "We can help." } },
+    ]);
+    await flushPromises();
+
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!launcher || !input || !send) throw new Error("Widget controls were not rendered");
+    launcher.dispatch("click");
+    input.value = "This text must never enter telemetry";
+    send.dispatch("click");
+    await flushPromises();
+
+    expect(harness.telemetryRequests.map(requestJsonBody)).toMatchObject([
+      { eventType: "widget_loaded", source: "widget_load" },
+      { eventType: "widget_engaged", source: "manual" },
+      { eventType: "first_message_submitted", source: "manual" },
+    ]);
+    for (const request of harness.telemetryRequests) {
+      const serialized = JSON.stringify(requestJsonBody(request));
+      expect(serialized).not.toContain("This text must never enter telemetry");
+      expect(request.init?.keepalive).toBe(true);
+      expect(
+        (request.init?.headers as Record<string, string>).Authorization,
+      ).toBe("Bearer test-widget-token");
+    }
+    expect(harness.requests.filter((request) => request.url.includes("/chat")))
+      .toHaveLength(1);
+  });
+
+  it("fails open for the invitation when browser storage is unavailable", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { storageThrows: true },
+    );
+    await flushPromises();
+
+    harness.timers.runTimeout(8_000);
+    expect(harness.document.querySelector(".sa-widget-panel")?.classList.contains("sa-visible"))
+      .toBe(true);
+    expect(harness.requests).toHaveLength(1);
+  });
+
+  it("keeps invitation and chat behavior independent from telemetry failures", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { telemetryFailure: "throw" },
+    );
+    await flushPromises();
+
+    harness.timers.runTimeout(8_000);
+    expect(harness.document.querySelector(".sa-widget-panel")?.classList.contains("sa-visible"))
+      .toBe(true);
+    expect(harness.requests).toHaveLength(1);
+  });
+
+  it("uses a visual-viewport full-screen fallback only under keyboard or tiny constraints", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { width: 320, height: 568, visualViewportHeight: 320 },
+    );
+    await flushPromises();
+
+    harness.timers.runTimeout(12_000);
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    expect(panel?.classList.contains("sa-viewport-constrained")).toBe(true);
+    expect(panel?.style["--sa-visual-height"]).toBe("320px");
+  });
+
+  it("supports reduced motion, nonmodal semantics, and Escape dismissal", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: { ...availableConfig, proactiveInvitationEnabled: true },
+        },
+      ],
+      { reducedMotion: true },
+    );
+    await flushPromises();
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    if (!panel || !launcher) throw new Error("Widget shell was not rendered");
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-modal")).toBe("false");
+    expect(panel.getAttribute("aria-labelledby")).toBe("sa-widget-title");
+    expect(harness.document.querySelector(".sa-widget-messages")?.textContent)
+      .toContain("How can we help?");
+
+    harness.timers.runTimeout(8_000);
+    harness.document.dispatch("keydown", {
+      key: "Escape",
+      preventDefault: vi.fn(),
+    });
+
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(launcher.getAttribute("aria-expanded")).toBe("false");
+    expect(launcher.focused).toBe(true);
+  });
+
+  it("leaves Escape untouched for a visible host modal or active host combobox", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+    harness.timers.runTimeout(8_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    if (!panel || !launcher) throw new Error("Widget shell was not rendered");
+
+    const modal = harness.document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    const modalButton = harness.document.createElement("button");
+    modal.appendChild(modalButton);
+    harness.document.body.appendChild(modal);
+    const modalPreventDefault = vi.fn();
+    harness.document.dispatch("keydown", {
+      key: "Escape",
+      target: modalButton,
+      preventDefault: modalPreventDefault,
+    });
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(modalPreventDefault).not.toHaveBeenCalled();
+    expect(launcher.focused).toBe(false);
+
+    modal.remove();
+    const combobox = harness.document.createElement("input");
+    combobox.setAttribute("role", "combobox");
+    combobox.setAttribute("aria-expanded", "true");
+    harness.document.body.appendChild(combobox);
+    const comboboxPreventDefault = vi.fn();
+    harness.document.dispatch("keydown", {
+      key: "Escape",
+      target: combobox,
+      preventDefault: comboboxPreventDefault,
+    });
+    expect(panel.classList.contains("sa-visible")).toBe(true);
+    expect(comboboxPreventDefault).not.toHaveBeenCalled();
+    expect(launcher.focused).toBe(false);
+
+    const pagePreventDefault = vi.fn();
+    harness.document.dispatch("keydown", {
+      key: "Escape",
+      target: harness.document.body,
+      preventDefault: pagePreventDefault,
+    });
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(pagePreventDefault).toHaveBeenCalledTimes(1);
+    expect(launcher.focused).toBe(true);
+  });
+
+  it("handles Escape from inside the widget when no host overlay owns it", async () => {
+    const harness = await createHarness([
+      {
+        status: 200,
+        body: { ...availableConfig, proactiveInvitationEnabled: true },
+      },
+    ]);
+    await flushPromises();
+    harness.timers.runTimeout(8_000);
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const launcher = harness.document.querySelector(".sa-widget-btn");
+    const input = harness.document.querySelector(".sa-widget-input");
+    if (!panel || !launcher || !input) throw new Error("Widget controls were not rendered");
+    input.focus();
+    const preventDefault = vi.fn();
+    harness.document.dispatch("keydown", {
+      key: "Escape",
+      target: input,
+      preventDefault,
+    });
+
+    expect(panel.classList.contains("sa-hidden")).toBe(true);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(launcher.focused).toBe(true);
+  });
+
+  it("forces a no-wait, no-focus invitation only inside the authenticated preview", async () => {
+    const harness = await createHarness(
+      [{ status: 200, body: availableConfig }],
+      { preview: true, width: 390, height: 800 },
+    );
+    await flushPromises();
+
+    harness.window.dispatch("message", {
+      data: {
+        source: "simplassist-widget-preview",
+        type: "apply-preview",
+        payload: {
+          proactiveInvitationEnabled: true,
+          forceProactiveInvitationOpen: true,
+        },
+      },
+    });
+
+    const panel = harness.document.querySelector(".sa-widget-panel");
+    const input = harness.document.querySelector(".sa-widget-input");
+    expect(panel?.classList.contains("sa-visible")).toBe(true);
+    expect(panel?.classList.contains("sa-mobile-compact")).toBe(true);
+    expect(input?.focused).toBe(false);
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.storage.has("sa-proactive-v1-shown-business-123")).toBe(false);
+  });
+
+  it("ignores preview-control messages in a public embed", async () => {
+    const harness = await createHarness([{ status: 200, body: availableConfig }]);
+    await flushPromises();
+
+    harness.window.dispatch("message", {
+      data: {
+        source: "simplassist-widget-preview",
+        type: "apply-preview",
+        payload: {
+          proactiveInvitationEnabled: true,
+          forceProactiveInvitationOpen: true,
+        },
+      },
+    });
+
+    expect(harness.document.querySelector(".sa-widget-panel")?.classList.contains("sa-hidden"))
+      .toBe(true);
+    expect(harness.timers.pendingTimeoutDelays()).not.toContain(8_000);
+    expect(harness.requests).toHaveLength(1);
   });
 });

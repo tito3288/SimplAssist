@@ -18,9 +18,5 @@ export default async function Page() {
     redirect("/login");
   }
 
-  return (
-    <HomePage
-      chatOnlyPublicLaunchEnabled={isChatOnlyPublicLaunchEnabled()}
-    />
-  );
+  return <HomePage />;
 }

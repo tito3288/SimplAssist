@@ -26,6 +26,7 @@ export default function WidgetPageClient({
     show_logo: config.show_logo,
     logo_url: config.logo_url || '',
     welcome_message: config.welcome_message,
+    proactive_invitation_enabled: config.proactive_invitation_enabled,
     lead_capture_enabled: config.lead_capture_enabled,
     lead_capture_timing: config.lead_capture_timing,
     quick_replies: config.quick_replies || [],

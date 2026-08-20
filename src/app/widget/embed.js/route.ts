@@ -87,6 +87,34 @@ export async function GET() {
   var CONFIG_RETRY_DELAYS = [750, 1500, 3000];
   var configRetryAttempt = 0;
   var CONFIG_REFRESH_INTERVAL = 60 * 1000;
+  var PROACTIVE_STORAGE_VERSION = 'v1';
+  var proactiveShownKey = 'sa-proactive-' + PROACTIVE_STORAGE_VERSION + '-shown-' + businessId;
+  var proactiveDismissedKey = 'sa-proactive-' + PROACTIVE_STORAGE_VERSION + '-dismissed-' + businessId;
+  var PROACTIVE_SHOWN_TTL = 24 * 60 * 60 * 1000;
+  var PROACTIVE_DISMISSED_TTL = 7 * 24 * 60 * 60 * 1000;
+  var proactiveFinishedThisVisit = false;
+  var proactiveAutoOpened = false;
+  var proactiveIsMobile = false;
+  var proactiveScrollReached = false;
+  var proactiveMinRemaining = 0;
+  var proactiveDelayRemaining = 0;
+  var proactiveActiveSince = null;
+  var proactiveMinTimer = null;
+  var proactiveDelayTimer = null;
+  var proactiveBlockedRetryTimer = null;
+  var proactiveListenersAttached = false;
+  var proactiveRouteObserver = null;
+  var proactiveSchedulingStarted = false;
+  var visitorIntentionalInteraction = false;
+  var proactivePendingTriggerSource = null;
+  var proactiveOpenedSource = null;
+  var widgetEngagementSource = null;
+  var widgetLoadedTelemetrySent = false;
+  var widgetEngagementTelemetrySent = false;
+  var firstMessageTelemetrySent = false;
+  var prefersReducedMotion = !!(
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -110,13 +138,13 @@ export async function GET() {
   var style = document.createElement('style');
   style.textContent = [
     '.sa-widget-container{position:fixed;z-index:2147483647;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;}',
-    '.sa-widget-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
+    '.sa-widget-btn{width:60px;height:60px;padding:0;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:transform 0.2s,box-shadow 0.2s;position:relative;}',
     '.sa-widget-btn:hover{transform:scale(1.05);box-shadow:0 6px 16px rgba(0,0,0,0.2);}',
     '.sa-widget-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;}',
     '.sa-widget-attention-dot{position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;background:#ef4444;display:none;}',
     '.sa-widget-panel{--sa-brand:#0066FF;width:400px;height:auto;min-height:260px;max-height:500px;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,0.14);display:flex;flex-direction:column;background:#fff;position:absolute;bottom:72px;transition:opacity 0.25s,transform 0.25s;transform-origin:bottom;}',
-    '.sa-widget-panel.sa-hidden{opacity:0;transform:translateY(12px) scale(0.95);pointer-events:none;}',
-    '.sa-widget-panel.sa-visible{opacity:1;transform:translateY(0) scale(1);}',
+    '.sa-widget-panel.sa-hidden{opacity:0;visibility:hidden;transform:translateY(12px) scale(0.95);pointer-events:none;}',
+    '.sa-widget-panel.sa-visible{opacity:1;visibility:visible;transform:translateY(0) scale(1);}',
     '.sa-widget-header{padding:14px 16px;color:#fff;display:flex;align-items:center;gap:12px;flex-shrink:0;}',
     '.sa-widget-header-avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,0.22);position:relative;}',
     '.sa-widget-header-avatar img{width:100%;height:100%;object-fit:cover;display:block;}',
@@ -127,7 +155,7 @@ export async function GET() {
     '.sa-widget-header-subtitle{margin:4px 0 0;font-size:12px;font-weight:400;opacity:0.92;line-height:1.3;}',
     '.sa-widget-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}',
     '.sa-widget-status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(255,255,255,0.35);flex-shrink:0;}',
-    '.sa-widget-close{background:none;border:none;color:#fff;cursor:pointer;padding:4px 6px;opacity:0.9;font-size:22px;line-height:1;}',
+    '.sa-widget-close{width:44px;height:44px;background:none;border:none;color:#fff;cursor:pointer;padding:0;opacity:0.9;font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;}',
     '.sa-widget-close:hover{opacity:1;}',
     '.sa-widget-messages{flex:1 1 auto;align-self:stretch;overflow-y:auto;min-height:0;max-height:calc(500px - 200px);padding:16px;display:flex;flex-direction:column;gap:10px;background:#fff;}',
     '.sa-widget-msg{max-width:85%;padding:12px 14px;border-radius:14px;word-wrap:break-word;font-size:14px;line-height:1.45;}',
@@ -155,7 +183,9 @@ export async function GET() {
     '.sa-widget-lead-skip{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:12px;text-align:center;}',
     '.sa-widget-lead-status{min-height:18px;margin:0!important;font-size:12px!important;color:#6b7280!important;text-align:left!important;}',
     '.sa-widget-lead-status.sa-widget-lead-error{color:#b91c1c!important;}',
-    '@media(max-width:500px){.sa-widget-panel{width:100vw;height:100vh;max-height:none;min-height:0;position:fixed;top:0;left:0;bottom:auto;border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
+    '@media(max-width:600px), (max-height:500px) and (max-width:950px) and (pointer:coarse){.sa-widget-panel{width:auto;min-width:0;min-height:0;height:var(--sa-mobile-expanded-height,78dvh);max-height:var(--sa-mobile-expanded-height,78dvh);position:fixed;top:auto;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));bottom:calc(max(12px,env(safe-area-inset-bottom)) + var(--sa-vv-bottom-offset,0px));border-radius:18px;transform-origin:bottom center;}.sa-widget-panel.sa-mobile-compact{height:var(--sa-mobile-compact-height,48dvh);max-height:var(--sa-mobile-compact-height,48dvh);}.sa-widget-panel.sa-mobile-expanded{height:var(--sa-mobile-expanded-height,78dvh);max-height:var(--sa-mobile-expanded-height,78dvh);}.sa-widget-panel.sa-viewport-constrained{inset:var(--sa-vv-offset-top,0px) 0 auto 0;width:100vw;height:var(--sa-visual-height,100dvh);max-height:var(--sa-visual-height,100dvh);border-radius:0;}.sa-widget-messages{max-height:none;flex:1;min-height:0;padding-bottom:max(16px,env(safe-area-inset-bottom));}.sa-widget-container.sa-open .sa-widget-btn{display:none;}}',
+    '@media(min-width:601px) and (max-width:950px) and (max-height:500px) and (pointer:coarse){.sa-widget-panel:not(.sa-viewport-constrained){width:min(560px,calc(100vw - 24px));}}',
+    '@media(prefers-reduced-motion:reduce){.sa-widget-panel,.sa-widget-btn,.sa-widget-send,.sa-widget-end,.sa-widget-quick-reply-btn{transition:none!important;animation:none!important;}.sa-widget-loading-dot,.sa-widget-cursor{animation:none!important;}}',
     '.sa-widget-btn.sa-btn-hidden{opacity:0;transform:scale(0.8);pointer-events:none;}',
     '.sa-widget-btn.sa-btn-visible{opacity:1;transform:scale(1);transition:opacity 0.4s ease,transform 0.4s ease;}',
     '.sa-widget-end-area{padding:0 16px 8px;text-align:center;background:#fff;flex-shrink:0;}',
@@ -169,10 +199,13 @@ export async function GET() {
 
   var container = el('div', { class: 'sa-widget-container' });
   if (homepageOnly) container.setAttribute('data-homepage-only', 'true');
-  var btn = el('div');
+  var btn = el('button', { class: 'sa-widget-btn', type: 'button', 'aria-label': 'Open chat', 'aria-expanded': 'false', 'aria-controls': 'sa-widget-panel', 'aria-hidden': 'true', tabindex: '-1', disabled: '' });
+  btn.disabled = true;
+  btn.tabIndex = -1;
   var badge = el('div', { class: 'sa-widget-badge', style: { display: 'none' } }, '0');
   var attentionDot = el('div', { class: 'sa-widget-attention-dot', style: { display: 'none' }, 'aria-hidden': 'true' });
-  var panel = el('div', { class: 'sa-widget-panel sa-hidden' });
+  var panel = el('div', { class: 'sa-widget-panel sa-hidden', id: 'sa-widget-panel', role: 'dialog', 'aria-modal': 'false', 'aria-hidden': 'true', 'aria-labelledby': 'sa-widget-title', inert: '' });
+  try { panel.inert = true; } catch(e) {}
   var header = el('div', { class: 'sa-widget-header' });
   var avatarWrap = el('div', { class: 'sa-widget-header-avatar' });
   var avatarImg = el('img', { class: 'sa-widget-header-avatar-img', alt: '' });
@@ -180,7 +213,7 @@ export async function GET() {
   var avatarFallback = el('span', { class: 'sa-widget-header-avatar-fallback' }, '\\u2026');
   avatarWrap.appendChild(avatarImg);
   avatarWrap.appendChild(avatarFallback);
-  var titleH3 = el('h3', null, 'Loading...');
+  var titleH3 = el('h3', { id: 'sa-widget-title' }, 'Loading...');
   var subtitleP = el('p', { class: 'sa-widget-header-subtitle' }, 'Typically replies instantly');
   var headerCenter = el('div', { class: 'sa-widget-header-center' });
   headerCenter.appendChild(titleH3);
@@ -194,9 +227,9 @@ export async function GET() {
   header.appendChild(avatarWrap);
   header.appendChild(headerCenter);
   header.appendChild(headerActions);
-  var messagesArea = el('div', { class: 'sa-widget-messages' });
+  var messagesArea = el('div', { class: 'sa-widget-messages', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions text' });
   var inputArea = el('div', { class: 'sa-widget-input-area' });
-  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text', maxlength: '2000' });
+  var input = el('input', { class: 'sa-widget-input', placeholder: 'Type your message...', type: 'text', maxlength: '2000', 'aria-label': 'Chat message' });
   var sendBtn = el('button', { class: 'sa-widget-send', type: 'button', 'aria-label': 'Send message' });
   sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   var footerEl = el('div', { class: 'sa-widget-footer' });
@@ -208,6 +241,13 @@ export async function GET() {
   endArea.appendChild(endBtn);
 
   input.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+  input.addEventListener('input', function() {
+    if (input.value) markIntentionalInteraction();
+  });
+  input.addEventListener('focus', function() {
+    if (isOpen) markIntentionalInteraction(true);
+  });
+  panel.addEventListener('pointerdown', handlePanelPointerEngagement);
   sendBtn.addEventListener('click', sendMessage);
   inputArea.appendChild(input);
   inputArea.appendChild(sendBtn);
@@ -222,17 +262,47 @@ export async function GET() {
   container.appendChild(btn);
   document.body.appendChild(container);
   btn.addEventListener('click', togglePanel);
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || !isOpen) return;
+    if (!widgetShouldHandleEscape(e)) return;
+    if (e.preventDefault) e.preventDefault();
+    closePanel(true);
+  });
 
   function positionWidget(pos) {
     container.style.bottom = '20px';
     if (pos === 'bottom_left') {
       container.style.left = '20px';
       container.style.right = 'auto';
-      panel.style.left = '0';
-      panel.style.right = 'auto';
     } else {
       container.style.right = '20px';
       container.style.left = 'auto';
+    }
+    if (isMobileViewport()) {
+      if (panel.classList.contains('sa-viewport-constrained')) {
+        panel.style.width = '100vw';
+        panel.style.left = '0';
+        panel.style.right = '0';
+      } else if (isShortCoarseMobileViewport()) {
+        panel.style.width = 'min(560px, calc(100vw - 24px))';
+        if (pos === 'bottom_left') {
+          panel.style.left = 'max(12px, env(safe-area-inset-left))';
+          panel.style.right = 'auto';
+        } else {
+          panel.style.right = 'max(12px, env(safe-area-inset-right))';
+          panel.style.left = 'auto';
+        }
+      } else {
+        panel.style.width = 'auto';
+        panel.style.left = 'max(12px, env(safe-area-inset-left))';
+        panel.style.right = 'max(12px, env(safe-area-inset-right))';
+      }
+    } else if (pos === 'bottom_left') {
+      panel.style.width = '';
+      panel.style.left = '0';
+      panel.style.right = 'auto';
+    } else {
+      panel.style.width = '';
       panel.style.right = '0';
       panel.style.left = 'auto';
     }
@@ -292,20 +362,702 @@ export async function GET() {
     avatarFallback.style.display = 'flex';
   });
 
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch(e) { return null; }
+  }
+
+  function safeStorageSet(key, value) {
+    try { localStorage.setItem(key, value); } catch(e) {}
+  }
+
+  function storedTimestampIsRecent(key, ttl) {
+    var raw = safeStorageGet(key);
+    if (!raw) return false;
+    var storedAt = Number(raw);
+    var age = Date.now() - storedAt;
+    return Number.isFinite(storedAt) && storedAt > 0 && age >= 0 && age < ttl;
+  }
+
+  function proactiveInvitationIsStorageSuppressed() {
+    return !!(
+      !isPreview &&
+      (storedTimestampIsRecent(proactiveDismissedKey, PROACTIVE_DISMISSED_TTL) ||
+        storedTimestampIsRecent(proactiveShownKey, PROACTIVE_SHOWN_TTL))
+    );
+  }
+
+  function proactiveInvitationEnabled(data) {
+    return !!(
+      data &&
+      (data.proactiveInvitationEnabled === true || data.proactive_invitation_enabled === true)
+    );
+  }
+
+  function isMobileViewport() {
+    var viewport = window.visualViewport;
+    var width = typeof window.innerWidth === 'number'
+      ? window.innerWidth
+      : (viewport && viewport.width);
+    return (
+      (typeof width === 'number' && width <= 600) ||
+      isShortCoarseMobileViewport()
+    );
+  }
+
+  function isShortCoarseMobileViewport() {
+    var viewport = window.visualViewport;
+    var width = typeof window.innerWidth === 'number'
+      ? window.innerWidth
+      : (viewport && viewport.width);
+    var height = typeof window.innerHeight === 'number'
+      ? window.innerHeight
+      : (viewport && viewport.height);
+    var coarsePointer = false;
+    if (window.matchMedia) {
+      try { coarsePointer = window.matchMedia('(pointer: coarse)').matches; } catch(e) {}
+    }
+    return !!(
+      coarsePointer &&
+      typeof width === 'number' &&
+      typeof height === 'number' &&
+      width <= 950 &&
+      height <= 500
+    );
+  }
+
+  function viewportHeight() {
+    var viewport = window.visualViewport;
+    if (viewport && typeof viewport.height === 'number') return viewport.height;
+    return typeof window.innerHeight === 'number' ? window.innerHeight : 800;
+  }
+
+  function updateViewportMetrics() {
+    var viewport = window.visualViewport;
+    var height = viewportHeight();
+    var width = viewport && typeof viewport.width === 'number'
+      ? viewport.width
+      : window.innerWidth;
+    var offsetTop = viewport && typeof viewport.offsetTop === 'number' ? viewport.offsetTop : 0;
+    var layoutHeight = typeof window.innerHeight === 'number' ? window.innerHeight : height;
+    var bottomOffset = Math.max(0, layoutHeight - (offsetTop + height));
+    panel.style.setProperty('--sa-visual-height', Math.max(1, Math.round(height)) + 'px');
+    panel.style.setProperty('--sa-vv-offset-top', Math.max(0, Math.round(offsetTop)) + 'px');
+    panel.style.setProperty('--sa-vv-bottom-offset', Math.max(0, Math.round(bottomOffset)) + 'px');
+    var shortMobile = isMobileViewport() && height <= 500;
+    var compactMinimum = 260;
+    var expandedMinimum = shortMobile ? 280 : 300;
+    var compactHeight = Math.min(
+      Math.max(1, height - 24),
+      Math.max(compactMinimum, Math.round(height * 0.48))
+    );
+    var expandedHeight = Math.min(
+      Math.max(1, height - 24),
+      Math.max(expandedMinimum, Math.round(height * 0.78))
+    );
+    panel.style.setProperty('--sa-mobile-compact-height', compactHeight + 'px');
+    panel.style.setProperty('--sa-mobile-expanded-height', expandedHeight + 'px');
+    var constrained = isMobileViewport() && (
+      height < 360 ||
+      (typeof width === 'number' && width <= 340 && height <= 480)
+    );
+    if (constrained) panel.classList.add('sa-viewport-constrained');
+    else panel.classList.remove('sa-viewport-constrained');
+    if (config) positionWidget(config.position || 'bottom_right');
+  }
+
+  function setMobilePanelPresentation(intentional) {
+    proactiveIsMobile = isMobileViewport();
+    panel.classList.remove('sa-mobile-compact');
+    panel.classList.remove('sa-mobile-expanded');
+    if (proactiveIsMobile) {
+      panel.classList.add(intentional ? 'sa-mobile-expanded' : 'sa-mobile-compact');
+    }
+    updateViewportMetrics();
+  }
+
+  function markProactiveShown() {
+    if (!isPreview) safeStorageSet(proactiveShownKey, String(Date.now()));
+  }
+
+  function markProactiveDismissed() {
+    if (!isPreview) safeStorageSet(proactiveDismissedKey, String(Date.now()));
+  }
+
+  function emitWidgetTelemetry(eventType, source) {
+    if (
+      isPreview ||
+      !widgetToken ||
+      !widgetSessionNonce ||
+      !source
+    ) return;
+    var telemetryPayload = {
+      businessId: businessId,
+      sessionId: sessionId,
+      sessionNonce: widgetSessionNonce,
+      eventType: eventType,
+      source: source,
+      deviceBucket: isMobileViewport() ? 'mobile' : 'desktop',
+      promptVersion: 1
+    };
+    try {
+      fetch(apiBaseUrl + '/api/widget/telemetry?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + widgetToken
+        },
+        body: JSON.stringify(telemetryPayload),
+        keepalive: true
+      }).catch(function() {});
+    } catch(e) {}
+  }
+
+  function recordWidgetEngagement(source) {
+    if (!widgetEngagementSource) widgetEngagementSource = source;
+    if (widgetEngagementTelemetrySent) return;
+    widgetEngagementTelemetrySent = true;
+    emitWidgetTelemetry('widget_engaged', widgetEngagementSource);
+  }
+
+  function widgetLoadedTelemetryIsPendingForHomepageRoute() {
+    return !!(
+      homepageOnly &&
+      !isPreview &&
+      !widgetLoadedTelemetrySent &&
+      config &&
+      widgetToken &&
+      widgetSessionNonce
+    );
+  }
+
+  function releaseHomepageRouteObserverIfIdle() {
+    if (
+      !proactiveRouteObserver ||
+      proactiveSchedulingStarted ||
+      widgetLoadedTelemetryIsPendingForHomepageRoute()
+    ) return;
+    proactiveRouteObserver.disconnect();
+    proactiveRouteObserver = null;
+  }
+
+  function ensureHomepageRouteObserver() {
+    if (
+      !homepageOnly ||
+      proactiveRouteObserver ||
+      !window.MutationObserver ||
+      !document.body
+    ) return;
+    proactiveRouteObserver = new window.MutationObserver(handleHomepageRouteChange);
+    proactiveRouteObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+  }
+
+  function clearProactiveTimers() {
+    if (proactiveMinTimer) clearTimeout(proactiveMinTimer);
+    if (proactiveDelayTimer) clearTimeout(proactiveDelayTimer);
+    if (proactiveBlockedRetryTimer) clearTimeout(proactiveBlockedRetryTimer);
+    proactiveMinTimer = null;
+    proactiveDelayTimer = null;
+    proactiveBlockedRetryTimer = null;
+  }
+
+  function detachProactiveListeners() {
+    if (proactiveListenersAttached) {
+      window.removeEventListener('scroll', handleProactiveScroll);
+      window.removeEventListener('storage', handleProactiveStorageChange);
+      document.removeEventListener('visibilitychange', handleProactiveVisibilityChange);
+      proactiveListenersAttached = false;
+    }
+    releaseHomepageRouteObserverIfIdle();
+  }
+
+  function stopProactiveScheduling() {
+    clearProactiveTimers();
+    proactiveSchedulingStarted = false;
+    detachProactiveListeners();
+    proactiveActiveSince = null;
+  }
+
+  function finishProactiveInvitationForVisit() {
+    proactiveFinishedThisVisit = true;
+    stopProactiveScheduling();
+  }
+
+  function pageIsVisible() {
+    return document.visibilityState !== 'hidden';
+  }
+
+  function homepageRouteAllowsWidget() {
+    return !homepageOnly || !!(
+      document.body &&
+      document.body.classList &&
+      document.body.classList.contains('sa-homepage-widget-route')
+    );
+  }
+
+  function proactivePageIsActive() {
+    return pageIsVisible() && homepageRouteAllowsWidget();
+  }
+
+  function emitWidgetLoadedTelemetryIfEligible() {
+    if (
+      isPreview ||
+      widgetLoadedTelemetrySent ||
+      !config ||
+      !widgetToken ||
+      !widgetSessionNonce ||
+      !homepageRouteAllowsWidget()
+    ) return;
+    widgetLoadedTelemetrySent = true;
+    emitWidgetTelemetry('widget_loaded', 'widget_load');
+  }
+
+  function visitorIsTyping() {
+    var active = document.activeElement;
+    if (!active || active === document.body) return false;
+    var tag = active.tagName ? String(active.tagName).toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'iframe') return true;
+    if (active.isContentEditable === true) return true;
+
+    var editableCandidate = null;
+    if (active.closest) {
+      try { editableCandidate = active.closest('[contenteditable]'); } catch(e) {}
+    }
+    var current = editableCandidate || active;
+    while (current) {
+      if (current.getAttribute) {
+        var editableValue = current.getAttribute('contenteditable');
+        if (editableValue !== null) {
+          var normalizedEditableValue = String(editableValue).trim().toLowerCase();
+          if (normalizedEditableValue === 'false') return false;
+          if (
+            normalizedEditableValue === '' ||
+            normalizedEditableValue === 'true' ||
+            normalizedEditableValue === 'plaintext-only'
+          ) return true;
+        }
+      }
+      current = current.parentElement || current.parentNode;
+    }
+    return false;
+  }
+
+  function panelTargetIsInteractive(target) {
+    if (!target) return false;
+    if (target.closest) {
+      try {
+        if (target.closest('button,input,textarea,select,a,label,summary,[role="button"],[role="link"],[contenteditable]')) {
+          return true;
+        }
+      } catch(e) {}
+    }
+    var current = target;
+    while (current && current !== panel) {
+      var currentTag = current.tagName ? String(current.tagName).toLowerCase() : '';
+      if (
+        currentTag === 'button' ||
+        currentTag === 'input' ||
+        currentTag === 'textarea' ||
+        currentTag === 'select' ||
+        currentTag === 'a' ||
+        currentTag === 'label' ||
+        currentTag === 'summary'
+      ) return true;
+      if (current.getAttribute) {
+        var role = current.getAttribute('role');
+        if (role === 'button' || role === 'link') return true;
+        if (current.getAttribute('contenteditable') !== null) return true;
+      }
+      current = current.parentElement || current.parentNode;
+    }
+    return false;
+  }
+
+  function handlePanelPointerEngagement(event) {
+    if (!isOpen || !proactiveAutoOpened) return;
+    if (event.isPrimary === false) return;
+    if (typeof event.button === 'number' && event.button !== 0) return;
+    if (panelTargetIsInteractive(event.target)) return;
+    markPresentationEngagement();
+  }
+
+  function anotherModalIsOpen() {
+    try {
+      var selectors = ['dialog[open]', '[role="dialog"][aria-modal="true"]', '[aria-modal="true"]'];
+      for (var selectorIndex = 0; selectorIndex < selectors.length; selectorIndex++) {
+        var modals = document.querySelectorAll(selectors[selectorIndex]);
+        for (var modalIndex = 0; modalIndex < modals.length; modalIndex++) {
+          var modal = modals[modalIndex];
+          if (modal === panel) continue;
+          if (modal.hidden || modal.getAttribute('hidden') !== null || modal.getAttribute('aria-hidden') === 'true') {
+            continue;
+          }
+          if (window.getComputedStyle) {
+            var modalStyle = window.getComputedStyle(modal);
+            if (modalStyle.display === 'none' || modalStyle.visibility === 'hidden') continue;
+          }
+          return true;
+        }
+      }
+      return false;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function targetIsInsideWidget(target) {
+    if (!target) return false;
+    if (panel.contains) {
+      try { return panel.contains(target); } catch(e) {}
+    }
+    var current = target;
+    while (current) {
+      if (current === panel) return true;
+      current = current.parentElement || current.parentNode;
+    }
+    return false;
+  }
+
+  function targetBelongsToActiveHostPopup(target) {
+    if (!target || targetIsInsideWidget(target)) return false;
+    if (target.closest) {
+      try {
+        if (target.closest('select,[role="listbox"],[role="menu"],[role="tree"],[role="grid"],[role="option"],[role="menuitem"],[role="treeitem"],[role="combobox"][aria-expanded="true"],[aria-haspopup][aria-expanded="true"]')) {
+          return true;
+        }
+      } catch(e) {}
+    }
+    var current = target;
+    while (current) {
+      var tag = current.tagName ? String(current.tagName).toLowerCase() : '';
+      if (tag === 'select') return true;
+      if (current.getAttribute) {
+        var role = current.getAttribute('role');
+        if (
+          role === 'listbox' ||
+          role === 'menu' ||
+          role === 'tree' ||
+          role === 'grid' ||
+          role === 'option' ||
+          role === 'menuitem' ||
+          role === 'treeitem'
+        ) return true;
+        if (
+          current.getAttribute('aria-expanded') === 'true' &&
+          (role === 'combobox' || current.getAttribute('aria-haspopup') !== null)
+        ) return true;
+      }
+      current = current.parentElement || current.parentNode;
+    }
+    return false;
+  }
+
+  function widgetShouldHandleEscape(event) {
+    if (event.defaultPrevented || event.isComposing) return false;
+    if (anotherModalIsOpen()) return false;
+    if (targetBelongsToActiveHostPopup(event.target)) return false;
+    return true;
+  }
+
+  function proactiveRevealIsBlocked() {
+    return !proactivePageIsActive() || visitorIsTyping() || anotherModalIsOpen();
+  }
+
+  function scheduleBlockedProactiveRetry() {
+    if (proactiveBlockedRetryTimer || proactiveFinishedThisVisit) return;
+    proactiveBlockedRetryTimer = setTimeout(function() {
+      proactiveBlockedRetryTimer = null;
+      attemptProactiveReveal();
+    }, 1000);
+  }
+
+  function openPanel(mode) {
+    if (isOpen) return;
+    var automatic = mode === 'automatic' || mode === 'preview-automatic';
+    isOpen = true;
+    proactiveAutoOpened = automatic;
+    if (mode === 'automatic') {
+      proactiveOpenedSource = proactivePendingTriggerSource || 'proactive_timer';
+    }
+    panel.classList.remove('sa-hidden');
+    panel.classList.add('sa-visible');
+    panel.setAttribute('aria-hidden', 'false');
+    panel.removeAttribute('inert');
+    try { panel.inert = false; } catch(e) {}
+    container.classList.add('sa-open');
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-label', 'Close chat');
+    attentionDismissed = true;
+    unreadCount = 0;
+    updateLauncherIndicators();
+    setMobilePanelPresentation(!automatic);
+    markProactiveShown();
+    finishProactiveInvitationForVisit();
+    if (mode === 'automatic') {
+      emitWidgetTelemetry('invitation_shown', proactiveOpenedSource);
+    }
+    if (!automatic) {
+      visitorIntentionalInteraction = true;
+      recordWidgetEngagement('manual');
+      var leadFormShown = needsLeadCapture();
+      var firstLeadInput = leadFormShown ? showLeadForm() : null;
+      if (isMobileViewport()) closeBtn.focus();
+      else if (firstLeadInput) firstLeadInput.focus();
+      else input.focus();
+    }
+    if (automatic) scrollToInvitationStart();
+    else scrollToBottom();
+  }
+
+  function closePanel(explicitDismissal) {
+    if (!isOpen) return;
+    if (
+      explicitDismissal &&
+      proactiveAutoOpened &&
+      !visitorIntentionalInteraction &&
+      proactiveOpenedSource
+    ) {
+      emitWidgetTelemetry('invitation_dismissed', proactiveOpenedSource);
+    }
+    isOpen = false;
+    proactiveAutoOpened = false;
+    panel.classList.remove('sa-visible');
+    panel.classList.add('sa-hidden');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.setAttribute('inert', '');
+    try { panel.inert = true; } catch(e) {}
+    container.classList.remove('sa-open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open chat');
+    if (explicitDismissal) markProactiveDismissed();
+    finishProactiveInvitationForVisit();
+    updateLauncherIndicators();
+    if (explicitDismissal) btn.focus();
+  }
+
+  function markIntentionalInteraction(focusLeadForm) {
+    var engagementSource = proactiveAutoOpened && proactiveOpenedSource
+      ? proactiveOpenedSource
+      : (widgetEngagementSource || 'manual');
+    visitorIntentionalInteraction = true;
+    proactiveAutoOpened = false;
+    recordWidgetEngagement(engagementSource);
+    markProactiveShown();
+    finishProactiveInvitationForVisit();
+    if (isOpen && isMobileViewport()) setMobilePanelPresentation(true);
+    if (needsLeadCapture()) {
+      var firstLeadInput = showLeadForm();
+      if (focusLeadForm && firstLeadInput) firstLeadInput.focus();
+      return true;
+    }
+    return false;
+  }
+
+  function markPresentationEngagement() {
+    var engagementSource = proactiveOpenedSource || widgetEngagementSource || 'manual';
+    proactiveAutoOpened = false;
+    recordWidgetEngagement(engagementSource);
+    markProactiveShown();
+    finishProactiveInvitationForVisit();
+    if (isOpen && isMobileViewport()) setMobilePanelPresentation(true);
+  }
+
+  function attemptProactiveReveal(source) {
+    if (source && !proactivePendingTriggerSource) {
+      proactivePendingTriggerSource = source;
+    }
+    if (
+      proactiveFinishedThisVisit ||
+      isOpen ||
+      !config ||
+      !proactiveInvitationEnabled(config)
+    ) return;
+    if (proactiveInvitationIsStorageSuppressed()) {
+      finishProactiveInvitationForVisit();
+      return;
+    }
+    if (proactiveRevealIsBlocked()) {
+      if (proactivePageIsActive()) scheduleBlockedProactiveRetry();
+      return;
+    }
+    openPanel('automatic');
+  }
+
+  function handleProactiveScroll() {
+    if (
+      proactiveFinishedThisVisit ||
+      proactiveScrollReached ||
+      !proactivePageIsActive()
+    ) return;
+    var root = document.documentElement;
+    var body = document.body;
+    var scrollHeight = Math.max(
+      root && root.scrollHeight ? root.scrollHeight : 0,
+      body && body.scrollHeight ? body.scrollHeight : 0
+    );
+    var visibleHeight = typeof window.innerHeight === 'number' ? window.innerHeight : viewportHeight();
+    var scrollable = scrollHeight - visibleHeight;
+    if (scrollable <= 0) return;
+    var scrollProgress = Math.max(0, window.scrollY || window.pageYOffset || 0) / scrollable;
+    var threshold = proactiveIsMobile ? 0.4 : 0.3;
+    if (scrollProgress < threshold) return;
+    proactiveScrollReached = true;
+    if (!proactivePendingTriggerSource) proactivePendingTriggerSource = 'proactive_scroll';
+    if (proactiveMinRemaining <= 0) attemptProactiveReveal('proactive_scroll');
+  }
+
+  function pauseProactiveTimers() {
+    if (proactiveActiveSince !== null) {
+      var elapsed = Math.max(0, Date.now() - proactiveActiveSince);
+      proactiveMinRemaining = Math.max(0, proactiveMinRemaining - elapsed);
+      proactiveDelayRemaining = Math.max(0, proactiveDelayRemaining - elapsed);
+    }
+    clearProactiveTimers();
+    proactiveActiveSince = null;
+  }
+
+  function resumeProactiveTimers() {
+    if (
+      proactiveFinishedThisVisit ||
+      !proactiveSchedulingStarted ||
+      !proactivePageIsActive()
+    ) return;
+    clearProactiveTimers();
+    proactiveActiveSince = Date.now();
+    if (proactiveMinRemaining > 0) {
+      proactiveMinTimer = setTimeout(function() {
+        proactiveMinTimer = null;
+        proactiveMinRemaining = 0;
+        if (proactiveScrollReached) attemptProactiveReveal('proactive_scroll');
+      }, proactiveMinRemaining);
+    }
+    if (proactiveDelayRemaining > 0) {
+      proactiveDelayTimer = setTimeout(function() {
+        proactiveDelayTimer = null;
+        proactiveDelayRemaining = 0;
+        attemptProactiveReveal('proactive_timer');
+      }, proactiveDelayRemaining);
+    }
+    if (proactiveDelayRemaining <= 0 || (proactiveMinRemaining <= 0 && proactiveScrollReached)) {
+      attemptProactiveReveal(
+        proactiveScrollReached ? 'proactive_scroll' : 'proactive_timer'
+      );
+    }
+  }
+
+  function handleProactiveVisibilityChange() {
+    if (!proactivePageIsActive()) {
+      pauseProactiveTimers();
+      return;
+    }
+    resumeProactiveTimers();
+  }
+
+  function handleHomepageRouteChange() {
+    emitWidgetLoadedTelemetryIfEligible();
+    if (!proactivePageIsActive()) {
+      pauseProactiveTimers();
+      return;
+    }
+    resumeProactiveTimers();
+    releaseHomepageRouteObserverIfIdle();
+  }
+
+  function handleProactiveStorageChange(event) {
+    if (
+      isPreview ||
+      !event ||
+      (event.key !== proactiveShownKey && event.key !== proactiveDismissedKey)
+    ) return;
+    if (proactiveInvitationIsStorageSuppressed()) {
+      finishProactiveInvitationForVisit();
+    }
+  }
+
+  function startProactiveInvitation() {
+    if (
+      proactiveFinishedThisVisit ||
+      proactiveSchedulingStarted ||
+      !config ||
+      !proactiveInvitationEnabled(config)
+    ) return;
+    if (proactiveInvitationIsStorageSuppressed()) {
+      proactiveFinishedThisVisit = true;
+      return;
+    }
+    proactiveIsMobile = isMobileViewport();
+    proactiveMinRemaining = proactiveIsMobile ? 8000 : 5000;
+    proactiveDelayRemaining = proactiveIsMobile ? 12000 : 8000;
+    proactiveScrollReached = false;
+    proactivePendingTriggerSource = null;
+    proactiveSchedulingStarted = true;
+    if (!proactiveListenersAttached) {
+      window.addEventListener('scroll', handleProactiveScroll, { passive: true });
+      window.addEventListener('storage', handleProactiveStorageChange);
+      document.addEventListener('visibilitychange', handleProactiveVisibilityChange);
+      proactiveListenersAttached = true;
+    }
+    ensureHomepageRouteObserver();
+    resumeProactiveTimers();
+  }
+
+  function forcePreviewProactiveInvitation(open) {
+    if (!isPreview) return;
+    if (!open) {
+      if (proactiveAutoOpened) closePanel(false);
+      proactiveFinishedThisVisit = false;
+      return;
+    }
+    if (isOpen) {
+      setMobilePanelPresentation(false);
+      return;
+    }
+    proactiveFinishedThisVisit = false;
+    openPanel('preview-automatic');
+  }
+
+  function handleViewportChange() {
+    updateViewportMetrics();
+    if (isOpen && isMobileViewport() && proactiveAutoOpened) {
+      setMobilePanelPresentation(false);
+    }
+  }
+
+  window.addEventListener('resize', handleViewportChange);
+  if (window.visualViewport && window.visualViewport.addEventListener) {
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    window.visualViewport.addEventListener('scroll', handleViewportChange);
+  }
+
   function hideWidgetForUnavailable() {
+    finishProactiveInvitationForVisit();
     config = null;
     widgetToken = null;
     widgetSessionNonce = null;
     isOpen = false;
+    proactiveAutoOpened = false;
     isLoading = false;
     sendBtn.disabled = false;
     input.disabled = false;
     hideLoading();
     panel.classList.remove('sa-visible');
     panel.classList.add('sa-hidden');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.setAttribute('inert', '');
+    try { panel.inert = true; } catch(e) {}
     container.classList.remove('sa-open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open chat');
+    btn.setAttribute('aria-hidden', 'true');
+    btn.setAttribute('tabindex', '-1');
+    btn.setAttribute('disabled', '');
+    btn.disabled = true;
+    btn.tabIndex = -1;
     btn.classList.remove('sa-btn-visible');
     btn.classList.add('sa-btn-hidden');
+    releaseHomepageRouteObserverIfIdle();
   }
 
   function endConversation() {
@@ -369,6 +1121,11 @@ export async function GET() {
     pendingLeadClientId = null;
     pendingLeadMessage = null;
     pendingLeadSourceClientMessageId = null;
+    proactiveOpenedSource = null;
+    widgetEngagementSource = null;
+    widgetLoadedTelemetrySent = false;
+    widgetEngagementTelemetrySent = false;
+    firstMessageTelemetrySent = false;
 
     // Generate new session
     sessionId = createId();
@@ -389,25 +1146,17 @@ export async function GET() {
   }
 
   function togglePanel() {
-    isOpen = !isOpen;
-    if (isOpen) {
-      panel.classList.remove('sa-hidden');
-      panel.classList.add('sa-visible');
-      container.classList.add('sa-open');
-      attentionDismissed = true;
-      unreadCount = 0;
-      updateLauncherIndicators();
-      input.focus();
-      scrollToBottom();
-    } else {
-      panel.classList.remove('sa-visible');
-      panel.classList.add('sa-hidden');
-      container.classList.remove('sa-open');
-      updateLauncherIndicators();
-    }
+    if (isOpen) closePanel(true);
+    else openPanel('manual');
   }
 
   function typeMsg(text, msgEl, callback) {
+    if (prefersReducedMotion) {
+      msgEl.textContent = text;
+      scrollToBottom();
+      if (callback) callback();
+      return;
+    }
     var i = 0;
     var cursor = el('span', { class: 'sa-widget-cursor' });
     msgEl.textContent = '';
@@ -475,12 +1224,21 @@ export async function GET() {
   function handleQuickReply(text) {
     var qr = document.getElementById('sa-quick-replies');
     if (qr) qr.remove();
+    if (markIntentionalInteraction(true)) {
+      input.value = text;
+      return;
+    }
     input.value = text;
     sendMessage();
   }
 
   function scrollToBottom() {
     setTimeout(function() { messagesArea.scrollTop = messagesArea.scrollHeight; }, 50);
+  }
+
+  function scrollToInvitationStart() {
+    messagesArea.scrollTop = 0;
+    setTimeout(function() { messagesArea.scrollTop = 0; }, 50);
   }
 
   function showLoading() {
@@ -498,7 +1256,11 @@ export async function GET() {
 
   function needsLeadCapture() {
     if (!config || !config.leadCaptureEnabled || leadCaptured) return false;
-    if (config.leadCaptureTiming === 'start' && messageCount === 0) return true;
+    if (
+      config.leadCaptureTiming === 'start' &&
+      messageCount === 0 &&
+      visitorIntentionalInteraction
+    ) return true;
     if (config.leadCaptureTiming === 'after_3_messages' && messageCount === 3 && !leadCaptured) return true;
     return false;
   }
@@ -539,6 +1301,7 @@ export async function GET() {
     form.appendChild(submitBtn);
     form.appendChild(skipBtn);
     panel.insertBefore(form, inputArea);
+    return nameInput;
   }
 
   function showAssistantUnavailableLeadMode(message, sourceClientMessageId) {
@@ -749,10 +1512,24 @@ export async function GET() {
       config.quickReplies = patch.quickReplies;
       if (JSON.stringify(patch.quickReplies) !== oldQR) resetMessages = true;
     }
+    if (patch.proactiveInvitationEnabled !== undefined) {
+      config.proactiveInvitationEnabled = patch.proactiveInvitationEnabled === true;
+      config.proactive_invitation_enabled = patch.proactiveInvitationEnabled === true;
+      if (!config.proactiveInvitationEnabled) {
+        stopProactiveScheduling();
+        if (proactiveAutoOpened) forcePreviewProactiveInvitation(false);
+      }
+    }
     if (resetMessages) resetPreviewConversation();
+    if (patch.forceProactiveInvitationOpen !== undefined) {
+      forcePreviewProactiveInvitation(patch.forceProactiveInvitationOpen === true);
+    } else if (patch.proactiveInvitationEnabled === true) {
+      forcePreviewProactiveInvitation(true);
+    }
   }
 
   window.addEventListener('message', function(ev) {
+    if (!isPreview) return;
     if (!ev.data || ev.data.source !== 'simplassist-widget-preview' || ev.data.type !== 'apply-preview') return;
     pendingPreviewPatch = ev.data.payload;
     if (config) applyPreviewPatch(pendingPreviewPatch);
@@ -761,6 +1538,7 @@ export async function GET() {
   function sendMessage() {
     var text = input.value.trim();
     if (!text || isLoading || !config) return;
+    if (markIntentionalInteraction()) return;
     if (!isPreview && (!widgetToken || !widgetSessionNonce)) {
       loadWidgetConfig();
       showTransientNotice('The chat is reconnecting. Please try again in a moment.');
@@ -798,6 +1576,13 @@ export async function GET() {
     var chatHeaders = { 'Content-Type': 'application/json' };
     if (!isPreview) chatHeaders.Authorization = 'Bearer ' + widgetToken;
 
+    if (!isPreview && !firstMessageTelemetrySent) {
+      firstMessageTelemetrySent = true;
+      emitWidgetTelemetry(
+        'first_message_submitted',
+        widgetEngagementSource || 'manual'
+      );
+    }
     fetch(apiBaseUrl + '/api/widget/chat?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
       headers: chatHeaders,
@@ -928,6 +1713,8 @@ export async function GET() {
     var firstLoad = !configInitialized;
     config = data;
     configInitialized = true;
+    ensureHomepageRouteObserver();
+    emitWidgetLoadedTelemetryIfEligible();
     applyPoweredByAttribution(data);
     titleH3.textContent = data.businessName || 'Chat';
     applyHeaderAvatar(data.businessName || 'Chat', !!data.showLogo, data.logoUrl || '');
@@ -935,6 +1722,11 @@ export async function GET() {
     positionWidget(data.position || 'bottom_right');
     btn.classList.remove('sa-btn-hidden');
     btn.classList.add('sa-btn-visible');
+    btn.removeAttribute('disabled');
+    btn.disabled = false;
+    btn.setAttribute('aria-hidden', 'false');
+    btn.setAttribute('tabindex', '0');
+    btn.tabIndex = 0;
     if (firstLoad) {
       addMsg(data.welcomeMessage || 'Hi! How can we help you today?', 'bot', showQuickReplies);
       unreadCount = 0;
@@ -943,6 +1735,17 @@ export async function GET() {
       if (needsLeadCapture()) showLeadForm();
     }
     if (pendingPreviewPatch) applyPreviewPatch(pendingPreviewPatch);
+    if (isPreview) {
+      if (
+        proactiveInvitationEnabled(config) &&
+        (!pendingPreviewPatch || pendingPreviewPatch.forceProactiveInvitationOpen !== false)
+      ) forcePreviewProactiveInvitation(true);
+    } else if (proactiveInvitationEnabled(config)) {
+      startProactiveInvitation();
+    } else {
+      stopProactiveScheduling();
+    }
+    releaseHomepageRouteObserverIfIdle();
   }
 
   function scheduleConfigRetry() {

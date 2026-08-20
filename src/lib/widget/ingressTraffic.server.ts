@@ -3,7 +3,12 @@ import "server-only";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-export type WidgetIngressEndpoint = "config" | "chat" | "end" | "lead";
+export type WidgetIngressEndpoint =
+  | "config"
+  | "chat"
+  | "end"
+  | "lead"
+  | "telemetry";
 
 export type WidgetIngressAcquireInput = {
   endpoint: WidgetIngressEndpoint;
@@ -40,6 +45,7 @@ const LOCAL_LIMITS: Record<
   chat: { network: 60, global: 3_000 },
   end: { network: 30, global: 3_000 },
   lead: { network: 20, global: 1_000 },
+  telemetry: { network: 240, global: 20_000 },
 };
 
 type RateBucket = { windowStart: number; count: number };
@@ -52,10 +58,16 @@ class SupabaseWidgetIngressAdapter implements WidgetIngressAdapter {
   ): Promise<WidgetIngressAcquireResult> {
     let result: { data: unknown; error: unknown };
     try {
-      result = await supabaseAdmin.rpc("acquire_widget_ingress_capacity", {
-        p_endpoint: input.endpoint,
-        p_network_key: input.networkKey,
-      });
+      result =
+        input.endpoint === "telemetry"
+          ? await supabaseAdmin.rpc(
+              "acquire_widget_telemetry_ingress_capacity",
+              { p_network_key: input.networkKey },
+            )
+          : await supabaseAdmin.rpc("acquire_widget_ingress_capacity", {
+              p_endpoint: input.endpoint,
+              p_network_key: input.networkKey,
+            });
     } catch (error) {
       console.error("[widget:ingress] Shared acquire threw:", error);
       return { status: "unavailable" };
@@ -157,9 +169,7 @@ function pruneLocalIngress(windowStart: number): void {
     if (bucket.windowStart < windowStart) globalRateBuckets.delete(key);
   }
   while (networkRateBuckets.size >= MAX_LOCAL_NETWORK_BUCKETS) {
-    const oldest = networkRateBuckets.keys().next().value as
-      | string
-      | undefined;
+    const oldest = networkRateBuckets.keys().next().value as string | undefined;
     if (!oldest) break;
     networkRateBuckets.delete(oldest);
   }

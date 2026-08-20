@@ -18,7 +18,7 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
 vi.mock("./(public)/home/page", () => ({
-  default: (props: { chatOnlyPublicLaunchEnabled: boolean }) => {
+  default: (props: Record<string, never>) => {
     mocks.homePage(props);
     return <main data-testid="canonical-home">Canonical homepage</main>;
   },
@@ -84,14 +84,12 @@ describe("root page branding redirect", () => {
       const html = renderToStaticMarkup(await Page());
 
       expect(html).toContain("Canonical homepage");
-      expect(mocks.homePage).toHaveBeenCalledWith({
-        chatOnlyPublicLaunchEnabled: false,
-      });
+      expect(mocks.homePage).toHaveBeenCalledWith({});
       expect(mocks.redirect).not.toHaveBeenCalled();
     },
   );
 
-  it("passes the exact server public-launch decision into the canonical homepage", async () => {
+  it("leaves the server public-launch decision inside the canonical homepage route", async () => {
     vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
     vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_live_chat_only");
     mocks.getRequestBrand.mockResolvedValue({
@@ -102,8 +100,6 @@ describe("root page branding redirect", () => {
 
     renderToStaticMarkup(await Page());
 
-    expect(mocks.homePage).toHaveBeenCalledWith({
-      chatOnlyPublicLaunchEnabled: true,
-    });
+    expect(mocks.homePage).toHaveBeenCalledWith({});
   });
 });

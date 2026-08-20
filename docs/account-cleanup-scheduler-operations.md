@@ -11,11 +11,18 @@ a Railway cron service or a second scheduler: overlapping runs are guarded by
 database claims, but duplicate schedulers would still add noise and operational
 risk.
 
-This authenticated HTTP heartbeat is not a Supabase `pg_cron` job. The database
-has exactly two independent jobs: `cleanup_processed_webhook_events` daily at
-`0 3 * * *`, and `reap_expired_ai_reply_reservations` every minute. Migration
-063 adds no database cron; its provider reconciler runs only as the prelude of
-the external account-cleanup request described here.
+This authenticated HTTP heartbeat is not a Supabase `pg_cron` job. At the
+current migration tip 066, the database has exactly three independent jobs:
+`cleanup_processed_webhook_events` daily at `0 3 * * *`,
+`cleanup_widget_engagement_events` daily at `20 3 * * *`, and
+`reap_expired_ai_reply_reservations` every minute. Telemetry rows become
+purge-eligible once they are older than 90 days and the next 03:20 UTC run
+removes them, so normal retention is less than roughly 91 days rather than a
+real-time 90-day deletion guarantee. This independent cleanup keeps its locks
+or failures from coupling to webhook idempotency cleanup or AI reservation
+recovery. Migration 063 itself
+added no database cron; its provider reconciler still runs only as the prelude
+of the external account-cleanup request described here.
 
 This configuration was verified read-only against the live cron-job.org job on
 2026-07-14. No secret value is recorded here.
@@ -233,10 +240,11 @@ After a cleanup-route or billing-deletion deployment:
 6. Query content-free operational state for provider backlog, repeated
    deferrals, pending legacy bookings, and any unresolved provider row past its
    48-hour review SLA. The SLA is an alert, never an auto-release instruction.
-7. Confirm Supabase still has exactly the two expected database jobs:
+7. Confirm Supabase still has exactly the three expected database jobs:
    `cleanup_processed_webhook_events` daily at 03:00 UTC and
-   `reap_expired_ai_reply_reservations` every minute. Do not add a third job for
-   calendar reconciliation.
+   `cleanup_widget_engagement_events` daily at 03:20 UTC, plus
+   `reap_expired_ai_reply_reservations` every minute. Do not add a fourth job
+   for calendar reconciliation or combine the two retention jobs.
 8. Confirm no retained Stripe block, provider ambiguity, credential-namespace
    block, or account-cleanup failure requires separately reviewed intervention.
 

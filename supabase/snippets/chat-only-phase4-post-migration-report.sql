@@ -5,7 +5,7 @@
 -- Checkout URL, or other customer identifier is selected.
 --
 -- Run only after separately proving the intended Supabase target and after all
--- migrations through 064 have committed. Any BLOCKER stops the release.
+-- migrations through 066 have committed. Any BLOCKER stops the release.
 
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SET LOCAL statement_timeout = '60s';
@@ -28,17 +28,17 @@ ledger_health AS (
       AS malformed_versions,
     count(*) FILTER (
       WHERE migration_number IS NOT NULL
-        AND migration_number NOT BETWEEN 1 AND 64
+        AND migration_number NOT BETWEEN 1 AND 66
     )::bigint AS versions_outside_reviewed_tip,
-    count(*) FILTER (WHERE migration_number BETWEEN 1 AND 64)::bigint
+    count(*) FILTER (WHERE migration_number BETWEEN 1 AND 66)::bigint
       AS reviewed_versions,
-    count(*) FILTER (WHERE migration_number = 64)::bigint
-      AS phase4_tip_count
+    count(*) FILTER (WHERE migration_number = 66)::bigint
+      AS reviewed_tip_count
   FROM ledger
 ),
 ledger_gaps AS (
   SELECT count(*)::bigint AS missing_versions
-  FROM generate_series(1, 64) AS expected(version_number)
+  FROM generate_series(1, 66) AS expected(version_number)
   WHERE NOT EXISTS (
     SELECT 1
     FROM ledger
@@ -57,7 +57,8 @@ expected_relations(relation_name) AS (
     ('public.widget_request_rate_buckets'),
     ('public.widget_request_capacity_leases'),
     ('public.calendar_provider_operations'),
-    ('public.chat_only_checkout_attempts')
+    ('public.chat_only_checkout_attempts'),
+    ('public.widget_engagement_events')
 ),
 missing_relations AS (
   SELECT count(*)::bigint AS failure_count
@@ -165,6 +166,50 @@ expected_named_constraints(relation_name, constraint_name) AS (
     (
       'public.chat_only_checkout_attempts',
       'chat_only_checkout_attempt_time_shape'
+    ),
+    (
+      'public.widget_ingress_rate_buckets',
+      'widget_ingress_rate_buckets_endpoint_check'
+    ),
+    (
+      'public.widget_request_rate_buckets',
+      'widget_request_rate_buckets_endpoint_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_pkey'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_business_id_fkey'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_session_key_hash_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_event_type_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_source_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_device_bucket_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_prompt_version_check'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_source_contract'
+    ),
+    (
+      'public.widget_engagement_events',
+      'widget_engagement_events_session_event_unique'
     )
 ),
 constraint_failures AS (
@@ -315,6 +360,86 @@ constraint_definition_failures AS (
           '%claim_expires_at >= claimed_at%',
           '%checkout_session_expires_at > created_at%'
         ]::text[]
+      ),
+      (
+        'public.widget_ingress_rate_buckets',
+        'widget_ingress_rate_buckets_endpoint_check',
+        ARRAY[
+          '%''config''%', '%''chat''%', '%''end''%', '%''lead''%',
+          '%''telemetry''%'
+        ]::text[]
+      ),
+      (
+        'public.widget_request_rate_buckets',
+        'widget_request_rate_buckets_endpoint_check',
+        ARRAY[
+          '%''config''%', '%''chat''%', '%''end''%', '%''lead''%',
+          '%''telemetry''%', '%''preview_chat''%', '%''preview_end''%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_pkey',
+        ARRAY['%PRIMARY KEY (id)%']::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_business_id_fkey',
+        ARRAY[
+          '%FOREIGN KEY (business_id)%',
+          '%REFERENCES businesses(id) ON DELETE CASCADE%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_session_key_hash_check',
+        ARRAY['%^[0-9a-f]{64}$%']::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_event_type_check',
+        ARRAY[
+          '%''widget_loaded''%', '%''invitation_shown''%',
+          '%''invitation_dismissed''%', '%''widget_engaged''%',
+          '%''first_message_submitted''%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_source_check',
+        ARRAY[
+          '%''widget_load''%', '%''manual''%', '%''proactive_timer''%',
+          '%''proactive_scroll''%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_device_bucket_check',
+        ARRAY['%''mobile''%', '%''desktop''%']::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_prompt_version_check',
+        ARRAY[
+          '%prompt_version >= 1%', '%prompt_version <= 1000%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_source_contract',
+        ARRAY[
+          '%event_type = ''widget_loaded''%', '%source = ''widget_load''%',
+          '%''invitation_shown''%', '%''invitation_dismissed''%',
+          '%''widget_engaged''%', '%''first_message_submitted''%',
+          '%''manual''%', '%''proactive_timer''%', '%''proactive_scroll''%'
+        ]::text[]
+      ),
+      (
+        'public.widget_engagement_events',
+        'widget_engagement_events_session_event_unique',
+        ARRAY[
+          '%UNIQUE (business_id, session_key_hash, event_type, prompt_version)%'
+        ]::text[]
       )
   ) AS expected(relation_name, constraint_name, required_patterns)
   LEFT JOIN pg_constraint AS constraint_row
@@ -356,7 +481,9 @@ expected_indexes(index_name, must_be_unique) AS (
     ('public.calendar_provider_operations_live_target_unique', true),
     ('public.chat_only_checkout_attempts_one_live_per_business', true),
     ('public.chat_only_checkout_attempts_subscription_unique', true),
-    ('public.chat_only_checkout_attempts_state_expiry_idx', false)
+    ('public.chat_only_checkout_attempts_state_expiry_idx', false),
+    ('public.idx_widget_engagement_events_business_occurred', false),
+    ('public.idx_widget_engagement_events_retention', false)
 ),
 index_failures AS (
   SELECT count(*)::bigint AS failure_count
@@ -429,6 +556,14 @@ index_definition_failures AS (
         ARRAY[
           '%state, checkout_session_expires_at, business_id%'
         ]::text[]
+      ),
+      (
+        'public.idx_widget_engagement_events_business_occurred',
+        ARRAY['%business_id, occurred_at DESC, event_type%']::text[]
+      ),
+      (
+        'public.idx_widget_engagement_events_retention',
+        ARRAY['%occurred_at, id%']::text[]
       )
   ) AS expected(index_name, required_patterns)
   WHERE to_regclass(expected.index_name) IS NULL
@@ -451,7 +586,8 @@ expected_private_relations(relation_name, service_may_write) AS (
     ('public.widget_request_rate_buckets', false),
     ('public.widget_request_capacity_leases', false),
     ('public.calendar_provider_operations', false),
-    ('public.chat_only_checkout_attempts', false)
+    ('public.chat_only_checkout_attempts', false),
+    ('public.widget_engagement_events', false)
 ),
 private_relation_security_failures AS (
   SELECT count(*)::bigint AS failure_count
@@ -551,6 +687,69 @@ widget_schema_boundary_failures AS (
     OR allowlist.atttypid <> 'text[]'::regtype
     OR NOT allowlist.attnotnull
     OR allowlist.default_expression IS DISTINCT FROM 'ARRAY[]::text[]'
+),
+proactive_preference_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (VALUES (1)) AS required(marker)
+  WHERE NOT EXISTS (
+      SELECT 1
+      FROM pg_attribute AS attribute
+      LEFT JOIN pg_attrdef AS default_value
+        ON default_value.adrelid = attribute.attrelid
+       AND default_value.adnum = attribute.attnum
+      WHERE attribute.attrelid = to_regclass('public.widget_configs')
+        AND attribute.attname = 'proactive_invitation_enabled'
+        AND NOT attribute.attisdropped
+        AND attribute.atttypid = 'boolean'::regtype
+        AND attribute.attnotnull
+        AND pg_get_expr(default_value.adbin, default_value.adrelid) = 'true'
+        AND col_description(attribute.attrelid, attribute.attnum) =
+          'Owner preference for automatically revealing the saved welcome message. Public delivery also requires the server-only runtime gate.'
+    )
+    OR NOT COALESCE((
+      SELECT class.relrowsecurity
+      FROM pg_class AS class
+      WHERE class.oid = to_regclass('public.widget_configs')
+    ), false)
+    OR (
+      SELECT count(*)
+      FROM pg_policy AS policy
+      WHERE policy.polrelid = to_regclass('public.widget_configs')
+    ) <> 4
+    OR EXISTS (
+      SELECT 1
+      FROM (
+        VALUES
+          ('widget_configs_delete'),
+          ('widget_configs_insert'),
+          ('widget_configs_select'),
+          ('widget_configs_update')
+      ) AS expected(policy_name)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM pg_policy AS policy
+        WHERE policy.polrelid = to_regclass('public.widget_configs')
+          AND policy.polname = expected.policy_name
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM (VALUES ('anon'), ('authenticated'), ('service_role'))
+        AS role(role_name)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'))
+        AS privilege(privilege_name)
+      WHERE has_column_privilege(
+        role.role_name,
+        'public.widget_configs',
+        'proactive_invitation_enabled',
+        privilege.privilege_name
+      ) IS DISTINCT FROM has_column_privilege(
+        role.role_name,
+        'public.widget_configs',
+        'welcome_message',
+        privilege.privilege_name
+      )
+    )
 ),
 widget_validator_failures AS (
   SELECT count(*)::bigint AS failure_count
@@ -710,6 +909,22 @@ expected_service_functions(identity, expected_definer) AS (
     ),
     (
       'public.expire_chat_only_checkout_attempt(uuid,uuid,text,text,timestamptz)',
+      true
+    ),
+    (
+      'public.record_widget_engagement_event(uuid,text,text,text,text,integer)',
+      true
+    ),
+    (
+      'public.acquire_widget_telemetry_ingress_capacity(text)',
+      true
+    ),
+    (
+      'public.acquire_widget_telemetry_capacity(uuid,text,text,text,text)',
+      true
+    ),
+    (
+      'public.purge_widget_engagement_events()',
       true
     )
 ),
@@ -979,6 +1194,269 @@ checkout_column_failures AS (
   WHERE expected.column_name IS NULL
     OR actual.column_name IS NULL
     OR expected.formatted_type IS DISTINCT FROM actual.formatted_type
+),
+expected_telemetry_columns(
+  column_name,
+  formatted_type,
+  must_be_not_null,
+  default_expression
+) AS (
+  VALUES
+    ('id', 'uuid', true, 'gen_random_uuid()'),
+    ('business_id', 'uuid', true, NULL::text),
+    ('session_key_hash', 'text', true, NULL::text),
+    ('event_type', 'text', true, NULL::text),
+    ('source', 'text', true, NULL::text),
+    ('device_bucket', 'text', true, NULL::text),
+    ('prompt_version', 'integer', true, NULL::text),
+    (
+      'occurred_at',
+      'timestamp with time zone',
+      true,
+      'statement_timestamp()'
+    )
+),
+actual_telemetry_columns AS (
+  SELECT
+    attribute.attname AS column_name,
+    format_type(attribute.atttypid, attribute.atttypmod) AS formatted_type,
+    attribute.attnotnull AS must_be_not_null,
+    pg_get_expr(default_value.adbin, default_value.adrelid)
+      AS default_expression
+  FROM pg_attribute AS attribute
+  LEFT JOIN pg_attrdef AS default_value
+    ON default_value.adrelid = attribute.attrelid
+   AND default_value.adnum = attribute.attnum
+  WHERE attribute.attrelid =
+        to_regclass('public.widget_engagement_events')
+    AND attribute.attnum > 0
+    AND NOT attribute.attisdropped
+),
+telemetry_column_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM expected_telemetry_columns AS expected
+  FULL JOIN actual_telemetry_columns AS actual USING (column_name)
+  WHERE expected.column_name IS NULL
+    OR actual.column_name IS NULL
+    OR expected.formatted_type IS DISTINCT FROM actual.formatted_type
+    OR expected.must_be_not_null IS DISTINCT FROM actual.must_be_not_null
+    OR expected.default_expression IS DISTINCT FROM actual.default_expression
+),
+telemetry_constraint_catalog_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (VALUES (1)) AS required(marker)
+  WHERE (
+      SELECT count(*)
+      FROM pg_constraint AS constraint_row
+      WHERE constraint_row.conrelid =
+            to_regclass('public.widget_engagement_events')
+    ) <> 9
+    OR EXISTS (
+      SELECT 1
+      FROM (
+        VALUES
+          ('widget_engagement_events_business_id_fkey'),
+          ('widget_engagement_events_device_bucket_check'),
+          ('widget_engagement_events_event_type_check'),
+          ('widget_engagement_events_pkey'),
+          ('widget_engagement_events_prompt_version_check'),
+          ('widget_engagement_events_session_event_unique'),
+          ('widget_engagement_events_session_key_hash_check'),
+          ('widget_engagement_events_source_check'),
+          ('widget_engagement_events_source_contract')
+      ) AS expected(constraint_name)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_row
+        WHERE constraint_row.conrelid =
+              to_regclass('public.widget_engagement_events')
+          AND constraint_row.conname = expected.constraint_name
+          AND constraint_row.convalidated
+      )
+    )
+),
+telemetry_endpoint_constraint_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (
+    VALUES
+      (
+        'public.widget_ingress_rate_buckets',
+        'widget_ingress_rate_buckets_endpoint_check',
+        ARRAY[
+          '%''config''%', '%''chat''%', '%''end''%', '%''lead''%',
+          '%''telemetry''%'
+        ]::text[],
+        'CHECKendpoint=ANYARRAY[''config'',''chat'',''end'',''lead'',''telemetry'']'
+      ),
+      (
+        'public.widget_request_rate_buckets',
+        'widget_request_rate_buckets_endpoint_check',
+        ARRAY[
+          '%''config''%', '%''chat''%', '%''end''%', '%''lead''%',
+          '%''telemetry''%', '%''preview_chat''%', '%''preview_end''%'
+        ]::text[],
+        'CHECKendpoint=ANYARRAY[''config'',''chat'',''end'',''lead'',''telemetry'',''preview_chat'',''preview_end'']'
+      )
+  ) AS expected(
+    relation_name,
+    constraint_name,
+    required_patterns,
+    normalized_definition
+  )
+  LEFT JOIN pg_constraint AS constraint_row
+    ON constraint_row.conrelid = to_regclass(expected.relation_name)
+   AND constraint_row.conname = expected.constraint_name
+  WHERE constraint_row.oid IS NULL
+    OR NOT constraint_row.convalidated
+    OR replace(
+      regexp_replace(
+        pg_get_constraintdef(constraint_row.oid),
+        '[[:space:]()]',
+        '',
+        'g'
+      ),
+      '::text',
+      ''
+    ) IS DISTINCT FROM expected.normalized_definition
+    OR EXISTS (
+      SELECT 1
+      FROM unnest(expected.required_patterns) AS pattern(value)
+      WHERE pg_get_constraintdef(constraint_row.oid) NOT LIKE pattern.value
+    )
+),
+telemetry_metadata_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (VALUES (1)) AS required(marker)
+  WHERE obj_description(
+      to_regclass('public.widget_engagement_events'),
+      'pg_class'
+    ) IS DISTINCT FROM
+      'Content-free proactive-widget funnel events. Session identity is a server-side keyed HMAC; rows contain no message, contact, URL, or network data, become purge-eligible after 90 days, and are removed by the next daily cleanup run.'
+    OR col_description(
+      to_regclass('public.widget_engagement_events'),
+      (
+        SELECT attribute.attnum
+        FROM pg_attribute AS attribute
+        WHERE attribute.attrelid =
+              to_regclass('public.widget_engagement_events')
+          AND attribute.attname = 'session_key_hash'
+          AND NOT attribute.attisdropped
+      )
+    ) IS DISTINCT FROM
+      'Lowercase SHA-256 HMAC produced server-side from the business and widget session using a domain-separated secret context.'
+),
+telemetry_table_security_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (VALUES (1)) AS required(marker)
+  LEFT JOIN pg_class AS class
+    ON class.oid = to_regclass('public.widget_engagement_events')
+  WHERE class.oid IS NULL
+    OR NOT class.relrowsecurity
+    OR EXISTS (
+      SELECT 1
+      FROM pg_policy AS policy
+      WHERE policy.polrelid = class.oid
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM aclexplode(COALESCE(class.relacl, acldefault('r', class.relowner)))
+        AS acl
+      WHERE acl.grantee = 0
+        AND acl.privilege_type IN (
+          'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES',
+          'TRIGGER'
+        )
+    )
+    OR COALESCE(has_table_privilege('anon', class.oid, 'SELECT'), false)
+    OR COALESCE(has_table_privilege('anon', class.oid, 'INSERT'), false)
+    OR COALESCE(has_table_privilege('anon', class.oid, 'UPDATE'), false)
+    OR COALESCE(has_table_privilege('anon', class.oid, 'DELETE'), false)
+    OR COALESCE(
+      has_table_privilege('authenticated', class.oid, 'SELECT'), false
+    )
+    OR COALESCE(
+      has_table_privilege('authenticated', class.oid, 'INSERT'), false
+    )
+    OR COALESCE(
+      has_table_privilege('authenticated', class.oid, 'UPDATE'), false
+    )
+    OR COALESCE(
+      has_table_privilege('authenticated', class.oid, 'DELETE'), false
+    )
+    OR NOT COALESCE(
+      has_table_privilege('service_role', class.oid, 'SELECT'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'INSERT'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'UPDATE'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'DELETE'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'TRUNCATE'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'REFERENCES'), false
+    )
+    OR COALESCE(
+      has_table_privilege('service_role', class.oid, 'TRIGGER'), false
+    )
+),
+telemetry_function_security_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (
+    VALUES
+      (
+        'public.record_widget_engagement_event(uuid,text,text,text,text,integer)'
+      ),
+      ('public.acquire_widget_telemetry_ingress_capacity(text)'),
+      (
+        'public.acquire_widget_telemetry_capacity(uuid,text,text,text,text)'
+      ),
+      ('public.purge_widget_engagement_events()')
+  ) AS expected(identity)
+  LEFT JOIN pg_proc AS procedure
+    ON procedure.oid = to_regprocedure(expected.identity)
+  WHERE procedure.oid IS NULL
+    OR NOT procedure.prosecdef
+    OR procedure.proconfig IS DISTINCT FROM
+       ARRAY['search_path=public, pg_temp']::text[]
+    OR NOT COALESCE(
+      has_function_privilege('service_role', procedure.oid, 'EXECUTE'), false
+    )
+    OR COALESCE(
+      has_function_privilege('authenticated', procedure.oid, 'EXECUTE'), false
+    )
+    OR COALESCE(
+      has_function_privilege('anon', procedure.oid, 'EXECUTE'), false
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM aclexplode(COALESCE(
+        procedure.proacl,
+        acldefault('f', procedure.proowner)
+      )) AS acl
+      WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+    )
+),
+telemetry_retention_function_failures AS (
+  SELECT count(*)::bigint AS failure_count
+  FROM (VALUES ('public.purge_widget_engagement_events()'))
+    AS expected(identity)
+  LEFT JOIN pg_proc AS procedure
+    ON procedure.oid = to_regprocedure(expected.identity)
+  WHERE procedure.oid IS NULL
+    OR pg_get_functiondef(procedure.oid) NOT LIKE
+      '%DELETE FROM public.widget_engagement_events AS event%'
+    OR pg_get_functiondef(procedure.oid) NOT LIKE
+      '%event.occurred_at < statement_timestamp() - interval ''90 days''%'
+    OR to_regclass('public.idx_widget_engagement_events_retention') IS NULL
+    OR pg_get_indexdef(
+      to_regclass('public.idx_widget_engagement_events_retention')
+    ) NOT LIKE '%occurred_at, id%'
 ),
 credential_shape_failures AS (
   SELECT count(*)::bigint AS failure_count
@@ -1269,6 +1747,61 @@ critical_source_contracts(group_name, identity, required_patterns, forbidden_pat
       ARRAY[
         '%v_attempt.checkout_session_expires_at < v_now%',
         '%v_attempt.checkout_session_expires_at <= v_now%'
+      ]::text[]
+    ),
+    (
+      'migration_066_function_boundaries',
+      'public.record_widget_engagement_event(uuid,text,text,text,text,integer)',
+      ARRAY[
+        '%invalid_widget_engagement_event%',
+        '%INSERT INTO public.widget_engagement_events%',
+        '%ON CONFLICT%',
+        '%DO NOTHING%'
+      ]::text[],
+      ARRAY[
+        '%contacts%', '%conversations%', '%messages%',
+        '%anthropic%', '%billing_usage%', '%ai_reply_usage_periods%',
+        '%ai_reply_reservations%', '%subscriptions%', '%stripe%',
+        '%telnyx%', '%calendar_provider_operations%'
+      ]::text[]
+    ),
+    (
+      'migration_066_function_boundaries',
+      'public.acquire_widget_telemetry_ingress_capacity(text)',
+      ARRAY[
+        '%invalid_widget_telemetry_ingress_request%',
+        '%public.widget_ingress_rate_buckets%',
+        '%''telemetry''%', '%''network''%', '%''global''%'
+      ]::text[],
+      ARRAY[
+        '%public.widget_configs%', '%public.contacts%',
+        '%public.conversations%', '%public.messages%', '%anthropic%'
+      ]::text[]
+    ),
+    (
+      'migration_066_function_boundaries',
+      'public.acquire_widget_telemetry_capacity(uuid,text,text,text,text)',
+      ARRAY[
+        '%FROM public.businesses AS business%', '%FOR UPDATE%',
+        '%FROM public.widget_configs AS widget%',
+        '%is_valid_widget_hostname_allowlist%',
+        '%public.widget_request_rate_buckets%', '%''telemetry''%'
+      ]::text[],
+      ARRAY[
+        '%public.widget_request_capacity_leases%', '%public.contacts%',
+        '%public.conversations%', '%public.messages%', '%anthropic%'
+      ]::text[]
+    ),
+    (
+      'migration_066_function_boundaries',
+      'public.purge_widget_engagement_events()',
+      ARRAY[
+        '%DELETE FROM public.widget_engagement_events AS event%',
+        '%event.occurred_at < statement_timestamp() - interval ''90 days''%'
+      ]::text[],
+      ARRAY[
+        '%public.processed_webhook_events%',
+        '%public.ai_reply_reservations%'
       ]::text[]
     )
 ),
@@ -1617,6 +2150,18 @@ checkout_live_duplicates AS (
     HAVING count(*) > 1
   ) AS duplicate
 ),
+widget_telemetry_retention_health AS (
+  SELECT
+    count(*) FILTER (
+      WHERE event.occurred_at <
+            statement_timestamp() - interval '90 days'
+    )::bigint AS purge_eligible_count,
+    count(*) FILTER (
+      WHERE event.occurred_at <
+            statement_timestamp() - interval '91 days'
+    )::bigint AS overdue_count
+  FROM public.widget_engagement_events AS event
+),
 cron_health AS (
   SELECT
     count(*)::bigint AS total_jobs,
@@ -1627,6 +2172,13 @@ cron_health AS (
         AND job.command LIKE
           '%DELETE FROM processed_webhook_events%processed_at < now() - interval ''7 days''%'
     )::bigint AS valid_cleanup_jobs,
+    count(*) FILTER (
+      WHERE job.jobname = 'cleanup_widget_engagement_events'
+        AND job.active
+        AND job.schedule = '20 3 * * *'
+        AND job.command =
+          'SELECT public.purge_widget_engagement_events()'
+    )::bigint AS valid_widget_telemetry_cleanup_jobs,
     count(*) FILTER (
       WHERE job.jobname = 'reap_expired_ai_reply_reservations'
         AND job.active
@@ -1643,19 +2195,19 @@ report_rows AS (
     CASE
       WHEN malformed_versions = 0
         AND versions_outside_reviewed_tip = 0
-        AND reviewed_versions = 64
-        AND phase4_tip_count = 1
+        AND reviewed_versions = 66
+        AND reviewed_tip_count = 1
         AND (SELECT missing_versions FROM ledger_gaps) = 0
       THEN 'PASS'
       ELSE 'BLOCKER'
     END AS status,
     (
       malformed_versions + versions_outside_reviewed_tip
-      + (64 - LEAST(reviewed_versions, 64))
+      + (66 - LEAST(reviewed_versions, 66))
       + (SELECT missing_versions FROM ledger_gaps)
-      + CASE WHEN phase4_tip_count = 1 THEN 0 ELSE 1 END
+      + CASE WHEN reviewed_tip_count = 1 THEN 0 ELSE 1 END
     )::bigint AS observed_count,
-    'Ledger must be contiguous from 001 through the exact reviewed tip 064.'::text
+    'Ledger must be contiguous from 001 through the exact reviewed tip 066.'::text
       AS detail
   FROM ledger_health
 
@@ -1728,6 +2280,14 @@ report_rows AS (
 
   UNION ALL
   SELECT
+    'post_migration', 'migration_065_proactive_preference_boundaries',
+    CASE WHEN failure_count = 0 THEN 'PASS' ELSE 'BLOCKER' END,
+    failure_count,
+    'The owner preference is boolean, non-null, default-on, documented, and inherits exact existing widget RLS and privileges.'
+  FROM proactive_preference_failures
+
+  UNION ALL
+  SELECT
     'post_migration', 'migration_063_google_token_grants',
     CASE WHEN failure_count = 0 THEN 'PASS' ELSE 'BLOCKER' END,
     failure_count,
@@ -1774,6 +2334,52 @@ report_rows AS (
 
   UNION ALL
   SELECT
+    'post_migration', 'migration_066_widget_telemetry_schema_boundaries',
+    CASE
+      WHEN columns.failure_count = 0
+        AND constraints.failure_count = 0
+        AND endpoints.failure_count = 0
+        AND metadata.failure_count = 0
+      THEN 'PASS' ELSE 'BLOCKER'
+    END,
+    columns.failure_count + constraints.failure_count
+      + endpoints.failure_count + metadata.failure_count,
+    'Telemetry has exactly the reviewed content-free columns, constraints, metadata, and five-path rate-bucket enums.'
+  FROM telemetry_column_failures AS columns
+  CROSS JOIN telemetry_constraint_catalog_failures AS constraints
+  CROSS JOIN telemetry_endpoint_constraint_failures AS endpoints
+  CROSS JOIN telemetry_metadata_failures AS metadata
+
+  UNION ALL
+  SELECT
+    'post_migration', 'migration_066_widget_telemetry_security_boundaries',
+    CASE
+      WHEN relation.failure_count = 0 AND functions.failure_count = 0
+      THEN 'PASS' ELSE 'BLOCKER'
+    END,
+    relation.failure_count + functions.failure_count,
+    'Telemetry is RLS-private with service read-only table access and service-only fixed-path RPC mutation.'
+  FROM telemetry_table_security_failures AS relation
+  CROSS JOIN telemetry_function_security_failures AS functions
+
+  UNION ALL
+  SELECT
+    'post_migration', 'migration_066_widget_telemetry_retention_boundaries',
+    CASE
+      WHEN retention.failure_count = 0
+        AND cron.valid_widget_telemetry_cleanup_jobs = 1
+      THEN 'PASS' ELSE 'BLOCKER'
+    END,
+    retention.failure_count
+      + CASE
+          WHEN cron.valid_widget_telemetry_cleanup_jobs = 1 THEN 0 ELSE 1
+        END,
+    'Rows become eligible after 90 days and the exact independent 03:20 UTC daily purge removes them.'
+  FROM telemetry_retention_function_failures AS retention
+  CROSS JOIN cron_health AS cron
+
+  UNION ALL
+  SELECT
     'post_migration', 'plan_family_lock_invariants',
     CASE WHEN failure_count = 0 THEN 'PASS' ELSE 'BLOCKER' END,
     failure_count,
@@ -1795,7 +2401,7 @@ report_rows AS (
       WHEN source.group_name = 'migration_063_function_lock_boundaries'
       THEN ordering.failure_count ELSE 0
     END,
-    'Critical lock, namespace, reconciliation, and provider-evidence source contracts.'
+    'Critical lock, namespace, reconciliation, provider-evidence, and content-free telemetry source contracts.'
   FROM source_contract_results AS source
   CROSS JOIN source_order_failures AS ordering
 
@@ -1989,15 +2595,31 @@ report_rows AS (
 
   UNION ALL
   SELECT
+    'post_migration', 'widget_telemetry_purge_eligible_inventory', 'PASS',
+    purge_eligible_count,
+    'Content-free telemetry older than 90 days is eligible for removal by the next 03:20 UTC daily purge.'
+  FROM widget_telemetry_retention_health
+
+  UNION ALL
+  SELECT
+    'post_migration', 'widget_telemetry_expired_backlog',
+    CASE WHEN overdue_count = 0 THEN 'PASS' ELSE 'BLOCKER' END,
+    overdue_count,
+    'Content-free telemetry older than 91 days indicates the independent daily purge missed its normal cleanup window.'
+  FROM widget_telemetry_retention_health
+
+  UNION ALL
+  SELECT
     'post_migration', 'database_cron_exact_jobs',
     CASE
-      WHEN total_jobs = 2
+      WHEN total_jobs = 3
         AND valid_cleanup_jobs = 1
+        AND valid_widget_telemetry_cleanup_jobs = 1
         AND valid_reaper_jobs = 1
       THEN 'PASS' ELSE 'BLOCKER'
     END,
     total_jobs,
-    'Exactly webhook cleanup daily and reply-reservation reaping minutely are approved.'
+    'Exactly webhook cleanup at 03:00 UTC, telemetry cleanup at 03:20 UTC, and reply-reservation reaping minutely are approved.'
   FROM cron_health
 )
 SELECT phase, check_name, status, observed_count, detail

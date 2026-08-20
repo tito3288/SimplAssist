@@ -10,6 +10,7 @@ export type WidgetTrafficEndpoint =
   | "chat"
   | "end"
   | "lead"
+  | "telemetry"
   | "preview_chat"
   | "preview_end";
 
@@ -91,6 +92,7 @@ const LOCAL_LIMITS: Record<
   chat: { session: 12, network: 30 },
   end: { session: 10, network: 10 },
   lead: { session: 5, network: 10 },
+  telemetry: { session: 12, network: 120 },
   preview_chat: { session: 6, network: 12 },
   preview_end: { session: 6, network: 6 },
 };
@@ -106,14 +108,23 @@ class SupabaseWidgetTrafficAdapter implements WidgetTrafficAdapter {
   ): Promise<WidgetTrafficAcquireResult> {
     let result: { data: unknown; error: unknown };
     try {
-      result = await supabaseAdmin.rpc("acquire_widget_request_capacity", {
-        p_business_id: input.businessId,
-        p_origin_hostname: input.originHostname,
-        p_session_id: input.sessionId,
-        p_endpoint: input.endpoint,
-        p_network_key: input.networkKey,
-        p_request_key: input.requestKey,
-      });
+      result =
+        input.endpoint === "telemetry"
+          ? await supabaseAdmin.rpc("acquire_widget_telemetry_capacity", {
+              p_business_id: input.businessId,
+              p_origin_hostname: input.originHostname,
+              p_session_id: input.sessionId,
+              p_network_key: input.networkKey,
+              p_request_key: input.requestKey,
+            })
+          : await supabaseAdmin.rpc("acquire_widget_request_capacity", {
+              p_business_id: input.businessId,
+              p_origin_hostname: input.originHostname,
+              p_session_id: input.sessionId,
+              p_endpoint: input.endpoint,
+              p_network_key: input.networkKey,
+              p_request_key: input.requestKey,
+            });
     } catch (error) {
       console.error("[widget:traffic] Shared acquire threw:", error);
       return { status: "unavailable" };
@@ -264,9 +275,7 @@ export async function releaseWidgetTraffic(
   await releaseSharedLeaseBestEffort(lease.sharedLeaseToken);
 }
 
-async function releaseSharedLeaseBestEffort(
-  leaseToken: string,
-): Promise<void> {
+async function releaseSharedLeaseBestEffort(leaseToken: string): Promise<void> {
   const release = adapter.release({ leaseToken }).then(
     () => undefined,
     (error) => {

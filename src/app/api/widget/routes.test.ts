@@ -265,6 +265,7 @@ const WIDGET_CONFIG_PATCH = {
   show_logo: false,
   logo_url: null,
   welcome_message: "Welcome",
+  proactive_invitation_enabled: true,
   lead_capture_enabled: true,
   lead_capture_timing: "start",
   quick_replies: ["Pricing"],
@@ -494,6 +495,7 @@ describe("authenticated widget configuration mutations", () => {
       id: "widget-1",
       business_id: BUSINESS_ID,
       welcome_message: "Welcome",
+      proactive_invitation_enabled: true,
     });
     const updateChain = mocks.from.mock.results[0]?.value as {
       update: ReturnType<typeof vi.fn>;
@@ -517,6 +519,19 @@ describe("authenticated widget configuration mutations", () => {
       error: "Service temporarily unavailable",
       retryable: true,
     });
+  });
+
+  it("requires an explicit proactive invitation preference", async () => {
+    const payload: Record<string, unknown> = { ...WIDGET_CONFIG_PATCH };
+    delete payload.proactive_invitation_enabled;
+
+    const response = await patchConfig(configPatchRequest(payload));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Invalid widget configuration",
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it("refuses to activate a widget with an explicitly empty hostname allowlist", async () => {
@@ -686,6 +701,7 @@ describe("public widget entitlement boundaries", () => {
           brand_color: "#123456",
           position: "bottom_right",
           welcome_message: "Welcome",
+          proactive_invitation_enabled: true,
           show_logo: false,
           logo_url: null,
           lead_capture_enabled: true,
@@ -705,6 +721,7 @@ describe("public widget entitlement boundaries", () => {
       available: true,
       businessName: "Acme",
       welcomeMessage: "Welcome",
+      proactiveInvitationEnabled: false,
       poweredByName: "SimplAssist",
       poweredByUrl: "https://simplassist.com",
       widgetToken: "test-token",
@@ -715,11 +732,46 @@ describe("public widget entitlement boundaries", () => {
       origin: "http://localhost",
       sessionId: "session-1",
     });
+
     const configChain = mocks.from.mock.results[0]?.value as {
       eq: ReturnType<typeof vi.fn>;
     };
     expect(configChain.eq).toHaveBeenCalledWith("business_id", BUSINESS_ID);
   });
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])(
+    "combines broad proactive authority with saved preference %s",
+    async (preference, expected) => {
+      vi.stubEnv("WIDGET_PROACTIVE_INVITATIONS_ENABLED", "1");
+      queueDatabaseResults(
+        {
+          data: {
+            id: "widget-1",
+            brand_color: "#123456",
+            position: "bottom_right",
+            welcome_message: "Welcome",
+            proactive_invitation_enabled: preference,
+            show_logo: false,
+            logo_url: null,
+            lead_capture_enabled: true,
+            lead_capture_timing: "start",
+            quick_replies: [],
+          },
+          error: null,
+        },
+        { data: { name: "Acme" }, error: null },
+      );
+
+      const response = await getConfig(configRequest());
+      expect(await response.json()).toMatchObject({
+        available: true,
+        proactiveInvitationEnabled: expected,
+      });
+    },
+  );
 
   it("returns unavailable when AI pauses while config attribution is pending", async () => {
     queueDatabaseResults(
@@ -2829,6 +2881,7 @@ describe("widget attribution responses", () => {
     brand_color: "#123456",
     position: "bottom_right",
     welcome_message: "Welcome",
+    proactive_invitation_enabled: true,
     show_logo: false,
     logo_url: null,
     lead_capture_enabled: true,
@@ -2996,6 +3049,7 @@ describe("owner-only widget preview", () => {
         brand_color: "#123456",
         position: "bottom_left",
         welcome_message: "Preview welcome",
+        proactive_invitation_enabled: true,
         show_logo: false,
         logo_url: null,
         lead_capture_enabled: true,
@@ -3020,6 +3074,7 @@ describe("owner-only widget preview", () => {
       businessName: "Acme",
       position: "bottom_left",
       welcomeMessage: "Preview welcome",
+      proactiveInvitationEnabled: true,
       poweredByName: "SimplAssist",
       poweredByUrl: "https://simplassist.com",
     });

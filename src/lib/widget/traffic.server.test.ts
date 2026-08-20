@@ -181,6 +181,32 @@ describe("widget traffic controls", () => {
     );
   });
 
+  it("uses isolated shared telemetry capacity without allocating a lease", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: { status: "allowed", lease_token: null },
+      error: null,
+    });
+    const decision = await acquireWidgetTraffic({
+      ...INPUT,
+      endpoint: "telemetry",
+    });
+
+    expect(decision).toEqual({
+      status: "allowed",
+      lease: { sharedLeaseToken: null, localConcurrencyKeys: [] },
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "acquire_widget_telemetry_capacity",
+      {
+        p_business_id: INPUT.businessId,
+        p_origin_hostname: INPUT.originHostname,
+        p_session_id: INPUT.sessionId,
+        p_network_key: INPUT.networkKey,
+        p_request_key: INPUT.requestKey,
+      },
+    );
+  });
+
   it("fails closed for adapter errors, malformed results, and a missing chat lease", async () => {
     mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: "down" } });
     expect(await acquireWidgetTraffic(INPUT)).toEqual({

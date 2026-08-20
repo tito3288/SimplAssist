@@ -32,6 +32,7 @@ import {
 } from "@/lib/widget/request.server";
 import { mintWidgetToken } from "@/lib/widget/token.server";
 import { acquireWidgetIngressTraffic } from "@/lib/widget/ingressTraffic.server";
+import { arePublicWidgetProactiveInvitationsEnabledForBusiness } from "@/lib/widget/proactiveInvitations.server";
 import {
   acquireWidgetTraffic,
   deriveWidgetNetworkKey,
@@ -45,6 +46,7 @@ const widgetConfigMutationSchema = z
     show_logo: z.boolean(),
     logo_url: z.union([z.string().url(), z.literal(""), z.null()]),
     welcome_message: z.string().trim().min(1).max(500),
+    proactive_invitation_enabled: z.boolean(),
     lead_capture_enabled: z.boolean(),
     lead_capture_timing: z.enum(["start", "after_3_messages", "on_booking"]),
     quick_replies: z.array(z.string().trim().max(50)).max(3),
@@ -360,6 +362,9 @@ export async function GET(request: NextRequest) {
         welcomeMessage: widgetConfig.welcome_message,
         showLogo: widgetConfig.show_logo,
         logoUrl: widgetConfig.logo_url,
+        proactiveInvitationEnabled:
+          widgetConfig.proactive_invitation_enabled &&
+          arePublicWidgetProactiveInvitationsEnabledForBusiness(businessId),
         leadCaptureEnabled: widgetConfig.lead_capture_enabled,
         leadCaptureTiming: widgetConfig.lead_capture_timing,
         quickReplies: widgetConfig.quick_replies || [],

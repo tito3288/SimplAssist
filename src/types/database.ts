@@ -865,6 +865,7 @@ export interface WidgetConfig {
   brand_color: string;
   position: WidgetPosition;
   welcome_message: string;
+  proactive_invitation_enabled: boolean;
   show_logo: boolean;
   logo_url: string | null;
   lead_capture_enabled: boolean;

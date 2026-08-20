@@ -19,6 +19,14 @@ const REPORTS = [
   },
 ];
 
+const PROACTIVE_PREFLIGHT = {
+  phase: "proactive_pre_migration",
+  url: new URL(
+    "../supabase/snippets/proactive-widget-065-066-pre-migration-report.sql",
+    import.meta.url
+  ),
+};
+
 const PRE_REQUIRED_CHECKS = [
   "migration_ledger_format",
   "migration_ledger_contiguous",
@@ -45,13 +53,18 @@ const POST_REQUIRED_CHECKS = [
   "trigger_catalog_and_boundaries",
   "migration_063_provider_table_shape",
   "migration_061_widget_schema_boundaries",
+  "migration_065_proactive_preference_boundaries",
   "migration_063_google_token_grants",
   "migration_063_function_lock_boundaries",
   "migration_063_function_namespace_boundaries",
   "migration_063_function_reconciliation_boundaries",
   "migration_064_checkout_table_shape",
+  "migration_066_widget_telemetry_schema_boundaries",
+  "migration_066_widget_telemetry_security_boundaries",
+  "migration_066_widget_telemetry_retention_boundaries",
   "plan_family_lock_invariants",
   "migration_064_function_evidence_boundaries",
+  "migration_066_function_boundaries",
   "migration_064_authority_trigger_fields",
   "active_widget_allowlist_invariants",
   "active_widget_inventory",
@@ -76,7 +89,21 @@ const POST_REQUIRED_CHECKS = [
   "checkout_completed_binding_invariants",
   "checkout_family_lock_invariants",
   "checkout_singleflight_invariants",
+  "widget_telemetry_purge_eligible_inventory",
+  "widget_telemetry_expired_backlog",
   "database_cron_exact_jobs",
+];
+
+const PROACTIVE_PREFLIGHT_REQUIRED_CHECKS = [
+  "migration_ledger_exact_064",
+  "migration_065_preference_column_absent",
+  "migration_066_telemetry_objects_absent",
+  "pre_066_widget_endpoint_constraints",
+  "widget_config_security_prerequisites",
+  "active_widget_allowlist_prerequisites",
+  "widget_config_inventory",
+  "active_widget_inventory",
+  "database_cron_pre_066_exact_jobs",
 ];
 
 function maskSqlLiteralsAndComments(sql) {
@@ -214,7 +241,7 @@ describe("Phase 4 SQL report safety contract", () => {
     }
   });
 
-  it("keeps the pre-report independent of every post-tip Checkout object", async () => {
+  it("keeps the historical pre-report independent of every post-tip object", async () => {
     const [{ sql }] = await loadReports();
 
     expect(sql).not.toContain("chat_only_checkout_attempts");
@@ -222,6 +249,82 @@ describe("Phase 4 SQL report safety contract", () => {
     expect(sql).not.toContain("sync_chat_only_subscription_from_attempt");
     expect(sql).not.toContain("complete_chat_only_checkout_attempt");
     expect(sql).not.toContain("expire_chat_only_checkout_attempt");
+    expect(sql).not.toContain("proactive_invitation_enabled");
+    expect(sql).not.toContain("widget_engagement_events");
+    expect(sql).not.toContain("acquire_widget_telemetry_capacity");
+    expect(sql).not.toContain("purge_widget_engagement_events");
+  });
+
+  it("pins the current post-report to exact reviewed tip 066", async () => {
+    const [, { sql }] = await loadReports();
+
+    expect(sql).toMatch(/migration_number NOT BETWEEN 1 AND 66/);
+    expect(sql).toMatch(/migration_number BETWEEN 1 AND 66/);
+    expect(sql).toMatch(/migration_number = 66/);
+    expect(sql).toMatch(/generate_series\(1, 66\)/);
+    expect(sql).toMatch(/reviewed_versions = 66/);
+    expect(sql).toContain("exact reviewed tip 066");
+  });
+
+  it("pins migration 065 owner preference schema and inherited security", async () => {
+    const [, { sql }] = await loadReports();
+
+    expect(sql).toContain("proactive_invitation_enabled");
+    expect(sql).toContain("'boolean'::regtype");
+    expect(sql).toContain("default_value.adbin");
+    expect(sql).toContain(
+      "Owner preference for automatically revealing the saved welcome message. Public delivery also requires the server-only runtime gate."
+    );
+    expect(sql).toContain("widget_configs_update");
+    expect(sql).toContain("welcome_message");
+  });
+
+  it("pins migration 066 content-free schema, security, retention, and cron", async () => {
+    const [, { sql }] = await loadReports();
+
+    expect(sql).toContain("public.widget_engagement_events");
+    expect(sql).toContain("session_key_hash");
+    expect(sql).toContain("widget_engagement_events_source_contract");
+    expect(sql).toContain("widget_ingress_rate_buckets_endpoint_check");
+    expect(sql).toContain("widget_request_rate_buckets_endpoint_check");
+    expect(sql).toContain("'telemetry'");
+    expect(sql).toContain(
+      "public.record_widget_engagement_event(uuid,text,text,text,text,integer)"
+    );
+    expect(sql).toContain(
+      "public.acquire_widget_telemetry_ingress_capacity(text)"
+    );
+    expect(sql).toContain(
+      "public.acquire_widget_telemetry_capacity(uuid,text,text,text,text)"
+    );
+    expect(sql).toContain("public.purge_widget_engagement_events()");
+    expect(sql).toContain("interval '90 days'");
+    expect(sql).toContain("interval '91 days'");
+    expect(sql).toContain("cleanup_widget_engagement_events");
+    expect(sql).toContain("'20 3 * * *'");
+    expect(sql).toMatch(/total_jobs = 3/);
+    expect(sql).toMatch(/valid_widget_telemetry_cleanup_jobs = 1/);
+    expect(sql).toContain(
+      "CHECKendpoint=ANYARRAY[''config'',''chat'',''end'',''lead'',''telemetry'']"
+    );
+    expect(sql).toContain(
+      "CHECKendpoint=ANYARRAY[''config'',''chat'',''end'',''lead'',''telemetry'',''preview_chat'',''preview_end'']"
+    );
+    for (const forbiddenRecordDependency of [
+      "%contacts%",
+      "%conversations%",
+      "%messages%",
+      "%anthropic%",
+      "%billing_usage%",
+      "%ai_reply_usage_periods%",
+      "%ai_reply_reservations%",
+      "%subscriptions%",
+      "%stripe%",
+      "%telnyx%",
+      "%calendar_provider_operations%",
+    ]) {
+      expect(sql).toContain(forbiddenRecordDependency);
+    }
   });
 
   it("contains each pre-migration blocker and inventory check exactly once", async () => {
@@ -268,5 +371,83 @@ describe("Phase 4 SQL report safety contract", () => {
         )
       ).toBe(true);
     }
+  });
+});
+
+describe("proactive widget 064-to-066 preflight safety contract", () => {
+  it("is a read-only repeatable-read snapshot with fixed aggregate output", async () => {
+    const sql = await readFile(PROACTIVE_PREFLIGHT.url, "utf8");
+    const executable = maskSqlLiteralsAndComments(sql);
+
+    expect(executable).toMatch(
+      /BEGIN\s+TRANSACTION\s+ISOLATION\s+LEVEL\s+REPEATABLE\s+READ\s+READ\s+ONLY\s*;/i
+    );
+    expect(executable.match(/\bBEGIN\b/gi)).toHaveLength(1);
+    expect(executable.match(/\bROLLBACK\b/gi)).toHaveLength(1);
+    expect(executable.trimEnd()).toMatch(/ROLLBACK\s*;$/i);
+    expect(sql).toMatch(
+      /SELECT phase, check_name, status, observed_count, detail\s+FROM report_rows\s+ORDER BY check_name;/
+    );
+    expect(sql).not.toMatch(
+      /\b(?:json_agg|jsonb_agg|array_agg|string_agg|row_to_json|to_json|to_jsonb)\s*\(/i
+    );
+    expect(sql).not.toMatch(/\bSELECT\s+\*/i);
+    expect(executable).not.toContain("||");
+  });
+
+  it("contains no SQL or psql mutation surface", async () => {
+    const sql = await readFile(PROACTIVE_PREFLIGHT.url, "utf8");
+    const executable = maskSqlLiteralsAndComments(sql);
+    const forbidden =
+      /\b(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|CALL|DO|COPY|VACUUM|ANALYZE|GRANT|REVOKE|LOCK|REFRESH|CLUSTER|REINDEX)\b/i;
+
+    expect(executable).not.toMatch(forbidden);
+    expect(executable).not.toMatch(/\\(?:gexec|copy|include|i|o|out)\b/i);
+    expect(executable).not.toMatch(
+      /\b(?:nextval|setval|pg_advisory_lock|pg_advisory_xact_lock|dblink|lo_import|lo_export)\s*\(/i
+    );
+  });
+
+  it("emits every required sanitized preflight check exactly once", async () => {
+    const sql = await readFile(PROACTIVE_PREFLIGHT.url, "utf8");
+    const names = extractCheckNames(sql, PROACTIVE_PREFLIGHT.phase);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.toSorted()).toEqual(
+      PROACTIVE_PREFLIGHT_REQUIRED_CHECKS.toSorted()
+    );
+  });
+
+  it("pins exact tip 064, absent 065-066 objects, old enums, and two jobs", async () => {
+    const sql = await readFile(PROACTIVE_PREFLIGHT.url, "utf8");
+
+    expect(sql).toMatch(/migration_number NOT BETWEEN 1 AND 64/);
+    expect(sql).toMatch(/generate_series\(1, 64\)/);
+    expect(sql).toMatch(/reviewed_versions = 64/);
+    expect(sql).toContain("proactive_invitation_enabled");
+    expect(sql).toContain("public.widget_engagement_events");
+    expect(sql).toContain(
+      "public.record_widget_engagement_event(uuid,text,text,text,text,integer)"
+    );
+    expect(sql).toContain("pg_get_constraintdef(constraint_row.oid)");
+    expect(sql).toContain("LIKE '%''telemetry''%'");
+    expect(sql).toMatch(/total_jobs = 2/);
+    expect(sql).toContain("cleanup_processed_webhook_events");
+    expect(sql).toContain("reap_expired_ai_reply_reservations");
+    expect(sql).not.toContain("cleanup_widget_engagement_events");
+  });
+
+  it("documents the exact operator command and rejects the historical pre-report", async () => {
+    const runbook = await readFile(
+      new URL("../docs/proactive-widget-rollout.md", import.meta.url),
+      "utf8"
+    );
+
+    expect(runbook).toContain(
+      "npx supabase db query --linked --project-ref inmgpkurctttsofpywuz --file supabase/snippets/proactive-widget-065-066-pre-migration-report.sql"
+    );
+    expect(runbook).toContain(
+      "The Phase 4 pre-report is a historical pre-064 artifact"
+    );
   });
 });

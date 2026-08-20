@@ -121,7 +121,8 @@ off and revise the trusted-proxy rule before launch.
 
 Application limits cannot stop a distributed botnet rotating source IPs across
 many edge regions. Managed edge/WAF rate limiting for `/api/widget/config`,
-`/api/widget/chat`, `/api/widget/end`, and `/api/widget/lead` is therefore a
+`/api/widget/chat`, `/api/widget/end`, `/api/widget/lead`, and
+`/api/widget/telemetry` is therefore a
 mandatory hosted launch gate before enabling either direct or partner Chat
 Only acquisition flag. Keep limits generic and do not key edge decisions on a
 caller-supplied business ID.
@@ -129,7 +130,7 @@ caller-supplied business ID.
 The hosted Phase 6 closure strengthens this boundary: public embed API calls
 use the canonical Cloudflare-proxied application origin even when the static
 embed script is served from a connected partner origin. Cloudflare overwrites
-a private `x-simplassist-widget-edge-origin` request header on the four exact
+a private `x-simplassist-widget-edge-origin` request header on the five exact
 public API paths, and Railway checks that value against the distinct server-only
 `WIDGET_EDGE_ORIGIN_SECRET` before
 public widget work. Authenticated same-origin dashboard preview remains a
@@ -335,7 +336,8 @@ Also verify all of the following before launch:
 - every active widget has one through ten exact canonical ASCII hostnames; no
   wildcard, scheme, path, port, credentials, trailing dot, or blank allowlist;
 - managed edge/WAF limits cover `/api/widget/config`, `/api/widget/chat`,
-  `/api/widget/end`, and `/api/widget/lead`; public calls use the canonical
+  `/api/widget/end`, `/api/widget/lead`, and `/api/widget/telemetry`; public
+  calls use the canonical
   protected origin, direct Railway-origin calls fail without the private edge
   proof, Railway's trusted `X-Forwarded-For` behavior is verified, and no
   caller-supplied business key is used;
@@ -362,7 +364,8 @@ refresh, provider-operation recovery, and the authenticated cleanup heartbeat
 before reopening calendar traffic. Never leave old calendar writers serving
 alongside 063.
 
-The database must have exactly these two `pg_cron` jobs:
+At the historical migration-063 boundary, the database had exactly these two
+`pg_cron` jobs:
 
 - `cleanup_processed_webhook_events` at `0 3 * * *`, deleting webhook
   idempotency rows older than seven days; and

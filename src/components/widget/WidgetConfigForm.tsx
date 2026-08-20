@@ -38,6 +38,7 @@ export interface WidgetConfigFormValues {
   show_logo: boolean;
   logo_url: string;
   welcome_message: string;
+  proactive_invitation_enabled: boolean;
   lead_capture_enabled: boolean;
   lead_capture_timing: LeadCaptureTiming;
   quick_replies: string[];
@@ -179,6 +180,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
       show_logo: config.show_logo,
       logo_url: config.logo_url || '',
       welcome_message: config.welcome_message,
+      proactive_invitation_enabled: config.proactive_invitation_enabled,
       lead_capture_enabled: config.lead_capture_enabled,
       lead_capture_timing: config.lead_capture_timing,
       quick_replies: config.quick_replies || [],
@@ -191,6 +193,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
   const showLogo = watch('show_logo');
   const position = watch('position');
   const welcomeMessage = watch('welcome_message');
+  const proactiveInvitationEnabled = watch('proactive_invitation_enabled');
   const leadCaptureEnabled = watch('lead_capture_enabled');
   const quickReplies = watch('quick_replies');
   const allowedHostnames = watch('allowed_hostnames');
@@ -237,6 +240,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           show_logo: data.show_logo,
           logo_url: data.logo_url || null,
           welcome_message: data.welcome_message,
+          proactive_invitation_enabled: data.proactive_invitation_enabled,
           lead_capture_enabled: data.lead_capture_enabled,
           lead_capture_timing: data.lead_capture_timing,
           quick_replies: data.quick_replies.filter(q => q.trim() !== ''),
@@ -381,6 +385,53 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
         <h2 className="text-lg font-semibold text-stone-900 dark:text-[#f5f5f5] mb-1">Welcome Message</h2>
         <p className="text-sm text-stone-500 dark:text-[#bdbdbf] mb-4">The first message visitors see when they open the chat.</p>
 
+        <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-[#ece4d8] bg-[#faf7f2] p-4 dark:border-white/[0.10] dark:bg-white/[0.04]">
+          <div>
+            <p
+              id="proactive-invitation-label"
+              className="text-sm font-medium text-stone-900 dark:text-[#f5f5f5]"
+            >
+              Automatically greet website visitors
+            </p>
+            <p
+              id="proactive-invitation-description"
+              className="mt-1 text-xs leading-5 text-stone-500 dark:text-[#bdbdbf]"
+            >
+              On by default. Open this welcome message after visitors have had
+              time to look around. It does not start a conversation or use an
+              AI reply until a visitor responds. When off, the chat bubble
+              stays available for them to open themselves.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={proactiveInvitationEnabled}
+            aria-labelledby="proactive-invitation-label"
+            aria-describedby="proactive-invitation-description"
+            onClick={() =>
+              setValue(
+                'proactive_invitation_enabled',
+                !proactiveInvitationEnabled,
+                { shouldDirty: true },
+              )
+            }
+            className={cn(
+              'relative inline-flex h-7 w-14 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer',
+              proactiveInvitationEnabled
+                ? 'bg-[var(--brand-primary)] dark:bg-[var(--brand-primary-dark)]'
+                : 'bg-stone-300 dark:bg-white/[0.18]'
+            )}
+          >
+            <span
+              className={cn(
+                'pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow ring-0 transition-transform',
+                proactiveInvitationEnabled ? 'translate-x-7' : 'translate-x-0'
+              )}
+            />
+          </button>
+        </div>
+
         <div className="relative">
           <textarea
             {...register('welcome_message')}
@@ -483,7 +534,7 @@ export default function WidgetConfigForm({ config, onSaved, onPreviewChange }: W
           {leadCaptureEnabled && (
             <div className="space-y-2 pl-1">
               {([
-                { value: 'start' as const, label: 'Ask immediately when chat opens' },
+                { value: 'start' as const, label: 'Ask when the visitor starts chatting' },
                 { value: 'after_3_messages' as const, label: 'Ask after 3 messages' },
                 { value: 'on_booking' as const, label: 'Ask only when booking is mentioned' },
               ]).map((option) => (

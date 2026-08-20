@@ -77,7 +77,8 @@ change Cloudflare or deploy the application.
 
 --waf-verified requires retained evidence that every public widget API call
 uses the canonical Cloudflare-proxied application origin, Cloudflare overwrites
-the private edge-origin request header on all four widget API paths, and the
+the private edge-origin request header on all five widget API paths (config,
+chat, end, lead, and telemetry), and the
 application rejects the same calls through Railway's generated or custom-domain
 origin paths when that edge proof is absent. It also covers the separately
 reviewed coarse IP burst rule and trusted network-key evidence. Partner-branded

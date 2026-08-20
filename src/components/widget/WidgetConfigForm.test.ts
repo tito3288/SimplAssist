@@ -48,4 +48,17 @@ describe("WidgetConfigForm Phase 2 branding", () => {
     expect(source).not.toContain("X-Forwarded-Host");
     expect(source).not.toContain("SimplAssist");
   });
+
+  it("persists an accessible proactive greeting preference with owner-facing copy", () => {
+    expect(source).toContain("Automatically greet website visitors");
+    expect(source).toContain("role=\"switch\"");
+    expect(source).toContain("aria-checked={proactiveInvitationEnabled}");
+    expect(source).toContain("proactive_invitation_enabled: data.proactive_invitation_enabled");
+    expect(source).toContain("does not start a conversation or use an");
+  });
+
+  it("describes start-timed lead capture as visitor-triggered", () => {
+    expect(source).toContain("Ask when the visitor starts chatting");
+    expect(source).not.toContain("Ask immediately when chat opens");
+  });
 });

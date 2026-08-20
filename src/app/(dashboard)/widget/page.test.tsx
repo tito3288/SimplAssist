@@ -123,6 +123,7 @@ describe("WidgetPage defaults", () => {
       expect.objectContaining({
         business_id: BUSINESS_ID,
         allowed_hostnames: ["www.example.com"],
+        proactive_invitation_enabled: true,
         is_active: true,
       })
     );

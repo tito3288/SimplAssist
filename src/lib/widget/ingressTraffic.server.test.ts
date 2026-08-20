@@ -36,6 +36,20 @@ describe("widget ingress traffic", () => {
     });
   });
 
+  it("uses the isolated telemetry ingress RPC", async () => {
+    await expect(
+      acquireWidgetIngressTraffic(
+        { endpoint: "telemetry", networkKey: "t".repeat(43) },
+        1_000,
+      ),
+    ).resolves.toEqual({ status: "allowed" });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "acquire_widget_telemetry_ingress_capacity",
+      { p_network_key: "t".repeat(43) },
+    );
+  });
+
   it("fails closed on shared errors, throws, and malformed decisions", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: "db" } });
     await expect(acquireWidgetIngressTraffic(INPUT, 1_000)).resolves.toEqual({
@@ -85,9 +99,9 @@ describe("widget ingress traffic", () => {
 
   it("applies the local per-network chat limit before another shared call", async () => {
     for (let index = 0; index < 60; index += 1) {
-      await expect(
-        acquireWidgetIngressTraffic(INPUT, 1_000),
-      ).resolves.toEqual({ status: "allowed" });
+      await expect(acquireWidgetIngressTraffic(INPUT, 1_000)).resolves.toEqual({
+        status: "allowed",
+      });
     }
 
     await expect(acquireWidgetIngressTraffic(INPUT, 1_000)).resolves.toEqual({
@@ -127,9 +141,9 @@ describe("widget ingress traffic", () => {
     for (let index = 0; index < 60; index += 1) {
       await acquireWidgetIngressTraffic(INPUT, 59_999);
     }
-    await expect(
-      acquireWidgetIngressTraffic(INPUT, 60_000),
-    ).resolves.toEqual({ status: "allowed" });
+    await expect(acquireWidgetIngressTraffic(INPUT, 60_000)).resolves.toEqual({
+      status: "allowed",
+    });
     expect(rpc).toHaveBeenCalledTimes(61);
   });
 

@@ -243,13 +243,12 @@ deployment boundary:
   061 active-widget hostname derivability, migration 062 active booking
   overlaps, both migration 063 legacy provider-namespace preflights, cleanup
   eligibility, and current cron state.
-- The post-migration report verifies every expected object, constraint, index,
-  RLS policy, grant, and function boundary through the Phase 4 migration tip,
-  including every 063 invariant and any private Checkout-attempt objects; exact
-  active-widget allowlists; absence of active slot conflicts and invalid
-  provider namespaces; exactly the two approved database cron jobs;
-  reply-reservation health; and unresolved or overdue calendar
-  provider-operation backlog.
+- The maintained post-migration report now verifies every expected object,
+  constraint, index, RLS policy, grant, and function boundary through the
+  current reviewed tip 066. It retains every Phase 4 invariant and additionally
+  pins the proactive preference, content-free widget telemetry, its 90-day
+  purge-eligibility boundary with next-daily-run removal, and exactly three
+  approved database cron jobs.
 
 Both reports are tested only against disposable local databases during Phase
 4A. Never run pgTAP fixtures against hosted data. A separate non-mutating HTTP
@@ -425,7 +424,11 @@ npm run audit:chat-only-phase4 -- \
   --canary-state absent
 ```
 
-### Stage C — migrations 063–064 cutover and compatible deploy
+### Historical Stage C — migrations 063–064 cutover and compatible deploy
+
+This subsection records the original Phase 4 cutover. It is not the current
+migration-tip runbook; use `proactive-widget-rollout.md` for the 065–066
+sequence.
 
 Migration 063 does not support rolling old Calendar writers beside the new
 schema. Before the release window, approve one exact drain strategy:

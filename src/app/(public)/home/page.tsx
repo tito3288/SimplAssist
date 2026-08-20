@@ -347,15 +347,8 @@ function FaqAnswerText({
 
 /* ── Page ── */
 
-type HomePageProps = {
-  chatOnlyPublicLaunchEnabled?: boolean;
-};
-
-export default function HomePage({
-  chatOnlyPublicLaunchEnabled,
-}: HomePageProps) {
-  const publicChatOnlyAvailable =
-    chatOnlyPublicLaunchEnabled ?? isChatOnlyPublicLaunchEnabled();
+export default function HomePage() {
+  const publicChatOnlyAvailable = isChatOnlyPublicLaunchEnabled();
   const seoContent = getHomepageSeoContent(publicChatOnlyAvailable);
   const plans = publicChatOnlyAvailable
     ? [chatOnlyPlan, ...existingPlans]

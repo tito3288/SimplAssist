@@ -411,6 +411,8 @@ describe("Phase 5 launch-readiness CLI contract", () => {
     expect(source).toContain("response body, metadata, and JSON-LD");
     expect(source).toContain("Chat Only sale");
     expect(source).toContain("WIDGET_EDGE_ORIGIN_SECRET");
+    expect(source).toContain("all five widget API paths");
+    expect(source).toContain("config,\nchat, end, lead, and telemetry");
     expect(source).toContain("Railway's generated or custom-domain");
     expect(JSON.parse(packageSource).scripts["audit:chat-only-phase5"]).toBe(
       "node scripts/chat-only-phase5-readiness.mjs",

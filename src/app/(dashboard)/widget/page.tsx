@@ -57,6 +57,7 @@ export default async function WidgetPage() {
         brand_color: '#3B82F6',
         position: 'bottom_right',
         welcome_message: 'Hi there! 👋 How can we help you today?',
+        proactive_invitation_enabled: true,
         show_logo: true,
         logo_url: null,
         lead_capture_enabled: true,

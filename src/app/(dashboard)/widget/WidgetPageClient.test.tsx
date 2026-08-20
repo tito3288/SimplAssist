@@ -2,11 +2,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { WidgetConfig } from "@/types/database";
 
+const mocks = vi.hoisted(() => ({ widgetPreview: vi.fn() }));
+
 vi.mock("@/components/widget/WidgetConfigForm", () => ({
   default: () => <div>Config form</div>,
 }));
 vi.mock("@/components/widget/WidgetPreview", () => ({
-  default: () => <div>Widget preview</div>,
+  default: (props: unknown) => {
+    mocks.widgetPreview(props);
+    return <div>Widget preview</div>;
+  },
 }));
 vi.mock("@/components/widget/EmbedCodeGenerator", () => ({
   default: ({
@@ -30,6 +35,7 @@ const CONFIG: WidgetConfig = {
   brand_color: "#123456",
   position: "bottom_right",
   welcome_message: "Hello",
+  proactive_invitation_enabled: true,
   show_logo: false,
   logo_url: null,
   lead_capture_enabled: true,
@@ -54,5 +60,12 @@ describe("WidgetPageClient install origin", () => {
 
     expect(html).toContain('data-script-origin="https://app.partner.example"');
     expect(html).toContain(`data-business-id="${BUSINESS_ID}"`);
+    expect(mocks.widgetPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preview: expect.objectContaining({
+          proactive_invitation_enabled: true,
+        }),
+      }),
+    );
   });
 });

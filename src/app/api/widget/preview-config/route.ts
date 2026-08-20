@@ -120,6 +120,8 @@ export async function GET(request: NextRequest) {
       welcomeMessage: widgetConfig.welcome_message,
       showLogo: widgetConfig.show_logo,
       logoUrl: widgetConfig.logo_url,
+      proactiveInvitationEnabled:
+        widgetConfig.proactive_invitation_enabled,
       leadCaptureEnabled: widgetConfig.lead_capture_enabled,
       leadCaptureTiming: widgetConfig.lead_capture_timing,
       quickReplies: widgetConfig.quick_replies || [],

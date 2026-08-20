@@ -40,7 +40,9 @@ Phase 9 billing/admin and Phase 3 calendar/operations use these deployment varia
 - `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only acceptance while the broad flag remains off. In production, setting it with the live Chat Price authorizes that exact eligible business to begin a real-charge Checkout, so configure it only for the separately approved Phase 7 window and remove it after the exact-account evidence is complete. It accepts no list, whitespace, wildcard, or public/browser variant. Never create a `NEXT_PUBLIC_` copy.
 - `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` - independent server-only, exact-`1` rollout switch reserved for new partner-admin chat-only assignments. Leave unset or `0` until partner acceptance testing is complete.
 - `WIDGET_TOKEN_SECRET` - server-only secret used to sign short-lived public widget sessions and derive opaque traffic keys. Use at least 32 cryptographically random bytes, keep it identical across all application instances, and never expose it through a `NEXT_PUBLIC_` variable. Rotation immediately invalidates existing five-minute widget sessions and changes the traffic-key namespace, effectively starting new rate buckets; rotate deliberately across every instance at once.
-- `WIDGET_EDGE_ORIGIN_SECRET` - distinct server-only proof that a public widget API request traversed the reviewed Cloudflare edge before Railway. Use 43–128 base64url-safe characters derived from at least 32 cryptographically random bytes (64 lowercase hexadecimal characters is valid), keep it identical to the value Cloudflare overwrites into `x-simplassist-widget-edge-origin` on the four exact public widget API paths, never reuse `WIDGET_TOKEN_SECRET`, and never create a `NEXT_PUBLIC_` copy. Public embed API calls use the canonical application origin; authenticated dashboard preview remains same-origin.
+- `WIDGET_EDGE_ORIGIN_SECRET` - distinct server-only proof that a public widget API request traversed the reviewed Cloudflare edge before Railway. Use 43–128 base64url-safe characters derived from at least 32 cryptographically random bytes (64 lowercase hexadecimal characters is valid), keep it identical to the value Cloudflare overwrites into `x-simplassist-widget-edge-origin` on the five exact public widget API paths, never reuse `WIDGET_TOKEN_SECRET`, and never create a `NEXT_PUBLIC_` copy. Public embed API calls use the canonical application origin; authenticated dashboard preview remains same-origin.
+- `WIDGET_PROACTIVE_INVITATIONS_ENABLED` - server-only, exact-`1` global switch for delivering proactive chat invitations to public widgets. Leave unset or `0` to suppress automatic opening without changing any owner's saved preference; authenticated previews may still show the saved preference. Never create a `NEXT_PUBLIC_` copy.
+- `WIDGET_PROACTIVE_INVITATIONS_CANARY_BUSINESS_ID` - optional server-only canonical business UUID for rehearsing proactive invitations on exactly one public widget while the broad switch remains off. Whitespace, lists, wildcards, and malformed identifiers fail closed. Remove it after rehearsal, and never create a `NEXT_PUBLIC_` copy.
 - `GOOGLE_CLIENT_ID` - server-side Google OAuth client ID for Calendar access.
 - `GOOGLE_CLIENT_SECRET` - server-only Google OAuth client secret. Never expose it through a `NEXT_PUBLIC_` variable.
 - `GOOGLE_REDIRECT_URI` - exact canonical callback URL: the origin from `NEXT_PUBLIC_APP_URL` followed by `/api/google/callback`. A different origin, path, query, fragment, or embedded credential fails closed.
@@ -66,12 +68,13 @@ implied: the owner decides whether the founding subscription remains active.
 
 The switches gate new acquisition and partner assignment only. They do not
 turn off the metering, widget-security, or calendar-lifecycle code used by
-existing plans, so migrations 060-064 and their existing-plan regression gates
+existing plans, so migrations 060-066 and their existing-plan regression gates
 must be treated as production changes even while both switches remain `0`.
 
 Before setting either switch to `1`, configure managed edge/WAF rate limiting
 for `/api/widget/config`, `/api/widget/chat`, `/api/widget/end`, and
-`/api/widget/lead`. The application has business-independent shared ingress
+`/api/widget/lead`, plus `/api/widget/telemetry`. The application has
+business-independent shared ingress
 limits, but distributed source-IP rotation still requires an edge control and
 is a mandatory hosted launch gate.
 
@@ -97,6 +100,10 @@ owner-led new-account live $10 acceptance and only then permits a separately
 approved monitored broad-direct launch. Partner Chat Only and cross-family
 transitions remain independent, default-off future work.
 
+The proactive desktop/mobile invitation, privacy boundary, five-path edge
+contract, canary-to-broad rollout, monitoring, and rollback are documented in
+[`docs/proactive-widget-rollout.md`](docs/proactive-widget-rollout.md).
+
 The Full Suite waitlist uses these server-only deployment variables:
 
 - `RESEND_API_KEY` - Resend API key used for waitlist confirmation emails.
@@ -120,11 +127,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 Railway is the application host. Database migrations are applied separately to
 Supabase and must precede any Railway application version that calls their new
-RPCs or reads their new columns. Migration 063 is not safe as an ordinary
-rolling change: block and drain old calendar create/update/delete, AI booking,
-OAuth-completion, refresh, and disconnect traffic; run the documented
-preflights; apply migrations through 064; deploy the compatible application and
-reconciler; then reopen calendar traffic only after verification.
+RPCs or reads their new columns. Migration 063 was not safe as an ordinary
+rolling change. Its historical cutover contract was to block and drain old
+calendar create/update/delete, AI booking, OAuth-completion, refresh, and
+disconnect traffic; run the documented preflights; apply through migration
+064; deploy the compatible application and reconciler; then reopen calendar
+traffic only after verification. The current 065–066 proactive-widget change
+is a separate additive rollout: apply both migrations before deploying the
+application version that reads their schema, then use the canary procedure in
+the proactive-widget runbook.
 
 Railway does not schedule account cleanup. Keep exactly one external
 cron-job.org job for `POST https://simplassist.com/api/account/cleanup`, with

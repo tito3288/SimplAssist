@@ -88,11 +88,15 @@ function visibleText(html: string): string {
 }
 
 function renderHomepage(chatOnlyPublicLaunchEnabled = false) {
-  return renderToStaticMarkup(
-    <CanonicalHomepage
-      chatOnlyPublicLaunchEnabled={chatOnlyPublicLaunchEnabled}
-    />,
+  vi.stubEnv(
+    "CHAT_ONLY_DIRECT_SALES_ENABLED",
+    chatOnlyPublicLaunchEnabled ? "1" : "0",
   );
+  vi.stubEnv(
+    "STRIPE_PRICE_CHAT_ONLY",
+    chatOnlyPublicLaunchEnabled ? "price_live_chat_only" : "",
+  );
+  return renderToStaticMarkup(<CanonicalHomepage />);
 }
 
 type JsonRecord = Record<string, unknown>;

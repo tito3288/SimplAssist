@@ -111,16 +111,25 @@ is not a launch.
 Every **public** widget API call must traverse the canonical
 `https://simplassist.com` Cloudflare edge before Railway. Partner-branded embed
 scripts remain available from their connected partner origin, but the script's
-public config, chat, end, and lead calls use the canonical API origin. The
+public config, chat, end, lead, and telemetry calls use the canonical API
+origin. The
 authenticated dashboard preview remains same-origin on its application host
 and continues through the existing workspace authorization path.
 
-The four public API paths are:
+The five public API paths are:
 
 - `/api/widget/config`;
 - `/api/widget/chat`;
-- `/api/widget/end`; and
-- `/api/widget/lead`.
+- `/api/widget/end`;
+- `/api/widget/lead`; and
+- `/api/widget/telemetry`.
+
+The original Phase 6 boundary covered the first four paths. For the migration
+065–066 extension, stage the telemetry path in both Cloudflare rules before the
+compatible application deploy, re-prove the existing four paths at that stage,
+and prove telemetry canonical success plus direct-origin rejection only after
+the new endpoint is deployed. Follow the exact sequence in
+`docs/proactive-widget-rollout.md`.
 
 Cloudflare must have one Request Header Transform Rule for those exact paths.
 The rule must **set/overwrite**, not merely preserve, the private edge-origin
@@ -162,7 +171,7 @@ loaded partner embed cannot be stranded when enforcement begins:
    dashboard preview still works on the partner host.
 
 The existing coarse Cloudflare IP burst rule remains a separate layer and must
-stay enabled for all four exact paths. The private edge proof does not replace
+stay enabled for all five exact paths. The private edge proof does not replace
 the persisted customer-site hostname allowlist, signed widget session token,
 per-network/session/business limits, reply allowance, or concurrency controls.
 It only proves that a public request passed through the reviewed edge rather
