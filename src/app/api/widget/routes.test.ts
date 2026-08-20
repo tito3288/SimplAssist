@@ -235,9 +235,8 @@ function sameOriginConfigRequest(headers: Record<string, string> = {}) {
     `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
     {
       headers: {
+        Host: "localhost",
         "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
         ...headers,
       },
     },
@@ -1923,6 +1922,106 @@ describe("public widget transport security", () => {
     );
   });
 
+  it("derives the public origin from proxy Host and protocol without requiring mode or destination metadata", async () => {
+    queueDatabaseResults(
+      {
+        data: {
+          id: "widget-1",
+          brand_color: "#123456",
+          position: "bottom_right",
+          welcome_message: "Welcome",
+          show_logo: false,
+          logo_url: null,
+          lead_capture_enabled: true,
+          lead_capture_timing: "start",
+          quick_replies: [],
+          allowed_hostnames: ["simplassist.com"],
+          is_active: true,
+        },
+        error: null,
+      },
+      { data: { name: "SimplAssist" }, error: null },
+    );
+    const response = await getConfig(
+      new NextRequest(
+        `http://railway.internal:8080/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+        {
+          headers: {
+            Host: "simplassist.com",
+            "X-Forwarded-Proto": "https",
+            "Sec-Fetch-Site": "same-origin",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ available: true });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "https://simplassist.com",
+    );
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith(
+      expect.objectContaining({ originHostname: "simplassist.com" }),
+    );
+    expect(mocks.mintWidgetToken).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      origin: "https://simplassist.com",
+      sessionId: "session-1",
+    });
+  });
+
+  it("rejects an internal/public host mismatch without a forwarded protocol before DB work", async () => {
+    const response = await getConfig(
+      new NextRequest(
+        `http://railway.internal:8080/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+        {
+          headers: {
+            Host: "simplassist.com",
+            "Sec-Fetch-Site": "same-origin",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit valid Origin authoritative over malformed fallback-only proxy headers", async () => {
+    queueDatabaseResults({
+      data: {
+        id: "widget-1",
+        allowed_hostnames: ["simplassist.com"],
+        is_active: false,
+      },
+      error: null,
+    });
+    const response = await getConfig(
+      new NextRequest(
+        `http://railway.internal:8080/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+        {
+          headers: {
+            Origin: "https://simplassist.com",
+            Host: "https://malformed.example",
+            "X-Forwarded-Proto": "https,http",
+            "Sec-Fetch-Site": "cross-site",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "https://simplassist.com",
+    );
+    expect(mocks.from).toHaveBeenCalledOnce();
+  });
+
   it("still denies a same-origin config GET when its synthesized hostname is not persisted", async () => {
     queueDatabaseResults({
       data: {
@@ -1944,47 +2043,64 @@ describe("public widget transport security", () => {
   });
 
   it.each([
-    ["missing Fetch Metadata", {}],
+    ["missing Fetch Metadata", { Host: "localhost" }],
     [
       "a non-same-origin site",
       {
+        Host: "localhost",
         "Sec-Fetch-Site": "same-site",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
-      },
-    ],
-    [
-      "a non-fetch mode",
-      {
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Dest": "empty",
-      },
-    ],
-    [
-      "a non-empty destination",
-      {
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "document",
       },
     ],
     [
       "an explicitly empty Origin",
       {
+        Host: "localhost",
         Origin: "",
         "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
       },
     ],
     [
       "an opaque Origin",
       {
+        Host: "localhost",
         Origin: "null",
         "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
+      },
+    ],
+    [
+      "a missing Host",
+      {
+        "Sec-Fetch-Site": "same-origin",
+      },
+    ],
+    [
+      "a URL-shaped Host",
+      {
+        Host: "https://simplassist.com",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    ],
+    [
+      "a list-valued Host",
+      {
+        Host: "simplassist.com,evil.example",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    ],
+    [
+      "a list-valued forwarded protocol",
+      {
+        Host: "simplassist.com",
+        "X-Forwarded-Proto": "https,http",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    ],
+    [
+      "an empty forwarded protocol",
+      {
+        Host: "simplassist.com",
+        "X-Forwarded-Proto": "",
+        "Sec-Fetch-Site": "same-origin",
       },
     ],
   ])("rejects a config GET with %s before DB work", async (_label, headers) => {

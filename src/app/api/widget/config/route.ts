@@ -10,6 +10,7 @@ import {
   BusinessPartnerResolutionError,
   resolveWidgetAttribution,
 } from "@/lib/branding/businessPartner.server";
+import { normalizeHostHeader } from "@/lib/branding/hostname";
 import {
   OperationalControlsResolutionError,
   resolveBusinessOperationalControls,
@@ -61,15 +62,43 @@ function resolvePublicConfigOrigin(request: NextRequest) {
     return normalizeWidgetOrigin(declaredOrigin);
   }
 
-  if (
-    request.headers.get("sec-fetch-site") !== "same-origin" ||
-    request.headers.get("sec-fetch-mode") !== "cors" ||
-    request.headers.get("sec-fetch-dest") !== "empty"
-  ) {
+  // Browser scripts cannot forge Sec-Fetch-Site. Same-origin GETs may omit
+  // Origin, while cross-origin embeds continue through the explicit branch.
+  if (request.headers.get("sec-fetch-site") !== "same-origin") return null;
+
+  const rawHost = request.headers.get("host");
+  const hostname = normalizeHostHeader(rawHost);
+  if (!rawHost || !hostname) return null;
+
+  const protocol = resolvePublicConfigProtocol(request, hostname);
+  if (!protocol) return null;
+
+  const hostOrigin = normalizeWidgetOrigin(`${protocol}//${rawHost}`);
+  return hostOrigin?.hostname === hostname ? hostOrigin : null;
+}
+
+function resolvePublicConfigProtocol(
+  request: NextRequest,
+  publicHostname: string,
+): "https:" | "http:" | null {
+  const forwardedProtocol = request.headers.get("x-forwarded-proto");
+  if (forwardedProtocol !== null) {
+    if (forwardedProtocol === "https") return "https:";
+    if (forwardedProtocol === "http") return "http:";
     return null;
   }
 
-  return normalizeWidgetOrigin(request.nextUrl.origin);
+  // A server-visible URL may be internal behind a proxy. Without an explicit
+  // proxy protocol, its scheme is usable only when its host is public too.
+  if (normalizeHostHeader(request.nextUrl.host) !== publicHostname) return null;
+
+  if (
+    request.nextUrl.protocol === "https:" ||
+    request.nextUrl.protocol === "http:"
+  ) {
+    return request.nextUrl.protocol;
+  }
+  return null;
 }
 
 export async function OPTIONS(request: NextRequest) {
