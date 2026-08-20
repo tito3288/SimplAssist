@@ -241,7 +241,7 @@ describe("canonical homepage static HTML", () => {
     );
   });
 
-  it("adds the complete direct Chat Only offer without changing existing plan positioning", () => {
+  it("renders balanced selling points with complete plan details when Chat Only is public", () => {
     const html = renderHomepage(true);
     const pricing = html.match(
       /<section id="pricing"[\s\S]*?<\/section>/,
@@ -252,22 +252,57 @@ describe("canonical homepage static HTML", () => {
     expect(text).toContain("Chat Only");
     expect(text).toMatch(/\$10\s*\/mo/);
     expect(text).toContain("200 completed AI replies/month");
+    expect(text).toContain("Website AI chat widget");
+    expect(text).toContain("Web-chat lead capture + conversation inbox");
+    expect(text).toContain("AI customization + Google Calendar booking");
+    expect(text).toContain("No phone, texting, or setup fee");
+    expect(text).toContain("$25 one-time SMS activation fee");
+    expect(text).toContain("2,500 SMS parts/month + priority support");
     expect(text).toContain("Website chat widget");
     expect(text).toContain("Web-chat lead capture");
     expect(text).toContain("Contact and conversation inbox");
+    expect(text).toContain("Custom widget branding");
     expect(text).toContain(
       "AI answer, tone, FAQ, and service customization",
     );
     expect(text).toContain("Google Calendar connection");
     expect(text).toContain("AI appointment scheduling");
-    expect(text).toContain("No phone number, SMS, MMS, or Telnyx activation");
+    expect(text).toContain("No phone number, SMS, MMS, or carrier activation");
     expect(text).toContain("No setup or SMS activation fee");
-    expect(pricing).toMatch(/href="\/signup"[^>]*>Get Started<\/a>/);
+    expect(text).toContain("Compare complete plan details");
+    expect(text).toContain("See every included feature before you choose.");
+    expect(pricing).toMatch(
+      /<details(?![^>]*\bopen\b)[^>]*>[\s\S]*?<summary/,
+    );
     expect(text).toContain("SMS Only");
     expect(text).toContain("SMS + Web Chat");
     expect(text).toContain("Full Suite");
     expect(text.match(/Most Popular/g)).toHaveLength(1);
-    expect(text.match(/Coming Soon/g)).toHaveLength(1);
+    expect(text.match(/Coming Soon/g)).toHaveLength(2);
+    expect(pricing?.match(/href="\/signup"/g)).toHaveLength(3);
+    expect(text).toContain("Notify Me When It Launches");
+
+    for (const planKey of [
+      "chat_only",
+      "sms_only",
+      "sms_and_chat",
+      "full",
+    ]) {
+      const card = pricing?.match(
+        new RegExp(
+          `<article data-plan-card="${planKey}"[\\s\\S]*?<\\/article>`,
+        ),
+      )?.[0];
+      const highlights = card?.match(
+        new RegExp(
+          `<ul data-plan-highlights="${planKey}"[\\s\\S]*?<\\/ul>`,
+        ),
+      )?.[0];
+
+      expect(card).toBeDefined();
+      expect(highlights?.match(/<li\b/g)).toHaveLength(5);
+      expect(pricing).toContain(`data-plan-details="${planKey}"`);
+    }
   });
 
   it("preserves the exact prelaunch plan and SEO presentation when Chat Only is off", () => {
@@ -278,6 +313,10 @@ describe("canonical homepage static HTML", () => {
     const content = getHomepageSeoContent(false);
 
     expect(visibleText(pricing ?? "")).not.toContain("Chat Only");
+    expect(pricing).not.toContain('data-plan-card="chat_only"');
+    expect(pricing).not.toContain('data-plan-details="chat_only"');
+    expect(pricing?.match(/data-plan-card=/g)).toHaveLength(3);
+    expect(pricing?.match(/data-plan-details=/g)).toHaveLength(3);
     expect(html).toContain(HOME_DEFINITION);
     expect(content.faqs).toBe(HOME_FAQS);
     expect(content.title).toBe(HOME_TITLE);

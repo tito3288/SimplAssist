@@ -129,17 +129,27 @@ const chatOnlyPlan = {
   planKey: "chat_only" as const,
   name: "Chat Only",
   price: "$10",
+  category: "Website chat",
+  billingNote: "No setup fee",
   description:
     "An AI website receptionist for teams that want web chat without texting.",
+  highlights: [
+    "Website AI chat widget",
+    "200 completed AI replies/month",
+    "Web-chat lead capture + conversation inbox",
+    "AI customization + Google Calendar booking",
+    "No phone, texting, or setup fee",
+  ],
   features: [
     "Website chat widget",
     "200 completed AI replies/month",
+    "Custom widget branding",
     "Web-chat lead capture",
     "Contact and conversation inbox",
     "AI answer, tone, FAQ, and service customization",
     "Google Calendar connection",
     "AI appointment scheduling",
-    "No phone number, SMS, MMS, or Telnyx activation",
+    "No phone number, SMS, MMS, or carrier activation",
     "No setup or SMS activation fee",
   ],
   highlighted: false,
@@ -150,12 +160,24 @@ const existingPlans = [
     planKey: "sms_only" as const,
     name: "SMS Only",
     price: "$25",
+    category: "Texting",
+    billingNote: "$25 one-time SMS activation fee",
     description: "Missed-call texting for small teams that want fast coverage.",
+    highlights: [
+      "Local SimplAssist number",
+      "Automatic missed-call text-back",
+      "Manual SMS inbox + replies",
+      "Contact + conversation management",
+      "500 included SMS parts/month",
+    ],
     features: [
       "One local SimplAssist number",
       "Manual SMS inbox and replies",
       "Automatic missed-call text",
       "500 included SMS parts/month",
+      "Contact management",
+      "Conversation inbox",
+      "$25 one-time SMS activation fee",
     ],
     highlighted: false,
   },
@@ -163,10 +185,20 @@ const existingPlans = [
     planKey: "sms_and_chat" as const,
     name: "SMS + Web Chat",
     price: "$45",
+    category: "Texting + web chat",
+    billingNote: "$25 one-time SMS activation fee",
     description: "Capture leads from calls and your website, then turn them into booked appointments.",
+    highlights: [
+      "Everything in SMS Only",
+      "Website chat widget + lead capture",
+      "AI conversations + customization",
+      "Google Calendar booking",
+      "1,500 included SMS parts/month",
+    ],
     features: [
       "Everything in SMS Only",
       "Website chat widget",
+      "Custom widget branding",
       "Web chat lead capture",
       "Full AI SMS conversations",
       "Customize your AI's answers and tone",
@@ -180,7 +212,16 @@ const existingPlans = [
     planKey: "full" as const,
     name: "Full Suite",
     price: "$65",
+    category: "Complete suite",
+    billingNote: "Planned pricing",
     description: "Measure performance and automate follow-up as your business grows.",
+    highlights: [
+      "Everything in SMS + Web Chat",
+      "Advanced AI guardrails + analytics",
+      "Conversion reports + weekly summaries",
+      "Lead alerts, reviews + follow-up workflows",
+      "2,500 SMS parts/month + priority support",
+    ],
     features: [
       "Everything in SMS + Web Chat",
       "Advanced AI guardrails",
@@ -228,17 +269,19 @@ function Logo() {
 }
 
 function SectionHeader({
+  id,
   title,
   subtitle,
   subtitleClassName = "",
 }: {
+  id?: string;
   title: React.ReactNode;
   subtitle: string;
   subtitleClassName?: string;
 }) {
   return (
     <Reveal className="mb-12 sm:mb-16">
-      <h2 className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
+      <h2 id={id} className={`text-[clamp(28px,4vw,46px)] leading-[1.04] tracking-[-0.04em] font-extrabold ${ink}`}>
         {title}
       </h2>
       <p className={`${body} mt-4 max-w-[60ch] leading-[1.65] ${subtitleClassName}`}>
@@ -646,8 +689,13 @@ export default function HomePage({
         </section>
 
         {/* ── Pricing ── */}
-        <section id="pricing" className="py-16 sm:py-24">
+        <section
+          id="pricing"
+          aria-labelledby="pricing-heading"
+          className="py-16 sm:py-24"
+        >
           <SectionHeader
+            id="pricing-heading"
             title={
               <>
                 Simple plans that grow with your{" "}
@@ -664,8 +712,8 @@ export default function HomePage({
           <div
             className={
               publicChatOnlyAvailable
-                ? "grid md:grid-cols-2 xl:grid-cols-4 gap-5 items-start"
-                : "grid md:grid-cols-3 gap-5 items-start"
+                ? "grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-4"
+                : "grid items-stretch gap-5 md:grid-cols-3"
             }
           >
             {plans.map((plan, i) => {
@@ -673,14 +721,17 @@ export default function HomePage({
                 plan.planKey === "chat_only"
                   ? publicChatOnlyAvailable
                   : isPlanAvailable(plan.planKey);
+              const cardHeadingId = `pricing-card-${plan.planKey}`;
 
               return (
                 <Reveal key={plan.name} delayMs={i * 100} className="h-full">
-                  <div
+                  <article
+                    data-plan-card={plan.planKey}
+                    aria-labelledby={cardHeadingId}
                     className={
                       plan.highlighted
                         ? `
-                        rounded-[28px] p-7 flex flex-col min-h-full relative md:-translate-y-1 z-10
+                        rounded-[28px] p-7 flex h-full flex-col relative xl:-translate-y-1 z-10
                         bg-white border border-transparent
                         outline outline-2 outline-[rgba(194,65,12,.30)]
                         shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgba(154,52,18,0.18)]
@@ -689,11 +740,17 @@ export default function HomePage({
                         dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_56px_-16px_rgba(0,0,0,0.7)]
                         dark:backdrop-blur-[18px]
                       `
-                        : `p-7 flex flex-col min-h-full relative ${card} ${cardHover}`
+                        : `p-7 flex h-full flex-col relative ${card} ${
+                            available
+                              ? cardHover
+                              : "bg-stone-50/90 dark:bg-white/[0.035]"
+                          }`
                     }
                   >
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className={`text-2xl font-bold ${ink}`}>{plan.name}</h3>
+                    <div className="mb-4 flex min-h-7 flex-wrap items-center justify-between gap-2 xl:min-h-16 xl:flex-col xl:flex-nowrap xl:items-start xl:justify-start">
+                      <span className="text-xs font-extrabold uppercase tracking-[0.09em] text-stone-500 dark:text-[#bdbdbf]">
+                        {plan.category}
+                      </span>
                       {plan.highlighted && (
                         <span className="px-3 py-1.5 rounded-full text-[12px] font-extrabold bg-[#ea580c] text-white dark:bg-[#ff914d] dark:text-[#16100b]">
                           Most Popular
@@ -705,15 +762,29 @@ export default function HomePage({
                         </span>
                       )}
                     </div>
-                    <p className={`${body} leading-[1.65] mb-6`}>{plan.description}</p>
-                    <div className={`text-[50px] font-extrabold tracking-[-0.05em] mb-5 ${ink}`}>
-                      {plan.price}
-                      <small className="text-lg text-stone-400 dark:text-[#bdbdbf]">/mo</small>
+                    <h3 id={cardHeadingId} className={`text-2xl font-bold xl:min-h-16 ${ink}`}>
+                      {plan.name}
+                    </h3>
+                    <p className={`${body} mt-2 leading-[1.65] mb-6 xl:min-h-28`}>
+                      {plan.description}
+                    </p>
+                    <div className={`mb-1 text-[50px] font-extrabold tracking-[-0.05em] ${ink}`}>
+                      <span aria-hidden="true">
+                        {plan.price}
+                        <small className="text-lg text-stone-500 dark:text-[#bdbdbf]">/mo</small>
+                      </span>
+                      <span className="sr-only">{plan.price} per month</span>
                     </div>
-                    <ul className="space-y-3 mb-6 flex-1">
-                      {plan.features.map((feature) => (
+                    <p className="mb-6 min-h-6 text-sm font-bold text-[#c2410c] dark:text-[#ffb080]">
+                      {plan.billingNote}
+                    </p>
+                    <ul
+                      data-plan-highlights={plan.planKey}
+                      className="mb-7 flex-1 space-y-3"
+                    >
+                      {plan.highlights.map((feature) => (
                         <li key={feature} className="flex items-start gap-2.5 text-stone-700 dark:text-[#efefef] leading-relaxed">
-                          <span className="text-[#ea580c] dark:text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
+                          <span aria-hidden="true" className="text-[#ea580c] dark:text-[#ff914d] font-black text-2xl leading-none -mt-px">&bull;</span>
                           <span>{feature}</span>
                         </li>
                       ))}
@@ -721,6 +792,7 @@ export default function HomePage({
                     {available ? (
                       <Link
                         href="/signup"
+                        aria-label={`Get started with ${plan.name}`}
                         className={plan.highlighted ? `${btnPrimary} w-full` : `${btnSecondary} w-full`}
                       >
                         Get Started
@@ -728,11 +800,83 @@ export default function HomePage({
                     ) : (
                       <FullSuiteWaitlistButton className={`${btnSecondary} w-full`} />
                     )}
-                  </div>
+                  </article>
                 </Reveal>
               );
             })}
           </div>
+
+          <Reveal className="mt-7">
+            <details className={`sa-pricing-comparison group overflow-hidden ${card}`}>
+              <summary className="flex min-h-20 cursor-pointer list-none items-center justify-between gap-5 p-6 outline-none transition-colors hover:bg-[#faf6ef] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ea580c]/60 dark:hover:bg-white/[0.04] dark:focus-visible:ring-[#ff914d]/60 sm:px-7 [&::-webkit-details-marker]:hidden">
+                <span>
+                  <strong className={`block text-lg sm:text-xl ${ink}`}>
+                    Compare complete plan details
+                  </strong>
+                  <span className={`mt-1 block text-sm leading-6 ${body}`}>
+                    See every included feature before you choose.
+                  </span>
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className="h-5 w-5 shrink-0 text-[#c2410c] transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none dark:text-[#ff914d]"
+                />
+              </summary>
+
+              <div className="border-t border-[#ece4d8] p-5 dark:border-white/[0.10] sm:p-7">
+                <div
+                  className={
+                    publicChatOnlyAvailable
+                      ? "grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+                      : "grid gap-4 md:grid-cols-3"
+                  }
+                >
+                  {plans.map((plan) => {
+                    const available =
+                      plan.planKey === "chat_only"
+                        ? publicChatOnlyAvailable
+                        : isPlanAvailable(plan.planKey);
+                    const detailHeadingId = `pricing-details-${plan.planKey}`;
+
+                    return (
+                      <article
+                        key={plan.planKey}
+                        data-plan-details={plan.planKey}
+                        aria-labelledby={detailHeadingId}
+                        className="rounded-[22px] border border-[#ece4d8] bg-white/75 p-5 dark:border-white/[0.10] dark:bg-white/[0.035]"
+                      >
+                        <div className="mb-4 border-b border-[#ece4d8] pb-4 dark:border-white/[0.10]">
+                          <p className="mb-1 text-xs font-extrabold uppercase tracking-[0.09em] text-stone-500 dark:text-[#bdbdbf]">
+                            {available ? plan.category : "Coming Soon"}
+                          </p>
+                          <h3 id={detailHeadingId} className={`text-lg font-bold ${ink}`}>
+                            {plan.name}
+                          </h3>
+                          <p className={`mt-1 text-sm font-semibold ${body}`}>
+                            {plan.price}/month · {plan.billingNote}
+                          </p>
+                        </div>
+                        <ul className="space-y-2.5">
+                          {plan.features.map((feature) => (
+                            <li
+                              key={feature}
+                              className="flex items-start gap-2.5 text-sm leading-6 text-stone-700 dark:text-[#efefef]"
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#ea580c] dark:bg-[#ff914d]"
+                              />
+                              <span>{feature}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            </details>
+          </Reveal>
         </section>
 
         {/* ── FAQ ── */}
