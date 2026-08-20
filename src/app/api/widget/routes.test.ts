@@ -230,6 +230,20 @@ function configRequest(headers?: HeadersInit) {
   );
 }
 
+function sameOriginConfigRequest(headers: Record<string, string> = {}) {
+  return new NextRequest(
+    `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+    {
+      headers: {
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        ...headers,
+      },
+    },
+  );
+}
+
 function previewConfigRequest(headers?: HeadersInit) {
   return new NextRequest(
     `http://localhost/api/widget/preview-config?businessId=${BUSINESS_ID}`,
@@ -1879,6 +1893,115 @@ describe("public widget transport security", () => {
     expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
     expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
     expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+  });
+
+  it("accepts an Origin-less browser same-origin config GET through the persisted allowlist", async () => {
+    queueDatabaseResults({
+      data: {
+        id: "widget-1",
+        allowed_hostnames: ["localhost"],
+        is_active: false,
+      },
+      error: null,
+    });
+
+    const response = await getConfig(sameOriginConfigRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false });
+    expect(mocks.from).toHaveBeenCalledOnce();
+    expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledWith({
+      endpoint: "config",
+      networkKey: "network-key",
+    });
+    expect(mocks.acquireWidgetTraffic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: BUSINESS_ID,
+        sessionId: "session-1",
+        originHostname: "localhost",
+      }),
+    );
+  });
+
+  it("still denies a same-origin config GET when its synthesized hostname is not persisted", async () => {
+    queueDatabaseResults({
+      data: {
+        id: "widget-1",
+        allowed_hostnames: ["www.example.com"],
+        is_active: true,
+      },
+      error: null,
+    });
+
+    const response = await getConfig(sameOriginConfigRequest());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.from).toHaveBeenCalledOnce();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing Fetch Metadata", {}],
+    [
+      "a non-same-origin site",
+      {
+        "Sec-Fetch-Site": "same-site",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+      },
+    ],
+    [
+      "a non-fetch mode",
+      {
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "empty",
+      },
+    ],
+    [
+      "a non-empty destination",
+      {
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "document",
+      },
+    ],
+    [
+      "an explicitly empty Origin",
+      {
+        Origin: "",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+      },
+    ],
+    [
+      "an opaque Origin",
+      {
+        Origin: "null",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+      },
+    ],
+  ])("rejects a config GET with %s before DB work", async (_label, headers) => {
+    const response = await getConfig(
+      new NextRequest(
+        `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+        { headers },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
   });
 
   it("denies rotating unknown config identifiers at ingress before widget reads", async () => {

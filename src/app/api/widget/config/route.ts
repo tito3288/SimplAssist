@@ -55,6 +55,23 @@ const widgetConfigMutationSchema = z
   })
   .strict();
 
+function resolvePublicConfigOrigin(request: NextRequest) {
+  const declaredOrigin = request.headers.get("origin");
+  if (declaredOrigin !== null) {
+    return normalizeWidgetOrigin(declaredOrigin);
+  }
+
+  if (
+    request.headers.get("sec-fetch-site") !== "same-origin" ||
+    request.headers.get("sec-fetch-mode") !== "cors" ||
+    request.headers.get("sec-fetch-dest") !== "empty"
+  ) {
+    return null;
+  }
+
+  return normalizeWidgetOrigin(request.nextUrl.origin);
+}
+
 export async function OPTIONS(request: NextRequest) {
   const query = parseExactWidgetQuery(request);
   const origin = normalizeWidgetOrigin(request.headers.get("origin"));
@@ -172,7 +189,7 @@ export async function PATCH(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const query = parseExactWidgetQuery(request);
-    const origin = normalizeWidgetOrigin(request.headers.get("origin"));
+    const origin = resolvePublicConfigOrigin(request);
     if (!query.ok || !origin) {
       return widgetErrorResponse("invalid_request", 400);
     }
