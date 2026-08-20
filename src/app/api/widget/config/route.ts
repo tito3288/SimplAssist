@@ -18,6 +18,7 @@ import {
 } from "@/lib/account/operationalControls.server";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { resolvePublicWidgetAccess } from "@/lib/widget/access.server";
+import { requireWidgetEdgeOrigin } from "@/lib/widget/edgeOrigin.server";
 import {
   normalizeWidgetOrigin,
   parseConfiguredWidgetHostnames,
@@ -102,6 +103,9 @@ function resolvePublicConfigProtocol(
 }
 
 export async function OPTIONS(request: NextRequest) {
+  const edgeRejection = requireWidgetEdgeOrigin(request);
+  if (edgeRejection) return edgeRejection;
+
   const query = parseExactWidgetQuery(request);
   const origin = normalizeWidgetOrigin(request.headers.get("origin"));
   if (!query.ok || !origin) {
@@ -217,6 +221,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const edgeRejection = requireWidgetEdgeOrigin(request);
+    if (edgeRejection) return edgeRejection;
+
     const query = parseExactWidgetQuery(request);
     const origin = resolvePublicConfigOrigin(request);
     if (!query.ok || !origin) {

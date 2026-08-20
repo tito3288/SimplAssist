@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing/entitlements";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 import { resolvePublicWidgetAccess } from "@/lib/widget/access.server";
+import { requireWidgetEdgeOrigin } from "@/lib/widget/edgeOrigin.server";
 import { acquireWidgetIngressTraffic } from "@/lib/widget/ingressTraffic.server";
 import {
   isSameOriginWidgetPreview,
@@ -30,6 +31,9 @@ import {
 } from "@/lib/widget/traffic.server";
 
 export async function OPTIONS(request: NextRequest) {
+  const edgeRejection = requireWidgetEdgeOrigin(request);
+  if (edgeRejection) return edgeRejection;
+
   const query = parseExactWidgetQuery(request);
   const origin = normalizeWidgetOrigin(request.headers.get("origin"));
   if (!query.ok || !origin) return widgetErrorResponse("invalid_request", 400);
@@ -52,6 +56,12 @@ export async function POST(request: NextRequest) {
       return widgetErrorResponse("invalid_request", 400);
     }
 
+    const verifiedPreview = preview === true;
+    if (!verifiedPreview) {
+      const edgeRejection = requireWidgetEdgeOrigin(request);
+      if (edgeRejection) return edgeRejection;
+    }
+
     let networkKey: string;
     try {
       networkKey = deriveWidgetNetworkKey(request);
@@ -72,7 +82,6 @@ export async function POST(request: NextRequest) {
       return widgetErrorResponse("service_unavailable", 503);
     }
 
-    const verifiedPreview = preview === true;
     if (verifiedPreview) {
       if (!isSameOriginWidgetPreview(request, origin)) {
         return widgetErrorResponse("origin_not_allowed", 403);

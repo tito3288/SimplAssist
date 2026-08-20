@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class WidgetOfflineLeadConflictError extends Error {}
@@ -51,6 +51,7 @@ vi.mock("@/lib/widget/traffic.server", () => ({
 }));
 
 import { OPTIONS, POST } from "./route";
+import { WIDGET_EDGE_ORIGIN_HEADER } from "@/lib/widget/edgeOrigin.server";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_BUSINESS_ID = "00000000-0000-4000-8000-000000000099";
@@ -59,6 +60,7 @@ const CLIENT_LEAD_ID = "00000000-0000-4000-8000-000000000003";
 const SOURCE_CLIENT_MESSAGE_ID = "00000000-0000-4000-8000-000000000004";
 const SESSION_NONCE = "abcdefghijklmnopqrstuvwx";
 const ORIGIN = "https://allowed.example";
+const EDGE_SECRET = "e".repeat(64);
 
 const VALID_BODY = {
   businessId: BUSINESS_ID,
@@ -82,6 +84,7 @@ function leadRequest(
   const headers = new Headers({
     "Content-Type": "application/json",
     Origin: options.origin ?? ORIGIN,
+    [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
   });
   if (options.authorization !== null) {
     headers.set("Authorization", options.authorization ?? "Bearer test-token");
@@ -95,11 +98,27 @@ function leadRequest(
 function preflightRequest(origin = ORIGIN) {
   return new NextRequest(
     `https://app.simplassist.test/api/widget/lead?businessId=${BUSINESS_ID}&sessionId=${SESSION_ID}`,
-    { method: "OPTIONS", headers: { Origin: origin } },
+    {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
+      },
+    },
   );
 }
 
+function withEdgeMarker(request: NextRequest, marker: string | null) {
+  if (marker === null) {
+    request.headers.delete(WIDGET_EDGE_ORIGIN_HEADER);
+  } else {
+    request.headers.set(WIDGET_EDGE_ORIGIN_HEADER, marker);
+  }
+  return request;
+}
+
 beforeEach(() => {
+  vi.stubEnv("WIDGET_EDGE_ORIGIN_SECRET", EDGE_SECRET);
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.readWidgetBearerToken.mockReturnValue("test-token");
@@ -124,7 +143,43 @@ beforeEach(() => {
   );
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("widget offline lead route", () => {
+  it.each([
+    ["POST", (marker: string | null) => POST(withEdgeMarker(leadRequest(), marker))],
+    [
+      "OPTIONS",
+      (marker: string | null) =>
+        OPTIONS(withEdgeMarker(preflightRequest(), marker)),
+    ],
+  ] as const)(
+    "rejects missing and wrong edge markers on lead %s before downstream work",
+    async (_label, invoke) => {
+      for (const marker of [null, "x".repeat(64)] as const) {
+        vi.clearAllMocks();
+
+        const response = await invoke(marker);
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          error: "origin_not_allowed",
+        });
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("vary")).toContain("Origin");
+        expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+        expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+        expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+        expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+        expect(mocks.resolvePublicWidgetAccess).not.toHaveBeenCalled();
+        expect(mocks.recordWidgetOfflineLead).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("answers exact preflight without database or durable traffic work", async () => {
     const response = await OPTIONS(preflightRequest());
 

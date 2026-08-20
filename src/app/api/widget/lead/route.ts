@@ -8,6 +8,7 @@ import {
   resolveBusinessEntitlements,
 } from "@/lib/billing/entitlements";
 import { resolvePublicWidgetAccess } from "@/lib/widget/access.server";
+import { requireWidgetEdgeOrigin } from "@/lib/widget/edgeOrigin.server";
 import { acquireWidgetIngressTraffic } from "@/lib/widget/ingressTraffic.server";
 import {
   WidgetOfflineLeadConflictError,
@@ -32,6 +33,9 @@ import {
 } from "@/lib/widget/traffic.server";
 
 export async function OPTIONS(request: NextRequest) {
+  const edgeRejection = requireWidgetEdgeOrigin(request);
+  if (edgeRejection) return edgeRejection;
+
   const query = parseExactWidgetQuery(request);
   const origin = normalizeWidgetOrigin(request.headers.get("origin"));
   if (!query.ok || !origin) return widgetErrorResponse("invalid_request", 400);
@@ -41,6 +45,9 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   let responseOrigin: string | undefined;
   try {
+    const edgeRejection = requireWidgetEdgeOrigin(request);
+    if (edgeRejection) return edgeRejection;
+
     const query = parseExactWidgetQuery(request);
     const body = await parseWidgetJson(request, widgetLeadRequestSchema);
     const origin = normalizeWidgetOrigin(request.headers.get("origin"));

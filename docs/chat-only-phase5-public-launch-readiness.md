@@ -106,6 +106,84 @@ and Google Calendar service remain healthy.
 Phase 6 creates no Chat Only Checkout and no charge. A green Phase 6 rehearsal
 is not a launch.
 
+#### Public widget edge-origin boundary
+
+Every **public** widget API call must traverse the canonical
+`https://simplassist.com` Cloudflare edge before Railway. Partner-branded embed
+scripts remain available from their connected partner origin, but the script's
+public config, chat, end, and lead calls use the canonical API origin. The
+authenticated dashboard preview remains same-origin on its application host
+and continues through the existing workspace authorization path.
+
+The four public API paths are:
+
+- `/api/widget/config`;
+- `/api/widget/chat`;
+- `/api/widget/end`; and
+- `/api/widget/lead`.
+
+Cloudflare must have one Request Header Transform Rule for those exact paths.
+The rule must **set/overwrite**, not merely preserve, the private edge-origin
+header `x-simplassist-widget-edge-origin` with a separately generated
+high-entropy value. Railway stores the same value only as the server-side
+`WIDGET_EDGE_ORIGIN_SECRET`; it must contain
+43–128 base64url-safe characters derived from at least 32 random bytes (64
+lowercase hexadecimal characters is valid), differ from `WIDGET_TOKEN_SECRET`,
+have no `NEXT_PUBLIC_` copy, and never appear in source, screenshots, command
+output, logs, or retained evidence. Cloudflare documents that a static request-header transform overrides
+an incoming header of the same name:
+<https://developers.cloudflare.com/rules/transform/request-header-modification/create-dashboard/>.
+
+Roll out this boundary in two application deployments so a stale or already
+loaded partner embed cannot be stranded when enforcement begins:
+
+1. deploy only the compatible embed-routing change, which sends public API
+   calls to the canonical origin while the API routes still accept the former
+   partner-origin path;
+2. verify the connected-partner CSP permits `https://simplassist.com`,
+   purge/revalidate the canonical and partner `widget/embed.js` URLs, wait out
+   the prior cache window, verify newly loaded partner embeds use the canonical
+   API origin, and choose a maintenance window with no relied-upon old in-memory
+   widget session;
+3. stage the new Railway secret without deploying;
+4. create and enable the exact Cloudflare header-transform rule while the
+   compatibility deployment still ignores that header;
+5. deploy the route-enforcement change with both Chat acquisition flags still
+   exact `0` and the canary absent;
+6. verify public widget config through the apex returns its normal successful
+   response, including `Cache-Control: no-store` and `Vary: Origin`;
+7. verify an unauthenticated public/live call through the Railway-generated
+   hostname and a direct connection to a Railway custom-domain CNAME target is
+   rejected before widget/database/provider work, even when ordinary browser
+   headers are forged; authenticated preview remains the separate bounded
+   ingress, workspace-authenticated path; and
+8. verify a partner-branded public embed still loads while its API requests go
+   to the canonical Cloudflare-protected origin, then verify authenticated
+   dashboard preview still works on the partner host.
+
+The existing coarse Cloudflare IP burst rule remains a separate layer and must
+stay enabled for all four exact paths. The private edge proof does not replace
+the persisted customer-site hostname allowlist, signed widget session token,
+per-network/session/business limits, reply allowance, or concurrency controls.
+It only proves that a public request passed through the reviewed edge rather
+than calling Railway around it.
+
+Customer sites that enforce Content Security Policy must allow the origin that
+serves their branded embed script in `script-src` and must allow
+`https://simplassist.com` in `connect-src`. Before deploying this routing
+change, inspect the active connected-partner sites for a restrictive CSP or
+perform an equivalent owner-approved embed rehearsal; a site that permits only
+the previous partner API origin must be updated before the canonical API change
+is deployed.
+
+Do not attest `--waf-verified true` from a Cloudflare rule screenshot alone.
+Retained evidence must cover the transform rule, the rate rule, a successful
+canonical public request, both direct-origin rejection shapes, the canonical
+API destination used by the partner embed, and the previously reviewed
+privacy-safe two-network rate-key proof. If any legitimate public embed still
+calls a non-Cloudflare API origin, or either direct-origin request succeeds,
+the WAF evidence remains false.
+
 Before attesting to homepage cache safety, retain separately reviewed HTTP and
 body evidence for both `https://simplassist.com/` and
 `https://www.simplassist.com/`. Each response must:

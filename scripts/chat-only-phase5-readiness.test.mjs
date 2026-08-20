@@ -30,6 +30,7 @@ function environment(overrides = {}) {
     STRIPE_PRICE_SMS_OVERAGE_PART: "price_overage",
     STRIPE_BILLING_PORTAL_CONFIGURATION_ID: "bpc_phase5",
     WIDGET_TOKEN_SECRET: "w".repeat(32),
+    WIDGET_EDGE_ORIGIN_SECRET: "e".repeat(64),
     CHAT_ONLY_DIRECT_SALES_ENABLED: "0",
     CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED: "0",
     TELNYX_REMOTE_RELEASE_ENABLED: "0",
@@ -75,6 +76,7 @@ function config(overrides = {}) {
     chatOnlyDirectSalesEnabled: false,
     chatOnlyPartnerAssignmentEnabled: false,
     directCanaryBusinessId: null,
+    widgetEdgeOriginSecretConfigured: true,
     ...overrides,
   };
 }
@@ -271,6 +273,7 @@ describe("Phase 5 launch-readiness CLI contract", () => {
       partnerAssignmentSwitchValue: "0",
       chatOnlyPriceId: "price_chat",
       widgetTokenSecretConfigured: true,
+      widgetEdgeOriginSecretConfigured: true,
     });
   });
 
@@ -320,7 +323,7 @@ describe("Phase 5 launch-readiness CLI contract", () => {
     ).toThrow("--launch-state ready requires --stripe-mode live");
   });
 
-  it("inherits Price, widget-secret, Portal, mode, and server-only validation", () => {
+  it("inherits Price, widget-token, Portal, mode, and server-only validation", () => {
     expect(() =>
       validateEnvironment(
         target(),
@@ -339,6 +342,35 @@ describe("Phase 5 launch-readiness CLI contract", () => {
         environment({ NEXT_PUBLIC_WIDGET_TOKEN_SECRET: "exposed" }),
       ),
     ).toThrow("must remain server-only");
+    expect(() =>
+      validateEnvironment(
+        target(),
+        environment({ WIDGET_EDGE_ORIGIN_SECRET: undefined }),
+      ),
+    ).toThrow("WIDGET_EDGE_ORIGIN_SECRET must contain 43-128 base64url-safe characters");
+    expect(() =>
+      validateEnvironment(
+        target(),
+        environment({ WIDGET_EDGE_ORIGIN_SECRET: "short" }),
+      ),
+    ).toThrow("WIDGET_EDGE_ORIGIN_SECRET must contain 43-128 base64url-safe characters");
+    for (const publicCopy of ["", "exposed"]) {
+      expect(() =>
+        validateEnvironment(
+          target(),
+          environment({ NEXT_PUBLIC_WIDGET_EDGE_ORIGIN_SECRET: publicCopy }),
+        ),
+      ).toThrow("WIDGET_EDGE_ORIGIN_SECRET must remain server-only");
+    }
+    expect(() =>
+      validateEnvironment(
+        target(),
+        environment({
+          WIDGET_EDGE_ORIGIN_SECRET: "w".repeat(64),
+          WIDGET_TOKEN_SECRET: "w".repeat(64),
+        }),
+      ),
+    ).toThrow("must be distinct from WIDGET_TOKEN_SECRET");
     expect(() =>
       validateEnvironment(
         target(),
@@ -378,6 +410,8 @@ describe("Phase 5 launch-readiness CLI contract", () => {
     expect(source).toContain("including --launch-state ready");
     expect(source).toContain("response body, metadata, and JSON-LD");
     expect(source).toContain("Chat Only sale");
+    expect(source).toContain("WIDGET_EDGE_ORIGIN_SECRET");
+    expect(source).toContain("Railway's generated or custom-domain");
     expect(JSON.parse(packageSource).scripts["audit:chat-only-phase5"]).toBe(
       "node scripts/chat-only-phase5-readiness.mjs",
     );
@@ -532,6 +566,7 @@ describe("Phase 5 launch-readiness analysis", () => {
       contracts: {
         inherited_phase4_inventory_clear: true,
         widget_token_secret_configured: true,
+        widget_edge_origin_secret_configured: true,
         pinned_portal_contract_complete: true,
       },
       external_evidence: {
@@ -699,6 +734,7 @@ describe("Phase 5 launch-readiness analysis", () => {
           phase4_contract_complete: false,
         },
       }),
+      config: config({ widgetEdgeOriginSecretConfigured: false }),
     });
 
     expect(report.verdict).toBe("blocked");
@@ -707,6 +743,7 @@ describe("Phase 5 launch-readiness analysis", () => {
         "inherited_blocker",
         "chat_only_price_launch_contract_not_verified",
         "widget_secret_launch_contract_not_verified",
+        "widget_edge_origin_secret_launch_contract_not_verified",
         "billing_portal_launch_contract_not_verified",
       ]),
     );

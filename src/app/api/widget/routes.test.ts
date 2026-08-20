@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class AIProcessingBlockedError extends Error {
@@ -142,6 +142,7 @@ vi.mock("@/lib/account/operationalControls.server", async (importOriginal) => {
 
 import { EntitlementResolutionError } from "@/lib/billing/entitlements";
 import { OperationalControlsResolutionError } from "@/lib/account/operationalControls.server";
+import { WIDGET_EDGE_ORIGIN_HEADER } from "@/lib/widget/edgeOrigin.server";
 import { OPTIONS as optionsChat, POST as postChat } from "./chat/route";
 import {
   GET as getConfig,
@@ -152,6 +153,7 @@ import { OPTIONS as optionsEnd, POST as postEnd } from "./end/route";
 import { GET as getPreviewConfig } from "./preview-config/route";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
+const EDGE_SECRET = "e".repeat(64);
 const PAUSED_AT = "2026-08-04T12:00:00.000Z";
 const WEB_CHAT_SOURCE_KEY = `web-chat-session:${"a".repeat(64)}`;
 const AI_CONVERSATION_SOURCE_KEY =
@@ -226,7 +228,13 @@ function queueDatabaseResults(...results: QueryResult[]) {
 function configRequest(headers?: HeadersInit) {
   return new NextRequest(
     `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
-    { headers: { Origin: "http://localhost", ...headers } },
+    {
+      headers: {
+        Origin: "http://localhost",
+        [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
+        ...headers,
+      },
+    },
   );
 }
 
@@ -237,6 +245,7 @@ function sameOriginConfigRequest(headers: Record<string, string> = {}) {
       headers: {
         Host: "localhost",
         "Sec-Fetch-Site": "same-origin",
+        [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
         ...headers,
       },
     },
@@ -307,6 +316,7 @@ function postRequest(
         "Content-Type": "application/json",
         Origin: "http://localhost",
         Authorization: "Bearer test-token",
+        [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
         ...headers,
       },
       body: JSON.stringify(normalized),
@@ -320,11 +330,32 @@ function preflightRequest(
 ) {
   return new NextRequest(
     `http://localhost/api/widget/${path}?businessId=${BUSINESS_ID}&sessionId=session-1`,
-    { method: "OPTIONS", headers: { Origin: origin } },
+    {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
+      },
+    },
   );
 }
 
+function withoutEdgeMarker(request: NextRequest) {
+  request.headers.delete(WIDGET_EDGE_ORIGIN_HEADER);
+  return request;
+}
+
+function withEdgeMarker(request: NextRequest, marker: string | null) {
+  if (marker === null) {
+    request.headers.delete(WIDGET_EDGE_ORIGIN_HEADER);
+  } else {
+    request.headers.set(WIDGET_EDGE_ORIGIN_HEADER, marker);
+  }
+  return request;
+}
+
 beforeEach(() => {
+  vi.stubEnv("WIDGET_EDGE_ORIGIN_SECRET", EDGE_SECRET);
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   mocks.getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
@@ -381,6 +412,10 @@ beforeEach(() => {
   mocks.deriveWidgetNetworkKey.mockReturnValue("network-key");
   mocks.deriveWidgetRequestKey.mockReturnValue("request-key");
   queueDatabaseResults();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("authenticated widget configuration mutations", () => {
@@ -441,6 +476,7 @@ describe("authenticated widget configuration mutations", () => {
   });
 
   it("updates an allow-listed configuration through the admin client", async () => {
+    vi.stubEnv("WIDGET_EDGE_ORIGIN_SECRET", "");
     queueDatabaseResults({
       data: {
         id: "widget-1",
@@ -920,12 +956,12 @@ describe("public widget entitlement boundaries", () => {
     });
 
     const response = await postChat(
-      postRequest("chat", {
+      withoutEdgeMarker(postRequest("chat", {
         businessId: BUSINESS_ID,
         message: "I want to sign up.",
         sessionId: "preview-session",
         preview: true,
-      }),
+      })),
     );
 
     expect(response.status).toBe(200);
@@ -970,12 +1006,12 @@ describe("public widget entitlement boundaries", () => {
       });
 
       const response = await postChat(
-        postRequest("chat", {
+        withoutEdgeMarker(postRequest("chat", {
           businessId: BUSINESS_ID,
           message: "I want to sign up.",
           sessionId: "preview-session",
           preview: true,
-        }),
+        })),
       );
 
       expect(response.status).toBe(status);
@@ -988,6 +1024,12 @@ describe("public widget entitlement boundaries", () => {
       expect(mocks.resolveBusinessOperationalControls).not.toHaveBeenCalled();
       expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
       expect(mocks.finalizeGoalLinkEvent).not.toHaveBeenCalled();
+      expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledOnce();
+      expect(
+        mocks.acquireWidgetIngressTraffic.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.requireWorkspaceRouteAccess.mock.invocationCallOrder[0],
+      );
     },
   );
 
@@ -1831,6 +1873,175 @@ describe("public widget entitlement boundaries", () => {
 
 describe("public widget transport security", () => {
   it.each([
+    [
+      "config GET",
+      (marker: string | null) =>
+        getConfig(withEdgeMarker(configRequest(), marker)),
+    ],
+    [
+      "config OPTIONS",
+      (marker: string | null) =>
+        optionsConfig(withEdgeMarker(preflightRequest("config"), marker)),
+    ],
+    [
+      "chat POST",
+      (marker: string | null) =>
+        postChat(
+          withEdgeMarker(
+            postRequest("chat", {
+              businessId: BUSINESS_ID,
+              message: "Hello",
+              sessionId: "session-1",
+            }),
+            marker,
+          ),
+        ),
+    ],
+    [
+      "chat OPTIONS",
+      (marker: string | null) =>
+        optionsChat(withEdgeMarker(preflightRequest("chat"), marker)),
+    ],
+    [
+      "end POST",
+      (marker: string | null) =>
+        postEnd(
+          withEdgeMarker(
+            postRequest("end", {
+              businessId: BUSINESS_ID,
+              sessionId: "session-1",
+            }),
+            marker,
+          ),
+        ),
+    ],
+    [
+      "end OPTIONS",
+      (marker: string | null) =>
+        optionsEnd(withEdgeMarker(preflightRequest("end"), marker)),
+    ],
+  ] as const)(
+    "rejects missing and wrong edge markers on public %s before downstream work",
+    async (_label, invoke) => {
+      for (const marker of [null, "x".repeat(64)] as const) {
+        vi.clearAllMocks();
+
+        const response = await invoke(marker);
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          error: "origin_not_allowed",
+        });
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("vary")).toContain("Origin");
+        expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+        expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+        expect(mocks.requireWorkspaceRouteAccess).not.toHaveBeenCalled();
+        expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+        expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+        expect(mocks.from).not.toHaveBeenCalled();
+        expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("fails a public route closed when the edge secret is missing", async () => {
+    vi.stubEnv("WIDGET_EDGE_ORIGIN_SECRET", "");
+
+    const response = await getConfig(configRequest());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_unavailable",
+      retryable: true,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("does not trust forged proxy, Fetch Metadata, Origin, or Host headers on a direct Railway request", async () => {
+    const response = await getConfig(
+      new NextRequest(
+        `https://simplassist-production.up.railway.app/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
+        {
+          headers: {
+            Host: "simplassist.com",
+            Origin: "https://simplassist.com",
+            "Sec-Fetch-Site": "same-origin",
+            "X-Forwarded-Host": "simplassist.com",
+            "X-Forwarded-Proto": "https",
+            "CF-Ray": "forged",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "origin_not_allowed" });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(mocks.acquireWidgetIngressTraffic).not.toHaveBeenCalled();
+    expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.mintWidgetToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "chat",
+      () =>
+        postChat(
+          withoutEdgeMarker(
+            postRequest("chat", {
+              businessId: BUSINESS_ID,
+              message: "Hello",
+              sessionId: "preview-session",
+              preview: true,
+            }),
+          ),
+        ),
+    ],
+    [
+      "end",
+      () =>
+        postEnd(
+          withoutEdgeMarker(
+            postRequest("end", {
+              businessId: BUSINESS_ID,
+              sessionId: "preview-session",
+              preview: true,
+            }),
+          ),
+        ),
+    ],
+  ] as const)(
+    "rate-controls an unauthenticated %s preview-shaped request before workspace auth",
+    async (_label, invoke) => {
+      mocks.requireWorkspaceRouteAccess.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      });
+
+      const response = await invoke();
+
+      expect(response.status).toBe(401);
+      expect(mocks.acquireWidgetIngressTraffic).toHaveBeenCalledOnce();
+      expect(mocks.requireWorkspaceRouteAccess).toHaveBeenCalledOnce();
+      expect(
+        mocks.acquireWidgetIngressTraffic.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.requireWorkspaceRouteAccess.mock.invocationCallOrder[0],
+      );
+      expect(mocks.readWidgetBearerToken).not.toHaveBeenCalled();
+      expect(mocks.verifyWidgetToken).not.toHaveBeenCalled();
+      expect(mocks.acquireWidgetTraffic).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.processIncomingMessageDetailed).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     ["config", optionsConfig],
     ["chat", optionsChat],
     ["end", optionsEnd],
@@ -1950,6 +2161,7 @@ describe("public widget transport security", () => {
             Host: "simplassist.com",
             "X-Forwarded-Proto": "https",
             "Sec-Fetch-Site": "same-origin",
+            [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
           },
         },
       ),
@@ -1978,6 +2190,7 @@ describe("public widget transport security", () => {
           headers: {
             Host: "simplassist.com",
             "Sec-Fetch-Site": "same-origin",
+            [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
           },
         },
       ),
@@ -2009,6 +2222,7 @@ describe("public widget transport security", () => {
             Host: "https://malformed.example",
             "X-Forwarded-Proto": "https,http",
             "Sec-Fetch-Site": "cross-site",
+            [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
           },
         },
       ),
@@ -2107,7 +2321,12 @@ describe("public widget transport security", () => {
     const response = await getConfig(
       new NextRequest(
         `http://localhost/api/widget/config?businessId=${BUSINESS_ID}&sessionId=session-1`,
-        { headers },
+        {
+          headers: {
+            ...headers,
+            [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
+          },
+        },
       ),
     );
 
@@ -2129,7 +2348,12 @@ describe("public widget transport security", () => {
     const response = await getConfig(
       new NextRequest(
         `http://localhost/api/widget/config?businessId=${unknownBusinessId}&sessionId=session-unknown`,
-        { headers: { Origin: "https://untrusted.example" } },
+        {
+          headers: {
+            Origin: "https://untrusted.example",
+            [WIDGET_EDGE_ORIGIN_HEADER]: EDGE_SECRET,
+          },
+        },
       ),
     );
 
@@ -2540,11 +2764,11 @@ describe("public widget transport security", () => {
       { data: null, error: null },
     );
     const response = await postEnd(
-      postRequest("end", {
+      withoutEdgeMarker(postRequest("end", {
         businessId: BUSINESS_ID,
         sessionId: "preview-session",
         preview: true,
-      }),
+      })),
     );
 
     expect(response.status).toBe(200);

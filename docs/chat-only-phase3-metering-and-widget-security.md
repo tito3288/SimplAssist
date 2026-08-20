@@ -126,6 +126,16 @@ mandatory hosted launch gate before enabling either direct or partner Chat
 Only acquisition flag. Keep limits generic and do not key edge decisions on a
 caller-supplied business ID.
 
+The hosted Phase 6 closure strengthens this boundary: public embed API calls
+use the canonical Cloudflare-proxied application origin even when the static
+embed script is served from a connected partner origin. Cloudflare overwrites
+a private `x-simplassist-widget-edge-origin` request header on the four exact
+public API paths, and Railway checks that value against the distinct server-only
+`WIDGET_EDGE_ORIGIN_SECRET` before
+public widget work. Authenticated same-origin dashboard preview remains a
+separate path. This prevents Railway's generated hostname or a discovered
+custom-domain CNAME target from bypassing the managed edge rule.
+
 ## Quota and offline-lead behavior
 
 At the 200-reply boundary the public response does not tell a visitor that the
@@ -308,13 +318,27 @@ namespace, effectively starting new buckets. Rotate every Railway instance
 together and monitor the resulting traffic reset; never expose the secret to
 the browser.
 
+Also configure a distinct server-only `WIDGET_EDGE_ORIGIN_SECRET` containing
+43–128 base64url-safe characters derived from at least 32 cryptographically
+random bytes (64 lowercase hexadecimal characters is valid). Store the same
+value in the canonical Cloudflare zone's exact-path request-header transform
+and every Railway instance; never expose it through a `NEXT_PUBLIC_` variable
+or reuse the widget token secret. First deploy and drain the canonical
+public-API embed routing while the former path remains accepted. Then stage
+Railway without deploying, enable the Cloudflare overwrite rule, deploy route
+enforcement, and prove both canonical success and direct-origin rejection. The
+detailed two-deployment evidence and rollback contract is in
+`docs/chat-only-phase5-public-launch-readiness.md`.
+
 Also verify all of the following before launch:
 
 - every active widget has one through ten exact canonical ASCII hostnames; no
   wildcard, scheme, path, port, credentials, trailing dot, or blank allowlist;
 - managed edge/WAF limits cover `/api/widget/config`, `/api/widget/chat`,
-  `/api/widget/end`, and `/api/widget/lead`, with Railway's trusted
-  `X-Forwarded-For` behavior verified and no caller-supplied business key;
+  `/api/widget/end`, and `/api/widget/lead`; public calls use the canonical
+  protected origin, direct Railway-origin calls fail without the private edge
+  proof, Railway's trusted `X-Forwarded-For` behavior is verified, and no
+  caller-supplied business key is used;
 - actual widget responses remain `Cache-Control: no-store` and
   `Vary: Origin`; only OPTIONS preflight may advertise a 600-second CORS cache;
 - `GOOGLE_CLIENT_ID`, server-only `GOOGLE_CLIENT_SECRET`, and the exact

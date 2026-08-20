@@ -49,7 +49,8 @@ Checkout, expiration, cancellation, or provider-mutation mode.
 
 Both launch states require:
   - an active, licensed USD $10 monthly Chat Only Price in the selected mode;
-  - the server-only widget secret and pinned safe Billing Portal contract;
+  - distinct server-only widget token and edge-origin secrets plus the pinned
+    safe Billing Portal contract;
   - no open Chat Checkout Session or creating/open Chat Checkout attempt;
   - the partner-assignment switch at exact 0 and the canary unset; and
   - explicit external evidence for the locked SQL blocker inventories,
@@ -74,9 +75,23 @@ before opening sales, the response body, metadata, and JSON-LD must contain no
 Chat Only sale. This flag records separately reviewed evidence; it does not
 change Cloudflare or deploy the application.
 
+--waf-verified requires retained evidence that every public widget API call
+uses the canonical Cloudflare-proxied application origin, Cloudflare overwrites
+the private edge-origin request header on all four widget API paths, and the
+application rejects the same calls through Railway's generated or custom-domain
+origin paths when that edge proof is absent. It also covers the separately
+reviewed coarse IP burst rule and trusted network-key evidence. Partner-branded
+embed scripts may remain branded, but their public API calls must use the
+canonical protected origin; authenticated same-origin dashboard preview is a
+separate path.
+
 Required environment variables are the Phase 4 required-Price configuration,
-including STRIPE_PRICE_CHAT_ONLY, WIDGET_TOKEN_SECRET, and the pinned Portal
-configuration. CHAT_ONLY_DIRECT_SALES_ENABLED and
+including STRIPE_PRICE_CHAT_ONLY, WIDGET_TOKEN_SECRET, the distinct server-only
+WIDGET_EDGE_ORIGIN_SECRET, and the pinned Portal configuration.
+WIDGET_EDGE_ORIGIN_SECRET must contain 43–128 base64url-safe characters derived
+from at least 32 random bytes (64 lowercase hexadecimal characters is valid),
+must differ from WIDGET_TOKEN_SECRET, and must never have a NEXT_PUBLIC_ copy.
+CHAT_ONLY_DIRECT_SALES_ENABLED and
 CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED must be explicitly configured as
 described above. CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID must be unset or empty.
 
@@ -167,6 +182,30 @@ export function validateEnvironment(arguments_, environment) {
     environment,
   );
 
+  const widgetEdgeOriginSecret = environment.WIDGET_EDGE_ORIGIN_SECRET;
+  if (
+    typeof widgetEdgeOriginSecret !== "string" ||
+    !/^[A-Za-z0-9_-]{43,128}$/.test(widgetEdgeOriginSecret) ||
+    Buffer.byteLength(widgetEdgeOriginSecret, "utf8") < 43
+  ) {
+    throw new Error(
+      "WIDGET_EDGE_ORIGIN_SECRET must contain 43-128 base64url-safe characters",
+    );
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(
+      environment,
+      "NEXT_PUBLIC_WIDGET_EDGE_ORIGIN_SECRET",
+    )
+  ) {
+    throw new Error("WIDGET_EDGE_ORIGIN_SECRET must remain server-only");
+  }
+  if (widgetEdgeOriginSecret === environment.WIDGET_TOKEN_SECRET) {
+    throw new Error(
+      "WIDGET_EDGE_ORIGIN_SECRET must be distinct from WIDGET_TOKEN_SECRET",
+    );
+  }
+
   const directSalesSwitchValue = requireExactBinarySwitch(
     environment,
     "CHAT_ONLY_DIRECT_SALES_ENABLED",
@@ -205,6 +244,7 @@ export function validateEnvironment(arguments_, environment) {
     launchState: arguments_.launchState,
     directSalesSwitchValue,
     partnerAssignmentSwitchValue,
+    widgetEdgeOriginSecretConfigured: true,
     blockerInventoriesClear: arguments_.blockerInventoriesClear,
     wafVerified: arguments_.wafVerified,
     schedulerVerified: arguments_.schedulerVerified,
@@ -273,7 +313,7 @@ export function analyzeLaunchReadiness({
   const blockers = phase4Report.blockers.map(cloneIssue);
   const warnings = phase4Report.warnings.map(cloneIssue);
   assertInheritedTargets(phase4Report, config);
-  addContractBlockers(blockers, phase4Report);
+  addContractBlockers(blockers, phase4Report, config);
   const attemptInventory = analyzeAttemptInventory(
     database?.chatOnlyCheckoutAttempts,
     blockers,
@@ -321,6 +361,8 @@ export function analyzeLaunchReadiness({
       chat_only_price: { ...phase4Report.chat_only_price },
       widget_token_secret_configured:
         phase4Report.environment.widget_token_secret_configured === true,
+      widget_edge_origin_secret_configured:
+        config.widgetEdgeOriginSecretConfigured === true,
       pinned_portal_contract_complete:
         phase4Report.stripe_portal.phase4_contract_complete === true,
     },
@@ -449,7 +491,7 @@ function addExternalEvidenceBlockers(blockers, config) {
   }
 }
 
-function addContractBlockers(blockers, phase4Report) {
+function addContractBlockers(blockers, phase4Report, config) {
   if (
     phase4Report.environment.chat_price_state !== "required" ||
     phase4Report.chat_only_price.contract_satisfied !== true ||
@@ -473,6 +515,13 @@ function addContractBlockers(blockers, phase4Report) {
       blockers,
       "widget_secret_launch_contract_not_verified",
       "The required server-only widget security secret is not verified",
+    );
+  }
+  if (config.widgetEdgeOriginSecretConfigured !== true) {
+    addIssue(
+      blockers,
+      "widget_edge_origin_secret_launch_contract_not_verified",
+      "The distinct server-only widget edge-origin secret is not verified",
     );
   }
   if (phase4Report.stripe_portal.phase4_contract_complete !== true) {
