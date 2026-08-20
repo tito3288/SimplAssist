@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getRequestBrand: vi.fn(),
@@ -15,11 +15,20 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
 }));
 
 import RootLayout from "../../layout";
-import { metadata } from "../../page";
+import {
+  dynamic,
+  generateMetadata,
+  revalidate,
+} from "../../page";
 import CanonicalHomepage from "./page";
 import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
 import {
+  CHAT_ONLY_HOME_DESCRIPTION,
+  CHAT_ONLY_HOME_FAQS,
+  CHAT_ONLY_HOME_TITLE,
   getHomepageJsonLd,
+  getHomepageMetadata,
+  getHomepageSeoContent,
   HOME_DEFINITION,
   HOME_DESCRIPTION,
   HOME_FAQS,
@@ -53,8 +62,15 @@ const DEFAULT_REQUEST_BRAND = {
 };
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+  vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "");
   mocks.getRequestBrand.mockReset();
   mocks.getRequestBrand.mockResolvedValue(DEFAULT_REQUEST_BRAND);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 function visibleText(html: string): string {
@@ -71,21 +87,27 @@ function visibleText(html: string): string {
     .trim();
 }
 
-function renderHomepage() {
-  return renderToStaticMarkup(<CanonicalHomepage />);
+function renderHomepage(chatOnlyPublicLaunchEnabled = false) {
+  return renderToStaticMarkup(
+    <CanonicalHomepage
+      chatOnlyPublicLaunchEnabled={chatOnlyPublicLaunchEnabled}
+    />,
+  );
 }
 
 type JsonRecord = Record<string, unknown>;
 
 describe("canonical homepage SEO metadata", () => {
   it("uses the approved title and description with canonical social parity", () => {
+    const metadata = generateMetadata();
+
     expect(metadata).toBe(HOME_METADATA);
     expect(HOME_TITLE).toHaveLength(56);
     expect(HOME_DESCRIPTION).toHaveLength(155);
     expect(HOME_TITLE).toBe(
       "SimplAssist — Missed-Call Text Back for Small Businesses"
     );
-    expect(HOME_METADATA.alternates.canonical).toBe("/");
+    expect(HOME_METADATA.alternates?.canonical).toBe("/");
 
     expect(HOME_METADATA.openGraph).toMatchObject({
       title: HOME_TITLE,
@@ -105,6 +127,32 @@ describe("canonical homepage SEO metadata", () => {
       title: HOME_TITLE,
       description: HOME_DESCRIPTION,
       images: ["/social-preview.png"],
+    });
+  });
+
+  it("is dynamic and cache-safe at the root marketing boundary", () => {
+    expect(dynamic).toBe("force-dynamic");
+    expect(revalidate).toBe(0);
+  });
+
+  it("switches all canonical metadata only for the public launch policy", () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_live_chat_only");
+
+    const metadata = generateMetadata();
+
+    expect(metadata).toEqual(getHomepageMetadata(true));
+    expect(metadata).toMatchObject({
+      title: CHAT_ONLY_HOME_TITLE,
+      description: CHAT_ONLY_HOME_DESCRIPTION,
+      openGraph: {
+        title: CHAT_ONLY_HOME_TITLE,
+        description: CHAT_ONLY_HOME_DESCRIPTION,
+      },
+      twitter: {
+        title: CHAT_ONLY_HOME_TITLE,
+        description: CHAT_ONLY_HOME_DESCRIPTION,
+      },
     });
   });
 });
@@ -191,6 +239,65 @@ describe("canonical homepage static HTML", () => {
     expect(html.indexOf('id="trusted-technology-heading"')).toBeLessThan(
       html.indexOf("<footer")
     );
+  });
+
+  it("adds the complete direct Chat Only offer without changing existing plan positioning", () => {
+    const html = renderHomepage(true);
+    const pricing = html.match(
+      /<section id="pricing"[\s\S]*?<\/section>/,
+    )?.[0];
+    const text = visibleText(pricing ?? "");
+
+    expect(pricing).toBeDefined();
+    expect(text).toContain("Chat Only");
+    expect(text).toMatch(/\$10\s*\/mo/);
+    expect(text).toContain("200 completed AI replies/month");
+    expect(text).toContain("Website chat widget");
+    expect(text).toContain("Web-chat lead capture");
+    expect(text).toContain("Contact and conversation inbox");
+    expect(text).toContain(
+      "AI answer, tone, FAQ, and service customization",
+    );
+    expect(text).toContain("Google Calendar connection");
+    expect(text).toContain("AI appointment scheduling");
+    expect(text).toContain("No phone number, SMS, MMS, or Telnyx activation");
+    expect(text).toContain("No setup or SMS activation fee");
+    expect(pricing).toMatch(/href="\/signup"[^>]*>Get Started<\/a>/);
+    expect(text).toContain("SMS Only");
+    expect(text).toContain("SMS + Web Chat");
+    expect(text).toContain("Full Suite");
+    expect(text.match(/Most Popular/g)).toHaveLength(1);
+    expect(text.match(/Coming Soon/g)).toHaveLength(1);
+  });
+
+  it("preserves the exact prelaunch plan and SEO presentation when Chat Only is off", () => {
+    const html = renderHomepage(false);
+    const pricing = html.match(
+      /<section id="pricing"[\s\S]*?<\/section>/,
+    )?.[0];
+    const content = getHomepageSeoContent(false);
+
+    expect(visibleText(pricing ?? "")).not.toContain("Chat Only");
+    expect(html).toContain(HOME_DEFINITION);
+    expect(content.faqs).toBe(HOME_FAQS);
+    expect(content.title).toBe(HOME_TITLE);
+    expect(content.description).toBe(HOME_DESCRIPTION);
+  });
+
+  it("uses launch-specific visible definition and FAQ copy only when enabled", () => {
+    const html = renderHomepage(true);
+    const faqSection = html.match(/<section id="faq"[\s\S]*?<\/section>/)?.[0];
+    const launched = getHomepageSeoContent(true);
+
+    expect(html).toContain(launched.definition);
+    expect(launched.faqs).toBe(CHAT_ONLY_HOME_FAQS);
+    expect(faqSection?.match(/<h3\b/g)).toHaveLength(
+      CHAT_ONLY_HOME_FAQS.length,
+    );
+    for (const { question, answer } of CHAT_ONLY_HOME_FAQS) {
+      expect(visibleText(faqSection ?? "")).toContain(question);
+      expect(visibleText(faqSection ?? "")).toContain(answer);
+    }
   });
 });
 
@@ -287,5 +394,49 @@ describe("homepage JSON-LD", () => {
     expect(structuredDataKeys).not.toContain("reviews");
     expect(structuredDataKeys).not.toContain("rating");
     expect(structuredDataKeys).not.toContain("aggregaterating");
+  });
+
+  it("adds one no-setup-fee Chat Only offer with launch FAQ parity", () => {
+    const data = getHomepageJsonLd(true) as {
+      "@graph": JsonRecord[];
+    };
+    const application = data["@graph"].find(
+      (node) => node["@type"] === "SoftwareApplication",
+    );
+    const offers = application?.offers as JsonRecord[];
+    const chatOffer = offers.find((offer) => offer.name === "Chat Only");
+
+    expect(offers.map(({ name, price }) => ({ name, price }))).toEqual([
+      { name: "Chat Only", price: 10 },
+      { name: "SMS Only", price: 25 },
+      { name: "SMS + Web Chat", price: 45 },
+    ]);
+    expect(chatOffer).toMatchObject({
+      price: 10,
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+    });
+    expect(chatOffer?.priceSpecification).toEqual([
+      expect.objectContaining({
+        "@type": "UnitPriceSpecification",
+        price: 10,
+        billingDuration: "P1M",
+      }),
+    ]);
+    expect(JSON.stringify(chatOffer)).not.toContain("activation fee");
+
+    const faqPage = data["@graph"].find(
+      (node) => node["@type"] === "FAQPage",
+    );
+    expect(faqPage?.mainEntity).toEqual(
+      CHAT_ONLY_HOME_FAQS.map(({ question, answer }) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: answer,
+        },
+      })),
+    );
   });
 });

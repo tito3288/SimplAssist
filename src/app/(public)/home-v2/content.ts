@@ -137,6 +137,35 @@ export const plans = [
   },
 ];
 
+export const chatOnlyPlan = {
+  name: "Chat Only",
+  price: "$10",
+  description:
+    "An AI website receptionist for teams that want web chat without texting.",
+  features: [
+    "Website chat widget",
+    "200 completed AI replies/month",
+    "Web-chat lead capture",
+    "Contact and conversation inbox",
+    "AI answer, tone, FAQ, and service customization",
+    "Google Calendar connection",
+    "AI appointment scheduling",
+    "No phone number, SMS, MMS, or Telnyx activation",
+    "No setup or SMS activation fee",
+  ],
+  highlighted: false,
+} as const;
+
+/**
+ * Presentation-only composition for the noncanonical preview. The caller must
+ * supply the canonical server-side public-launch decision; this module never
+ * reads rollout configuration or treats the exact-business canary as public
+ * launch authority.
+ */
+export function plansForPublicLaunch(chatOnlyPublicLaunchEnabled: boolean) {
+  return chatOnlyPublicLaunchEnabled ? [chatOnlyPlan, ...plans] : plans;
+}
+
 export const heroStats = [
   { stat: "24/7", label: "Lead response coverage for missed calls and website visitors" },
   { stat: "1 inbox", label: "SMS and web chat conversations in one place" },

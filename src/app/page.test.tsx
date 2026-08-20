@@ -1,8 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   getRequestBrand: vi.fn(),
+  homePage: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`redirect:${path}`);
   }),
@@ -15,7 +18,10 @@ vi.mock("@/lib/branding/requestBrand.server", () => ({
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
 vi.mock("./(public)/home/page", () => ({
-  default: () => <main data-testid="canonical-home">Canonical homepage</main>,
+  default: (props: { chatOnlyPublicLaunchEnabled: boolean }) => {
+    mocks.homePage(props);
+    return <main data-testid="canonical-home">Canonical homepage</main>;
+  },
 }));
 
 import Page from "./page";
@@ -42,8 +48,16 @@ const DEFAULT_BRAND = {
 };
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "0");
+  vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "");
   mocks.getRequestBrand.mockReset();
+  mocks.homePage.mockReset();
   mocks.redirect.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("root page branding redirect", () => {
@@ -70,7 +84,26 @@ describe("root page branding redirect", () => {
       const html = renderToStaticMarkup(await Page());
 
       expect(html).toContain("Canonical homepage");
+      expect(mocks.homePage).toHaveBeenCalledWith({
+        chatOnlyPublicLaunchEnabled: false,
+      });
       expect(mocks.redirect).not.toHaveBeenCalled();
     },
   );
+
+  it("passes the exact server public-launch decision into the canonical homepage", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    vi.stubEnv("STRIPE_PRICE_CHAT_ONLY", "price_live_chat_only");
+    mocks.getRequestBrand.mockResolvedValue({
+      source: "default",
+      isPreview: false,
+      brand: DEFAULT_BRAND,
+    });
+
+    renderToStaticMarkup(await Page());
+
+    expect(mocks.homePage).toHaveBeenCalledWith({
+      chatOnlyPublicLaunchEnabled: true,
+    });
+  });
 });

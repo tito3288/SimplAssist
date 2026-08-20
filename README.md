@@ -32,12 +32,12 @@ Phase 9 billing/admin and Phase 3 calendar/operations use these deployment varia
 - `STRIPE_PRICE_SMS_ONLY` - recurring Price ID for Starter / SMS Only in the same Stripe account and mode as the secret key; production uses the live Price.
 - `STRIPE_PRICE_SMS_AND_CHAT` - recurring Price ID for Growth / SMS + Web Chat in the same Stripe account and mode as the secret key; production uses the live Price.
 - `STRIPE_PRICE_FULL` - recurring Price ID for Pro / Full Suite in the same Stripe account and mode as the secret key; production uses the live Price.
-- `STRIPE_PRICE_CHAT_ONLY` - server-only recurring Price ID for Chat Only in the same Stripe account and mode as the secret key. Before exact-business acquisition, verify that it is an active, licensed/non-metered USD Price for exactly $10 every month and distinct from every SMS base, setup-fee, and overage Price. Production Phase 4B uses one real owner-performed $10 live subscription; keep this value configured after the first Session even when acquisition is disabled so signed webhooks and historical plan recovery continue to work.
+- `STRIPE_PRICE_CHAT_ONLY` - server-only recurring Price ID for Chat Only in the same Stripe account and mode as the secret key. Before exact-business acquisition, verify that it is an active, licensed/non-metered USD Price for exactly $10 every month and distinct from every SMS base, setup-fee, and overage Price. Phase 4 configured the production-live Price without creating a Chat Only Checkout or charge. Keep this value configured even while acquisition is disabled so the Phase 7 owner-led acceptance, signed webhooks, and historical plan recovery use one stable Price.
 - `STRIPE_PRICE_SETUP_FEE` - one-time Price ID for the $25 setup and SMS activation fee in the same Stripe account and mode; production uses the live Price.
 - `STRIPE_PRICE_SMS_OVERAGE_PART` - Price ID for $0.03 per extra SMS part after opt-in in the same Stripe account and mode; production uses the live Price.
 - `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` - server-only ID of the reviewed Stripe Billing Portal configuration (`bpc_...`) for this Stripe account and mode. Portal session creation fails closed when this pin is missing or malformed; never expose it through a `NEXT_PUBLIC_` variable.
-- `CHAT_ONLY_DIRECT_SALES_ENABLED` - server-only, exact-`1` rollout switch reserved for a later public direct Chat Only launch. Leave unset or `0` throughout the production Phase 4 exact-business canary and closeout.
-- `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only canary while the broad flag remains off. In production, setting it with the live Chat Price authorizes that exact eligible business to begin a real-charge Checkout, so configure it only for the separately approved Stage D window and remove it during Stage E closeout. It accepts no list, whitespace, wildcard, or public/browser variant. Never create a `NEXT_PUBLIC_` copy.
+- `CHAT_ONLY_DIRECT_SALES_ENABLED` - server-only, exact-`1` rollout switch reserved for the monitored public direct Chat Only launch after the Phase 7 owner-led live acceptance passes. Leave unset or `0` throughout Phases 5 and 6 and during the exact-business portion of Phase 7.
+- `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` - optional server-only exact canonical business UUID for the isolated direct Chat Only acceptance while the broad flag remains off. In production, setting it with the live Chat Price authorizes that exact eligible business to begin a real-charge Checkout, so configure it only for the separately approved Phase 7 window and remove it after the exact-account evidence is complete. It accepts no list, whitespace, wildcard, or public/browser variant. Never create a `NEXT_PUBLIC_` copy.
 - `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` - independent server-only, exact-`1` rollout switch reserved for new partner-admin chat-only assignments. Leave unset or `0` until partner acceptance testing is complete.
 - `WIDGET_TOKEN_SECRET` - server-only secret used to sign short-lived public widget sessions and derive opaque traffic keys. Use at least 32 cryptographically random bytes, keep it identical across all application instances, and never expose it through a `NEXT_PUBLIC_` variable. Rotation immediately invalidates existing five-minute widget sessions and changes the traffic-key namespace, effectively starting new rate buckets; rotate deliberately across every instance at once.
 - `GOOGLE_CLIENT_ID` - server-side Google OAuth client ID for Calendar access.
@@ -55,12 +55,13 @@ assignments have independent release schedules. See
 for the pre-implementation inventory and regression gate.
 
 Production Stripe mode is fixed for the lifetime of a deployment and its
-database evidence. The production Phase 4B canary remains on the existing live
-key, live Prices, and live webhook endpoint; it never swaps to test mode. The
-owner alone performs the one approved real $10 payment. After validation, the
-exact canary is removed, the subscription is canceled and optionally refunded
-under the recorded accounting procedure, both broad flags remain `0`, and no
-public Chat Only launch occurs in Phase 4.
+database evidence. Phase 4 completed hosted preparation and compatible
+deployment on the existing live key, live Prices, and live webhook endpoint; it
+never swapped to test mode and it created no Chat Only Checkout, subscription,
+or charge. The owner intentionally moved the one new-account real $10 payment
+and product acceptance to Phase 7. The owner alone enters payment details. The
+exact canary is removed after verification, but cancellation or refund is not
+implied: the owner decides whether the founding subscription remains active.
 
 The switches gate new acquisition and partner assignment only. They do not
 turn off the metering, widget-security, or calendar-lifecycle code used by
@@ -87,6 +88,13 @@ in [`docs/account-cleanup-scheduler-operations.md`](docs/account-cleanup-schedul
 The Phase 4 isolated direct-canary, Checkout single-flight, rollback, and
 hosted approval boundaries are documented in
 [`docs/chat-only-phase4-direct-canary.md`](docs/chat-only-phase4-direct-canary.md).
+The Phase 5–7 completion contract is documented in
+[`docs/chat-only-phase5-public-launch-readiness.md`](docs/chat-only-phase5-public-launch-readiness.md):
+Phase 5 prepares public presentation locally with all acquisition flags off;
+Phase 6 deploys and rehearses with the flags off; Phase 7 performs the
+owner-led new-account live $10 acceptance and only then permits a separately
+approved monitored broad-direct launch. Partner Chat Only and cross-family
+transitions remain independent, default-off future work.
 
 The Full Suite waitlist uses these server-only deployment variables:
 

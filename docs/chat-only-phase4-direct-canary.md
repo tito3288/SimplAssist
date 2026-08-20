@@ -1,41 +1,64 @@
-# Chat Only Phase 4 production-live direct canary
+# Chat Only Phase 4 production-live direct canary readiness
 
-Execution and release contract for hardening one isolated direct Chat Only
-canary before any broad sale or partner assignment.
+Execution and release record for hardening one isolated direct Chat Only
+canary path before any broad sale or partner assignment.
 
 Date: 2026-08-19
 
 ## Phase boundary
 
-Phase 4 proves the direct $10 Chat Only acquisition path with one explicitly
-named disposable business. It is divided into two separately authorized parts:
+Phase 4 prepared the direct $10 Chat Only acquisition path for one explicitly
+named business. It was divided into separately authorized local and hosted
+parts:
 
 - **Phase 4A** is local implementation, testing, read-only release tooling, and
   documentation. It made no hosted change and never accessed live Stripe.
-- **Phase 4B** is the later, separately approved production release window for
-  one exact-business canary. Its stages are approval boundaries, not actions
-  authorized merely by this document.
+- **Phase 4B** defined a separately approved production release window. Its
+  stages are approval boundaries, not actions authorized merely by this
+  document.
 
-The owner selected the Phase 4B topology on 2026-08-19: keep the production
-Railway service on the production Supabase project and its already configured
-Stripe **live mode**, then perform one real $10 subscription manually at the
-very end through one exact disposable business. Never replace the production
-live key, live Price IDs, or live webhook secret with test-mode values, even
-temporarily. A Railway staging or local application must never point at the
-production database for this canary.
+The owner selected the production-live topology on 2026-08-19: keep the
+production Railway service on the production Supabase project and its existing
+Stripe **live mode**. Never replace the production live key, live Price IDs, or
+live webhook secret with test-mode values, even temporarily. A Railway staging
+or local application must never point at the production database for this
+acceptance test.
+
+## Execution status — 2026-08-19
+
+Phase 4A and the approved hosted preparation/deployment work through Phase 4B
+Stage C are complete. The compatible application and migrations are deployed,
+the live $10 Price and required server configuration are present, the readiness
+and post-migration reports pass, and both broad Chat Only acquisition switches
+remain off.
+
+No Phase 4 paid canary ran. No canary business was named, no Chat Only Checkout
+Session or subscription was created, and no $10 card charge occurred. Before
+Stage D, the owner intentionally moved the owner-led new-account live payment
+and product acceptance to Phase 7. Phase 5 prepares public presentation locally
+with flags off; Phase 6 deploys and rehearses it with flags off; Phase 7 owns
+the real payment, product verification, and any later monitored broad-direct
+activation. See
+[`chat-only-phase5-public-launch-readiness.md`](chat-only-phase5-public-launch-readiness.md).
+
+The original Stage D/E controls remain below as historical safety requirements,
+but they were not executed in Phase 4 and do not override the Phase 5–7
+contract.
 
 `CHAT_ONLY_DIRECT_SALES_ENABLED` and
 `CHAT_ONLY_PARTNER_ASSIGNMENT_ENABLED` remain unset or `0` throughout Phase 4A.
-The broad direct-sales switch also remains off during the production Phase 4B
-canary and its closeout. Only the exact disposable business named by the
-server-only canary configuration may enter the new direct flow.
+Both broad switches remained off through the completed Phase 4 hosted work,
+and the server-only canary value remained unset. The later Phase 7 exact-account
+window keeps the broad switch off while only its named business may enter the
+new direct flow.
 
 Phase 4A did not advertise Chat Only, open public sales, enable partner
 assignment, apply a hosted migration, create a hosted Stripe object, change a
 Railway variable, deploy, edit an edge or scheduler configuration, call a
-provider, or mutate a customer account. Phase 4B may perform only the exact
-production reads and mutations separately approved in Stages A-E below. It
-does not authorize a public launch.
+provider, or mutate a customer account. The original Phase 4B plan permitted
+only the exact production reads and mutations separately approved in Stages
+A-E below; actual execution stopped after Stage C. It did not authorize a
+public launch.
 
 ## Phase 4A local objectives
 
@@ -62,8 +85,9 @@ differ, but its authority must satisfy this contract:
   only their existing broad availability policies. They must not reveal the
   canary merely because one business is authorized.
 - The broad direct flag may authorize eligible direct businesses in a later
-  release. During the Phase 4 canary it stays off, so a wrong business ID must
-  observe the exact same unavailable state as when no canary exists.
+  release. During any exact-account acceptance window it stays off, so a wrong
+  business ID must observe the exact same unavailable state as when no canary
+  exists.
 - The partner flag stays independent and off. A partner-owned, invoiced,
   comped, or partner-linked business cannot use the direct canary path even if
   its UUID is configured by mistake.
@@ -268,9 +292,9 @@ Phase 4A deliberately does not include:
   provider calls, test accounts, or cleanup.
 
 Those are historical Phase 4A boundaries: the completed local phase did none
-of them. They do not imply that the later Phase 4B canary uses test mode. The
-owner subsequently selected the separately approved production-live topology
-defined below.
+of them. They do not imply that the later paid acceptance uses test mode. The
+owner selected the production-live topology, then intentionally moved the
+owner-led payment from Phase 4 to Phase 7 before any Checkout began.
 
 Partner Chat Only remains a later independent phase. Before its flag can open,
 the partner billing mutation must receive the shared same-origin admin mutation
@@ -380,17 +404,17 @@ scheduler edit or test request, cache purge, secret rotation, WAF/CDN change,
 Railway variable change, Stripe object mutation, or canary-business creation is
 a hosted mutation and must be named in the approval.
 
-This configuration prepares a real billing path. Once Stage D begins, Checkout
-will create a live Customer, live invoice, live subscription, and real $10 card
-charge with ordinary Stripe processing and accounting consequences. Stage B
-must record that disclosure and the approved cardholder, cancellation timing,
-refund choice, and accounting owner before the Price can be used. It does not
-authorize anyone to enter payment details or create a Checkout Session.
+This configuration prepares a real billing path. The later Phase 7 test will
+create a live Customer, live invoice, live subscription, and real $10 card
+charge with ordinary Stripe processing and accounting consequences. Hosted
+preparation did not authorize anyone to enter payment details or create a
+Checkout Session.
 
 After the Price and configuration are present, rerun the canary-ready audit in
 GET/read-only mode. It must validate the Price, Portal, configuration, and
 sanitized before/after delta before Stage C begins. The single-business canary
-value remains unset until Stage D has an exact disposable business to name.
+value remained unset throughout Phase 4 and may be set only for the separately
+approved Phase 7 business.
 
 ```bash
 npm run audit:chat-only-phase4 -- \
@@ -442,10 +466,11 @@ schema, restart an old application replica, or reopen an old Calendar writer.
 If a later check fails, keep affected traffic closed, preserve durable
 provider-operation evidence, and deploy a reviewed forward fix.
 
-### Stage D — exact disposable canary
+### Historical Stage D — exact paid canary (not executed)
 
-After the compatible deployment is healthy, separately approve the provider
-and customer mutations needed for one production disposable direct business:
+This was the original post-deployment contract. The owner deferred it before
+any canary business, Checkout, subscription, or charge existed. Phase 7 now
+governs the owner-led live acceptance. The retained controls were:
 
 - create or identify the exact disposable direct/unpartnered business and set
   only its server-side canary UUID through an approved Railway change;
@@ -485,9 +510,11 @@ account deletion, and cleanup are real production actions even when the account
 is disposable. None is authorized by a successful local Phase 4A pass or by an
 earlier Phase 4B stage.
 
-### Stage E — canary closeout; no public release
+### Historical Stage E — disposable-canary closeout (not executed)
 
-After all paid-canary evidence is captured, close the canary in this order:
+This closeout would have applied only to the original disposable Phase 4
+canary. Because that canary did not run, none of these cancellation or refund
+steps occurred. The historical order was:
 
 1. Remove `CHAT_ONLY_DIRECT_CANARY_BUSINESS_ID` from Railway. Keep
    `STRIPE_PRICE_CHAT_ONLY` configured so signed webhook recovery and historical
@@ -516,9 +543,11 @@ After all paid-canary evidence is captured, close the canary in this order:
    deletion grace and durable Stripe/Calendar cleanup rules rather than deleting
    linkage manually.
 
-Phase 4 ends after this closeout with both broad flags off and Chat Only still
-hidden from public sale. Any public direct launch, including public copy changes
-or `CHAT_ONLY_DIRECT_SALES_ENABLED=1`, is a later independent phase requiring a
-fresh audit, release contract, approval, and monitored launch window. Partner
-assignment likewise requires its own implementation, acceptance pass, hosted
-preflight, and canary.
+Phase 4 closed after hosted preparation and compatible deployment, with both
+broad flags off, the exact canary unset, and Chat Only hidden from public sale.
+The unexecuted paid acceptance moved to Phase 7; it must never be reported as
+Phase 4 evidence. Public direct launch still requires the Phase 5 local
+acceptance, Phase 6 flags-off deployment rehearsal, Phase 7 owner-led live test,
+fresh approval, and a monitored launch window. Partner assignment remains an
+independent future project requiring its own implementation, acceptance pass,
+hosted preflight, and canary.

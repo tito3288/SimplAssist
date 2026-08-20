@@ -11,6 +11,24 @@ export const HOME_DESCRIPTION =
 export const HOME_DEFINITION =
   "SimplAssist is a missed call text back service for small businesses, with plans starting at $25/month. Its $45/month plan adds an AI receptionist for SMS and web chat, a website chat widget, and Google Calendar appointment booking.";
 
+export const CHAT_ONLY_HOME_TITLE =
+  "SimplAssist — $10 AI Website Chat for Small Businesses";
+
+export const CHAT_ONLY_HOME_DESCRIPTION =
+  "SimplAssist Chat Only is $10/month for 200 completed website-chat AI replies, lead capture, and booking—with no SMS, Telnyx activation, or setup fee.";
+
+export const CHAT_ONLY_HOME_DEFINITION =
+  "SimplAssist is a customer communication service for small businesses. Its Chat Only plan is $10/month for 200 completed website-chat AI replies, lead capture, a conversation inbox, AI customization, Google Calendar, and appointment booking, with no SMS, Telnyx activation, or setup fee.";
+
+export type HomepageFaq = {
+  question: string;
+  answer: string;
+  answerLink?: {
+    text: string;
+    href: string;
+  };
+};
+
 export const HOME_FAQS = [
   {
     question: "What is missed call text back?",
@@ -56,7 +74,66 @@ export const HOME_FAQS = [
     answer:
       "Yes — you can cancel anytime, and there are no contracts. The one-time $25 setup fee is non-refundable once carrier registration begins, since it covers that registration process itself.",
   },
-] as const;
+] as const satisfies readonly HomepageFaq[];
+
+export const CHAT_ONLY_HOME_FAQS = [
+  HOME_FAQS[0],
+  {
+    question: "What is SimplAssist?",
+    answer:
+      "SimplAssist is a customer communication service built for small businesses. Chat Only provides an AI website receptionist, lead capture, a conversation inbox, and Google Calendar booking without phone or SMS setup. SMS plans add missed-call text back and business texting.",
+  },
+  {
+    question: "What is included in Chat Only?",
+    answer:
+      "Chat Only is $10/month and includes a website chat widget, 200 completed AI replies per month, web-chat lead capture, a contact and conversation inbox, AI answer and tone customization, Google Calendar connection, and AI appointment booking. It has no phone number, SMS, MMS, Telnyx activation, or setup fee.",
+  },
+  HOME_FAQS[2],
+  {
+    question: "How much does SimplAssist cost?",
+    answer:
+      "Chat Only is $10/month with 200 completed website-chat AI replies and no setup fee. SMS Only is $25/month with 500 included SMS parts, and SMS + Web Chat is $45/month with 1,500 included SMS parts. Paid SMS activation has a one-time $25 setup fee for carrier registration. Full Suite is coming soon and cannot be purchased yet.",
+  },
+  HOME_FAQS[4],
+  {
+    question: "Does the AI answer with my business's real information?",
+    answer:
+      "Yes — on Chat Only and SMS + Web Chat, your AI loads your business profile, active services, saved FAQs, business hours, and AI settings before every answer, and it is instructed never to invent facts about your business.",
+  },
+  {
+    ...HOME_FAQS[6],
+    answer:
+      "Chat Only can launch without phone or carrier registration after billing and core setup are complete. SMS registrations are usually approved within a few business days of payment, though additional carrier review can sometimes take a few weeks. Texting goes live after carrier approval and phone-number assignment. Learn more about what the one-time $25 SMS setup fee covers.",
+    answerLink: {
+      text: "what the one-time $25 SMS setup fee covers.",
+      href: "/support/setup-fee",
+    },
+  },
+  HOME_FAQS[7],
+] as const satisfies readonly HomepageFaq[];
+
+export function getHomepageSeoContent(
+  chatOnlyPublicLaunchEnabled = false,
+): {
+  title: string;
+  description: string;
+  definition: string;
+  faqs: readonly HomepageFaq[];
+} {
+  return chatOnlyPublicLaunchEnabled
+    ? {
+        title: CHAT_ONLY_HOME_TITLE,
+        description: CHAT_ONLY_HOME_DESCRIPTION,
+        definition: CHAT_ONLY_HOME_DEFINITION,
+        faqs: CHAT_ONLY_HOME_FAQS,
+      }
+    : {
+        title: HOME_TITLE,
+        description: HOME_DESCRIPTION,
+        definition: HOME_DEFINITION,
+        faqs: HOME_FAQS,
+      };
+}
 
 const socialPreview = {
   url: "/social-preview.png",
@@ -65,26 +142,44 @@ const socialPreview = {
   alt: "SimplAssist",
 };
 
-export const HOME_METADATA = {
-  title: HOME_TITLE,
-  description: HOME_DESCRIPTION,
-  alternates: {
-    canonical: "/",
-  },
-  openGraph: {
-    title: HOME_TITLE,
-    description: HOME_DESCRIPTION,
-    url: "/",
-    type: "website",
-    images: [socialPreview],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: HOME_TITLE,
-    description: HOME_DESCRIPTION,
-    images: [socialPreview.url],
-  },
-} satisfies Metadata;
+function buildHomepageMetadata(title: string, description: string): Metadata {
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: "/",
+    },
+    openGraph: {
+      title,
+      description,
+      url: "/",
+      type: "website",
+      images: [socialPreview],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [socialPreview.url],
+    },
+  };
+}
+
+export const HOME_METADATA = buildHomepageMetadata(
+  HOME_TITLE,
+  HOME_DESCRIPTION,
+);
+
+export function getHomepageMetadata(
+  chatOnlyPublicLaunchEnabled = false,
+): Metadata {
+  const { title, description } = getHomepageSeoContent(
+    chatOnlyPublicLaunchEnabled,
+  );
+  return chatOnlyPublicLaunchEnabled
+    ? buildHomepageMetadata(title, description)
+    : HOME_METADATA;
+}
 
 const monthlyPriceSpecification = (price: number) => ({
   "@type": "UnitPriceSpecification",
@@ -102,9 +197,51 @@ const activationPriceSpecification = {
   priceCurrency: "USD",
 };
 
-export function getHomepageJsonLd() {
+export function getHomepageJsonLd(chatOnlyPublicLaunchEnabled = false) {
   const organizationId = `${SITE_ORIGIN}/#organization`;
   const applicationId = `${SITE_ORIGIN}/#software-application`;
+  const { description, faqs } = getHomepageSeoContent(
+    chatOnlyPublicLaunchEnabled,
+  );
+  const offers = [
+    ...(chatOnlyPublicLaunchEnabled
+      ? [
+          {
+            "@type": "Offer",
+            name: "Chat Only",
+            url: `${SITE_ORIGIN}/#pricing`,
+            price: 10,
+            priceCurrency: "USD",
+            availability: "https://schema.org/InStock",
+            priceSpecification: [monthlyPriceSpecification(10)],
+          },
+        ]
+      : []),
+    {
+      "@type": "Offer",
+      name: "SMS Only",
+      url: `${SITE_ORIGIN}/#pricing`,
+      price: 25,
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      priceSpecification: [
+        monthlyPriceSpecification(25),
+        activationPriceSpecification,
+      ],
+    },
+    {
+      "@type": "Offer",
+      name: "SMS + Web Chat",
+      url: `${SITE_ORIGIN}/#pricing`,
+      price: 45,
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      priceSpecification: [
+        monthlyPriceSpecification(45),
+        activationPriceSpecification,
+      ],
+    },
+  ];
 
   return {
     "@context": "https://schema.org",
@@ -120,42 +257,17 @@ export function getHomepageJsonLd() {
         "@type": "SoftwareApplication",
         "@id": applicationId,
         name: "SimplAssist",
-        description: HOME_DESCRIPTION,
+        description,
         url: `${SITE_ORIGIN}/`,
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
         publisher: { "@id": organizationId },
-        offers: [
-          {
-            "@type": "Offer",
-            name: "SMS Only",
-            url: `${SITE_ORIGIN}/#pricing`,
-            price: 25,
-            priceCurrency: "USD",
-            availability: "https://schema.org/InStock",
-            priceSpecification: [
-              monthlyPriceSpecification(25),
-              activationPriceSpecification,
-            ],
-          },
-          {
-            "@type": "Offer",
-            name: "SMS + Web Chat",
-            url: `${SITE_ORIGIN}/#pricing`,
-            price: 45,
-            priceCurrency: "USD",
-            availability: "https://schema.org/InStock",
-            priceSpecification: [
-              monthlyPriceSpecification(45),
-              activationPriceSpecification,
-            ],
-          },
-        ],
+        offers,
       },
       {
         "@type": "FAQPage",
         "@id": `${SITE_ORIGIN}/#faq`,
-        mainEntity: HOME_FAQS.map(({ question, answer }) => ({
+        mainEntity: faqs.map(({ question, answer }) => ({
           "@type": "Question",
           name: question,
           acceptedAnswer: {

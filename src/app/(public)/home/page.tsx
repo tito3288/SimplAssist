@@ -14,13 +14,14 @@ import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
+import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
 import {
   getHomepageJsonLd,
-  HOME_DEFINITION,
-  HOME_FAQS,
+  getHomepageSeoContent,
+  type HomepageFaq,
   serializeJsonLd,
 } from "./seo";
 import {
@@ -124,7 +125,27 @@ const dashboardViews = [
   },
 ];
 
-const plans = [
+const chatOnlyPlan = {
+  planKey: "chat_only" as const,
+  name: "Chat Only",
+  price: "$10",
+  description:
+    "An AI website receptionist for teams that want web chat without texting.",
+  features: [
+    "Website chat widget",
+    "200 completed AI replies/month",
+    "Web-chat lead capture",
+    "Contact and conversation inbox",
+    "AI answer, tone, FAQ, and service customization",
+    "Google Calendar connection",
+    "AI appointment scheduling",
+    "No phone number, SMS, MMS, or Telnyx activation",
+    "No setup or SMS activation fee",
+  ],
+  highlighted: false,
+};
+
+const existingPlans = [
   {
     planKey: "sms_only" as const,
     name: "SMS Only",
@@ -260,9 +281,9 @@ const paneFrame =
 function FaqAnswerText({
   faq,
 }: {
-  faq: (typeof HOME_FAQS)[number];
+  faq: HomepageFaq;
 }) {
-  if (!("answerLink" in faq)) return faq.answer;
+  if (!faq.answerLink) return faq.answer;
 
   const linkStart = faq.answer.indexOf(faq.answerLink.text);
   if (linkStart < 0) return faq.answer;
@@ -283,7 +304,20 @@ function FaqAnswerText({
 
 /* ── Page ── */
 
-export default function HomePage() {
+type HomePageProps = {
+  chatOnlyPublicLaunchEnabled?: boolean;
+};
+
+export default function HomePage({
+  chatOnlyPublicLaunchEnabled,
+}: HomePageProps) {
+  const publicChatOnlyAvailable =
+    chatOnlyPublicLaunchEnabled ?? isChatOnlyPublicLaunchEnabled();
+  const seoContent = getHomepageSeoContent(publicChatOnlyAvailable);
+  const plans = publicChatOnlyAvailable
+    ? [chatOnlyPlan, ...existingPlans]
+    : existingPlans;
+
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
       <noscript>
@@ -292,7 +326,9 @@ export default function HomePage() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: serializeJsonLd(getHomepageJsonLd()),
+          __html: serializeJsonLd(
+            getHomepageJsonLd(publicChatOnlyAvailable),
+          ),
         }}
       />
       <HomepageChatWidget />
@@ -439,7 +475,7 @@ export default function HomePage() {
                 What is SimplAssist?
               </h2>
               <p className={`${body} mt-4 max-w-[78ch] leading-[1.75]`}>
-                {HOME_DEFINITION}
+                {seoContent.definition}
               </p>
             </div>
           </Reveal>
@@ -618,12 +654,25 @@ export default function HomePage() {
                 <span className={accentText}>business</span>.
               </>
             }
-            subtitle="No contracts. Paid SMS activation includes a one-time $25 setup fee."
+            subtitle={
+              publicChatOnlyAvailable
+                ? "No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $25 setup fee."
+                : "No contracts. Paid SMS activation includes a one-time $25 setup fee."
+            }
           />
 
-          <div className="grid md:grid-cols-3 gap-5 items-start">
+          <div
+            className={
+              publicChatOnlyAvailable
+                ? "grid md:grid-cols-2 xl:grid-cols-4 gap-5 items-start"
+                : "grid md:grid-cols-3 gap-5 items-start"
+            }
+          >
             {plans.map((plan, i) => {
-              const available = isPlanAvailable(plan.planKey);
+              const available =
+                plan.planKey === "chat_only"
+                  ? publicChatOnlyAvailable
+                  : isPlanAvailable(plan.planKey);
 
               return (
                 <Reveal key={plan.name} delayMs={i * 100} className="h-full">
@@ -705,7 +754,7 @@ export default function HomePage() {
           </Reveal>
 
           <div className="grid gap-4">
-            {HOME_FAQS.map((faq, i) => (
+            {seoContent.faqs.map((faq, i) => (
               <Reveal key={faq.question} delayMs={Math.min(i * 45, 180)}>
                 <details className={`sa-faq-disclosure group overflow-hidden ${card}`}>
                   <summary className="min-h-[76px] cursor-pointer list-none p-6 outline-none transition-colors hover:bg-[#faf6ef] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ea580c]/60 dark:hover:bg-white/[0.04] dark:focus-visible:ring-[#ff914d]/60 sm:px-7 [&::-webkit-details-marker]:hidden">

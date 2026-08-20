@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { HeroDemo } from "@/lib/theme-v2/hero-demo";
 import { GridFrame, GridSection, hairline, hairlineDivide } from "@/lib/theme-v2/grid";
+import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import {
   accentText,
   body,
@@ -18,7 +19,13 @@ import {
   navShell,
   pageShell,
 } from "@/lib/theme-v2/theme";
-import { features, heroStats, plans, splitColumns, steps } from "./content";
+import {
+  features,
+  heroStats,
+  plansForPublicLaunch,
+  splitColumns,
+  steps,
+} from "./content";
 import { ShowcaseTabs } from "./showcase-tabs";
 
 /**
@@ -38,6 +45,9 @@ import { ShowcaseTabs } from "./showcase-tabs";
 // Gating in generateMetadata (as well as the component) makes the production
 // 404 a true HTTP 404 — metadata resolves before streaming starts, so the
 // status code can still be set (component-only gating yields a soft 404).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export function generateMetadata(): Metadata {
   if (process.env.NODE_ENV === "production" && process.env.ENABLE_HOME_V2_PREVIEW !== "1") {
     notFound();
@@ -168,6 +178,9 @@ export default function HomeV2Page() {
   if (process.env.NODE_ENV === "production" && process.env.ENABLE_HOME_V2_PREVIEW !== "1") {
     notFound();
   }
+
+  const chatOnlyPublicLaunchEnabled = isChatOnlyPublicLaunchEnabled();
+  const publicPlans = plansForPublicLaunch(chatOnlyPublicLaunchEnabled);
 
   return (
     <div className={`${pageShell} isolate`} style={{ fontFamily: fontStack }}>
@@ -401,10 +414,20 @@ export default function HomeV2Page() {
                   Simple plans that grow with your <span className={accentText}>business</span>.
                 </>
               }
-              subtitle="No contracts. Paid SMS activation includes a one-time $25 setup fee."
+              subtitle={
+                chatOnlyPublicLaunchEnabled
+                  ? "No contracts. Chat Only has no setup fee; paid SMS activation includes a one-time $25 setup fee."
+                  : "No contracts. Paid SMS activation includes a one-time $25 setup fee."
+              }
             />
-            <div className={`grid md:grid-cols-3 border-t ${hairline} divide-y md:divide-y-0 md:divide-x ${hairlineDivide}`}>
-              {plans.map((plan) => (
+            <div
+              className={`grid border-t ${hairline} divide-y ${
+                chatOnlyPublicLaunchEnabled
+                  ? "lg:grid-cols-4 lg:divide-y-0 lg:divide-x"
+                  : "md:grid-cols-3 md:divide-y-0 md:divide-x"
+              } ${hairlineDivide}`}
+            >
+              {publicPlans.map((plan) => (
                 <div
                   key={plan.name}
                   className={`relative p-7 sm:p-9 flex flex-col ${
