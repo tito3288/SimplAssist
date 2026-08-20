@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/branding/defaultBrand", () => ({
+  getCanonicalAppOrigin: () => "https://api.simplassist.test",
+}));
 
 import { GET } from "./route";
 
@@ -193,9 +197,13 @@ class FakeDocument {
   readonly body = new FakeElement("body");
   readonly currentScript: FakeElement;
 
-  constructor(preview = false, homepageOnly = false) {
+  constructor(
+    preview = false,
+    homepageOnly = false,
+    scriptOrigin = "https://simplassist.test",
+  ) {
     this.currentScript = new FakeElement("script");
-    this.currentScript.src = "https://simplassist.test/widget/embed.js";
+    this.currentScript.src = `${scriptOrigin}/widget/embed.js`;
     this.currentScript.setAttribute("data-business-id", "business-123");
     if (preview) this.currentScript.setAttribute("data-preview", "true");
     if (homepageOnly) {
@@ -305,12 +313,17 @@ async function createHarness(
   options: {
     preview?: boolean;
     homepageOnly?: boolean;
+    scriptOrigin?: string;
     uuids?: string[];
   } = {},
 ) {
   const response = await GET();
   const script = await response.text();
-  const document = new FakeDocument(options.preview, options.homepageOnly);
+  const document = new FakeDocument(
+    options.preview,
+    options.homepageOnly,
+    options.scriptOrigin,
+  );
   const timers = new FakeTimers();
   const requests: Array<{ url: string; init?: Record<string, unknown> }> = [];
   const storage = new Map<string, string>();
@@ -434,6 +447,48 @@ describe("widget embed runtime", () => {
     expect(footerLink?.getAttribute("href")).toBe("https://simplassist.test/");
   });
 
+  it("keeps partner script branding while routing public traffic through the canonical API", async () => {
+    const harness = await createHarness(
+      [
+        {
+          status: 200,
+          body: {
+            ...availableConfig,
+            poweredByName: "Alpha Dog Agency",
+            poweredByUrl: "https://app.partner.test/",
+          },
+        },
+        { status: 200, body: { available: true, response: "We can help." } },
+      ],
+      { scriptOrigin: "https://app.partner.test" },
+    );
+    await flushPromises();
+
+    expect(harness.document.currentScript.src).toBe(
+      "https://app.partner.test/widget/embed.js",
+    );
+    expect(harness.requests[0]?.url).toBe(
+      "https://api.simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+    const footerLink = harness.document
+      .querySelector(".sa-widget-footer")
+      ?.querySelector("a");
+    expect(footerLink?.textContent).toBe("Powered by Alpha Dog Agency");
+    expect(footerLink?.getAttribute("href")).toBe(
+      "https://app.partner.test/",
+    );
+
+    const input = harness.document.querySelector(".sa-widget-input");
+    const send = harness.document.querySelector(".sa-widget-send");
+    if (!input || !send) throw new Error("Widget input controls were not rendered");
+    input.value = "Can you help?";
+    send.dispatch("click");
+
+    expect(harness.requests[1]?.url).toBe(
+      "https://api.simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+  });
+
   it("marks only an explicitly homepage-scoped widget container", async () => {
     const regularHarness = await createHarness([
       { status: 200, body: availableConfig },
@@ -534,19 +589,28 @@ describe("widget embed runtime", () => {
     expect(footerLink?.getAttribute("href")).toBe("http://partner.example/");
   });
 
-  it("uses the owner-only config route in preview mode", async () => {
+  it("keeps partner preview config, chat, and end traffic on the partner origin", async () => {
     const harness = await createHarness(
       [
         { status: 200, body: availableConfig },
         { status: 200, body: { response: "Preview reply" } },
+        { status: 200, body: { success: true, available: true } },
+        { status: 200, body: availableConfig },
       ],
-      { preview: true },
+      {
+        preview: true,
+        scriptOrigin: "https://app.partner.test",
+        uuids: [
+          "00000000-0000-4000-8000-000000000002",
+          "00000000-0000-4000-8000-000000000003",
+        ],
+      },
     );
 
     await flushPromises();
 
     expect(harness.requests[0]?.url).toBe(
-      "https://simplassist.test/api/widget/preview-config?businessId=business-123",
+      "https://app.partner.test/api/widget/preview-config?businessId=business-123",
     );
     expect(
       harness.document
@@ -562,15 +626,33 @@ describe("widget embed runtime", () => {
     send.dispatch("click");
 
     expect(harness.requests[1]?.url).toBe(
-      "https://simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+      "https://app.partner.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
     );
     expect(requestJsonBody(harness.requests[1])).toMatchObject({
       businessId: "business-123",
       message: "How do I sign up?",
       sessionId: "00000000-0000-4000-8000-000000000002",
-      clientMessageId: "00000000-0000-4000-8000-000000000002",
+      clientMessageId: "00000000-0000-4000-8000-000000000003",
       preview: true,
     });
+
+    await flushPromises();
+    const end = harness.document.querySelector(".sa-widget-end");
+    if (!end) throw new Error("End control was not rendered");
+    end.dispatch("click");
+
+    expect(harness.requests[2]?.url).toBe(
+      "https://app.partner.test/api/widget/end?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+    );
+    expect(requestJsonBody(harness.requests[2])).toMatchObject({
+      businessId: "business-123",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      preview: true,
+    });
+    await flushPromises();
+    expect(harness.requests[3]?.url).toBe(
+      "https://app.partner.test/api/widget/preview-config?businessId=business-123",
+    );
   });
 
   it("retries transient config failures with bounded backoff and then initializes", async () => {
@@ -631,7 +713,7 @@ describe("widget embed runtime", () => {
       "please try again",
     );
     expect(harness.requests[1]).toMatchObject({
-      url: "https://simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+      url: "https://api.simplassist.test/api/widget/chat?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
       init: { method: "POST" },
     });
     expect(requestJsonBody(harness.requests[1])).toMatchObject({
@@ -712,7 +794,7 @@ describe("widget embed runtime", () => {
     await flushPromises();
 
     expect(harness.requests[2]?.url).toBe(
-      "https://simplassist.test/api/widget/lead?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+      "https://api.simplassist.test/api/widget/lead?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
     );
     expect(requestJsonBody(harness.requests[2])).toEqual({
       businessId: "business-123",
@@ -844,7 +926,7 @@ describe("widget embed runtime", () => {
     await flushPromises();
 
     expect(harness.requests[0]?.url).toBe(
-      "https://simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+      "https://api.simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
     );
     const input = harness.document.querySelector(".sa-widget-input");
     const send = harness.document.querySelector(".sa-widget-send");
@@ -897,7 +979,7 @@ describe("widget embed runtime", () => {
     await flushPromises();
 
     expect(harness.requests[1]?.url).toBe(
-      "https://simplassist.test/api/widget/end?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
+      "https://api.simplassist.test/api/widget/end?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000002",
     );
     expect(requestJsonBody(harness.requests[1])).toEqual({
       businessId: "business-123",
@@ -909,7 +991,7 @@ describe("widget embed runtime", () => {
         .Authorization,
     ).toBe("Bearer test-widget-token");
     expect(harness.requests[2]?.url).toBe(
-      "https://simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000004",
+      "https://api.simplassist.test/api/widget/config?businessId=business-123&sessionId=00000000-0000-4000-8000-000000000004",
     );
   });
 });

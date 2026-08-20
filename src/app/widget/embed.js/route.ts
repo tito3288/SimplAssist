@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { getCanonicalAppOrigin } from "@/lib/branding/defaultBrand";
 
 export async function GET() {
+  const canonicalPublicApiOrigin = getCanonicalAppOrigin();
   const js = `(function() {
   if (window.__saWidgetLoaded) return;
   window.__saWidgetLoaded = true;
@@ -18,6 +20,7 @@ export async function GET() {
 
   var baseUrl = script.src.substring(0, script.src.indexOf('/widget/embed.js'));
   var isPreview = !!(script && script.getAttribute('data-preview') === 'true');
+  var apiBaseUrl = isPreview ? baseUrl : ${JSON.stringify(canonicalPublicApiOrigin)};
   var configPath = isPreview
     ? '/api/widget/preview-config'
     : '/api/widget/config';
@@ -320,7 +323,7 @@ export async function GET() {
     };
     if (isPreview) endPayload.preview = true;
     else endPayload.sessionNonce = widgetSessionNonce;
-    fetch(baseUrl + '/api/widget/end?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
+    fetch(apiBaseUrl + '/api/widget/end?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
       headers: endHeaders,
       body: JSON.stringify(endPayload)
@@ -642,7 +645,7 @@ export async function GET() {
       visitorEmail: fields.visitorEmail || undefined
     };
 
-    fetch(baseUrl + '/api/widget/lead?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
+    fetch(apiBaseUrl + '/api/widget/lead?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -795,7 +798,7 @@ export async function GET() {
     var chatHeaders = { 'Content-Type': 'application/json' };
     if (!isPreview) chatHeaders.Authorization = 'Bearer ' + widgetToken;
 
-    fetch(baseUrl + '/api/widget/chat?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
+    fetch(apiBaseUrl + '/api/widget/chat?businessId=' + encodeURIComponent(businessId) + '&sessionId=' + encodeURIComponent(sessionId), {
       method: 'POST',
       headers: chatHeaders,
       body: JSON.stringify(chatPayload)
@@ -956,7 +959,7 @@ export async function GET() {
     configRequestInFlight = true;
     var configQuery = '?businessId=' + encodeURIComponent(businessId);
     if (!isPreview) configQuery += '&sessionId=' + encodeURIComponent(sessionId);
-    fetch(baseUrl + configPath + configQuery, { cache: 'no-store' })
+    fetch(apiBaseUrl + configPath + configQuery, { cache: 'no-store' })
       .then(function(r) {
         return r.json()
           .catch(function() { return {}; })
