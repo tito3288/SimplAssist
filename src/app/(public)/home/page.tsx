@@ -8,6 +8,7 @@ import {
   Star,
   ArrowUpRight,
   ChevronDown,
+  Check,
 } from "lucide-react";
 import { Reveal, ThemeToggleV2 } from "@/lib/theme-v2/ui";
 import { REVEAL_NO_SCRIPT_CSS } from "@/lib/theme-v2/reveal";
@@ -16,6 +17,7 @@ import { CtaRace } from "@/lib/theme-v2/cta-race";
 import { FullSuiteWaitlistButton } from "@/components/waitlist/FullSuiteWaitlistButton";
 import { isChatOnlyPublicLaunchEnabled } from "@/lib/billing/chatOnlyPublicLaunch.server";
 import { isPlanAvailable } from "@/lib/billing/planAvailability";
+import { SETUP_FEE_CENTS, SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
 import { OpenChatButton } from "./open-chat-button";
 import { HomepageChatWidget } from "./homepage-chat-widget";
 import {
@@ -125,24 +127,33 @@ const dashboardViews = [
   },
 ];
 
+const smsActivationFeeLabel = `$${SETUP_FEE_CENTS / 100} one-time SMS activation fee`;
+const formattedPlanPrice = (planKey: keyof typeof SUBSCRIPTION_PLANS) =>
+  `$${SUBSCRIPTION_PLANS[planKey].price}`;
+const formattedSmsParts = (planKey: keyof typeof SUBSCRIPTION_PLANS) =>
+  SUBSCRIPTION_PLANS[planKey].includedSmsParts.toLocaleString("en-US");
+const formattedChatOnlyAiReplies =
+  SUBSCRIPTION_PLANS.chat_only.includedAiReplies?.toLocaleString("en-US") ??
+  "Not defined";
+
 const chatOnlyPlan = {
   planKey: "chat_only" as const,
   name: "Chat Only",
-  price: "$10",
+  price: formattedPlanPrice("chat_only"),
   category: "Website chat",
   billingNote: "No setup fee",
   description:
     "An AI website receptionist for teams that want web chat without texting.",
   highlights: [
     "Website AI chat widget",
-    "200 completed AI replies/month",
+    `${formattedChatOnlyAiReplies} completed AI replies/month`,
     "Web-chat lead capture + conversation inbox",
     "AI customization + Google Calendar booking",
     "No phone, texting, or setup fee",
   ],
   features: [
     "Website chat widget",
-    "200 completed AI replies/month",
+    `${formattedChatOnlyAiReplies} completed AI replies/month`,
     "Custom widget branding",
     "Web-chat lead capture",
     "Contact and conversation inbox",
@@ -159,41 +170,41 @@ const existingPlans = [
   {
     planKey: "sms_only" as const,
     name: "SMS Only",
-    price: "$25",
+    price: formattedPlanPrice("sms_only"),
     category: "Texting",
-    billingNote: "$25 one-time SMS activation fee",
+    billingNote: smsActivationFeeLabel,
     description: "Missed-call texting for small teams that want fast coverage.",
     highlights: [
       "Local SimplAssist number",
       "Automatic missed-call text-back",
       "Manual SMS inbox + replies",
       "Contact + conversation management",
-      "500 included SMS parts/month",
+      `${formattedSmsParts("sms_only")} included SMS parts/month`,
     ],
     features: [
       "One local SimplAssist number",
       "Manual SMS inbox and replies",
       "Automatic missed-call text",
-      "500 included SMS parts/month",
+      `${formattedSmsParts("sms_only")} included SMS parts/month`,
       "Contact management",
       "Conversation inbox",
-      "$25 one-time SMS activation fee",
+      smsActivationFeeLabel,
     ],
     highlighted: false,
   },
   {
     planKey: "sms_and_chat" as const,
     name: "SMS + Web Chat",
-    price: "$45",
+    price: formattedPlanPrice("sms_and_chat"),
     category: "Texting + web chat",
-    billingNote: "$25 one-time SMS activation fee",
+    billingNote: smsActivationFeeLabel,
     description: "Capture leads from calls and your website, then turn them into booked appointments.",
     highlights: [
-      "Everything in SMS Only",
+      "Everything in SMS Only, plus",
       "Website chat widget + lead capture",
-      "AI conversations + customization",
+      "Full AI SMS conversations + customization",
       "Google Calendar booking",
-      "1,500 included SMS parts/month",
+      `${formattedSmsParts("sms_and_chat")} included SMS parts/month`,
     ],
     features: [
       "Everything in SMS Only",
@@ -204,23 +215,23 @@ const existingPlans = [
       "Customize your AI's answers and tone",
       "Google Calendar connection",
       "AI appointment scheduling",
-      "1,500 included SMS parts/month",
+      `${formattedSmsParts("sms_and_chat")} included SMS parts/month`,
     ],
     highlighted: true,
   },
   {
     planKey: "full" as const,
     name: "Full Suite",
-    price: "$65",
+    price: formattedPlanPrice("full"),
     category: "Complete suite",
     billingNote: "Planned pricing",
     description: "Measure performance and automate follow-up as your business grows.",
     highlights: [
-      "Everything in SMS + Web Chat",
+      "Everything in SMS + Web Chat, plus",
       "Advanced AI guardrails + analytics",
       "Conversion reports + weekly summaries",
       "Lead alerts, reviews + follow-up workflows",
-      "2,500 SMS parts/month + priority support",
+      `${formattedSmsParts("full")} SMS parts/month + priority support`,
     ],
     features: [
       "Everything in SMS + Web Chat",
@@ -232,9 +243,281 @@ const existingPlans = [
       "Review-request workflow",
       "Automated follow-up and no-show workflows",
       "Priority support",
-      "2,500 included SMS parts/month",
+      `${formattedSmsParts("full")} included SMS parts/month`,
     ],
     highlighted: false,
+  },
+];
+
+type HomepagePlan = typeof chatOnlyPlan | (typeof existingPlans)[number];
+type HomepagePlanKey = HomepagePlan["planKey"];
+type PlanComparisonValue = boolean | string;
+
+const comparisonGroups: ReadonlyArray<{
+  title: string;
+  rows: ReadonlyArray<{
+    feature: string;
+    values: Record<HomepagePlanKey, PlanComparisonValue>;
+  }>;
+}> = [
+  {
+    title: "Price & usage",
+    rows: [
+      {
+        feature: "Includes everything in",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: "SMS Only",
+          full: "SMS + Web Chat",
+        },
+      },
+      {
+        feature: "Completed AI replies/month",
+        values: {
+          chat_only: formattedChatOnlyAiReplies,
+          sms_only: "Not included",
+          sms_and_chat: "No set cap",
+          full: "No set cap",
+        },
+      },
+      {
+        feature: "Included SMS parts/month",
+        values: {
+          chat_only: formattedSmsParts("chat_only"),
+          sms_only: formattedSmsParts("sms_only"),
+          sms_and_chat: formattedSmsParts("sms_and_chat"),
+          full: formattedSmsParts("full"),
+        },
+      },
+      {
+        feature: "Setup / SMS activation fee",
+        values: {
+          chat_only: "None",
+          sms_only: smsActivationFeeLabel,
+          sms_and_chat: smsActivationFeeLabel,
+          full: smsActivationFeeLabel,
+        },
+      },
+    ],
+  },
+  {
+    title: "Channels",
+    rows: [
+      {
+        feature: "One local SimplAssist number",
+        values: {
+          chat_only: false,
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Manual SMS inbox and replies",
+        values: {
+          chat_only: false,
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Automatic missed-call text",
+        values: {
+          chat_only: false,
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Website chat widget",
+        values: {
+          chat_only: true,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Custom widget branding",
+        values: {
+          chat_only: true,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Web-chat lead capture",
+        values: {
+          chat_only: true,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Phone number / SMS carrier activation",
+        values: {
+          chat_only: "Not included",
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "MMS availability",
+        values: {
+          chat_only: "Not included",
+          sms_only: "Not defined",
+          sms_and_chat: "Not defined",
+          full: "Not defined",
+        },
+      },
+    ],
+  },
+  {
+    title: "AI, leads & inbox",
+    rows: [
+      {
+        feature: "Contact management",
+        values: {
+          chat_only: true,
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Conversation inbox",
+        values: {
+          chat_only: true,
+          sms_only: true,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "Full AI SMS conversations",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "AI customization",
+        values: {
+          chat_only: "Answers, tone, FAQs & services",
+          sms_only: false,
+          sms_and_chat: "Answers, tone, FAQs & services",
+          full: "Answers, tone, FAQs & services",
+        },
+      },
+    ],
+  },
+  {
+    title: "Calendar & booking",
+    rows: [
+      {
+        feature: "Google Calendar connection",
+        values: {
+          chat_only: true,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+      {
+        feature: "AI appointment scheduling",
+        values: {
+          chat_only: true,
+          sms_only: false,
+          sms_and_chat: true,
+          full: true,
+        },
+      },
+    ],
+  },
+  {
+    title: "Full Suite advanced",
+    rows: [
+      {
+        feature: "Advanced AI guardrails",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Advanced analytics dashboard",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Lead-to-appointment conversion reporting",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Weekly performance summary",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Real-time new-lead alerts",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Review-request workflow",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Automated follow-up and no-show workflows",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+      {
+        feature: "Priority support",
+        values: {
+          chat_only: false,
+          sms_only: false,
+          sms_and_chat: false,
+          full: true,
+        },
+      },
+    ],
   },
 ];
 
@@ -345,13 +628,47 @@ function FaqAnswerText({
   );
 }
 
+function PlanComparisonCell({ value }: { value: PlanComparisonValue }) {
+  if (value === true) {
+    return (
+      <span className="inline-flex items-center justify-center text-[#c2410c] dark:text-[#ff914d]">
+        <Check aria-hidden="true" className="h-5 w-5" strokeWidth={2.5} />
+        <span className="sr-only">Included</span>
+      </span>
+    );
+  }
+
+  if (value === false) {
+    return (
+      <span className="text-stone-400 dark:text-[#77777d]">
+        <span aria-hidden="true">&mdash;</span>
+        <span className="sr-only">Not included</span>
+      </span>
+    );
+  }
+
+  if (value === "—") {
+    return (
+      <span className="text-stone-400 dark:text-[#77777d]">
+        <span aria-hidden="true">&mdash;</span>
+        <span className="sr-only">Not specified</span>
+      </span>
+    );
+  }
+
+  return <span>{value}</span>;
+}
+
 /* ── Page ── */
 
 export default function HomePage() {
   const publicChatOnlyAvailable = isChatOnlyPublicLaunchEnabled();
   const seoContent = getHomepageSeoContent(publicChatOnlyAvailable);
-  const plans = publicChatOnlyAvailable
+  const comparisonPlans = publicChatOnlyAvailable
     ? [chatOnlyPlan, ...existingPlans]
+    : existingPlans;
+  const pricingCardPlans = publicChatOnlyAvailable
+    ? [chatOnlyPlan, existingPlans[1], existingPlans[2]]
     : existingPlans;
 
   return (
@@ -702,14 +1019,8 @@ export default function HomePage() {
             }
           />
 
-          <div
-            className={
-              publicChatOnlyAvailable
-                ? "grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-4"
-                : "grid items-stretch gap-5 md:grid-cols-3"
-            }
-          >
-            {plans.map((plan, i) => {
+          <div className="mx-auto grid max-w-[1160px] items-stretch gap-5 lg:grid-cols-3">
+            {pricingCardPlans.map((plan, i) => {
               const available =
                 plan.planKey === "chat_only"
                   ? publicChatOnlyAvailable
@@ -724,7 +1035,7 @@ export default function HomePage() {
                     className={
                       plan.highlighted
                         ? `
-                        rounded-[28px] p-7 flex h-full flex-col relative xl:-translate-y-1 z-10
+                        rounded-[28px] p-7 flex h-full flex-col relative lg:-translate-y-1 z-10
                         bg-white border border-transparent
                         outline outline-2 outline-[rgba(194,65,12,.30)]
                         shadow-[0_2px_4px_rgba(28,25,23,0.05),0_28px_56px_-16px_rgba(154,52,18,0.18)]
@@ -740,7 +1051,7 @@ export default function HomePage() {
                           }`
                     }
                   >
-                    <div className="mb-4 flex min-h-7 flex-wrap items-center justify-between gap-2 xl:min-h-16 xl:flex-col xl:flex-nowrap xl:items-start xl:justify-start">
+                    <div className="mb-4 flex min-h-7 flex-wrap items-center justify-between gap-2 lg:min-h-16 lg:flex-col lg:flex-nowrap lg:items-start lg:justify-start">
                       <span className="text-xs font-extrabold uppercase tracking-[0.09em] text-stone-500 dark:text-[#bdbdbf]">
                         {plan.category}
                       </span>
@@ -755,10 +1066,10 @@ export default function HomePage() {
                         </span>
                       )}
                     </div>
-                    <h3 id={cardHeadingId} className={`text-2xl font-bold xl:min-h-16 ${ink}`}>
+                    <h3 id={cardHeadingId} className={`text-2xl font-bold lg:min-h-16 ${ink}`}>
                       {plan.name}
                     </h3>
-                    <p className={`${body} mt-2 leading-[1.65] mb-6 xl:min-h-28`}>
+                    <p className={`${body} mt-2 leading-[1.65] mb-6 lg:min-h-24`}>
                       {plan.description}
                     </p>
                     <div className={`mb-1 text-[50px] font-extrabold tracking-[-0.05em] ${ink}`}>
@@ -799,73 +1110,144 @@ export default function HomePage() {
             })}
           </div>
 
+          {publicChatOnlyAvailable && (
+            <p
+              data-sms-only-footnote
+              className={`mt-5 text-center text-sm leading-6 ${body}`}
+            >
+              Just need missed-call texting without web chat?{" "}
+              <Link
+                href="/signup"
+                className={`${inlineLink} font-semibold underline-offset-4 hover:underline`}
+              >
+                SMS Only — $25/mo <span aria-hidden="true">&rarr;</span>
+              </Link>
+            </p>
+          )}
+
           <Reveal className="mt-7">
-            <details className={`sa-pricing-comparison group overflow-hidden ${card}`}>
-              <summary className="flex min-h-20 cursor-pointer list-none items-center justify-between gap-5 p-6 outline-none transition-colors hover:bg-[#faf6ef] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#ea580c]/60 dark:hover:bg-white/[0.04] dark:focus-visible:ring-[#ff914d]/60 sm:px-7 [&::-webkit-details-marker]:hidden">
-                <span>
-                  <strong className={`block text-lg sm:text-xl ${ink}`}>
-                    Compare complete plan details
-                  </strong>
-                  <span className={`mt-1 block text-sm leading-6 ${body}`}>
-                    See every included feature before you choose.
-                  </span>
-                </span>
-                <ChevronDown
+            <details className="sa-pricing-comparison group">
+              <summary
+                data-plan-comparison-toggle
+                className={`mx-auto flex min-h-11 w-fit cursor-pointer list-none items-center justify-center gap-1.5 px-3 py-2 text-center text-sm font-bold outline-none transition-colors hover:text-[#c2410c] focus-visible:rounded-lg focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 dark:hover:text-[#ff914d] dark:focus-visible:ring-[#ff914d]/60 [&::-webkit-details-marker]:hidden ${ink}`}
+              >
+                <span>Compare all plan features</span>
+                <span
                   aria-hidden="true"
-                  className="h-5 w-5 shrink-0 text-[#c2410c] transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none dark:text-[#ff914d]"
-                />
+                  className="text-base leading-none text-[#c2410c] transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none dark:text-[#ff914d]"
+                >
+                  &#8964;
+                </span>
               </summary>
 
-              <div className="border-t border-[#ece4d8] p-5 dark:border-white/[0.10] sm:p-7">
+              <div className="mt-4">
+                <p className={`mb-3 text-sm sm:hidden ${body}`}>
+                  Swipe sideways to compare every plan.
+                </p>
                 <div
-                  className={
-                    publicChatOnlyAvailable
-                      ? "grid gap-4 md:grid-cols-2 xl:grid-cols-4"
-                      : "grid gap-4 md:grid-cols-3"
-                  }
+                  role="region"
+                  aria-label="Complete plan feature comparison"
+                  tabIndex={0}
+                  className="overflow-x-auto rounded-[20px] border border-[#ece4d8] outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]/60 dark:border-white/[0.10] dark:focus-visible:ring-[#ff914d]/60"
                 >
-                  {plans.map((plan) => {
-                    const available =
-                      plan.planKey === "chat_only"
-                        ? publicChatOnlyAvailable
-                        : isPlanAvailable(plan.planKey);
-                    const detailHeadingId = `pricing-details-${plan.planKey}`;
+                  <table className="w-full min-w-[940px] border-separate border-spacing-0 text-left text-sm">
+                    <caption className="sr-only">
+                      Complete feature comparison for SimplAssist plans
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                          className="sticky left-0 z-30 w-[170px] min-w-[170px] border-b border-r border-[#e7ddd0] bg-[#faf6ef] px-4 py-5 font-extrabold text-stone-700 shadow-[5px_0_10px_-8px_rgba(28,25,23,0.45)] dark:border-white/[0.12] dark:bg-[#151515] dark:text-[#efefef] sm:w-[260px] sm:min-w-[260px] sm:px-5"
+                        >
+                          Feature
+                        </th>
+                        {comparisonPlans.map((plan) => {
+                          const available =
+                            plan.planKey === "chat_only"
+                              ? publicChatOnlyAvailable
+                              : isPlanAvailable(plan.planKey);
+                          const highlighted = plan.planKey === "sms_and_chat";
 
-                    return (
-                      <article
-                        key={plan.planKey}
-                        data-plan-details={plan.planKey}
-                        aria-labelledby={detailHeadingId}
-                        className="rounded-[22px] border border-[#ece4d8] bg-white/75 p-5 dark:border-white/[0.10] dark:bg-white/[0.035]"
-                      >
-                        <div className="mb-4 border-b border-[#ece4d8] pb-4 dark:border-white/[0.10]">
-                          <p className="mb-1 text-xs font-extrabold uppercase tracking-[0.09em] text-stone-500 dark:text-[#bdbdbf]">
-                            {available ? plan.category : "Coming Soon"}
-                          </p>
-                          <h3 id={detailHeadingId} className={`text-lg font-bold ${ink}`}>
-                            {plan.name}
-                          </h3>
-                          <p className={`mt-1 text-sm font-semibold ${body}`}>
-                            {plan.price}/month · {plan.billingNote}
-                          </p>
-                        </div>
-                        <ul className="space-y-2.5">
-                          {plan.features.map((feature) => (
-                            <li
-                              key={feature}
-                              className="flex items-start gap-2.5 text-sm leading-6 text-stone-700 dark:text-[#efefef]"
+                          return (
+                            <th
+                              key={plan.planKey}
+                              scope="col"
+                              data-plan-details={plan.planKey}
+                              data-highlighted={highlighted || undefined}
+                              className={`min-w-[170px] border-b border-[#e7ddd0] px-4 py-4 align-top dark:border-white/[0.12] ${
+                                highlighted
+                                  ? "bg-[#fff1e6] dark:bg-[#ff914d]/[0.12]"
+                                  : "bg-white/90 dark:bg-[#111111]"
+                              }`}
                             >
-                              <span
-                                aria-hidden="true"
-                                className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#ea580c] dark:bg-[#ff914d]"
-                              />
-                              <span>{feature}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </article>
-                    );
-                  })}
+                              <span className="block text-xs font-extrabold uppercase tracking-[0.08em] text-stone-500 dark:text-[#bdbdbf]">
+                                {available ? plan.category : "Coming Soon"}
+                              </span>
+                              <span className={`mt-1.5 block text-base font-extrabold ${ink}`}>
+                                {plan.name}
+                              </span>
+                              <span className={`mt-1 block text-sm font-semibold ${body}`}>
+                                {plan.price}/month
+                              </span>
+                              <span className="mt-1 block text-xs font-semibold leading-5 text-[#c2410c] dark:text-[#ffb080]">
+                                {plan.billingNote}
+                              </span>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    {comparisonGroups.map((group) => (
+                      <tbody key={group.title} data-comparison-group={group.title}>
+                        <tr>
+                          <th
+                            scope="rowgroup"
+                            colSpan={comparisonPlans.length + 1}
+                            className="border-b border-[#e7ddd0] bg-[#f4ede3] px-4 py-2.5 text-xs font-extrabold uppercase tracking-[0.09em] text-stone-600 dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-[#d6d6d8] sm:px-5"
+                          >
+                            {group.title}
+                          </th>
+                        </tr>
+                        {group.rows.map((row) => (
+                          <tr key={row.feature} data-comparison-feature={row.feature}>
+                            <th
+                              scope="row"
+                              className="sticky left-0 z-20 border-b border-r border-[#e7ddd0] bg-white px-4 py-3.5 font-semibold leading-5 text-stone-700 shadow-[5px_0_10px_-8px_rgba(28,25,23,0.45)] dark:border-white/[0.12] dark:bg-[#111111] dark:text-[#efefef] sm:px-5"
+                            >
+                              {row.feature}
+                            </th>
+                            {comparisonPlans.map((plan) => {
+                              const highlighted = plan.planKey === "sms_and_chat";
+                              const value = row.values[plan.planKey];
+
+                              return (
+                                <td
+                                  key={plan.planKey}
+                                  data-comparison-plan={plan.planKey}
+                                  data-comparison-value={
+                                    typeof value === "boolean"
+                                      ? value
+                                        ? "Included"
+                                        : "Not included"
+                                      : value
+                                  }
+                                  data-highlighted={highlighted || undefined}
+                                  className={`border-b border-[#e7ddd0] px-4 py-3.5 text-center font-medium text-stone-700 dark:border-white/[0.12] dark:text-[#efefef] ${
+                                    highlighted
+                                      ? "bg-[#fff8f2] dark:bg-[#ff914d]/[0.07]"
+                                      : "bg-white/70 dark:bg-[#0d0d0d]"
+                                  }`}
+                                >
+                                  <PlanComparisonCell value={value} />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    ))}
+                  </table>
                 </div>
               </div>
             </details>
