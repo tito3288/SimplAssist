@@ -263,7 +263,7 @@ SELECT lives_ok(
         'reason','Not listed','outputKind','fact','outputTitle','Payment methods')),
       'missing','[]'::jsonb,
       'scanMeta',jsonb_build_object('pageCount',1,'failedPageCount',0,'generatedAt','2026-08-28T00:00:00Z')
-    ))),
+    )),
   'validated extraction becomes a persisted review draft'
 );
 SELECT is(
@@ -316,7 +316,7 @@ SELECT lives_ok(
           'content','An owner-refined local business.') FROM public.website_scan_suggestions WHERE kind='fact')),
       'questions',jsonb_build_array((SELECT jsonb_build_object('questionId',id,'status','answered','answer','Cards and cash.')
         FROM public.website_scan_questions))
-    ))),
+    )),
   'one transaction publishes the final authoritative owner review'
 );
 SELECT ok(
@@ -487,7 +487,9 @@ VALUES('10000000-0000-4000-a068-000000000003','00000000-0000-4000-a068-000000000
 INSERT INTO scan_068_state(name,uuid_value,integer_value,text_value)
 SELECT 'lease_one',c.id,c.claim_generation,c.claim_token::text
 FROM public.claim_next_website_scan_v1('lease-one',30) c;
-UPDATE public.website_scan_runs SET claim_expires_at=clock_timestamp()-interval '1 second'
+UPDATE public.website_scan_runs SET
+  claimed_at=clock_timestamp()-interval '2 seconds',
+  claim_expires_at=clock_timestamp()-interval '1 second'
 WHERE id=(SELECT uuid_value FROM scan_068_state WHERE name='lease_one');
 INSERT INTO scan_068_state(name,uuid_value,integer_value,text_value)
 SELECT 'lease_two',c.id,c.claim_generation,c.claim_token::text
@@ -557,7 +559,10 @@ SELECT is(
 );
 
 -- The retained business tombstone explicitly purges scan and brain data.
-UPDATE public.businesses SET deleted_at=clock_timestamp(),deletion_scheduled_for=clock_timestamp()-interval '1 day',owner_id=NULL
+UPDATE public.businesses SET
+  deleted_at=now()-interval '61 days',
+  deletion_scheduled_for=now()-interval '1 day',
+  owner_id=NULL
 WHERE id='10000000-0000-4000-a068-000000000001';
 UPDATE public.businesses SET cleanup_pii_scrubbed_at=clock_timestamp()
 WHERE id='10000000-0000-4000-a068-000000000001';
