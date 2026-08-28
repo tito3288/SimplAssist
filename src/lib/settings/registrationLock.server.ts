@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
+import { hasCarrierRejection } from "@/lib/onboarding/rejectionGuidance";
 import {
   REGISTRATION_STATE_UNAVAILABLE_CODE,
   REGISTRATION_STATE_UNAVAILABLE_MESSAGE,
@@ -52,8 +53,9 @@ export function isSettingsRegistrationLocked(
   business: SettingsRegistrationState
 ): boolean {
   return (
-    registrationHasStartedForRisk(business) &&
-    business.onboarding_registration_status !== "failed"
+    hasCarrierRejection(business.brand_status, business.campaign_status) ||
+    (registrationHasStartedForRisk(business) &&
+      business.onboarding_registration_status !== "failed")
   );
 }
 

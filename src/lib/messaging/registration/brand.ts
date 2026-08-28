@@ -267,7 +267,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
+      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason"
     )
     .eq("id", businessId)
     .single();
@@ -277,6 +277,16 @@ export async function registerBrand(businessId: string): Promise<void> {
       `[registration:brand] Business ${businessId} not found: ${readError?.message}`
     );
   }
+
+  // Existing provider IDs used to return before the create-boundary refresh.
+  // Check the same fresh row first so a retry claimed from a webhook's
+  // `failed` state cannot silently reuse a rejected resource.
+  throwIfCarrierRejected({
+    brandStatus: business.brand_status,
+    campaignStatus: business.campaign_status,
+    brandReason: business.brand_rejection_reason,
+    campaignReason: business.campaign_rejection_reason,
+  });
 
   if (business.telnyx_brand_id) {
     return;

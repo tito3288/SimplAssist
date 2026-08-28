@@ -113,10 +113,10 @@ export function CarrierReviewStatus({
       : null;
   const title = registration.smsReady
     ? 'SMS is active'
-    : registration.holdReason === 'held_no_ein'
-      ? 'Add your EIN to continue'
-      : carrierRejected
-        ? 'Registration needs support'
+    : carrierRejected
+      ? 'Registration needs support'
+      : registration.holdReason === 'held_no_ein'
+        ? 'Add your EIN to continue'
         : registration.status === 'failed'
           ? 'Registration needs another try'
           : 'Carrier review is underway';
@@ -357,19 +357,19 @@ function statusCopy(state: OnboardingState): string {
     return 'Your number is approved and linked. Your AI assistant can now send and reply to customer texts.';
   }
 
-  if (registration.holdReason === 'held_no_ein') {
-    return 'SMS setup is paused until you add an EIN in Business Verification.';
-  }
-
   // Rejection copy outranks the generic failed copy: carrier rejections also
-  // set status to 'failed' (webhook mapping), and "something interrupted the
-  // submit" would misdescribe a rejection.
+  // set status to 'failed' (webhook mapping), and it also outranks a legacy
+  // No-EIN hold so the only available support action matches the explanation.
   if (registration.brandStatus === 'rejected') {
     return REJECTION_SUPPORT_MESSAGE;
   }
 
   if (registration.campaignStatus === 'rejected') {
     return REJECTION_SUPPORT_MESSAGE;
+  }
+
+  if (registration.holdReason === 'held_no_ein') {
+    return 'SMS setup is paused until you add an EIN in Business Verification.';
   }
 
   if (registration.status === 'failed') {

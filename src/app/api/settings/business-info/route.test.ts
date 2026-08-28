@@ -217,22 +217,86 @@ describe("POST /api/settings/business-info", () => {
     expect(mocks.adminFrom).not.toHaveBeenCalled();
   });
 
-  it("allows a phone-only write without reading or changing filed address state", async () => {
+  it("allows a phone-only write with an exact registration snapshot", async () => {
     const response = await POST(
       makeRequest({ phoneNumber: "  (317) 555-0199  " })
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
-    expect(mocks.stateSelect).not.toHaveBeenCalled();
+    expect(mocks.stateSelect).toHaveBeenCalledExactlyOnceWith(
+      SETTINGS_REGISTRATION_STATE_COLUMNS
+    );
     expect(mocks.businessUpdate).toHaveBeenCalledExactlyOnceWith({
       phone_number: "(317) 555-0199",
     });
     expect(mocks.updateEq.mock.calls).toEqual([
       ["id", BUSINESS_ID],
       ["owner_id", USER_ID],
+      ["onboarding_registration_status", "not_started"],
     ]);
-    expect(mocks.updateIs).toHaveBeenCalledExactlyOnceWith("deleted_at", null);
+    expect(mocks.updateIs.mock.calls).toEqual([
+      ["deleted_at", null],
+      ["telnyx_brand_id", null],
+      ["brand_status", null],
+      ["campaign_status", null],
+    ]);
+  });
+
+  it.each([
+    ["brand", { brand_status: "rejected" }],
+    ["campaign", { campaign_status: "rejected" }],
+  ])(
+    "keeps a failed %s rejection locked for a phone-only update",
+    async (_label, rejection) => {
+      mocks.stateMaybeSingle.mockResolvedValue({
+        data: {
+          ...pristineRegistrationState,
+          ...rejection,
+          telnyx_brand_id: "brand-1",
+          onboarding_registration_status: "failed",
+        },
+        error: null,
+      });
+
+      const response = await POST(
+        makeRequest({ phoneNumber: "(317) 555-0199" })
+      );
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        code: SETTINGS_REGISTRATION_LOCK_CODE,
+        error:
+          "Contact support to change your business contact phone because it was filed with your carrier registration.",
+      });
+      expect(mocks.businessUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns the phone lock when its guarded save loses to a rejection", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mocks.stateMaybeSingle
+      .mockResolvedValueOnce({ data: pristineRegistrationState, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          ...pristineRegistrationState,
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        },
+        error: null,
+      });
+
+    const response = await POST(
+      makeRequest({ phoneNumber: "(317) 555-0199" })
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: SETTINGS_REGISTRATION_LOCK_CODE,
+      error:
+        "Contact support to change your business contact phone because it was filed with your carrier registration.",
+    });
+    expect(mocks.stateMaybeSingle).toHaveBeenCalledTimes(2);
   });
 
   it("normalizes and saves a full unlocked update with an exact state snapshot", async () => {
@@ -310,6 +374,33 @@ describe("POST /api/settings/business-info", () => {
   });
 
   it.each([
+    ["brand", { brand_status: "rejected" }],
+    ["campaign", { campaign_status: "rejected" }],
+  ])(
+    "keeps a failed %s rejection locked for a full address update",
+    async (_label, rejection) => {
+      mocks.stateMaybeSingle.mockResolvedValue({
+        data: {
+          ...pristineRegistrationState,
+          ...rejection,
+          telnyx_brand_id: "brand-1",
+          onboarding_registration_status: "failed",
+        },
+        error: null,
+      });
+
+      const response = await POST(makeRequest(fullRequest));
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        code: SETTINGS_REGISTRATION_LOCK_CODE,
+        error: BUSINESS_ADDRESS_LOCK_COPY.message,
+      });
+      expect(mocks.businessUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
     ["a read error", { data: null, error: new Error("read failed") }],
     ["a missing row", { data: null, error: null }],
   ])("fails closed when fresh registration state has %s", async (_name, result) => {
@@ -348,6 +439,30 @@ describe("POST /api/settings/business-info", () => {
           ...pristineRegistrationState,
           campaign_status: "pending",
           onboarding_registration_status: "submitted",
+        },
+        error: null,
+      });
+
+    const response = await POST(makeRequest(fullRequest));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: SETTINGS_REGISTRATION_LOCK_CODE,
+      error: BUSINESS_ADDRESS_LOCK_COPY.message,
+    });
+    expect(mocks.stateMaybeSingle).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the address lock when the guarded save loses to a failed rejection", async () => {
+    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mocks.stateMaybeSingle
+      .mockResolvedValueOnce({ data: pristineRegistrationState, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          ...pristineRegistrationState,
+          telnyx_brand_id: "brand-1",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
         },
         error: null,
       });

@@ -68,6 +68,7 @@ vi.mock("@/lib/billing/entitlements", () => ({
 }));
 
 import { POST } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const OWNER_ID = "owner-1";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000123";
@@ -88,12 +89,12 @@ const SNAPSHOT = {
   telnyx_campaign_id: CAMPAIGN_ID,
   telnyx_messaging_profile_id: MESSAGING_PROFILE_ID,
   brand_status: "approved",
-  campaign_status: "rejected",
+  campaign_status: "pending",
   campaign_status_updated_at: "2026-07-22T04:30:38.000Z",
-  campaign_rejection_reason: "Previous rejection",
-  onboarding_registration_status: "failed",
-  onboarding_registration_submitted_at: null,
-  onboarding_registration_error: "Previous rejection",
+  campaign_rejection_reason: null,
+  onboarding_registration_status: "submitted",
+  onboarding_registration_submitted_at: "2026-07-22T04:00:00.000Z",
+  onboarding_registration_error: null,
 } as const;
 
 const UPDATED_STATE = {
@@ -270,6 +271,56 @@ describe("POST /api/onboarding/refresh-status", () => {
     expect(JSON.stringify(body)).not.toContain("sensitive database detail");
     expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
     expectNoReconciliation();
+  });
+
+  it.each([
+    ["brand", { brand_status: "rejected", campaign_status: "pending" }],
+    ["campaign", { brand_status: "approved", campaign_status: "rejected" }],
+  ])(
+    "returns support-only for an already rejected %s before provider reconciliation",
+    async (_label, statuses) => {
+      setBusinessRead({
+        data: {
+          ...SNAPSHOT,
+          ...statuses,
+          onboarding_registration_status: "failed",
+        },
+        error: null,
+      });
+
+      const { response, body } = await invoke();
+
+      expect(response.status).toBe(409);
+      expect(body).toEqual({
+        code: "rejection_support_required",
+        error: REJECTION_SUPPORT_MESSAGE,
+      });
+      expect(mocks.resolveSmsProvisioningAccess).not.toHaveBeenCalled();
+      expect(mocks.getCampaignAssignmentSafetyBlock).not.toHaveBeenCalled();
+      expect(mocks.retrieveCampaign).not.toHaveBeenCalled();
+      expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+      expectNoReconciliation();
+    }
+  );
+
+  it("continues refreshing a non-rejected technical failure", async () => {
+    setBusinessRead({
+      data: {
+        ...SNAPSHOT,
+        onboarding_registration_status: "failed",
+        onboarding_registration_error: "Previous provider timeout",
+      },
+      error: null,
+    });
+
+    const { response } = await invoke();
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveSmsProvisioningAccess).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      { allowDirectPrecheckout: false },
+    );
+    expect(mocks.retrieveCampaign).toHaveBeenCalledTimes(1);
   });
 
   it.each(["subscription", "partner_billing"] as const)(
@@ -489,7 +540,7 @@ describe("POST /api/onboarding/refresh-status", () => {
     mocks.applyObservedCampaignStatus.mockResolvedValue({
       outcome: "applied",
       statusChanged: true,
-      repairedRejectedOnboarding: true,
+      repairedRejectedOnboarding: false,
     });
 
     const { response, body } = await invoke();
@@ -499,7 +550,7 @@ describe("POST /api/onboarding/refresh-status", () => {
       state: UPDATED_STATE,
       synced: true,
       reconciled: true,
-      repaired: true,
+      repaired: false,
       providerStatus: "MNO_PROVISIONED",
       message: "Carrier status updated from Telnyx.",
     });
@@ -525,9 +576,9 @@ describe("POST /api/onboarding/refresh-status", () => {
         providerCampaignStatus: "MNO_PROVISIONED",
         providerSubmissionStatus: "CREATED",
         providerStatus: "ACCEPTED",
-        previousLocalStatus: "rejected",
+        previousLocalStatus: "pending",
         statusChanged: true,
-        repairedRejectedOnboarding: true,
+        repairedRejectedOnboarding: false,
       },
     });
     expect(mocks.ensureCampaignAssignmentForBusiness).toHaveBeenCalledWith(

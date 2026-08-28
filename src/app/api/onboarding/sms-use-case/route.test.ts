@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -38,7 +38,44 @@ import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 const USER_ID = "00000000-0000-4000-8000-000000000010";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000020";
 
-function business(overrides: Record<string, unknown>) {
+type QueryResult = {
+  data: unknown;
+  error: unknown;
+};
+
+type QueryChain = Record<"select" | "update" | "eq" | "is" | "maybeSingle", ReturnType<typeof vi.fn>>;
+
+const adminChains: QueryChain[] = [];
+let updateResults: QueryResult[] = [];
+let readResults: QueryResult[] = [];
+
+function makeAdminChain(): QueryChain {
+  let operation: "select" | "update" | null = null;
+  const chain = {} as QueryChain;
+  chain.select = vi.fn(() => {
+    if (operation === null) operation = "select";
+    return chain;
+  });
+  chain.update = vi.fn(() => {
+    operation = "update";
+    return chain;
+  });
+  chain.eq = vi.fn(() => chain);
+  chain.is = vi.fn(() => chain);
+  chain.maybeSingle = vi.fn(async () => {
+    if (operation === "update") {
+      return updateResults.shift() ?? {
+        data: { id: BUSINESS_ID },
+        error: null,
+      };
+    }
+    return readResults.shift() ?? { data: null, error: null };
+  });
+  adminChains.push(chain);
+  return chain;
+}
+
+function business(overrides: Record<string, unknown> = {}) {
   return {
     id: BUSINESS_ID,
     compliance_info_completed_at: "2026-07-01T00:00:00.000Z",
@@ -103,12 +140,22 @@ function request() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test");
+  adminChains.length = 0;
+  updateResults = [];
+  readResults = [];
   mocks.requireWorkspaceRouteAccess.mockResolvedValue({ ok: true, access: {} });
+  mocks.createClient.mockResolvedValue(userClient(business()));
+  mocks.adminFrom.mockImplementation(makeAdminChain);
   mocks.registrationHasStartedForRisk.mockReturnValue(false);
   mocks.screenA2pRiskForBusiness.mockResolvedValue({
     registrationStarted: false,
     status: "passed",
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/onboarding/sms-use-case rejection lock", () => {
@@ -134,6 +181,114 @@ describe("POST /api/onboarding/sms-use-case rejection lock", () => {
       expect(mocks.screenA2pRiskForBusiness).not.toHaveBeenCalled();
       expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
       expect(mocks.adminFrom).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      "held risk draft",
+      { compliance_info_completed_at: "2026-07-01T00:00:00.000Z" },
+      { registrationStarted: false, status: "pending_review" },
+      false,
+    ],
+    [
+      "first submission",
+      { compliance_info_completed_at: null },
+      { registrationStarted: false, status: "passed" },
+      true,
+    ],
+    [
+      "existing submission",
+      { compliance_info_completed_at: "2026-07-01T00:00:00.000Z" },
+      { registrationStarted: false, status: "passed" },
+      true,
+    ],
+  ] as const)(
+    "keeps technical failures editable on the %s write path",
+    async (_label, overrides, riskResult, expectedSuccess) => {
+      mocks.createClient.mockResolvedValue(userClient(business(overrides)));
+      mocks.screenA2pRiskForBusiness.mockResolvedValue(riskResult);
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        success: expectedSuccess,
+      });
+      expect(adminChains).toHaveLength(1);
+      expect(adminChains[0].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
+      expect(adminChains[0].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+      expect(adminChains[0].eq).toHaveBeenCalledWith(
+        "telnyx_brand_id",
+        "brand-1",
+      );
+      expect(adminChains[0].eq).toHaveBeenCalledWith(
+        "onboarding_registration_status",
+        "failed",
+      );
+      expect(adminChains[0].is).toHaveBeenCalledWith("deleted_at", null);
+      expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+      expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
+      expect(adminChains[0].select).toHaveBeenCalledWith("id");
+    },
+  );
+
+  it.each([
+    [
+      "held risk draft",
+      { compliance_info_completed_at: "2026-07-01T00:00:00.000Z" },
+      { registrationStarted: false, status: "pending_review" },
+    ],
+    [
+      "first submission",
+      { compliance_info_completed_at: null },
+      { registrationStarted: false, status: "passed" },
+    ],
+    [
+      "existing submission",
+      { compliance_info_completed_at: "2026-07-01T00:00:00.000Z" },
+      { registrationStarted: false, status: "passed" },
+    ],
+  ] as const)(
+    "maps a rejection between read and the %s write to support-only",
+    async (_label, overrides, riskResult) => {
+      mocks.createClient.mockResolvedValue(userClient(business(overrides)));
+      mocks.screenA2pRiskForBusiness.mockResolvedValue(riskResult);
+      updateResults = [{ data: null, error: null }];
+      readResults = [
+        {
+          data: business({
+            brand_status: "approved",
+            campaign_status: "rejected",
+            onboarding_registration_status: "failed",
+          }),
+          error: null,
+        },
+      ];
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      });
+      expect(adminChains).toHaveLength(2);
+      expect(adminChains[0].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
+      expect(adminChains[0].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+      expect(adminChains[0].eq).toHaveBeenCalledWith(
+        "telnyx_brand_id",
+        "brand-1",
+      );
+      expect(adminChains[0].eq).toHaveBeenCalledWith(
+        "onboarding_registration_status",
+        "failed",
+      );
+      expect(adminChains[0].is).toHaveBeenCalledWith("deleted_at", null);
+      expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+      expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
+      expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+      expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
     },
   );
 });

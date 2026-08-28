@@ -66,7 +66,8 @@ const mocks = vi.hoisted(() => {
     resolveSmsProvisioningAccess: vi.fn(),
     claimSmsLaunchPlanFamily: vi.fn(),
     resolveProviderCreateIntent: vi.fn(),
-  readProviderCreateIntentForPayload: vi.fn(),
+    readProviderCreateIntentForPayload: vi.fn(),
+    assertNoCarrierRejectionForBusiness: vi.fn(),
   };
 });
 
@@ -144,6 +145,10 @@ vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   claimRegistrationAttempt: mocks.claim,
   markRegistrationFailed: mocks.markFailed,
   markRegistrationSubmitted: mocks.markSubmitted,
+}));
+vi.mock("@/lib/onboarding/rejectionGuard.server", () => ({
+  assertNoCarrierRejectionForBusiness:
+    mocks.assertNoCarrierRejectionForBusiness,
 }));
 vi.mock("@/lib/onboarding/contentQuality.server", () => ({
   getBusinessContentQuality: mocks.getBusinessContentQuality,
@@ -252,10 +257,11 @@ beforeEach(() => {
     mocks.readProviderCreateIntentForPayload,
     mocks.ensureCampaignAssignment,
     mocks.markFailed,
-    mocks.markSubmitted,
   ]) {
     fn.mockResolvedValue(undefined);
   }
+  mocks.assertNoCarrierRejectionForBusiness.mockResolvedValue(undefined);
+  mocks.markSubmitted.mockResolvedValue({ completed: true });
 });
 
 function expectNoProviderMutation() {

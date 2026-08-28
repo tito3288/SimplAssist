@@ -285,6 +285,36 @@ describe("POST /api/settings/compliance", () => {
   });
 
   it.each([
+    ["brand", { brand_status: "rejected" }],
+    ["campaign", { campaign_status: "rejected" }],
+  ])(
+    "keeps a failed %s rejection locked for compliance edits",
+    async (_label, rejection) => {
+      readResults = [
+        {
+          data: {
+            ...PRISTINE_STATE,
+            ...rejection,
+            telnyx_brand_id: "brand-1",
+            onboarding_registration_status: "failed",
+          },
+          error: null,
+        },
+      ];
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        code: SETTINGS_REGISTRATION_LOCK_CODE,
+        error: COMPLIANCE_LOCK_COPY.message,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(updateChains()).toHaveLength(0);
+    }
+  );
+
+  it.each([
     ["query error", { data: null, error: { message: "database unavailable" } }],
     ["missing row", { data: null, error: null }],
   ])("fails closed with exact 503 on registration-state %s", async (_label, result) => {
@@ -451,6 +481,31 @@ describe("POST /api/settings/compliance", () => {
       "https://example.test/terms",
       expect.objectContaining({ method: "HEAD" })
     );
+  });
+
+  it("returns exact 403 when the CAS loses to a failed carrier rejection", async () => {
+    updateResult = { data: null, error: null };
+    readResults = [
+      { data: PRISTINE_STATE, error: null },
+      {
+        data: {
+          ...PRISTINE_STATE,
+          telnyx_brand_id: "brand-new",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        },
+        error: null,
+      },
+    ];
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      code: SETTINGS_REGISTRATION_LOCK_CODE,
+      error: COMPLIANCE_LOCK_COPY.message,
+    });
+    expect(chains).toHaveLength(3);
   });
 
   it("returns exact 409 when the CAS loses but registration remains unlocked", async () => {

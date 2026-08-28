@@ -44,7 +44,7 @@ const BUSINESS = {
   has_ein: true,
   ein: "12-3456789",
   compliance_info_completed_at: "2026-08-05T12:00:00.000Z",
-  telnyx_brand_id: null,
+  telnyx_brand_id: null as string | null,
   authorized_rep_name: "Avery Dentist",
   authorized_rep_email: "avery@example.com",
   authorized_rep_phone: "317-555-0100",
@@ -53,8 +53,13 @@ const BUSINESS = {
   state: "IN",
   zip: "46204",
   website_url: "https://example.com",
+  brand_status: null as string | null,
+  campaign_status: null as string | null,
+  brand_rejection_reason: null as string | null,
+  campaign_rejection_reason: null as string | null,
 };
 
+let businessSnapshot: typeof BUSINESS;
 let carrierSnapshot: {
   brand_status: string | null;
   campaign_status: string | null;
@@ -72,6 +77,7 @@ beforeEach(() => {
     brand_rejection_reason: null,
     campaign_rejection_reason: null,
   };
+  businessSnapshot = { ...BUSINESS };
 
   mocks.from.mockReturnValue({
     select: vi.fn((columns: string) => ({
@@ -79,7 +85,7 @@ beforeEach(() => {
         single: vi.fn(async () => ({
           data: columns.startsWith("brand_status")
             ? carrierSnapshot
-            : BUSINESS,
+            : businessSnapshot,
           error: null,
         })),
       })),
@@ -97,6 +103,34 @@ afterEach(() => {
 });
 
 describe("registerBrand charged provider submission", () => {
+  it.each([
+    ["brand", "Existing brand was rejected"],
+    ["campaign", "Existing campaign was rejected"],
+  ] as const)(
+    "does not reuse an existing brand id after a %s rejection",
+    async (resource, reason) => {
+      businessSnapshot = {
+        ...BUSINESS,
+        telnyx_brand_id: BRAND_ID,
+        brand_status: resource === "brand" ? "rejected" : "approved",
+        campaign_status: resource === "campaign" ? "rejected" : null,
+        brand_rejection_reason: resource === "brand" ? reason : null,
+        campaign_rejection_reason: resource === "campaign" ? reason : null,
+      };
+
+      const error = await registerBrand(BUSINESS_ID).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(CarrierRejectionSupportRequiredError);
+      expect(error).toMatchObject({
+        code: "rejection_support_required",
+        carrierReason: reason,
+        rejectedResource: resource,
+      });
+      expect(mocks.createBrand).not.toHaveBeenCalled();
+      expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+    },
+  );
+
   it("disables SDK retries and invokes brand creation exactly once", async () => {
     await registerBrand(BUSINESS_ID);
 

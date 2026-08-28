@@ -56,6 +56,7 @@ import {
   hasCarrierRejection,
   REJECTION_SUPPORT_MESSAGE,
 } from "@/lib/onboarding/rejectionGuidance";
+import { assertNoCarrierRejectionForBusiness } from "@/lib/onboarding/rejectionGuard.server";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
 import type {
@@ -261,6 +262,11 @@ export async function attemptPaidLaunch(
   let linkedExistingBrandConsumed = false;
 
   try {
+    // The initial launch row predates the claim. A rejection webhook can land
+    // between those operations and leave a freshly claimed `failed` row in
+    // `submitting`; refresh now before any provider work.
+    await assertNoCarrierRejectionForBusiness(businessId);
+
     // Preflight the shared Telnyx name invariant before any carrier mutation.
     // The creators repeat this check against their fresh business reads.
     buildProviderResourceName(
@@ -319,6 +325,7 @@ export async function attemptPaidLaunch(
     // captures one private request tuple, revalidates that exact brand and
     // local identity, then consumes the same tuple atomically. Pending or
     // blocked requests stop here, before any provider create.
+    await assertNoCarrierRejectionForBusiness(businessId);
     const existingBrandPreparation =
       await prepareExistingTelnyxBrandLinkForLaunch(businessId);
     linkedExistingBrandConsumed =
@@ -329,8 +336,15 @@ export async function attemptPaidLaunch(
     // A number order needs both routing resources. Each helper recovers an
     // exact business-scoped provider resource before creating, closing the
     // provider-success/local-save retry gap.
+    await assertNoCarrierRejectionForBusiness(businessId);
     await createMessagingProfile(businessId);
+    await assertNoCarrierRejectionForBusiness(businessId);
     await createVoiceApplication(businessId);
+
+    // Number attachment/purchase is another paid provider boundary. In
+    // particular, registerBrand may have reused an existing ID and returned
+    // without creating anything, so do not rely on its create-only check.
+    await assertNoCarrierRejectionForBusiness(businessId);
 
     const latestNumber = await readActiveNumber(businessId);
     if (latestNumber) {
@@ -382,11 +396,43 @@ export async function attemptPaidLaunch(
 
     await registerCampaign(businessId);
 
+    // Existing campaign IDs return without a charged submit. Refresh before
+    // assignment so a rejection that landed during the pipeline cannot link
+    // the number to a rejected campaign.
+    await assertNoCarrierRejectionForBusiness(businessId);
     await ensureCampaignAssignmentForBusiness(businessId, {
       force: true,
       reason: `paid_launch_${source}`,
     });
-    await markRegistrationSubmitted(businessId);
+
+    await assertNoCarrierRejectionForBusiness(businessId);
+    const completion = await markRegistrationSubmitted(
+      businessId,
+      claim.startedAt,
+    );
+    if (!completion.completed) {
+      // A webhook rejection atomically changes the attempt to `failed`, which
+      // makes exact-claim completion miss. Re-read carrier state before
+      // classifying any other lost-claim outcome.
+      await assertNoCarrierRejectionForBusiness(businessId);
+
+      if (
+        completion.current?.onboarding_registration_status === "submitted"
+      ) {
+        return { status: "already_submitted" };
+      }
+      if (
+        completion.current?.onboarding_registration_status === "submitting"
+      ) {
+        return { status: "in_progress" };
+      }
+      return {
+        status: "failed",
+        message:
+          completion.current?.onboarding_registration_error ??
+          "Registration state changed while setup was finishing. Refresh before retrying.",
+      };
+    }
     return { status: "submitted" };
   } catch (err) {
     if (err instanceof CarrierRejectionSupportRequiredError) {

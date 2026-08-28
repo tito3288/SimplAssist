@@ -5,11 +5,12 @@ import type { OnboardingRegistrationStatus } from "@/types/database";
 
 const STALE_SUBMITTING_AFTER_MS = 15 * 60 * 1000;
 
-interface AttemptRow {
+export interface AttemptRow {
   id: string;
   onboarding_registration_status: OnboardingRegistrationStatus;
   onboarding_registration_started_at: string | null;
   onboarding_registration_submitted_at: string | null;
+  onboarding_registration_error: string | null;
 }
 
 export type RegistrationClaimOrigin =
@@ -34,6 +35,10 @@ export type RegistrationAttemptClaim =
       reason: "already_submitted" | "already_submitting" | "not_claimable";
       current: AttemptRow | null;
     };
+
+export type RegistrationAttemptCompletion =
+  | { completed: true }
+  | { completed: false; current: AttemptRow | null };
 
 export async function claimRegistrationAttempt(
   businessId: string
@@ -90,7 +95,7 @@ export async function claimRegistrationAttempt(
 
   const { data, error } = await query
     .select(
-      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at"
+      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at, onboarding_registration_error"
     )
     .returns<AttemptRow[]>();
 
@@ -117,10 +122,11 @@ export async function claimRegistrationAttempt(
 }
 
 export async function markRegistrationSubmitted(
-  businessId: string
-): Promise<void> {
+  businessId: string,
+  startedAt: string,
+): Promise<RegistrationAttemptCompletion> {
   const now = new Date().toISOString();
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("businesses")
     .update({
       onboarding_registration_status: "submitted",
@@ -133,13 +139,27 @@ export async function markRegistrationSubmitted(
     // Only complete the claimed attempt: if a rejection webhook landed
     // mid-pipeline and set status to 'failed', don't clobber it back to
     // 'submitted' (that would strand the business with no Retry offered).
-    .eq("onboarding_registration_status", "submitting");
+    .eq("onboarding_registration_status", "submitting")
+    // Bind completion to this launch's exact claim. A stale worker must not
+    // complete a newer attempt that reclaimed the same business row.
+    .eq("onboarding_registration_started_at", startedAt)
+    .select(
+      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at, onboarding_registration_error",
+    )
+    .maybeSingle<AttemptRow>();
 
   if (error) {
     throw new Error(
       `[onboarding:registrationAttempt] Failed to mark registration submitted for ${businessId}: ${error.message}`
     );
   }
+
+  if (data) return { completed: true };
+
+  return {
+    completed: false,
+    current: await readRegistrationAttempt(businessId),
+  };
 }
 
 export async function markRegistrationFailed(
@@ -171,7 +191,7 @@ async function readRegistrationAttempt(
   const { data, error } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at"
+      "id, onboarding_registration_status, onboarding_registration_started_at, onboarding_registration_submitted_at, onboarding_registration_error"
     )
     .eq("id", businessId)
     .maybeSingle<AttemptRow>();

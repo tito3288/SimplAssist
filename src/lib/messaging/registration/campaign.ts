@@ -19,7 +19,10 @@ import {
 } from "./riskScreening";
 import { mapCampaignStatus } from "./statusMapper";
 import type { PrimaryGoal } from "@/types/database";
-import { throwIfCarrierRejected } from "@/lib/onboarding/rejectionGuidance";
+import {
+  CarrierRejectionSupportRequiredError,
+  throwIfCarrierRejected,
+} from "@/lib/onboarding/rejectionGuidance";
 
 function appBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -435,11 +438,10 @@ async function recoverCampaignBeforeCreate(
   });
 
   if (status === "rejected") {
-    throw campaignRecoveryError(
-      "campaign_recovered_rejected",
-      "permanent",
-      "The existing Telnyx campaign is rejected. Its carrier reason was saved for review."
-    );
+    throw new CarrierRejectionSupportRequiredError({
+      carrierReason: rejectionReason,
+      rejectedResource: "campaign",
+    });
   }
 
   return true;
@@ -980,7 +982,7 @@ export async function registerCampaign(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, primary_goal, goal_url, ai_settings(language)"
+      "id, name, email, phone_number, telnyx_brand_id, telnyx_campaign_id, use_case_description, sample_messages, slug, privacy_terms_mode, privacy_url_override, terms_url_override, primary_goal, goal_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason, ai_settings(language)"
     )
     .eq("id", businessId)
     .single<{
@@ -998,6 +1000,10 @@ export async function registerCampaign(businessId: string): Promise<void> {
       terms_url_override: string | null;
       primary_goal: PrimaryGoal | null;
       goal_url: string | null;
+      brand_status: string | null;
+      campaign_status: string | null;
+      brand_rejection_reason: string | null;
+      campaign_rejection_reason: string | null;
       ai_settings: { language: "en" | "es" | "both" } | null;
     }>();
 
@@ -1006,6 +1012,16 @@ export async function registerCampaign(businessId: string): Promise<void> {
       `[registration:campaign] Business ${businessId} not found: ${readError?.message}`
     );
   }
+
+  // Existing IDs previously returned before the create-boundary refresh.
+  // Check the same fresh row first so a rejection claimed as a retry cannot
+  // be mistaken for a successfully reusable campaign.
+  throwIfCarrierRejected({
+    brandStatus: business.brand_status,
+    campaignStatus: business.campaign_status,
+    brandReason: business.brand_rejection_reason,
+    campaignReason: business.campaign_rejection_reason,
+  });
 
   if (business.telnyx_campaign_id) {
     return;
@@ -1036,6 +1052,10 @@ export async function registerCampaign(businessId: string): Promise<void> {
   if (
     await recoverCampaignBeforeCreate(businessId, business.telnyx_brand_id)
   ) {
+    // Recovery may take a provider round trip. Preserve a concurrently landed
+    // brand rejection even when the recovered campaign itself is pending or
+    // approved.
+    await assertNoCarrierRejectionBeforeCampaignSubmit(businessId);
     return;
   }
 

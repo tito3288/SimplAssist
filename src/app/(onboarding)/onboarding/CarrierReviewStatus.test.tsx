@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { OnboardingState } from "@/lib/onboarding/types";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 vi.mock("@/components/branding/BrandProvider", () => ({
   useBrand: () => ({ name: "SimplAssist" }),
@@ -18,12 +19,13 @@ function stateWithRejection(args: {
   smsReady?: boolean;
   error?: string | null;
   assignmentFailureReason?: string | null;
+  holdReason?: "held_no_ein" | null;
 }): OnboardingState {
   return {
     businessId: "business-1",
     registration: {
       status: args.status ?? "failed",
-      holdReason: null,
+      holdReason: args.holdReason ?? null,
       startedAt: null,
       submittedAt: null,
       error: args.error ?? null,
@@ -129,6 +131,23 @@ describe("CarrierReviewStatus rejection actions", () => {
     expect(html.match(/<a\b/g)).toHaveLength(1);
     expect(html).not.toContain("Refresh status");
     expect(html).not.toContain("Retry registration");
+  });
+
+  it("lets a carrier rejection outrank a legacy No-EIN hold", () => {
+    const html = render(
+      stateWithRejection({
+        brandStatus: "rejected",
+        campaignStatus: null,
+        brandReason: "Carrier brand reason 808",
+        holdReason: "held_no_ein",
+      })
+    );
+
+    expect(html).toContain("Registration needs support");
+    expect(html).toContain(REJECTION_SUPPORT_MESSAGE);
+    expect(html).toContain("Contact support");
+    expect(html).not.toContain("Add your EIN to continue");
+    expect(html).not.toContain("SMS setup is paused until you add an EIN");
   });
 
   it("lets active SMS outrank obsolete rejection data", () => {

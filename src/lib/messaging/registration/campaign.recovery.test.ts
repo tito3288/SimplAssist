@@ -54,10 +54,7 @@ vi.mock("./riskScreening", () => ({
   hashA2pRiskInput: mocks.hashRiskInput,
 }));
 
-import {
-  CampaignRegistrationError,
-  registerCampaign,
-} from "./campaign";
+import { registerCampaign } from "./campaign";
 import { CarrierRejectionSupportRequiredError } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
@@ -79,7 +76,7 @@ const baseBusiness = {
   email: "owner@example.com",
   phone_number: null,
   telnyx_brand_id: BRAND_ID,
-  telnyx_campaign_id: null,
+  telnyx_campaign_id: null as string | null,
   use_case_description: "Respond to customer questions and missed calls.",
   sample_messages: ["Sample one", "Sample two", "Sample three"],
   slug: "simplassist",
@@ -551,6 +548,37 @@ describe("goal-aware signup campaign filing", () => {
 });
 
 describe("registerCampaign recover-before-create", () => {
+  it.each([
+    ["brand", "Existing brand was rejected"],
+    ["campaign", "Existing campaign was rejected"],
+  ] as const)(
+    "does not reuse an existing campaign id after a %s rejection",
+    async (resource, reason) => {
+      business = {
+        ...business,
+        telnyx_campaign_id: CAMPAIGN_ID,
+        brand_status: resource === "brand" ? "rejected" : "approved",
+        campaign_status: resource === "campaign" ? "rejected" : null,
+        brand_rejection_reason: resource === "brand" ? reason : null,
+        campaign_rejection_reason: resource === "campaign" ? reason : null,
+      };
+
+      const error = await registerCampaign(BUSINESS_ID).catch(
+        (caught) => caught,
+      );
+
+      expect(error).toBeInstanceOf(CarrierRejectionSupportRequiredError);
+      expect(error).toMatchObject({
+        code: "rejection_support_required",
+        carrierReason: reason,
+        rejectedResource: resource,
+      });
+      expect(mocks.list).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(updates).toEqual([]);
+    },
+  );
+
   it("lists by brand before a normal submit when no referenceId matches", async () => {
     setCampaigns([unrelatedCampaign(1)]);
 
@@ -772,10 +800,11 @@ describe("registerCampaign recover-before-create", () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(CampaignRegistrationError);
+    expect(caught).toBeInstanceOf(CarrierRejectionSupportRequiredError);
     expect(caught).toMatchObject({
-      code: "campaign_recovered_rejected",
-      kind: "permanent",
+      code: "rejection_support_required",
+      carrierReason: providerReason,
+      rejectedResource: "campaign",
     });
     expect((caught as Error).message).not.toContain(providerReason);
     expect(updates).toContainEqual(
@@ -824,7 +853,10 @@ describe("registerCampaign recover-before-create", () => {
     ]);
 
     await expect(registerCampaign(BUSINESS_ID)).rejects.toMatchObject({
-      code: "campaign_recovered_rejected",
+      code: "rejection_support_required",
+      carrierReason:
+        "Telnyx reported that the recovered campaign was rejected.",
+      rejectedResource: "campaign",
     });
     expect(updates).toContainEqual(
       expect.objectContaining({

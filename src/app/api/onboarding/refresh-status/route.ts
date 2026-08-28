@@ -12,6 +12,10 @@ import {
 } from "@/lib/messaging/registration/campaignStatusTransition";
 import { ensureCampaignAssignmentForBusiness } from "@/lib/messaging/registration/phoneNumberAssignment";
 import { mapCampaignStatus } from "@/lib/messaging/registration/statusMapper";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import { getOnboardingStateForOwnerReadOnly } from "@/lib/onboarding/state";
 import { createClient } from "@/lib/supabase/server";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
@@ -77,6 +81,16 @@ export async function POST() {
   }
 
   const snapshot = data;
+  if (hasCarrierRejection(snapshot.brand_status, snapshot.campaign_status)) {
+    return NextResponse.json(
+      {
+        code: "rejection_support_required",
+        error: REJECTION_SUPPORT_MESSAGE,
+      },
+      { status: 409 }
+    );
+  }
+
   const smsAccess = await resolveSmsProvisioningAccess(snapshot.id, {
     allowDirectPrecheckout: false,
   });

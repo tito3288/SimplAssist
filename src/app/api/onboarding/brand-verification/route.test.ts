@@ -263,8 +263,47 @@ describe("POST /api/onboarding/brand-verification", () => {
     );
     expect(adminChains[1].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
     expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[1].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
     expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("campaign_status", null);
     expect(adminChains[1].select).toHaveBeenCalledWith("id");
+  });
+
+  it("maps a rejection between the EIN read and guarded write to support-only", async () => {
+    mocks.precheck
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: ownedBusiness({
+          telnyx_brand_id: "brand-1",
+          brand_status: "approved",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        }),
+        error: null,
+      });
+    mocks.commitUpdate.mockResolvedValue({ data: null, error: null });
+
+    const response = await saveBrandVerification(request(einBody()));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    });
+    expect(adminChains[1].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("campaign_status", null);
+    expect(adminChains[1].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
+    expect(adminChains[2].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[2].is).toHaveBeenCalledWith("deleted_at", null);
   });
 
   it("maps a uniqueness race to the same safe 409 response", async () => {
@@ -342,8 +381,47 @@ describe("POST /api/onboarding/brand-verification", () => {
     );
     expect(adminChains[0].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
     expect(adminChains[0].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[0].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
     expect(adminChains[0].is).toHaveBeenCalledWith("deleted_at", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
     expect(adminChains[0].select).toHaveBeenCalledWith("id");
+  });
+
+  it("maps a rejection between the No-EIN read and guarded write to support-only", async () => {
+    mocks.commitUpdate.mockResolvedValue({ data: null, error: null });
+    mocks.precheck.mockResolvedValueOnce({
+      data: ownedBusiness({
+        telnyx_brand_id: "brand-1",
+        brand_status: "rejected",
+        campaign_status: null,
+        onboarding_registration_status: "failed",
+      }),
+      error: null,
+    });
+
+    const response = await saveBrandVerification(
+      request({ businessId: BUSINESS_ID, has_ein: false }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    });
+    expect(adminChains[0].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
+    expect(adminChains[0].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
+    expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
   });
 
   it("fails closed when the No-EIN write loses ownership or is deleted after the ownership read", async () => {
