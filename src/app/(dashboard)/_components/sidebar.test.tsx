@@ -260,6 +260,16 @@ describe("Sidebar navigation", () => {
     }
   });
 
+  it("keeps Settings active on nested Assistant Knowledge pages", () => {
+    mocks.pathname = "/settings/knowledge";
+
+    const navSections = renderedNavSections(renderSidebar());
+    for (const nav of navSections) {
+      const settingsLink = nav.match(/<a href="\/settings" class="([^"]+)"/);
+      expect(settingsLink?.[1]).toContain("bg-[var(--brand-accent-soft)]");
+    }
+  });
+
   it("uses the partner identity for desktop and mobile logos", () => {
     const markup = renderSidebar({
       requestBrand: {

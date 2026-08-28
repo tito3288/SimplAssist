@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('server-only', () => ({}));
+
 const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   requireWorkspacePageAccess: vi.fn(),
@@ -13,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   businessInfoEditor: vi.fn(),
   aiSettingsForm: vi.fn(),
   isSettingsRegistrationLocked: vi.fn(),
+  richerWebsiteScanEnabled: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
@@ -30,6 +33,9 @@ vi.mock('@/lib/billing/planAvailability', () => ({
 }));
 vi.mock('@/lib/settings/registrationLock.server', () => ({
   isSettingsRegistrationLocked: mocks.isSettingsRegistrationLocked,
+}));
+vi.mock('@/lib/website-scans/rollout.server', () => ({
+  isRicherWebsiteScanEnabledForBusiness: mocks.richerWebsiteScanEnabled,
 }));
 vi.mock('@/components/settings/AISettingsForm', () => ({
   default: (props: unknown) => {
@@ -193,6 +199,7 @@ function makeQuery(table: string): QueryRecorder {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.richerWebsiteScanEnabled.mockReturnValue(true);
   queryRecorders.clear();
   tableData = {
     ai_settings: AI_SETTINGS,
@@ -511,5 +518,15 @@ describe('SettingsPage Calendar status parsing', () => {
     expect(mocks.aiSettingsForm).toHaveBeenCalledWith(
       expect.objectContaining({ calendarGoalAvailable: true })
     );
+  });
+});
+
+describe('SettingsPage richer scan rollout', () => {
+  it('hides the Assistant Knowledge entry point outside the canary rollout', async () => {
+    mocks.richerWebsiteScanEnabled.mockReturnValue(false);
+
+    const markup = renderToStaticMarkup(await SettingsPage({}));
+
+    expect(markup).not.toContain('href="/settings/knowledge"');
   });
 });

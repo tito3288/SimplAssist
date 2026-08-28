@@ -507,6 +507,33 @@ export interface FAQ {
   is_active: boolean;
 }
 
+export type BusinessKnowledgeKind = "overview" | "fact" | "policy";
+
+export type BusinessKnowledgeSource =
+  | "manual"
+  | "website_scan"
+  | "owner_answer";
+
+/**
+ * Owner-approved assistant context that does not fit the existing structured
+ * service or FAQ tables. Website-scan drafts never use this type until the
+ * owner publishes them.
+ */
+export interface BusinessKnowledgeItem {
+  id: string;
+  business_id: string;
+  kind: BusinessKnowledgeKind;
+  category: string | null;
+  title: string | null;
+  content: string;
+  source: BusinessKnowledgeSource;
+  is_active: boolean;
+  sort_order: number;
+  verified_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AISettings {
   id: string;
   business_id: string;

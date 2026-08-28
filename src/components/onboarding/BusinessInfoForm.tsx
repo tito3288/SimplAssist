@@ -3,12 +3,17 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
 import { primaryCtaInlineClass } from '@/lib/glass';
+import { WebsiteScanLauncher } from '@/components/website-scans/WebsiteScanLauncher';
+import {
+  isWebsiteScanReviewable,
+  type WebsiteScan,
+} from '@/lib/website-scans/client';
 import {
   getBusinessInfoScanPrefill,
   type OnboardingScanData,
@@ -49,6 +54,7 @@ interface BusinessInfoFormProps {
   businessId: string;
   initialData?: Partial<BusinessInfoData>;
   onNext: (data: BusinessInfoData, scrapedData: ScrapedData | null) => void;
+  richerScanEnabled?: boolean;
 }
 
 const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
@@ -68,11 +74,17 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
-export default function BusinessInfoForm({ businessId, initialData, onNext }: BusinessInfoFormProps) {
+export default function BusinessInfoForm({
+  businessId,
+  initialData,
+  onNext,
+  richerScanEnabled = true,
+}: BusinessInfoFormProps) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState('');
+  const [scanBlocking, setScanBlocking] = useState(false);
+  const [legacyScanning, setLegacyScanning] = useState(false);
+  const [legacyScanError, setLegacyScanError] = useState('');
   const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
 
   const {
@@ -102,18 +114,22 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
 
   const websiteValue = watch('website');
 
-  const handleScanWebsite = async () => {
-    if (!websiteValue) return;
-    setScanning(true);
-    setScanError('');
-    try {
-      const res = await fetch('/api/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: websiteValue }),
-      });
-      if (!res.ok) throw new Error('Failed to scan website');
-      const data = (await res.json()) as ScrapedData;
+  const handleScanChange = useCallback((scan: WebsiteScan | null) => {
+    const currentWebsite = getValues().website;
+    if (scan && !(currentWebsite ?? '').trim()) {
+      setValue('website', scan.websiteUrl, { shouldDirty: true, shouldValidate: true });
+    }
+    if (isWebsiteScanReviewable(scan)) {
+      const data: ScrapedData = {
+        ...scan.draft.businessInfo,
+        services: scan.draft.services
+          .filter((service) => service.selected)
+          .map(({ name, description, price }) => ({ name, description, price })),
+        faqs: scan.draft.faqs
+          .filter((faq) => faq.selected)
+          .map(({ question, answer }) => ({ question, answer })),
+        business_hours: scan.draft.businessHours,
+      };
       const current = getValues();
       const prefill = getBusinessInfoScanPrefill(
         {
@@ -134,10 +150,33 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
         setValue(field, value, { shouldDirty: true, shouldValidate: true });
       }
       setScrapedData(data);
+    }
+  }, [getValues, setValue]);
+
+  const applyScanPrefill = (data: ScrapedData) => {
+    const current = getValues();
+    const prefill = getBusinessInfoScanPrefill(current, data);
+    for (const [field, value] of Object.entries(prefill) as [keyof typeof prefill, string][]) {
+      setValue(field, value, { shouldDirty: true, shouldValidate: true });
+    }
+    setScrapedData(data);
+  };
+
+  const handleLegacyScan = async () => {
+    setLegacyScanning(true);
+    setLegacyScanError('');
+    try {
+      const response = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: websiteValue }),
+      });
+      if (!response.ok) throw new Error('scan failed');
+      applyScanPrefill((await response.json()) as ScrapedData);
     } catch {
-      setScanError('Could not scan website. You can continue by entering your information manually.');
+      setLegacyScanError('Could not scan website. You can continue by entering your information manually.');
     } finally {
-      setScanning(false);
+      setLegacyScanning(false);
     }
   };
 
@@ -241,36 +280,32 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
 
       <div>
         <label className="block text-sm font-medium text-stone-700 dark:text-[#d4d4d8] mb-1">Website URL (optional)</label>
-        <div className="flex gap-2">
-          <input
-            {...register('website')}
-            placeholder="https://www.example.com"
-            className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)]"
+        <input
+          {...register('website')}
+          disabled={scanBlocking || legacyScanning}
+          placeholder="https://www.example.com"
+          className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-[22px] bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:border-[var(--brand-primary-dark)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        {richerScanEnabled && (
+          <WebsiteScanLauncher
+            url={websiteValue || ''}
+            trigger="onboarding"
+            onScanChange={handleScanChange}
+            onBlockingChange={setScanBlocking}
+            compact
           />
-          {websiteValue && (
-            <button
-              type="button"
-              onClick={handleScanWebsite}
-              disabled={scanning}
-              className="px-4 py-2 bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] border border-[var(--brand-accent-soft-border)] hover:bg-[var(--brand-tint)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)] dark:border-white/[0.10] dark:hover:bg-[rgb(var(--brand-primary-dark-rgb)/.18)] font-medium rounded-full disabled:opacity-50 whitespace-nowrap"
-            >
-              {scanning ? (
-                <span className="flex items-center gap-2.5">
-                  <PulsingDot inline />
-                  Scanning...
-                </span>
-              ) : (
-                'Scan Website'
-              )}
-            </button>
-          )}
-        </div>
-        {scanError && <p className="text-sm text-amber-600 mt-1">{scanError}</p>}
-        {scrapedData && (
-          <p className="text-sm text-green-600 dark:text-green-400 mt-1">
-            Website scanned! Found {scrapedData.services?.length || 0} services and {scrapedData.faqs?.length || 0} FAQs.
-          </p>
         )}
+        {websiteValue && !richerScanEnabled && (
+          <button
+            type="button"
+            onClick={handleLegacyScan}
+            disabled={legacyScanning}
+            className="mt-2 rounded-full border border-[var(--brand-accent-soft-border)] bg-[var(--brand-accent-soft)] px-4 py-2 text-sm font-medium text-[var(--brand-accent)] disabled:opacity-50 dark:border-white/[0.10] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]"
+          >
+            {legacyScanning ? 'Scanning…' : 'Scan Website'}
+          </button>
+        )}
+        {legacyScanError && <p className="mt-1 text-sm text-amber-600">{legacyScanError}</p>}
       </div>
 
       <div>
@@ -344,7 +379,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       <div className="flex justify-end pt-4">
         <button
           type="submit"
-          disabled={saving || scanning}
+          disabled={saving || scanBlocking || legacyScanning}
           className={primaryCtaInlineClass}
         >
           {saving ? (
@@ -353,7 +388,7 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
               Saving...
             </>
           ) : (
-            'Next'
+            scanBlocking ? 'Scanning website…' : 'Next'
           )}
         </button>
       </div>

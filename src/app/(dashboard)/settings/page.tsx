@@ -18,6 +18,9 @@ import { isPlanAvailable } from '@/lib/billing/planAvailability';
 import { getDashboardEntitledContext } from '@/lib/dashboard/context';
 import { requireWorkspacePageAccess } from '@/lib/customer/workspaceRouteResponse.server';
 import { isSettingsRegistrationLocked } from '@/lib/settings/registrationLock.server';
+import Link from 'next/link';
+import { BookOpen, ChevronRight } from 'lucide-react';
+import { isRicherWebsiteScanEnabledForBusiness } from '@/lib/website-scans/rollout.server';
 
 type SettingsPageProps = {
   searchParams?: {
@@ -42,6 +45,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   const canUseCalendar = canUseFeature(entitlements, 'calendar');
   const canUseGuardrails = canUseFeature(entitlements, 'advanced_guardrails');
   const fullSuiteAvailable = isPlanAvailable('full');
+  const richerScanEnabled = isRicherWebsiteScanEnabledForBusiness(business.id);
 
   const [
     { data: aiSettings },
@@ -79,6 +83,22 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           can keep sending your configured link, and sent links appear in Leads.
         </div>
       )}
+
+      {richerScanEnabled && <Link
+        href="/settings/knowledge"
+        className={`group flex items-center gap-4 p-6 transition-colors hover:border-[var(--brand-primary)] ${card}`}
+      >
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-accent-soft)] text-[var(--brand-accent)] dark:bg-[rgb(var(--brand-primary-dark-rgb)/.12)] dark:text-[var(--brand-accent-dark)]">
+          <BookOpen className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold text-stone-900 dark:text-[#f5f5f5]">Assistant Knowledge</h2>
+          <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+            Review your assistant’s business briefing or rescan your website for updated services, FAQs, facts, and policies.
+          </p>
+        </div>
+        <ChevronRight className="h-5 w-5 shrink-0 text-stone-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+      </Link>}
 
       {/* Phone Number */}
       {smsEnabled && <div className={`p-6 ${card}`}>

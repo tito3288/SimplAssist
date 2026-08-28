@@ -1,16 +1,15 @@
-import FirecrawlApp from "@mendable/firecrawl-js";
+import Firecrawl from "@mendable/firecrawl-js";
 
-export const firecrawl = new FirecrawlApp({
+// The v4 client targets Firecrawl's v2 API. These two small wrappers preserve
+// the exact single-page contract used by the legacy onboarding and A2P
+// crawlers while the richer scanner uses the asynchronous v2 crawl API.
+export const firecrawl = new Firecrawl({
   apiKey: process.env.FIRECRAWL_API_KEY ?? "",
 });
 
 export async function scrapeBusinessWebsite(url: string): Promise<string> {
-  const result = await firecrawl.scrapeUrl(url, { formats: ["markdown"] });
-
-  if (!result.success) {
-    throw new Error(`Firecrawl scrape failed: ${result.error}`);
-  }
-
+  const result = await firecrawl.v1.scrapeUrl(url, { formats: ["markdown"] });
+  if (!result.success) throw new Error(`Firecrawl scrape failed: ${result.error}`);
   return result.markdown ?? "";
 }
 
@@ -20,13 +19,10 @@ export async function scrapeBusinessWebsite(url: string): Promise<string> {
 export async function scrapePageWithLinks(
   url: string
 ): Promise<{ markdown: string; links: string[] }> {
-  const result = await firecrawl.scrapeUrl(url, {
+  const result = await firecrawl.v1.scrapeUrl(url, {
     formats: ["markdown", "links"],
   });
-
-  if (!result.success) {
-    throw new Error(`Firecrawl scrape failed: ${result.error}`);
-  }
+  if (!result.success) throw new Error(`Firecrawl scrape failed: ${result.error}`);
 
   return {
     markdown: result.markdown ?? "",

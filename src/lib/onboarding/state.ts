@@ -36,6 +36,7 @@ import {
   registrationHasStartedForRisk,
 } from "@/lib/messaging/registration/riskScreening";
 import { evaluateContentQuality } from "@/lib/contentQuality";
+import { isRicherWebsiteScanEnabledForBusiness } from "@/lib/website-scans/rollout.server";
 import {
   onboardingStepsForPlan,
   onboardingStepNumber,
@@ -680,6 +681,10 @@ async function getOnboardingStateForBusiness(
 
   return {
     businessId: business.id,
+    capabilities: {
+      richerWebsiteScanEnabled:
+        isRicherWebsiteScanEnabledForBusiness(business.id),
+    },
     primaryGoal: business.primary_goal,
     goalUrl: business.goal_url,
     currentStep: derivedStep,

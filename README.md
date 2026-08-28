@@ -21,6 +21,8 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 Phase 8 A2P screening uses these deployment variables:
 
 - `FIRECRAWL_API_KEY` - optional website scanner key. If missing or unavailable, the app falls back to a safe direct website fetch.
+- `RICHER_WEBSITE_SCAN_ENABLED` - server-only exact-`1` production rollout switch for the review-first multi-page scanner. Leave unset or `0` until its canary passes.
+- `RICHER_WEBSITE_SCAN_CANARY_BUSINESS_ID` - optional server-only canonical business UUID for one richer-scan canary while the broad switch remains off. Never create a `NEXT_PUBLIC_` copy.
 - `A2P_REVIEW_EMAIL` - comma-separated support recipients for manual A2P review alerts. Falls back to `SUPPORT_EMAIL`, then `support@simplassist.com`.
 - `A2P_REVIEW_ADMIN_TOKEN` - bearer token required for the manual A2P review override endpoint.
 
@@ -103,6 +105,10 @@ transitions remain independent, default-off future work.
 The proactive desktop/mobile invitation, privacy boundary, five-path edge
 contract, canary-to-broad rollout, monitoring, and rollback are documented in
 [`docs/proactive-widget-rollout.md`](docs/proactive-widget-rollout.md).
+
+The richer multi-page website scan, dedicated Railway worker, approval
+boundary, canary rollout, monitoring, and rollback are documented in
+[`docs/richer-website-scan-rollout.md`](docs/richer-website-scan-rollout.md).
 
 The Full Suite waitlist uses these server-only deployment variables:
 

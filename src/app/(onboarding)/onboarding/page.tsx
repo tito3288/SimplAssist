@@ -6,7 +6,7 @@ import { CheckCircle2, Clock, Phone, RefreshCcw, AlertTriangle } from 'lucide-re
 import StepProgress from '@/components/onboarding/StepProgress';
 import BusinessInfoForm, { type ScrapedData } from '@/components/onboarding/BusinessInfoForm';
 import BusinessHoursForm from '@/components/onboarding/BusinessHoursForm';
-import ServicesAndFaqsForm from '@/components/onboarding/ServicesAndFaqsForm';
+import AssistantKnowledgeStep from '@/components/onboarding/AssistantKnowledgeStep';
 import AIPersonalityForm from '@/components/onboarding/AIPersonalityForm';
 import DirectPlanSelection from '@/components/onboarding/DirectPlanSelection';
 import BrandVerificationForm from '@/components/onboarding/BrandVerificationForm';
@@ -45,6 +45,10 @@ import {
   CHECKOUT_FINALIZE_ERROR,
   checkoutFinalizeFailureAction,
 } from '@/lib/onboarding/checkoutFinalize';
+import {
+  getCurrentWebsiteScan,
+  isWebsiteScanReviewable,
+} from '@/lib/website-scans/client';
 
 type StateResponse = {
   state?: OnboardingState;
@@ -56,6 +60,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const finalizedSessionRef = useRef<string | null>(null);
+  const resumedWebsiteScanRef = useRef(false);
   const [state, setState] = useState<OnboardingState | null>(null);
   const [step, setStep] = useState<OnboardingStep>('business_info');
   const [loading, setLoading] = useState(true);
@@ -110,6 +115,33 @@ export default function OnboardingPage() {
   useEffect(() => {
     refreshState();
   }, [refreshState]);
+
+  useEffect(() => {
+    if (
+      !state?.capabilities?.richerWebsiteScanEnabled ||
+      resumedWebsiteScanRef.current
+    ) {
+      return;
+    }
+    resumedWebsiteScanRef.current = true;
+    getCurrentWebsiteScan()
+      .then((scan) => {
+        if (!isWebsiteScanReviewable(scan)) return;
+        setScrapedData({
+          ...scan.draft.businessInfo,
+          services: scan.draft.services
+            .filter((service) => service.selected)
+            .map(({ name, description, price }) => ({ name, description, price })),
+          faqs: scan.draft.faqs
+            .filter((faq) => faq.selected)
+            .map(({ question, answer }) => ({ question, answer })),
+          business_hours: scan.draft.businessHours,
+        });
+      })
+      .catch(() => {
+        // Each onboarding form retains its normal manual fallback.
+      });
+  }, [state?.capabilities?.richerWebsiteScanEnabled]);
 
   useEffect(() => {
     const checkout = searchParams.get('checkout');
@@ -239,6 +271,7 @@ export default function OnboardingPage() {
           <BusinessInfoForm
             businessId={state.businessId}
             initialData={state.businessInfo}
+            richerScanEnabled={Boolean(state.capabilities?.richerWebsiteScanEnabled)}
             onNext={(data, scraped) => {
               // Only a fresh scan updates the captured result. BusinessInfoForm
               // remounts with null scrapedData on back-navigation, so guarding
@@ -281,8 +314,9 @@ export default function OnboardingPage() {
         )}
 
         {step === 'services_faqs' && (
-          <ServicesAndFaqsForm
+          <AssistantKnowledgeStep
             businessId={state.businessId}
+            richerScanEnabled={Boolean(state.capabilities?.richerWebsiteScanEnabled)}
             businessType={(state.businessInfo.business_type || 'general') as BusinessType}
             initialData={
               state.servicesAndFaqs.services.length > 0 ||

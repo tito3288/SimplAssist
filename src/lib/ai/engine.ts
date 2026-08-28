@@ -57,6 +57,7 @@ import type {
   Service,
   FAQ,
   BusinessHours,
+  BusinessKnowledgeItem,
   Channel,
   Contact,
   Conversation,
@@ -1365,6 +1366,30 @@ export async function processIncomingMessageDetailed(
           .select("*")
           .eq("business_id", businessId),
         supabaseAdmin
+          .from("business_knowledge_items")
+          .select(
+            "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
+          )
+          .eq("business_id", businessId)
+          .eq("is_active", true)
+          .eq("kind", "overview")
+          .order("sort_order", { ascending: true })
+          .order("verified_at", { ascending: false })
+          .order("id", { ascending: true })
+          .limit(1),
+        supabaseAdmin
+          .from("business_knowledge_items")
+          .select(
+            "id,business_id,kind,category,title,content,source,is_active,sort_order,verified_at,created_at,updated_at"
+          )
+          .eq("business_id", businessId)
+          .eq("is_active", true)
+          .in("kind", ["fact", "policy"])
+          .order("sort_order", { ascending: true })
+          .order("verified_at", { ascending: false })
+          .order("id", { ascending: true })
+          .limit(24),
+        supabaseAdmin
           .from("google_calendar_tokens")
           .select("id")
           .eq("business_id", businessId)
@@ -1383,9 +1408,18 @@ export async function processIncomingMessageDetailed(
       servicesResult,
       faqsResult,
       businessHoursResult,
+      businessOverviewResult,
+      businessKnowledgeDetailsResult,
       calendarTokenResult,
     ] = stateResults;
-    const contextError = stateResults.find((result) => result.error)?.error;
+    const contextError = [
+      businessResult,
+      aiSettingsResult,
+      servicesResult,
+      faqsResult,
+      businessHoursResult,
+      calendarTokenResult,
+    ].find((result) => result.error)?.error;
     if (contextError) {
       throw new AIProcessingStateError(
         `Could not load AI context for business ${businessId}.`,
@@ -1398,6 +1432,28 @@ export async function processIncomingMessageDetailed(
     const services = servicesResult.data;
     const faqs = faqsResult.data;
     const businessHours = businessHoursResult.data;
+    const businessKnowledgeReadFailed = Boolean(
+      businessOverviewResult.error || businessKnowledgeDetailsResult.error
+    );
+    if (businessKnowledgeReadFailed) {
+      console.error("[ai-engine] Approved business knowledge lookup failed", {
+        businessId,
+        overviewError: businessOverviewResult.error?.message,
+        detailsError: businessKnowledgeDetailsResult.error?.message,
+      });
+    }
+    // Richer knowledge is additive. A temporary read failure must not take the
+    // existing services/FAQ assistant offline; it safely falls back to the
+    // legacy prompt for this turn.
+    const businessKnowledge = businessKnowledgeReadFailed
+      ? []
+      : [
+          ...((businessOverviewResult.data ?? []) as BusinessKnowledgeItem[]),
+          ...((businessKnowledgeDetailsResult.data ?? []) as BusinessKnowledgeItem[]),
+        ].filter(
+          (item, index, items) =>
+            items.findIndex((candidate) => candidate.id === item.id) === index,
+        );
     const calendarToken = calendarTokenResult.data;
 
     if (!business || !aiSettings) {
@@ -1449,16 +1505,32 @@ export async function processIncomingMessageDetailed(
     };
 
     const buildModelSurface = (bookingAvailable: boolean) => {
-      const system = buildSystemPrompt(
-        business as Business,
-        effectiveAiSettings,
-        (services ?? []) as Service[],
-        (faqs ?? []) as FAQ[],
-        (businessHours ?? []) as BusinessHours[],
-        hasCalendar,
-        channel,
-        bookingAvailable
-      );
+      const approvedKnowledge = businessKnowledge;
+      // Preserve the exact legacy prompt call surface when no richer knowledge
+      // is approved. This keeps old accounts byte-for-byte stable while the
+      // new context is rolled out independently.
+      const system = approvedKnowledge.length > 0
+        ? buildSystemPrompt(
+            business as Business,
+            effectiveAiSettings,
+            (services ?? []) as Service[],
+            (faqs ?? []) as FAQ[],
+            (businessHours ?? []) as BusinessHours[],
+            hasCalendar,
+            channel,
+            bookingAvailable,
+            approvedKnowledge
+          )
+        : buildSystemPrompt(
+            business as Business,
+            effectiveAiSettings,
+            (services ?? []) as Service[],
+            (faqs ?? []) as FAQ[],
+            (businessHours ?? []) as BusinessHours[],
+            hasCalendar,
+            channel,
+            bookingAvailable
+          );
       const requestTools: Anthropic.Tool[] = [...contactTools];
       if (isSignupGoal) {
         requestTools.push(...signupGoalTools);

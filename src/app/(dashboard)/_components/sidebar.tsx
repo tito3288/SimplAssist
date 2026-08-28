@@ -101,7 +101,10 @@ export default function Sidebar({
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto min-h-0">
         {visibleNavItems.map((item) => {
-          const isActive = (activePath ?? pathname) === item.href;
+          const currentPath = activePath ?? pathname;
+          const isActive =
+            currentPath === item.href ||
+            (item.href === '/settings' && currentPath.startsWith('/settings/'));
           const isLocked =
             (item.href === "/calendar" && !canUseCalendar) ||
             (item.href === "/widget" && !canUseWidget);
