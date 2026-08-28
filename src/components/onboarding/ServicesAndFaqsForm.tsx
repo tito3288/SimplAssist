@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createClient } from '@/lib/supabase/client';
@@ -25,6 +25,17 @@ import {
   servicesAndFaqsSchema,
   type ServicesAndFaqsData,
 } from '@/lib/onboarding/servicesAndFaqsSubmission';
+import {
+  createWebsiteScanRequestId,
+  publishWebsiteScan,
+  saveWebsiteScanReview,
+  type WebsiteScan,
+  type WebsiteScanReviewDraft,
+} from '@/lib/website-scans/client';
+import {
+  ScanDraftDetailsEditor,
+  SourceEvidence,
+} from '@/components/website-scans/ScanDraftDetailsEditor';
 
 export type { ServicesAndFaqsData } from '@/lib/onboarding/servicesAndFaqsSubmission';
 
@@ -158,7 +169,10 @@ interface ServicesAndFaqsFormProps {
   scrapedFaqs?: { question: string; answer: string }[];
   initialData?: ServicesAndFaqsValues;
   onNext: (data: ServicesAndFaqsData) => void;
-  onBack: () => void;
+  onBack?: () => void;
+  websiteScan?: WebsiteScan & { draft: WebsiteScanReviewDraft };
+  mode?: 'onboarding' | 'settings';
+  onDiscardScan?: () => Promise<void> | void;
 }
 
 export default function ServicesAndFaqsForm({
@@ -169,20 +183,52 @@ export default function ServicesAndFaqsForm({
   initialData,
   onNext,
   onBack,
+  websiteScan,
+  mode = 'onboarding',
+  onDiscardScan,
 }: ServicesAndFaqsFormProps) {
   const [saving, setSaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [reviewDraft, setReviewDraft] = useState<WebsiteScanReviewDraft | null>(() => {
+    if (!websiteScan?.draft) return null;
+    const metadata = websiteScan.draft.overviewMetadata;
+    return metadata && metadata.selected === undefined
+      ? {
+          ...websiteScan.draft,
+          overviewMetadata: { ...metadata, selected: !metadata.targetId },
+        }
+      : websiteScan.draft;
+  });
+  const lastSavedDraft = useRef('');
+  const scanVersionRef = useRef(websiteScan?.version ?? 0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const publishIdempotencyRef = useRef({
+    scanId: websiteScan?.id ?? '',
+    key: createWebsiteScanRequestId(),
+  });
+  if (websiteScan && publishIdempotencyRef.current.scanId !== websiteScan.id) {
+    publishIdempotencyRef.current = {
+      scanId: websiteScan.id,
+      key: createWebsiteScanRequestId(),
+    };
+  }
   const suggestedFaqs = SUGGESTED_FAQS[businessType] || SUGGESTED_FAQS.general;
 
   const defaults = useMemo(
     () =>
       buildServicesAndFaqsDefaults({
-        initialData,
-        scrapedServices,
-        scrapedFaqs,
+        initialData: websiteScan ? undefined : initialData,
+        scrapedServices: websiteScan
+          ? websiteScan.draft.services.map(({ name, description, price }) => ({ name, description, price }))
+          : scrapedServices,
+        scrapedFaqs: websiteScan
+          ? websiteScan.draft.faqs.map(({ question, answer }) => ({ question, answer }))
+          : scrapedFaqs,
         suggestedFaqs,
       }),
-    [initialData, scrapedServices, scrapedFaqs, suggestedFaqs]
+    [initialData, scrapedServices, scrapedFaqs, suggestedFaqs, websiteScan]
   );
 
   const {
@@ -191,10 +237,22 @@ export default function ServicesAndFaqsForm({
     handleSubmit,
     formState: { errors },
   } = useForm<ServicesAndFaqsData>({
-    resolver: zodResolver(servicesAndFaqsSchema),
+    // A scan review publishes a delta over any already-approved knowledge,
+    // so its floor is validated against the union below. A fresh onboarding
+    // review still has no baseline and must supply the full 3+3 itself.
+    resolver:
+      websiteScan
+        ? undefined
+        : zodResolver(servicesAndFaqsSchema),
     defaultValues: {
-      services: defaults.services,
-      faqs: defaults.faqs,
+      services:
+        websiteScan && (mode === 'settings' || initialData)
+          ? defaults.services.slice(0, websiteScan.draft.services.length)
+          : defaults.services,
+      faqs:
+        websiteScan && (mode === 'settings' || initialData)
+          ? defaults.faqs.slice(0, websiteScan.draft.faqs.length)
+          : defaults.faqs,
     },
   });
 
@@ -210,12 +268,105 @@ export default function ServicesAndFaqsForm({
     remove: removeFaq,
   } = useFieldArray({ control, name: 'faqs' });
 
+  const removeServiceRow = (index: number) => {
+    removeService(index);
+    if (reviewDraft?.services[index]) {
+      const services = [...reviewDraft.services];
+      services.splice(index, 1);
+      setReviewDraft({ ...reviewDraft, services });
+    }
+  };
+
+  const removeFaqRow = (index: number) => {
+    removeFaq(index);
+    if (reviewDraft?.faqs[index]) {
+      const faqs = [...reviewDraft.faqs];
+      faqs.splice(index, 1);
+      setReviewDraft({ ...reviewDraft, faqs });
+    }
+  };
+
   const watchedServices = useWatch({ control, name: 'services' }) ?? [];
   const watchedFaqs = useWatch({ control, name: 'faqs' }) ?? [];
-  const quality = evaluateContentQuality({
-    services: watchedServices,
-    faqs: watchedFaqs,
-  });
+  const selectedServices = reviewDraft
+    ? watchedServices.filter((_, index) => reviewDraft.services[index]?.selected ?? true)
+    : watchedServices;
+  const selectedFaqs = reviewDraft
+    ? watchedFaqs.filter((_, index) => reviewDraft.faqs[index]?.selected ?? true)
+    : watchedFaqs;
+  const qualityInput =
+    websiteScan && initialData
+      ? {
+          services: [...initialData.services, ...selectedServices],
+          faqs: [...initialData.faqs, ...selectedFaqs],
+        }
+      : { services: selectedServices, faqs: selectedFaqs };
+  const quality = evaluateContentQuality(qualityInput);
+
+  function currentReviewDraft(): WebsiteScanReviewDraft | null {
+    if (!reviewDraft) return null;
+    return {
+      ...reviewDraft,
+      services: watchedServices.map((service, index) => ({
+        ...(reviewDraft.services[index] ?? {
+          id: `manual-service-${index}`,
+          selected: true,
+        }),
+        name: service.name,
+        description: service.description,
+        price: service.price,
+      })),
+      faqs: watchedFaqs.map((faq, index) => ({
+        ...(reviewDraft.faqs[index] ?? {
+          id: `manual-faq-${index}`,
+          selected: true,
+        }),
+        question: faq.question,
+        answer: faq.answer,
+      })),
+    };
+  }
+
+  const queueDraftSave = useCallback((snapshot: WebsiteScanReviewDraft) => {
+    if (!websiteScan) return Promise.resolve();
+    const serialized = JSON.stringify(snapshot);
+    saveQueueRef.current = saveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (serialized === lastSavedDraft.current) return;
+        setSaveStatus('saving');
+        const saved = await saveWebsiteScanReview({
+          scanId: websiteScan.id,
+          expectedVersion: scanVersionRef.current,
+          draft: snapshot,
+        });
+        scanVersionRef.current = saved.version;
+        lastSavedDraft.current = serialized;
+        setSaveStatus('saved');
+      })
+      .catch((error) => {
+        setSaveStatus('error');
+        throw error;
+      });
+    return saveQueueRef.current;
+  }, [websiteScan]);
+
+  useEffect(() => {
+    if (!websiteScan || !reviewDraft) return;
+    const snapshot = currentReviewDraft();
+    if (!snapshot) return;
+    if (!lastSavedDraft.current) {
+      lastSavedDraft.current = JSON.stringify(websiteScan.draft);
+    }
+
+    const timeout = window.setTimeout(() => {
+      void queueDraftSave(snapshot).catch(() => undefined);
+    }, 1200);
+    return () => window.clearTimeout(timeout);
+    // The watched arrays are intentional dependencies: react-hook-form owns
+    // those values while the rest of the scan draft lives in local state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewDraft, watchedServices, watchedFaqs, websiteScan, queueDraftSave]);
   const servicesError = errors.services as
     | (typeof errors.services & { root?: { message?: unknown } })
     | undefined;
@@ -239,9 +390,62 @@ export default function ServicesAndFaqsForm({
     setSaving(true);
     setSubmitError('');
     try {
-      const supabase = createClient();
+      const selectedData = reviewDraft
+        ? {
+            services: data.services.filter((_, index) => reviewDraft.services[index]?.selected ?? true),
+            faqs: data.faqs.filter((_, index) => reviewDraft.faqs[index]?.selected ?? true),
+          }
+        : data;
+      const selectedQuality = evaluateContentQuality(
+        websiteScan && initialData
+          ? {
+              services: [...initialData.services, ...selectedData.services],
+              faqs: [...initialData.faqs, ...selectedData.faqs],
+            }
+          : selectedData
+      );
+      if (!selectedQuality.hasMinimumServices || !selectedQuality.hasMinimumFaqs) {
+        setSubmitError(
+          `Select at least ${MIN_VALID_SERVICES} distinct services and ${MIN_VALID_FAQS} answered FAQs before continuing.`
+        );
+        return;
+      }
       const { cleanedData, rpcArguments } =
-        prepareServicesAndFaqsSubmission(businessId, data);
+        prepareServicesAndFaqsSubmission(businessId, selectedData);
+
+      if (websiteScan && reviewDraft) {
+        const finalDraft: WebsiteScanReviewDraft = {
+          ...reviewDraft,
+          services: data.services.map((service, index) => ({
+            ...(reviewDraft.services[index] ?? {
+              id: `manual-service-${index}`,
+              selected: true,
+            }),
+            name: service.name,
+            description: service.description,
+            price: service.price,
+          })),
+          faqs: data.faqs.map((faq, index) => ({
+            ...(reviewDraft.faqs[index] ?? {
+              id: `manual-faq-${index}`,
+              selected: true,
+            }),
+            question: faq.question,
+            answer: faq.answer,
+          })),
+        };
+        await queueDraftSave(finalDraft);
+        await publishWebsiteScan({
+          scanId: websiteScan.id,
+          expectedVersion: scanVersionRef.current,
+          idempotencyKey: publishIdempotencyRef.current.key,
+          draft: finalDraft,
+        });
+        onNext(cleanedData);
+        return;
+      }
+
+      const supabase = createClient();
 
       // Atomic replace via the provenance-aware RPC: both tables are replaced
       // in one transaction, so a mid-save failure can never lose existing
@@ -264,15 +468,60 @@ export default function ServicesAndFaqsForm({
       }
 
       onNext(cleanedData);
-    } catch {
-      setSubmitError('Could not save your services and FAQs. Please try again.');
+    } catch (cause) {
+      setSubmitError(
+        websiteScan && cause instanceof Error
+          ? cause.message
+          : 'Could not save your services and FAQs. Please try again.'
+      );
     } finally {
       setSaving(false);
     }
   };
 
+  const discardScan = async () => {
+    if (!onDiscardScan) return;
+    setDiscarding(true);
+    setSubmitError('');
+    try {
+      await onDiscardScan();
+    } catch (cause) {
+      setSubmitError(cause instanceof Error ? cause.message : 'Could not discard this scan.');
+    } finally {
+      setDiscarding(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-stone-900 dark:text-[#f5f5f5]">
+          Assistant Knowledge
+        </h1>
+        <p className="mt-1 text-sm text-stone-500 dark:text-[#bdbdbf]">
+          Review the information your assistant will use when helping customers.
+          Nothing from a website scan is used until you approve it here.
+        </p>
+        {websiteScan && websiteScan.coverage !== 'complete' && (
+          <div role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-100">
+            {websiteScan.coverage === 'insufficient'
+              ? 'We found very little usable website content. Treat this draft as a starting point and fill in missing details manually.'
+              : 'Some website pages could not be read. The draft is still usable, but please add anything important that is missing.'}
+          </div>
+        )}
+        {websiteScan && (
+          <p className="mt-2 text-xs text-stone-500" aria-live="polite">
+            {saveStatus === 'saving' && 'Saving draft…'}
+            {saveStatus === 'saved' && 'Draft saved.'}
+            {saveStatus === 'error' && 'Draft could not be autosaved. Your edits remain on this page.'}
+          </p>
+        )}
+      </div>
+
+      {reviewDraft && (
+        <ScanDraftDetailsEditor draft={reviewDraft} onChange={setReviewDraft} />
+      )}
+
       <div
         role="note"
         aria-labelledby="knowledge-quality-title"
@@ -314,11 +563,22 @@ export default function ServicesAndFaqsForm({
 
         <div className="space-y-3">
           {serviceFields.map((field, index) => {
-            const notCountingReason = serviceNotCountingReason(
-              watchedServices[index],
-              index,
-              watchedServices
-            );
+            const selected = reviewDraft?.services[index]?.selected ?? true;
+            const serviceQualityRows =
+              websiteScan && initialData
+                ? [...initialData.services, ...watchedServices]
+                : watchedServices;
+            const serviceQualityIndex =
+              websiteScan && initialData
+                ? initialData.services.length + index
+                : index;
+            const notCountingReason = selected
+              ? serviceNotCountingReason(
+                  watchedServices[index],
+                  serviceQualityIndex,
+                  serviceQualityRows
+                )
+              : 'Not selected for your assistant.';
 
             return (
               <div key={field.id} className="p-3 border border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg space-y-2">
@@ -327,9 +587,23 @@ export default function ServicesAndFaqsForm({
                   {...register(`services.${index}.source`)}
                 />
                 <div className="flex gap-2">
+                  {reviewDraft?.services[index] && (
+                    <input
+                      type="checkbox"
+                      checked={reviewDraft.services[index].selected}
+                      onChange={(event) => {
+                        const services = [...reviewDraft.services];
+                        services[index] = { ...services[index], selected: event.target.checked };
+                        setReviewDraft({ ...reviewDraft, services });
+                      }}
+                      aria-label={`Use ${watchedServices[index]?.name || `service ${index + 1}`}`}
+                      className="mt-3 h-4 w-4 shrink-0 accent-[var(--brand-primary)]"
+                    />
+                  )}
                   <div className="flex-1">
                     <input
                       {...register(`services.${index}.name`)}
+                      maxLength={120}
                       placeholder="Service name *"
                       aria-describedby={`service-${index}-quality`}
                       className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
@@ -338,14 +612,15 @@ export default function ServicesAndFaqsForm({
                   <div className="w-28">
                     <input
                       {...register(`services.${index}.price`)}
+                      maxLength={120}
                       placeholder="Price"
                       className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                     />
                   </div>
-                  {serviceFields.length > 1 && (
+                  {serviceFields.length > 1 && !reviewDraft?.services[index] && (
                     <button
                       type="button"
-                      onClick={() => removeService(index)}
+                      onClick={() => removeServiceRow(index)}
                       aria-label={`Remove service ${index + 1}`}
                       className="text-red-400 dark:text-red-400/70 hover:text-red-600 dark:hover:text-red-400 px-2"
                     >
@@ -357,6 +632,7 @@ export default function ServicesAndFaqsForm({
                 </div>
                 <input
                   {...register(`services.${index}.description`)}
+                  maxLength={1000}
                   placeholder="Description (optional)"
                   className="w-full px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                 />
@@ -370,6 +646,12 @@ export default function ServicesAndFaqsForm({
                 >
                   {notCountingReason ?? 'Counts toward your service minimum.'}
                 </p>
+                {reviewDraft?.services[index]?.changeType && reviewDraft.services[index].changeType !== 'new' && (
+                  <span className="text-xs font-medium text-stone-500">
+                    {reviewDraft.services[index].changeType === 'changed' ? 'Website suggests an update' : 'Already approved'}
+                  </span>
+                )}
+                <SourceEvidence evidence={reviewDraft?.services[index]?.evidence} />
               </div>
             );
           })}
@@ -432,11 +714,22 @@ export default function ServicesAndFaqsForm({
 
         <div className="space-y-3">
           {faqFields.map((field, index) => {
-            const notCountingReason = faqNotCountingReason(
-              watchedFaqs[index],
-              index,
-              watchedFaqs
-            );
+            const selected = reviewDraft?.faqs[index]?.selected ?? true;
+            const faqQualityRows =
+              websiteScan && initialData
+                ? [...initialData.faqs, ...watchedFaqs]
+                : watchedFaqs;
+            const faqQualityIndex =
+              websiteScan && initialData
+                ? initialData.faqs.length + index
+                : index;
+            const notCountingReason = selected
+              ? faqNotCountingReason(
+                  watchedFaqs[index],
+                  faqQualityIndex,
+                  faqQualityRows
+                )
+              : 'Not selected for your assistant.';
 
             return (
               <div key={field.id} className="p-3 border border-[#ece4d8] dark:border-white/[0.10] bg-white dark:bg-white/[0.04] rounded-lg space-y-2">
@@ -445,22 +738,36 @@ export default function ServicesAndFaqsForm({
                   {...register(`faqs.${index}.source`)}
                 />
                 <div className="flex gap-2">
+                  {reviewDraft?.faqs[index] && (
+                    <input
+                      type="checkbox"
+                      checked={reviewDraft.faqs[index].selected}
+                      onChange={(event) => {
+                        const faqs = [...reviewDraft.faqs];
+                        faqs[index] = { ...faqs[index], selected: event.target.checked };
+                        setReviewDraft({ ...reviewDraft, faqs });
+                      }}
+                      aria-label={`Use ${watchedFaqs[index]?.question || `FAQ ${index + 1}`}`}
+                      className="mt-3 h-4 w-4 shrink-0 accent-[var(--brand-primary)]"
+                    />
+                  )}
                   <input
                     {...register(`faqs.${index}.question`)}
+                    maxLength={300}
                     placeholder="Question"
                     aria-describedby={`faq-${index}-quality`}
                     className="flex-1 px-3 py-2 border border-[#e3dacc] dark:border-white/[0.12] rounded-lg bg-white dark:bg-white/[0.06] text-stone-900 dark:text-[#f5f5f5] placeholder:text-stone-400 dark:placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--brand-primary-rgb)/.25)] dark:focus:ring-[rgb(var(--brand-primary-dark-rgb)/.30)] focus:border-[var(--brand-primary)] dark:focus:border-[var(--brand-primary-dark)] text-sm"
                   />
-                  <button
+                  {!reviewDraft?.faqs[index] && <button
                     type="button"
-                    onClick={() => removeFaq(index)}
+                    onClick={() => removeFaqRow(index)}
                     aria-label={`Remove FAQ ${index + 1}`}
                     className="text-red-400 dark:text-red-400/70 hover:text-red-600 dark:hover:text-red-400 px-2"
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                  </button>
+                  </button>}
                 </div>
                 <textarea
                   {...register(`faqs.${index}.answer`)}
@@ -480,6 +787,12 @@ export default function ServicesAndFaqsForm({
                 >
                   {notCountingReason ?? 'Counts toward your FAQ minimum.'}
                 </p>
+                {reviewDraft?.faqs[index]?.changeType && reviewDraft.faqs[index].changeType !== 'new' && (
+                  <span className="text-xs font-medium text-stone-500">
+                    {reviewDraft.faqs[index].changeType === 'changed' ? 'Website suggests an update' : 'Already approved'}
+                  </span>
+                )}
+                <SourceEvidence evidence={reviewDraft?.faqs[index]?.evidence} />
               </div>
             );
           })}
@@ -507,13 +820,23 @@ export default function ServicesAndFaqsForm({
       )}
 
       <div className="flex justify-between pt-4">
-        <button
-          type="button"
-          onClick={onBack}
-          className={secondaryCtaClass}
-        >
-          Back
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {onBack && (
+            <button type="button" onClick={onBack} className={secondaryCtaClass}>
+              Back
+            </button>
+          )}
+          {websiteScan && onDiscardScan && (
+            <button
+              type="button"
+              onClick={discardScan}
+              disabled={discarding || saving}
+              className="text-sm font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+            >
+              {discarding ? 'Discarding…' : 'Discard this scan'}
+            </button>
+          )}
+        </div>
         <button
           type="submit"
           disabled={saving}
@@ -525,7 +848,7 @@ export default function ServicesAndFaqsForm({
               Saving...
             </>
           ) : (
-            'Save & continue'
+            mode === 'settings' ? 'Approve & publish' : 'Approve & continue'
           )}
         </button>
       </div>

@@ -388,6 +388,7 @@ function setAiData() {
   tableResults.set("services", { data: [], error: null });
   tableResults.set("faqs", { data: [], error: null });
   tableResults.set("business_hours", { data: [], error: null });
+  tableResults.set("business_knowledge_items", { data: [], error: null });
   tableResults.set("google_calendar_tokens", {
     data: { id: "calendar_1" },
     error: null,
@@ -483,7 +484,15 @@ beforeEach(() => {
       error: { message: `Unexpected ${table} query` },
     };
     const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-    for (const method of ["select", "eq", "single", "maybeSingle"]) {
+    for (const method of [
+      "select",
+      "eq",
+      "in",
+      "order",
+      "limit",
+      "single",
+      "maybeSingle",
+    ]) {
       chain[method] = vi.fn(() => chain);
     }
     const promise = Promise.resolve(result);
@@ -2653,6 +2662,75 @@ describe("processIncomingMessage entitlement and takeover defenses", () => {
     expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ guardrails: ["promise a price"] }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      true,
+      "sms",
+      true
+    );
+  });
+
+  it("loads active approved richer knowledge into the prompt without changing legacy accounts", async () => {
+    const approvedKnowledge = [
+      {
+        id: "knowledge-1",
+        business_id: BUSINESS_ID,
+        kind: "overview",
+        category: "general",
+        title: "Business overview",
+        content: "A locally owned plumbing business.",
+        source: "website_scan",
+        is_active: true,
+        sort_order: 0,
+        verified_at: "2026-08-28T00:00:00.000Z",
+        created_at: "2026-08-28T00:00:00.000Z",
+        updated_at: "2026-08-28T00:00:00.000Z",
+      },
+    ];
+    tableResults.set("business_knowledge_items", {
+      data: approvedKnowledge,
+      error: null,
+    });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "What should I know about you?",
+      "sms"
+    );
+
+    expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      true,
+      "sms",
+      true,
+      approvedKnowledge
+    );
+  });
+
+  it("falls back to the legacy prompt when approved knowledge cannot be loaded", async () => {
+    tableResults.set("business_knowledge_items", {
+      data: null,
+      error: { message: "temporary knowledge read failure" },
+    });
+
+    await processIncomingMessage(
+      BUSINESS_ID,
+      "+15745550100",
+      null,
+      "Are you open?",
+      "sms"
+    );
+
+    expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
       expect.anything(),
       expect.anything(),
       expect.anything(),

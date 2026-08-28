@@ -37,6 +37,13 @@ const REQUIRED_ROUTES: RouteInventory[] = [
   { path: "./settings/business-info/route.ts", methods: ["POST"] },
   { path: "./settings/compliance/route.ts", methods: ["POST"] },
   { path: "./settings/goal/route.ts", methods: ["POST"] },
+  { path: "./website-scans/route.ts", methods: ["POST"] },
+  { path: "./website-scans/current/route.ts", methods: ["GET"] },
+  { path: "./website-scans/[scanId]/route.ts", methods: ["GET"] },
+  { path: "./website-scans/[scanId]/review/route.ts", methods: ["PATCH"] },
+  { path: "./website-scans/[scanId]/publish/route.ts", methods: ["POST"] },
+  { path: "./website-scans/[scanId]/cancel/route.ts", methods: ["POST"] },
+  { path: "./website-scans/[scanId]/retry/route.ts", methods: ["POST"] },
   { path: "./widget/logo/route.ts", methods: ["POST"] },
   { path: "./widget/preview-config/route.ts", methods: ["GET"] },
 ];

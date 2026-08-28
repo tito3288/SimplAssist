@@ -61,7 +61,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
 export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   business_info: "Business Info",
   business_hours: "Business Hours",
-  services_faqs: "Services & FAQs",
+  services_faqs: "Assistant Knowledge",
   plan_selection: "Choose Plan",
   ai_settings: "AI Settings",
   legal_verification: "Business Verification",
@@ -205,6 +205,9 @@ export interface OnboardingRiskReviewSnapshot {
 
 export interface OnboardingState {
   businessId: string;
+  capabilities?: {
+    richerWebsiteScanEnabled: boolean;
+  };
   primaryGoal: PrimaryGoal | null;
   goalUrl: string | null;
   currentStep: OnboardingStep;
