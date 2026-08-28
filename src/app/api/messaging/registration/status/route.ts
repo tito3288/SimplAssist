@@ -28,6 +28,7 @@ import {
   sendCampaignApprovedEmail,
   sendCampaignRejectedEmail,
 } from "@/lib/email/registrationStatus";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 import type { RegistrationStatus } from "@/types/database";
 
 // Telnyx 10DLC brand/campaign status webhook receiver. Phase 3 wires this URL
@@ -452,8 +453,7 @@ async function applyBrandStatusTransition(args: {
           onboarding_registration_status: "failed" as const,
           onboarding_registration_submitted_at: null,
           onboarding_registration_error:
-            args.rejectionReason ??
-            "Your business verification was rejected by the carrier.",
+            args.rejectionReason ?? REJECTION_SUPPORT_MESSAGE,
         }
       : {}),
   };

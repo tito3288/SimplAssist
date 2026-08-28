@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
+import { hasCarrierRejection } from "@/lib/onboarding/rejectionGuidance";
 import {
   applyRegistrationStateSnapshot,
   isSettingsRegistrationLocked,
@@ -38,6 +39,13 @@ const BusinessInfoUpdateSchema = z.union([
   FullBusinessInfoUpdateSchema,
   PhoneOnlyUpdateSchema,
 ]);
+
+const BUSINESS_CONTACT_PHONE_LOCK_COPY = {
+  supportText: "Contact support to change your business contact phone",
+  reasonText: " because it was filed with your carrier registration.",
+  message:
+    "Contact support to change your business contact phone because it was filed with your carrier registration.",
+} as const;
 
 async function loadRegistrationState(businessId: string, ownerId: string) {
   return supabaseAdmin
@@ -95,22 +103,50 @@ export async function POST(request: NextRequest) {
       return invalidInput({ phoneNumber: phoneValidation.error });
     }
 
+    let registrationResult: Awaited<ReturnType<typeof loadRegistrationState>>;
     try {
-      const { data: updatedBusiness, error: updateError } = await supabaseAdmin
+      registrationResult = await loadRegistrationState(businessId, ownerId);
+    } catch {
+      console.error(
+        `[settings:business-info] Failed to load registration state for business ${businessId}`
+      );
+      return registrationStateUnavailableResponse();
+    }
+
+    const { data: registrationState, error: registrationStateError } =
+      registrationResult;
+    if (registrationStateError || !registrationState) {
+      console.error(
+        `[settings:business-info] Failed to load registration state for business ${businessId}`
+      );
+      return registrationStateUnavailableResponse();
+    }
+    if (
+      hasCarrierRejection(
+        registrationState.brand_status,
+        registrationState.campaign_status
+      )
+    ) {
+      return settingsRegistrationLockedResponse(
+        BUSINESS_CONTACT_PHONE_LOCK_COPY
+      );
+    }
+
+    let updateResult:
+      | { data: { id: string } | null; error: unknown }
+      | undefined;
+    try {
+      let updateQuery = supabaseAdmin
         .from("businesses")
         .update({ phone_number: phoneValidation.payload })
         .eq("id", businessId)
         .eq("owner_id", ownerId)
-        .is("deleted_at", null)
-        .select("id")
-        .maybeSingle<{ id: string }>();
-
-      if (updateError || !updatedBusiness) {
-        console.error(
-          `[settings:business-info] Failed to update contact phone for business ${businessId}`
-        );
-        return saveFailedResponse();
-      }
+        .is("deleted_at", null);
+      updateQuery = applyRegistrationStateSnapshot(
+        updateQuery,
+        registrationState
+      );
+      updateResult = await updateQuery.select("id").maybeSingle<{ id: string }>();
     } catch {
       console.error(
         `[settings:business-info] Failed to update contact phone for business ${businessId}`
@@ -118,7 +154,42 @@ export async function POST(request: NextRequest) {
       return saveFailedResponse();
     }
 
-    return NextResponse.json({ success: true });
+    if (updateResult.error) {
+      console.error(
+        `[settings:business-info] Failed to update contact phone for business ${businessId}`
+      );
+      return saveFailedResponse();
+    }
+    if (updateResult.data) return NextResponse.json({ success: true });
+
+    let currentResult: Awaited<ReturnType<typeof loadRegistrationState>>;
+    try {
+      currentResult = await loadRegistrationState(businessId, ownerId);
+    } catch {
+      console.error(
+        `[settings:business-info] Failed to reload registration state for business ${businessId}`
+      );
+      return registrationStateUnavailableResponse();
+    }
+
+    if (currentResult.error || !currentResult.data) {
+      console.error(
+        `[settings:business-info] Failed to reload registration state for business ${businessId}`
+      );
+      return registrationStateUnavailableResponse();
+    }
+    if (
+      hasCarrierRejection(
+        currentResult.data.brand_status,
+        currentResult.data.campaign_status
+      )
+    ) {
+      return settingsRegistrationLockedResponse(
+        BUSINESS_CONTACT_PHONE_LOCK_COPY
+      );
+    }
+
+    return settingsStateChangedResponse();
   }
 
   const validation = validateBusinessInfoSettings(

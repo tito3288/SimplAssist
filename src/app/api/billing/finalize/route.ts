@@ -5,6 +5,10 @@ import { syncCheckoutSession } from "@/lib/stripe/subscriptionSync";
 import { finalizePaidCheckout } from "@/lib/billing/finalizePaidCheckout.server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
 import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
+import {
   partnerManagedBillingMessage,
   resolveAssignedPartnerName,
 } from "@/lib/billing/partnerManagedBilling.server";
@@ -15,6 +19,8 @@ type FinalizeBusinessRow = {
   id: string;
   partner_id: string | null;
   billing_mode: BillingMode;
+  brand_status: string | null;
+  campaign_status: string | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -28,7 +34,7 @@ export async function POST(request: NextRequest) {
   // Session, even if one was created before the assignment changed.
   const { data: initialBusiness } = await supabase
     .from("businesses")
-    .select("id, partner_id, billing_mode")
+    .select("id, partner_id, billing_mode, brand_status, campaign_status")
     .eq("id", workspace.access.business.id)
     .eq("owner_id", workspace.access.user.id)
     .single<FinalizeBusinessRow>();
@@ -78,7 +84,7 @@ export async function POST(request: NextRequest) {
   // launch. Migration 044's guarded sync RPC remains the final race defense.
   const { data: business } = await supabase
     .from("businesses")
-    .select("id, partner_id, billing_mode")
+    .select("id, partner_id, billing_mode, brand_status, campaign_status")
     .eq("id", businessId)
     .eq("owner_id", workspace.access.user.id)
     .single<FinalizeBusinessRow>();
@@ -102,6 +108,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (
+    synced.plan !== "chat_only" &&
+    hasCarrierRejection(business.brand_status, business.campaign_status)
+  ) {
+    return rejectionSupportResponse(businessId);
+  }
+
   const launch = await finalizePaidCheckout(synced, "stripe_finalize");
   const state = await getOnboardingStateForBusinessId(businessId);
 
@@ -116,7 +129,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, inProgress: true, state });
   }
 
-  const status = launch.status === "billing_required" ? 402 : 400;
+  const status =
+    launch.status === "billing_required"
+      ? 402
+      : launch.status === "rejection_support_required"
+        ? 409
+        : 400;
   return NextResponse.json(
     {
       error: launch.message,
@@ -124,6 +142,18 @@ export async function POST(request: NextRequest) {
       state,
     },
     { status },
+  );
+}
+
+async function rejectionSupportResponse(businessId: string) {
+  const state = await getOnboardingStateForBusinessId(businessId);
+  return NextResponse.json(
+    {
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+      state,
+    },
+    { status: 409 },
   );
 }
 

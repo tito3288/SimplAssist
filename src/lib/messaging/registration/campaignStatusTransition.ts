@@ -3,9 +3,10 @@ import type {
   OnboardingRegistrationStatus,
   RegistrationStatus,
 } from "@/types/database";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const DEFAULT_CAMPAIGN_REJECTION_ERROR =
-  "Your SMS campaign was rejected by the carrier. Retry to resubmit.";
+  REJECTION_SUPPORT_MESSAGE;
 const ASSIGNABLE_RESOURCE_STATES = new Set(["provisioning", "active"]);
 const ASSIGNMENT_INTENT_LEASE_MS = 60_000;
 

@@ -4,6 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
 import { normalizeUsStateCode } from "@/lib/usStates";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
+import {
+  applyRegistrationStateSnapshot,
+  type SettingsRegistrationState,
+} from "@/lib/settings/registrationLock.server";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const REGISTRATION_LOCKED_MESSAGE =
@@ -11,6 +19,9 @@ const REGISTRATION_LOCKED_MESSAGE =
 
 const EIN_ALREADY_CONNECTED_MESSAGE =
   "This EIN is already connected to a SimplAssist account. Sign in to the original account or contact SimplAssist Support for help.";
+
+const REGISTRATION_STATE_CHANGED_MESSAGE =
+  "Registration state changed while saving. Refresh the page and try again.";
 
 function canonicalizeEin(value: string): string {
   const digits = value.replace(/\D/g, "");
@@ -24,6 +35,63 @@ function einAlreadyConnectedResponse() {
       code: "ein_already_connected",
     },
     { status: 409 }
+  );
+}
+
+function rejectionSupportResponse() {
+  return NextResponse.json(
+    {
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    },
+    { status: 409 },
+  );
+}
+
+function registrationStateOf(
+  business: SettingsRegistrationState,
+): SettingsRegistrationState {
+  return {
+    telnyx_brand_id: business.telnyx_brand_id,
+    brand_status: business.brand_status,
+    campaign_status: business.campaign_status,
+    onboarding_registration_status: business.onboarding_registration_status,
+  };
+}
+
+async function registrationSnapshotMissResponse(args: {
+  businessId: string;
+  ownerId: string;
+  fallbackError: string;
+}) {
+  const { data: current, error } = await supabaseAdmin
+    .from("businesses")
+    .select(
+      "id, telnyx_brand_id, brand_status, campaign_status, onboarding_registration_status",
+    )
+    .eq("id", args.businessId)
+    .eq("owner_id", args.ownerId)
+    .is("deleted_at", null)
+    .maybeSingle<SettingsRegistrationState & { id: string }>();
+
+  if (error || !current) {
+    return NextResponse.json({ error: args.fallbackError }, { status: 500 });
+  }
+  if (hasCarrierRejection(current.brand_status, current.campaign_status)) {
+    return rejectionSupportResponse();
+  }
+  if (
+    registrationHasStartedForRisk(current) &&
+    current.onboarding_registration_status !== "failed"
+  ) {
+    return NextResponse.json({ error: REGISTRATION_LOCKED_MESSAGE }, { status: 409 });
+  }
+  return NextResponse.json(
+    {
+      error: REGISTRATION_STATE_CHANGED_MESSAGE,
+      code: "registration_state_changed",
+    },
+    { status: 409 },
   );
 }
 
@@ -115,10 +183,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Rejected registrations are support-only. This fresh read closes stale-tab
+  // edits before any service-role lookup or write can drift the saved identity
+  // from the carrier submission staff must review.
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    return rejectionSupportResponse();
+  }
+
   // Legal identity is frozen while a submitted registration awaits carrier
   // review — the Telnyx brand can't be updated, so edits would only drift the
-  // DB from the filed brand. The 'failed' state stays editable: fixing data
-  // before a retry is the designed recovery path.
+  // DB from the filed brand.
   if (
     registrationHasStartedForRisk(business) &&
     business.onboarding_registration_status !== "failed"
@@ -131,7 +205,7 @@ export async function POST(request: NextRequest) {
 
   const now = new Date().toISOString();
   if (data.has_ein === false) {
-    const { data: updatedBusiness, error: updateError } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from("businesses")
       .update({
         has_ein: false,
@@ -143,7 +217,12 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", data.businessId)
       .eq("owner_id", user.id)
-      .is("deleted_at", null)
+      .is("deleted_at", null);
+    updateQuery = applyRegistrationStateSnapshot(
+      updateQuery,
+      registrationStateOf(business),
+    );
+    const { data: updatedBusiness, error: updateError } = await updateQuery
       .select("id")
       .maybeSingle();
 
@@ -153,10 +232,14 @@ export async function POST(request: NextRequest) {
       console.error(
         "[onboarding:brand-verification] Failed to save No-EIN hold"
       );
-      return NextResponse.json(
-        { error: "Failed to save EIN status" },
-        { status: 500 }
-      );
+      if (!updateError) {
+        return registrationSnapshotMissResponse({
+          businessId: data.businessId,
+          ownerId: user.id,
+          fallbackError: "Failed to save EIN status",
+        });
+      }
+      return NextResponse.json({ error: "Failed to save EIN status" }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -211,7 +294,7 @@ export async function POST(request: NextRequest) {
     return einAlreadyConnectedResponse();
   }
 
-  const { data: updatedBusiness, error: updateError } = await supabaseAdmin
+  let updateQuery = supabaseAdmin
     .from("businesses")
     .update({
       has_ein: true,
@@ -231,7 +314,12 @@ export async function POST(request: NextRequest) {
     })
     .eq("id", data.businessId)
     .eq("owner_id", user.id)
-    .is("deleted_at", null)
+    .is("deleted_at", null);
+  updateQuery = applyRegistrationStateSnapshot(
+    updateQuery,
+    registrationStateOf(business),
+  );
+  const { data: updatedBusiness, error: updateError } = await updateQuery
     .select("id")
     .maybeSingle();
 
@@ -252,15 +340,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (!updatedBusiness) {
-    // The business was deleted or changed owners after the initial ownership
-    // read. The conditional write changed nothing, so fail closed.
+    // Ownership, deletion, or registration state changed after the initial
+    // read. Re-read so a carrier rejection gets its stable support response.
     console.error(
-      "[onboarding:brand-verification] Legal-field write matched no active business"
+      "[onboarding:brand-verification] Legal-field write missed its state snapshot"
     );
-    return NextResponse.json(
-      { error: "Failed to save business verification info" },
-      { status: 500 }
-    );
+    return registrationSnapshotMissResponse({
+      businessId: data.businessId,
+      ownerId: user.id,
+      fallbackError: "Failed to save business verification info",
+    });
   }
 
   return NextResponse.json({ success: true });

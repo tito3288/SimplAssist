@@ -25,6 +25,7 @@ const REQUIRED_ROUTES: RouteInventory[] = [
   { path: "./messaging/numbers/search/route.ts", methods: ["GET"] },
   { path: "./messaging/send/route.ts", methods: ["POST"] },
   { path: "./onboarding/brand-verification/route.ts", methods: ["POST"] },
+  { path: "./onboarding/business-info/route.ts", methods: ["POST"] },
   { path: "./onboarding/refresh-status/route.ts", methods: ["POST"] },
   { path: "./onboarding/retry-registration/route.ts", methods: ["POST"] },
   { path: "./onboarding/sms-use-case/route.ts", methods: ["POST"] },

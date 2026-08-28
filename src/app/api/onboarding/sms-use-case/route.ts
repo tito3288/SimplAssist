@@ -23,6 +23,14 @@ import {
   type A2pRiskReviewResult,
 } from "@/lib/messaging/registration/riskScreening";
 import { validateCustomerCareCopy } from "@/lib/messaging/registration/customerCareTemplates";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
+import {
+  applyRegistrationStateSnapshot,
+  type SettingsRegistrationState,
+} from "@/lib/settings/registrationLock.server";
 import type { A2pRiskChecklistAnswer } from "@/types/database";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
@@ -31,6 +39,9 @@ const PREFLIGHT_FAILURE_MESSAGE =
 
 const REGISTRATION_LOCKED_MESSAGE =
   "Your registration is in carrier review — these details are locked until review completes.";
+
+const REGISTRATION_STATE_CHANGED_MESSAGE =
+  "Registration state changed while saving. Refresh the page and try again.";
 
 const PLACEHOLDER_PATTERN = /\[.+?\]/;
 const STOP_PATTERN = /\bstop\b/i;
@@ -52,16 +63,69 @@ type SmsUseCaseBusinessRow = {
   authorized_rep_title: string | null;
   authorized_rep_email: string | null;
   authorized_rep_phone: string | null;
-  telnyx_brand_id: string | null;
-  brand_status: string | null;
-  campaign_status: string | null;
-  onboarding_registration_status:
-    | "not_started"
-    | "submitting"
-    | "failed"
-    | "submitted"
-    | null;
-};
+} & SettingsRegistrationState;
+
+function rejectionSupportResponse() {
+  return NextResponse.json(
+    {
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    },
+    { status: 409 }
+  );
+}
+
+function registrationStateOf(
+  business: SettingsRegistrationState
+): SettingsRegistrationState {
+  return {
+    telnyx_brand_id: business.telnyx_brand_id,
+    brand_status: business.brand_status,
+    campaign_status: business.campaign_status,
+    onboarding_registration_status: business.onboarding_registration_status,
+  };
+}
+
+async function registrationSnapshotMissResponse(args: {
+  businessId: string;
+  ownerId: string;
+}) {
+  const { data: current, error } = await supabaseAdmin
+    .from("businesses")
+    .select(
+      "id, telnyx_brand_id, brand_status, campaign_status, onboarding_registration_status"
+    )
+    .eq("id", args.businessId)
+    .eq("owner_id", args.ownerId)
+    .is("deleted_at", null)
+    .maybeSingle<SettingsRegistrationState & { id: string }>();
+
+  if (error || !current) {
+    return NextResponse.json(
+      { error: "Failed to save SMS use case details" },
+      { status: 500 }
+    );
+  }
+  if (hasCarrierRejection(current.brand_status, current.campaign_status)) {
+    return rejectionSupportResponse();
+  }
+  if (
+    registrationHasStartedForRisk(current) &&
+    current.onboarding_registration_status !== "failed"
+  ) {
+    return NextResponse.json(
+      { error: REGISTRATION_LOCKED_MESSAGE },
+      { status: 409 }
+    );
+  }
+  return NextResponse.json(
+    {
+      error: REGISTRATION_STATE_CHANGED_MESSAGE,
+      code: "registration_state_changed",
+    },
+    { status: 409 }
+  );
+}
 
 const smsUseCaseSchema = z
   .object({
@@ -188,10 +252,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Rejected registrations are support-only. Stop stale form submissions
+  // before slug generation, risk screening, audit writes, or business writes.
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    return rejectionSupportResponse();
+  }
+
   // Compliance content feeds the submitted Telnyx campaign, which can't be
   // updated mid-review — edits would only drift the DB from the filed
-  // registration. The 'failed' state stays editable: fixing data before a
-  // retry is the designed recovery path.
+  // registration.
   if (
     registrationHasStartedForRisk(business) &&
     business.onboarding_registration_status !== "failed"
@@ -324,7 +393,7 @@ export async function POST(request: NextRequest) {
     : {};
 
   if (!riskCleared) {
-    const { error: draftError } = await supabaseAdmin
+    let draftQuery = supabaseAdmin
       .from("businesses")
       .update({
         ...editablePayload,
@@ -332,7 +401,16 @@ export async function POST(request: NextRequest) {
         compliance_info_completed_at: null,
         onboarding_step: "sms_use_case" as const,
       })
-      .eq("id", data.businessId);
+      .eq("id", data.businessId)
+      .eq("owner_id", user.id)
+      .is("deleted_at", null);
+    draftQuery = applyRegistrationStateSnapshot(
+      draftQuery,
+      registrationStateOf(business)
+    );
+    const { data: updatedDraft, error: draftError } = await draftQuery
+      .select("id")
+      .maybeSingle();
 
     if (draftError) {
       console.error(
@@ -344,6 +422,12 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+    if (!updatedDraft) {
+      return registrationSnapshotMissResponse({
+        businessId: data.businessId,
+        ownerId: user.id,
+      });
+    }
 
     return NextResponse.json({
       success: false,
@@ -352,7 +436,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (isFirstSubmit) {
-    const { data: updated, error: updateError } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from("businesses")
       .update({
         ...editablePayload,
@@ -362,8 +446,16 @@ export async function POST(request: NextRequest) {
         onboarding_step: "phone_number" as const,
       })
       .eq("id", data.businessId)
-      .is("compliance_info_completed_at", null)
-      .select("id");
+      .eq("owner_id", user.id)
+      .is("deleted_at", null)
+      .is("compliance_info_completed_at", null);
+    updateQuery = applyRegistrationStateSnapshot(
+      updateQuery,
+      registrationStateOf(business)
+    );
+    const { data: updated, error: updateError } = await updateQuery
+      .select("id")
+      .maybeSingle();
 
     if (updateError) {
       console.error(
@@ -376,11 +468,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!updated || updated.length === 0) {
-      return NextResponse.json({ success: true, riskReview: riskResult });
+    if (!updated) {
+      return registrationSnapshotMissResponse({
+        businessId: data.businessId,
+        ownerId: user.id,
+      });
     }
   } else {
-    const { error: updateError } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from("businesses")
       .update({
         ...editablePayload,
@@ -388,7 +483,16 @@ export async function POST(request: NextRequest) {
         compliance_info_completed_at: business.compliance_info_completed_at ?? now,
         onboarding_step: "phone_number" as const,
       })
-      .eq("id", data.businessId);
+      .eq("id", data.businessId)
+      .eq("owner_id", user.id)
+      .is("deleted_at", null);
+    updateQuery = applyRegistrationStateSnapshot(
+      updateQuery,
+      registrationStateOf(business)
+    );
+    const { data: updated, error: updateError } = await updateQuery
+      .select("id")
+      .maybeSingle();
 
     if (updateError) {
       console.error(
@@ -399,6 +503,12 @@ export async function POST(request: NextRequest) {
         { error: "Failed to save SMS use case details" },
         { status: 500 }
       );
+    }
+    if (!updated) {
+      return registrationSnapshotMissResponse({
+        businessId: data.businessId,
+        ownerId: user.id,
+      });
     }
   }
 

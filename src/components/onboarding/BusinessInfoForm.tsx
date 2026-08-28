@@ -4,7 +4,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useCallback, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import type { BusinessType } from '@/types/database';
 import { PulsingDot } from '@/components/ui/pulsing-dot';
 import { normalizeUsStateCode, US_STATES } from '@/lib/usStates';
@@ -46,7 +45,7 @@ const businessInfoSchema = z.object({
   path: ['business_type_other'],
 });
 
-type BusinessInfoData = z.infer<typeof businessInfoSchema>;
+export type BusinessInfoData = z.infer<typeof businessInfoSchema>;
 
 export type ScrapedData = OnboardingScanData;
 
@@ -55,6 +54,44 @@ interface BusinessInfoFormProps {
   initialData?: Partial<BusinessInfoData>;
   onNext: (data: BusinessInfoData, scrapedData: ScrapedData | null) => void;
   richerScanEnabled?: boolean;
+}
+
+type SaveBusinessInfoFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
+const BUSINESS_INFO_SAVE_FALLBACK =
+  'Could not save your business information. Please try again.';
+
+export class BusinessInfoSaveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BusinessInfoSaveError';
+  }
+}
+
+export async function persistOnboardingBusinessInfo(
+  data: BusinessInfoData,
+  timezone: string,
+  fetchBusinessInfo: SaveBusinessInfoFetch = fetch
+): Promise<void> {
+  const response = await fetchBusinessInfo('/api/onboarding/business-info', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...data, timezone }),
+  });
+
+  if (response.ok) return;
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: unknown;
+  };
+  const message =
+    typeof payload.error === 'string' && payload.error.trim()
+      ? payload.error
+      : BUSINESS_INFO_SAVE_FALLBACK;
+  throw new BusinessInfoSaveError(message);
 }
 
 const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
@@ -75,7 +112,6 @@ const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
 ];
 
 export default function BusinessInfoForm({
-  businessId,
   initialData,
   onNext,
   richerScanEnabled = true,
@@ -184,55 +220,17 @@ export default function BusinessInfoForm({
     setSaving(true);
     setSubmitError('');
     try {
-      // Submit-time lock check: business identity feeds the Telnyx brand,
-      // which can't be updated once a registration is awaiting carrier
-      // review. Step routing normally prevents reaching this form in that
-      // state, but a stale open tab bypasses it — re-check fresh state here.
-      // ('failed' stays editable: fixing data before retry is the designed
-      // recovery path. If the check itself fails, proceed — this is a
-      // best-effort client guard.)
-      try {
-        const stateRes = await fetch('/api/onboarding/state', { cache: 'no-store' });
-        const statePayload = (await stateRes.json().catch(() => ({}))) as {
-          state?: { registration?: { status?: string; riskReview?: { registrationStarted?: boolean } } };
-        };
-        const registration = statePayload.state?.registration;
-        if (
-          registration?.riskReview?.registrationStarted &&
-          registration.status !== 'failed'
-        ) {
-          setSubmitError(
-            'Your registration is in carrier review — these details are locked until review completes.'
-          );
-          return;
-        }
-      } catch {
-        // Lock check unavailable; fall through to the normal save path.
-      }
-
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('businesses')
-        .update({
-          name: data.name,
-          business_type: data.business_type,
-          business_type_other: data.business_type === 'other' ? data.business_type_other || null : null,
-          website_url: data.website || null,
-          phone_number: data.phone,
-          email: data.email || null,
-          address: data.address,
-          city: data.city,
-          state: normalizeUsStateCode(data.state),
-          zip: data.zip,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          onboarding_step: 'business_hours',
-          onboarding_last_saved_at: new Date().toISOString(),
-        })
-        .eq('id', businessId);
-      if (error) throw error;
+      await persistOnboardingBusinessInfo(
+        data,
+        Intl.DateTimeFormat().resolvedOptions().timeZone
+      );
       onNext(data, scrapedData);
-    } catch {
-      setSubmitError('Could not save your business information. Please try again.');
+    } catch (error) {
+      setSubmitError(
+        error instanceof BusinessInfoSaveError
+          ? error.message
+          : BUSINESS_INFO_SAVE_FALLBACK
+      );
     } finally {
       setSaving(false);
     }

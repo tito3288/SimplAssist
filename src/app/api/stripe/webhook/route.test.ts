@@ -396,6 +396,40 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
+  it("acknowledges a support-only carrier rejection and marks the event processed", async () => {
+    const checkoutEvent = event("checkout.session.completed", {
+      id: "cs_test_carrier_rejected",
+    });
+    mocks.constructEvent.mockReturnValue(checkoutEvent);
+    mocks.syncCheckoutSession.mockResolvedValue({
+      businessId: BUSINESS_ID,
+      customerId: CUSTOMER_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      plan: "sms_only",
+    });
+    mocks.finalizePaidCheckout.mockResolvedValue({
+      status: "rejection_support_required",
+      message: "Contact support.",
+    });
+
+    const response = await stripeWebhook(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      code: "rejection_support_required",
+    });
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed_at: expect.any(String),
+        processing_error: null,
+      }),
+    );
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ processing_error: expect.any(String) }),
+    );
+  });
+
   it("keeps Checkout synchronization ahead of a suspended provisioning no-op", async () => {
     const checkoutEvent = event("checkout.session.completed", {
       id: "cs_test_suspended_operations",

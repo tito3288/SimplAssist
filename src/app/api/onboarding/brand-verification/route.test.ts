@@ -27,6 +27,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST as saveBrandVerification } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const USER_ID = "00000000-0000-4000-8000-000000000010";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000020";
@@ -200,6 +201,36 @@ describe("POST /api/onboarding/brand-verification", () => {
     expect(mocks.adminFrom).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "locks a stale %s rejection before EIN checks or writes",
+    async (_label, statuses) => {
+      mocks.createClient.mockResolvedValue(
+        userClient({
+          business: ownedBusiness({
+            ...statuses,
+            onboarding_registration_status: "failed",
+          }),
+        }),
+      );
+
+      const response = await saveBrandVerification(request(einBody()));
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      });
+      expect(mocks.registrationHasStartedForRisk).not.toHaveBeenCalled();
+      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(mocks.precheck).not.toHaveBeenCalled();
+      expect(mocks.commitUpdate).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns the safe conflict response without updating when another business has the EIN", async () => {
     mocks.precheck.mockResolvedValue({
       data: { id: OTHER_BUSINESS_ID },
@@ -232,8 +263,47 @@ describe("POST /api/onboarding/brand-verification", () => {
     );
     expect(adminChains[1].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
     expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[1].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
     expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("campaign_status", null);
     expect(adminChains[1].select).toHaveBeenCalledWith("id");
+  });
+
+  it("maps a rejection between the EIN read and guarded write to support-only", async () => {
+    mocks.precheck
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: ownedBusiness({
+          telnyx_brand_id: "brand-1",
+          brand_status: "approved",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        }),
+        error: null,
+      });
+    mocks.commitUpdate.mockResolvedValue({ data: null, error: null });
+
+    const response = await saveBrandVerification(request(einBody()));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    });
+    expect(adminChains[1].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[1].is).toHaveBeenCalledWith("campaign_status", null);
+    expect(adminChains[1].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
+    expect(adminChains[2].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[2].is).toHaveBeenCalledWith("deleted_at", null);
   });
 
   it("maps a uniqueness race to the same safe 409 response", async () => {
@@ -311,8 +381,47 @@ describe("POST /api/onboarding/brand-verification", () => {
     );
     expect(adminChains[0].eq).toHaveBeenCalledWith("id", BUSINESS_ID);
     expect(adminChains[0].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[0].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
     expect(adminChains[0].is).toHaveBeenCalledWith("deleted_at", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
     expect(adminChains[0].select).toHaveBeenCalledWith("id");
+  });
+
+  it("maps a rejection between the No-EIN read and guarded write to support-only", async () => {
+    mocks.commitUpdate.mockResolvedValue({ data: null, error: null });
+    mocks.precheck.mockResolvedValueOnce({
+      data: ownedBusiness({
+        telnyx_brand_id: "brand-1",
+        brand_status: "rejected",
+        campaign_status: null,
+        onboarding_registration_status: "failed",
+      }),
+      error: null,
+    });
+
+    const response = await saveBrandVerification(
+      request({ businessId: BUSINESS_ID, has_ein: false }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+    });
+    expect(adminChains[0].is).toHaveBeenCalledWith("telnyx_brand_id", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("brand_status", null);
+    expect(adminChains[0].is).toHaveBeenCalledWith("campaign_status", null);
+    expect(adminChains[0].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "not_started",
+    );
+    expect(adminChains[1].eq).toHaveBeenCalledWith("owner_id", USER_ID);
+    expect(adminChains[1].is).toHaveBeenCalledWith("deleted_at", null);
   });
 
   it("fails closed when the No-EIN write loses ownership or is deleted after the ownership read", async () => {

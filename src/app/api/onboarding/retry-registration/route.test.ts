@@ -26,6 +26,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS_ID = "0b7f6f3e-8b1a-4a6c-9a56-0d6d6f6a1c2e";
 const STATE = { currentStep: "carrier_review" };
@@ -142,9 +143,10 @@ describe("POST /api/onboarding/retry-registration rejection guard", () => {
       const response = await POST(request());
 
       expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
+      expect(await response.json()).toEqual({
         code: "rejection_support_required",
-        error: expect.stringContaining("contact support"),
+        error: REJECTION_SUPPORT_MESSAGE,
+        state: STATE,
       });
       expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
     }
@@ -164,6 +166,23 @@ describe("POST /api/onboarding/retry-registration rejection guard", () => {
       BUSINESS_ID,
       "onboarding_retry"
     );
+  });
+
+  it("maps a launch-time rejection race to the support-required conflict", async () => {
+    queueResults({ data: business(), error: null });
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+      state: STATE,
+    });
   });
 
   it.each(NEUTRAL_LAUNCH_ERRORS)(

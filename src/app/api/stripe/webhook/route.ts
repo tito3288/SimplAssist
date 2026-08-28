@@ -60,7 +60,8 @@ export async function POST(request: NextRequest) {
     await markStripeEventProcessed(event.id);
     return NextResponse.json({
       received: true,
-      ...(launch?.status === "services_faqs_required"
+      ...(launch?.status === "services_faqs_required" ||
+      launch?.status === "rejection_support_required"
         ? { code: launch.status }
         : {}),
     });

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { attemptPaidLaunch } from "@/lib/billing/launch";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const MISSING_COMPLIANCE_MESSAGE =
@@ -26,7 +30,9 @@ export async function POST() {
 
   const { data: business, error: businessError } = await supabase
     .from("businesses")
-    .select("id, compliance_info_completed_at")
+    .select(
+      "id, compliance_info_completed_at, brand_status, campaign_status",
+    )
     .eq("owner_id", user.id)
     .single();
 
@@ -34,6 +40,18 @@ export async function POST() {
     return NextResponse.json(
       { error: "Business not found" },
       { status: 404 }
+    );
+  }
+
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    const state = await getOnboardingStateForBusinessId(business.id);
+    return NextResponse.json(
+      {
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+        state,
+      },
+      { status: 409 },
     );
   }
 
@@ -54,7 +72,9 @@ export async function POST() {
   }
 
   const code =
-    launch.status === "services_faqs_required"
+    launch.status === "rejection_support_required"
+      ? "rejection_support_required"
+      : launch.status === "services_faqs_required"
       ? "services_faqs_required"
       : launch.status === "held_no_ein"
       ? "held_no_ein"
@@ -74,6 +94,13 @@ export async function POST() {
 
   return NextResponse.json(
     { error: launch.message || REGISTRATION_FAILURE_MESSAGE, code, state },
-    { status: code === "billing_required" ? 402 : 400 }
+    {
+      status:
+        code === "billing_required"
+          ? 402
+          : code === "rejection_support_required"
+            ? 409
+            : 400,
+    }
   );
 }

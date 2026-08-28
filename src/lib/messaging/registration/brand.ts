@@ -11,6 +11,7 @@ import {
   preauthorizeTelnyxBrandDeletion,
   TelnyxRemoteMutationAuthorizationError,
 } from "@/lib/messaging/telnyxDestructive";
+import { throwIfCarrierRejected } from "@/lib/onboarding/rejectionGuidance";
 
 // Subset of the Telnyx `Vertical` enum we map to. Sourced from
 // node_modules/telnyx/resources/messaging-10dlc/brand/brand.d.ts (line 417).
@@ -109,22 +110,20 @@ function toE164(raw: string | null): string | undefined {
 }
 
 /**
- * Retry recovery for a carrier-rejected brand: preserve the rejected brand's
- * ID and rejection details in rejected_brands, archive the child campaign
- * whatever state it is in (it is bound to the dead brand at TCR, so the
- * replacement brand cannot adopt it), delete the brand at Telnyx best-effort
- * (provider failure is recorded for manual cleanup and does not block the
- * retry), then
- * clear businesses.telnyx_brand_id so registerBrand creates a replacement.
+ * Dormant staff-recovery primitive for a carrier-rejected brand. It preserves
+ * the rejected brand's ID and details in rejected_brands, archives the child
+ * campaign, deletes the brand at Telnyx best-effort, and clears the local
+ * pointer so an explicitly authorized workflow could create a replacement.
+ * Customer launch/retry paths must never call this helper.
  * The messaging profile and voice application are untouched — neither
  * references the brand.
  * A typed safety-boundary denial aborts recovery and preserves local provider
  * pointers; it is never downgraded to a best-effort provider failure.
  *
  * No-op unless brand_status is 'rejected' with a brand ID present. Safe to
- * re-run after a partial failure: the history row is reused, the campaign
- * cascade no-ops once its pointer is cleared, and an already-deleted brand
- * is not re-deleted.
+ * re-run after a partial staff operation: the history row is reused, the
+ * campaign cascade no-ops once its pointer is cleared, and an already-deleted
+ * brand is not re-deleted.
  */
 export async function archiveAndClearRejectedBrand(
   businessId: string
@@ -268,7 +267,7 @@ export async function registerBrand(businessId: string): Promise<void> {
   const { data: business, error: readError } = await supabaseAdmin
     .from("businesses")
     .select(
-      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url"
+      "id, name, slug, legal_business_name, business_entity_type, business_type, has_ein, ein, compliance_info_completed_at, telnyx_brand_id, authorized_rep_name, authorized_rep_email, authorized_rep_phone, address, city, state, zip, website_url, brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason"
     )
     .eq("id", businessId)
     .single();
@@ -278,6 +277,16 @@ export async function registerBrand(businessId: string): Promise<void> {
       `[registration:brand] Business ${businessId} not found: ${readError?.message}`
     );
   }
+
+  // Existing provider IDs used to return before the create-boundary refresh.
+  // Check the same fresh row first so a retry claimed from a webhook's
+  // `failed` state cannot silently reuse a rejected resource.
+  throwIfCarrierRejected({
+    brandStatus: business.brand_status,
+    campaignStatus: business.campaign_status,
+    brandReason: business.brand_rejection_reason,
+    campaignReason: business.campaign_rejection_reason,
+  });
 
   if (business.telnyx_brand_id) {
     return;
@@ -351,6 +360,11 @@ export async function registerBrand(businessId: string): Promise<void> {
       : buildBusinessLandingUrl(business.slug);
 
   try {
+    // Re-read carrier state at the charged mutation boundary. A rejection
+    // webhook can land after paid launch's initial read; never let that stale
+    // snapshot create another paid brand.
+    await assertNoCarrierRejectionBeforeBrandCreate(businessId);
+
     const response = await telnyx.messaging10dlc.brand.create(
       {
         country: "US",
@@ -428,4 +442,34 @@ export async function registerBrand(businessId: string): Promise<void> {
     });
     throw err;
   }
+}
+
+async function assertNoCarrierRejectionBeforeBrandCreate(
+  businessId: string
+): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("businesses")
+    .select(
+      "brand_status, campaign_status, brand_rejection_reason, campaign_rejection_reason"
+    )
+    .eq("id", businessId)
+    .single<{
+      brand_status: string | null;
+      campaign_status: string | null;
+      brand_rejection_reason: string | null;
+      campaign_rejection_reason: string | null;
+    }>();
+
+  if (error || !data) {
+    throw new Error(
+      `[registration:brand] Failed to refresh carrier status before brand creation for ${businessId}: ${error?.message ?? "business not found"}`
+    );
+  }
+
+  throwIfCarrierRejected({
+    brandStatus: data.brand_status,
+    campaignStatus: data.campaign_status,
+    brandReason: data.brand_rejection_reason,
+    campaignReason: data.campaign_rejection_reason,
+  });
 }

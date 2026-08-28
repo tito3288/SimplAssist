@@ -106,7 +106,7 @@ describe("registration-status business branding", () => {
     expect(sentMessage().message.html).toContain("Bryan&#39;s Plumbing");
   });
 
-  it("uses the partner login origin for rejected brand recovery", async () => {
+  it("routes rejected brands to the branded registration-support form", async () => {
     await sendBrandRejectedEmail({
       businessId: BUSINESS_ID,
       businessName: "Acme Plumbing",
@@ -116,15 +116,19 @@ describe("registration-status business branding", () => {
 
     const { message } = sentMessage();
     expect(message.subject).toBe(
-      "We need to update your Alpha Dog Agency business registration",
+      "Your Alpha Dog Agency business registration needs support",
     );
     expect(message.text).toContain(
-      "Log in to Alpha Dog Agency at https://app.alphadogagency.ai/login",
+      "https://app.alphadogagency.ai/support?category=number_registration",
+    );
+    expect(message.html).toContain(
+      'href="https://app.alphadogagency.ai/support?category=number_registration"',
     );
     expect(message.text).toContain("Reason from the carrier: EIN mismatch");
+    expect(message.text).not.toMatch(/fix & resubmit|resubmit|re-file/i);
   });
 
-  it("uses the partner dashboard origin for campaign approval and rejection", async () => {
+  it("uses the partner origin for campaign approval and rejection support", async () => {
     const input = {
       businessId: BUSINESS_ID,
       businessName: "Acme Plumbing",
@@ -142,13 +146,23 @@ describe("registration-status business branding", () => {
     vi.clearAllMocks();
     mocks.resolveBusinessEmailBrand.mockResolvedValue(PARTNER_BRAND);
     mocks.sendBusinessEmail.mockResolvedValue(undefined);
-    await sendCampaignRejectedEmail({ ...input, rejectionReason: null });
+    await sendCampaignRejectedEmail({
+      ...input,
+      rejectionReason: "Sample message was rejected",
+    });
     expect(sentMessage().message.subject).toBe(
-      "We need to update your Alpha Dog Agency SMS campaign",
+      "Your Alpha Dog Agency SMS campaign needs support",
     );
     expect(sentMessage().message.text).toContain(
-      "https://app.alphadogagency.ai/dashboard",
+      "https://app.alphadogagency.ai/support?category=number_registration",
     );
+    expect(sentMessage().message.html).toContain(
+      'href="https://app.alphadogagency.ai/support?category=number_registration"',
+    );
+    expect(sentMessage().message.text).toContain(
+      "Reason from the carrier: Sample message was rejected",
+    );
+    expect(sentMessage().message.text).not.toMatch(/resubmit|dashboard/i);
   });
 
   it("preserves the existing SimplAssist subject under the default brand", async () => {

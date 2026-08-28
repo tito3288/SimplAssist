@@ -1,5 +1,6 @@
 import { resolveBusinessEmailBrand } from "./businessEmailBrand.server";
 import { sendBusinessEmail } from "./sender";
+import { supportHref } from "@/lib/support/constants";
 
 interface ApprovedInput {
   businessId: string;
@@ -27,8 +28,23 @@ export function dedupeRecipients(
   return Array.from(seen);
 }
 
-function htmlFromParagraphs(paragraphs: string[]): string {
-  return paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+function htmlFromParagraphs(
+  paragraphs: string[],
+  linkUrls: string[] = [],
+): string {
+  return paragraphs
+    .map((paragraph) => {
+      let html = escapeHtml(paragraph);
+      for (const url of linkUrls) {
+        const escapedUrl = escapeHtml(url);
+        html = html.replace(
+          escapedUrl,
+          `<a href="${escapedUrl}">${escapedUrl}</a>`,
+        );
+      }
+      return `<p>${html}</p>`;
+    })
+    .join("");
 }
 
 function escapeHtml(s: string): string {
@@ -46,7 +62,7 @@ async function sendSafe(args: {
   context: string;
   content: (
     brand: Awaited<ReturnType<typeof resolveBusinessEmailBrand>>,
-  ) => { subject: string; paragraphs: string[] };
+  ) => { subject: string; paragraphs: string[]; linkUrls?: string[] };
 }): Promise<void> {
   if (args.to.length === 0) {
     console.warn(
@@ -64,7 +80,7 @@ async function sendSafe(args: {
         to: args.to,
         subject: content.subject,
         text: content.paragraphs.join("\n\n"),
-        html: htmlFromParagraphs(content.paragraphs),
+        html: htmlFromParagraphs(content.paragraphs, content.linkUrls),
       },
     });
   } catch (err) {
@@ -105,17 +121,23 @@ export async function sendBrandRejectedEmail(
     businessId: input.businessId,
     to: input.recipients,
     context: "brand_rejected",
-    content: (brand) => ({
-      subject: `We need to update your ${brand.name} business registration`,
-      paragraphs: [
-        "Hi,",
-        `The carrier review for ${input.businessName} came back without approval.`,
-        reasonLine,
-        `The most common causes are a mismatched legal business name, an incorrect EIN, or a website that doesn't match the registered business. Log in to ${brand.name} at ${new URL("/login", brand.publicOrigin)}, use Fix & resubmit to update your business verification details, and continue through to Review & Submit — we'll re-file your verification with the carrier automatically.`,
-        "If you're not sure what to fix, reply to this email and we'll help.",
-        `— The ${brand.name} Team`,
-      ],
-    }),
+    content: (brand) => {
+      const supportUrl = new URL(
+        supportHref("number_registration"),
+        brand.publicOrigin
+      ).toString();
+      return {
+        subject: `Your ${brand.name} business registration needs support`,
+        paragraphs: [
+          "Hi,",
+          `The carrier review for ${input.businessName} came back without approval.`,
+          reasonLine,
+          `Please contact the ${brand.name} support team at ${supportUrl}. We'll review the existing registration and carrier feedback before taking the next step.`,
+          `— The ${brand.name} Team`,
+        ],
+        linkUrls: [supportUrl],
+      };
+    },
   });
 }
 
@@ -148,17 +170,22 @@ export async function sendCampaignRejectedEmail(
     businessId: input.businessId,
     to: input.recipients,
     context: "campaign_rejected",
-    content: (brand) => ({
-      subject: `We need to update your ${brand.name} SMS campaign`,
-      paragraphs: [
-        "Hi,",
-        `The carrier review for the SMS campaign on ${input.businessName} came back without approval.`,
-        reasonLine,
-        "This usually means the use-case description, opt-in language, or sample messages need adjustment. Common fixes:",
-        "• Make sure your sample messages match what your AI will actually send.\n• Make sure the opt-in description describes how customers consent to texts (e.g. by texting your business or filling out a form).\n• Avoid words that look like they target restricted use cases (lending, gambling, cannabis, etc.).",
-        `You can update these from the ${brand.name} dashboard at ${new URL("/dashboard", brand.publicOrigin)} and resubmit. Reply to this email if you need help.`,
-        `— The ${brand.name} Team`,
-      ],
-    }),
+    content: (brand) => {
+      const supportUrl = new URL(
+        supportHref("number_registration"),
+        brand.publicOrigin
+      ).toString();
+      return {
+        subject: `Your ${brand.name} SMS campaign needs support`,
+        paragraphs: [
+          "Hi,",
+          `The carrier review for the SMS campaign on ${input.businessName} came back without approval.`,
+          reasonLine,
+          `Please contact the ${brand.name} support team at ${supportUrl}. We'll review the existing campaign and carrier feedback before taking the next step.`,
+          `— The ${brand.name} Team`,
+        ],
+        linkUrls: [supportUrl],
+      };
+    },
   });
 }

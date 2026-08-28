@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   buildProviderResourceName: vi.fn(),
   resolveProviderCreateIntent: vi.fn(),
   readProviderCreateIntentForPayload: vi.fn(),
+  assertNoCarrierRejectionForBusiness: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -100,11 +101,19 @@ vi.mock("@/lib/onboarding/registrationAttempt", () => ({
   markRegistrationFailed: mocks.markRegistrationFailed,
   markRegistrationSubmitted: mocks.markRegistrationSubmitted,
 }));
+vi.mock("@/lib/onboarding/rejectionGuard.server", () => ({
+  assertNoCarrierRejectionForBusiness:
+    mocks.assertNoCarrierRejectionForBusiness,
+}));
 vi.mock("@/lib/onboarding/contentQuality.server", () => ({
   getBusinessContentQuality: mocks.getBusinessContentQuality,
 }));
 
 import { attemptPaidLaunch } from "./launch";
+import {
+  CarrierRejectionSupportRequiredError,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import {
   NumberUnavailableError,
   PurchasedNumberResolutionError,
@@ -210,6 +219,7 @@ beforeEach(() => {
     claimedFrom: "not_started",
     startedAt: "2026-07-15T00:00:00.000Z",
   });
+  mocks.assertNoCarrierRejectionForBusiness.mockResolvedValue(undefined);
   for (const fn of [
     mocks.registerBrand,
     mocks.registerCampaign,
@@ -219,13 +229,13 @@ beforeEach(() => {
     mocks.archiveAndClearRejectedCampaign,
     mocks.ensureCampaignAssignmentForBusiness,
     mocks.markRegistrationFailed,
-    mocks.markRegistrationSubmitted,
     mocks.attachOwnedNumberToCustomerProfile,
     mocks.resolveProviderCreateIntent,
     mocks.readProviderCreateIntentForPayload,
   ]) {
     fn.mockResolvedValue(undefined);
   }
+  mocks.markRegistrationSubmitted.mockResolvedValue({ completed: true });
   mocks.findOwnedNumberId.mockResolvedValue(null);
   mocks.rpc.mockResolvedValue({ data: true, error: null });
   mocks.getActiveSmsNumber.mockResolvedValue(PENDING_NUMBER);
@@ -244,6 +254,282 @@ beforeEach(() => {
     numberOrderId: NUMBER_ORDER_ID,
     providerCreateIntentId: "c0000000-0000-4000-8000-00000000b1c1",
     status: "success",
+  });
+});
+
+describe("attemptPaidLaunch carrier rejection guard", () => {
+  it.each([
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "routes a %s rejection to support before any launch side effect",
+    async (_label, statuses) => {
+      queueResults({
+        data: { ...LAUNCH_BUSINESS, ...statuses },
+        error: null,
+      });
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result).toEqual({
+        status: "rejection_support_required",
+        message: REJECTION_SUPPORT_MESSAGE,
+      });
+      // The launch-row read is the only database interaction. In particular,
+      // no billing/registration claim or provider helper is reachable.
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+      for (const sideEffect of [
+        mocks.resolveBusinessOperationalControls,
+        mocks.resolveSmsProvisioningAccess,
+        mocks.claimSmsLaunchPlanFamily,
+        mocks.getBusinessContentQuality,
+        mocks.getA2pRiskClearanceForBusiness,
+        mocks.screenA2pRiskForBusiness,
+        mocks.claimRegistrationAttempt,
+        mocks.prepareExistingTelnyxBrandLinkForLaunch,
+        mocks.archiveAndClearRejectedBrand,
+        mocks.registerBrand,
+        mocks.createMessagingProfile,
+        mocks.createVoiceApplication,
+        mocks.findOwnedNumberId,
+        mocks.attachOwnedNumberToCustomerProfile,
+        mocks.purchaseNumber,
+        mocks.getActiveSmsNumber,
+        mocks.verifyPublishedCompliancePage,
+        mocks.archiveAndClearRejectedCampaign,
+        mocks.registerCampaign,
+        mocks.ensureCampaignAssignmentForBusiness,
+        mocks.markRegistrationFailed,
+        mocks.markRegistrationSubmitted,
+      ]) {
+        expect(sideEffect).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it("keeps a non-rejection technical failure eligible for launch recovery", async () => {
+    queueResults(
+      {
+        data: {
+          ...LAUNCH_BUSINESS,
+          onboarding_registration_status: "failed",
+          brand_status: "pending",
+          campaign_status: null,
+        },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: null, error: null }
+    );
+    mocks.claimRegistrationAttempt.mockResolvedValueOnce({
+      claimed: true,
+      claimedFrom: "failed",
+      startedAt: "2026-07-15T00:00:00.000Z",
+    });
+    mocks.buildProviderResourceName.mockImplementationOnce(() => {
+      throw new Error("provider resource-name invariant failed");
+    });
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result.status).toBe("failed");
+    expect(mocks.claimRegistrationAttempt).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.buildProviderResourceName).toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).toHaveBeenCalled();
+  });
+
+  it("rechecks after claiming a failed row and stops before provider work", async () => {
+    const carrierReason = "Carrier rejected while the retry was being claimed";
+    queueResults(
+      {
+        data: {
+          ...LAUNCH_BUSINESS,
+          onboarding_registration_status: "failed",
+          brand_status: "pending",
+          campaign_status: null,
+        },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: null, error: null },
+      { error: null },
+    );
+    mocks.claimRegistrationAttempt.mockResolvedValueOnce({
+      claimed: true,
+      claimedFrom: "failed",
+      startedAt: "2026-07-15T00:00:00.000Z",
+    });
+    mocks.assertNoCarrierRejectionForBusiness.mockRejectedValueOnce(
+      new CarrierRejectionSupportRequiredError({
+        carrierReason,
+        rejectedResource: "brand",
+      }),
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+    expect(mocks.prepareExistingTelnyxBrandLinkForLaunch).not.toHaveBeenCalled();
+    expect(mocks.registerBrand).not.toHaveBeenCalled();
+    expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+    expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["messaging-profile", 2, 0],
+    ["voice-application", 3, 1],
+  ] as const)(
+    "stops at the %s boundary when rejection lands between provider steps",
+    async (_boundary, clearGuardCount, expectedProfileCalls) => {
+      queueResults(
+        { data: LAUNCH_BUSINESS, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+        { error: null },
+      );
+      for (let index = 0; index < clearGuardCount; index += 1) {
+        mocks.assertNoCarrierRejectionForBusiness.mockResolvedValueOnce(
+          undefined,
+        );
+      }
+      mocks.assertNoCarrierRejectionForBusiness.mockRejectedValueOnce(
+        new CarrierRejectionSupportRequiredError({
+          carrierReason: "Carrier rejected between provider steps",
+          rejectedResource: "brand",
+        }),
+      );
+
+      const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+      expect(result).toEqual({
+        status: "rejection_support_required",
+        message: REJECTION_SUPPORT_MESSAGE,
+      });
+      expect(mocks.registerBrand).toHaveBeenCalledTimes(1);
+      expect(mocks.createMessagingProfile).toHaveBeenCalledTimes(
+        expectedProfileCalls,
+      );
+      expect(mocks.createVoiceApplication).not.toHaveBeenCalled();
+      expect(mocks.purchaseNumber).not.toHaveBeenCalled();
+      expect(mocks.registerCampaign).not.toHaveBeenCalled();
+    },
+  );
+
+  it("maps a campaign-boundary rejection race to support and releases only its claim", async () => {
+    const activeNumber = {
+      id: "phone-row-race",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: TELNYX_NUMBER_ID,
+    };
+    const carrierReason = "Exact carrier reason from the rejection webhook";
+    queueResults(
+      {
+        data: {
+          ...LAUNCH_BUSINESS,
+          brand_status: "approved",
+          campaign_status: null,
+        },
+        error: null,
+      },
+      { data: null, error: null },
+      { data: activeNumber, error: null },
+      { data: activeNumber, error: null },
+      { error: null },
+      { error: null }
+    );
+    mocks.registerCampaign.mockRejectedValueOnce(
+      new CarrierRejectionSupportRequiredError({
+        carrierReason,
+        rejectedResource: "campaign",
+      })
+    );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+    expect(chains[5].update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onboarding_registration_status: "failed",
+        onboarding_registration_error: carrierReason,
+        onboarding_registration_submitted_at: null,
+        onboarding_step: "carrier_review",
+      })
+    );
+    expect(chains[5].eq).toHaveBeenCalledWith(
+      "onboarding_registration_status",
+      "submitting"
+    );
+    expect(chains[5].eq).toHaveBeenCalledWith(
+      "onboarding_registration_started_at",
+      "2026-07-15T00:00:00.000Z"
+    );
+    expect(chains[5].or).toHaveBeenCalledWith(
+      "brand_status.eq.rejected,campaign_status.eq.rejected"
+    );
+    expect(mocks.ensureCampaignAssignmentForBusiness).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationSubmitted).not.toHaveBeenCalled();
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
+  });
+
+  it("maps a rejection that wins exact-claim completion to support", async () => {
+    const activeNumber = {
+      id: "phone-row-completion-race",
+      phone_number: PENDING_NUMBER,
+      telnyx_phone_number_id: TELNYX_NUMBER_ID,
+    };
+    const carrierReason = "Carrier rejected before completion committed";
+    queueResults(
+      { data: LAUNCH_BUSINESS, error: null },
+      { data: null, error: null },
+      { data: activeNumber, error: null },
+      { data: activeNumber, error: null },
+      { error: null },
+      { error: null },
+    );
+    mocks.markRegistrationSubmitted.mockResolvedValueOnce({
+      completed: false,
+      current: {
+        id: BUSINESS_ID,
+        onboarding_registration_status: "failed",
+        onboarding_registration_started_at: "2026-07-15T00:00:00.000Z",
+        onboarding_registration_submitted_at: null,
+        onboarding_registration_error: carrierReason,
+      },
+    });
+    mocks.assertNoCarrierRejectionForBusiness
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new CarrierRejectionSupportRequiredError({
+          carrierReason,
+          rejectedResource: "campaign",
+        }),
+      );
+
+    const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
+
+    expect(result).toEqual({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+    expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "2026-07-15T00:00:00.000Z",
+    );
+    expect(mocks.markRegistrationFailed).not.toHaveBeenCalled();
   });
 });
 
@@ -493,7 +779,10 @@ describe("attemptPaidLaunch number purchase recovery", () => {
         PENDING_NUMBER,
         BUSINESS_ID
       );
-      expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
+      expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(
+        BUSINESS_ID,
+        "2026-07-15T00:00:00.000Z",
+      );
     }
   );
 
@@ -738,11 +1027,6 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     );
     expect(
       mocks.prepareExistingTelnyxBrandLinkForLaunch.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.archiveAndClearRejectedBrand.mock.invocationCallOrder[0]
-    );
-    expect(
-      mocks.archiveAndClearRejectedBrand.mock.invocationCallOrder[0]
     ).toBeLessThan(mocks.registerBrand.mock.invocationCallOrder[0]);
     expect(mocks.registerBrand.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createMessagingProfile.mock.invocationCallOrder[0]
@@ -761,11 +1045,6 @@ describe("attemptPaidLaunch number purchase recovery", () => {
     ).toBeLessThan(mocks.verifyPublishedCompliancePage.mock.invocationCallOrder[0]);
     expect(
       mocks.verifyPublishedCompliancePage.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      mocks.archiveAndClearRejectedCampaign.mock.invocationCallOrder[0]
-    );
-    expect(
-      mocks.archiveAndClearRejectedCampaign.mock.invocationCallOrder[0]
     ).toBeLessThan(mocks.registerCampaign.mock.invocationCallOrder[0]);
     expect(mocks.verifyPublishedCompliancePage).toHaveBeenCalledWith({
       slug: LAUNCH_BUSINESS.slug,
@@ -773,7 +1052,10 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       smsPhoneNumber: PENDING_NUMBER,
       language: "en",
     });
-    expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mocks.markRegistrationSubmitted).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      "2026-07-15T00:00:00.000Z",
+    );
   });
 
   it("fails before every provider mutation when the name preflight fails", async () => {
@@ -1347,7 +1629,7 @@ describe("attemptPaidLaunch number purchase recovery", () => {
       BUSINESS_ID,
       TELNYX_NUMBER_ID
     );
-    expect(mocks.archiveAndClearRejectedCampaign).toHaveBeenCalledTimes(1);
+    expect(mocks.archiveAndClearRejectedCampaign).not.toHaveBeenCalled();
     expect(mocks.registerCampaign).toHaveBeenCalledTimes(1);
   });
 
