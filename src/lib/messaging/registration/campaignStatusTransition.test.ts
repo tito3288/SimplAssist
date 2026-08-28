@@ -227,7 +227,7 @@ describe("applyObservedCampaignStatus", () => {
     );
   });
 
-  it("writes rejection state and makes the onboarding attempt retryable", async () => {
+  it("writes rejection state for support review", async () => {
     const rejectionReason = "Carrier rejected the submitted CTA";
     const snapshot = campaignSnapshot();
     const chain = queueDatabaseResult();

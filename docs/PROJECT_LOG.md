@@ -77,9 +77,9 @@ Migrations 012–024. Canonical phase detail: `docs/a2p-10dlc-roadmap.md`.
   match what was originally screened.
 - **Rejected-campaign history + deactivation** — rejected campaigns archived with
   history and deactivated (migration 024).
-- **Rejection routing + plain-English copy** — carrier rejections route the
-  customer to the exact step that needs fixing, with honest plain-English
-  explanations of fix paths.
+- **Rejection routing + plain-English copy** — originally routed customers to
+  editable steps; superseded by the 2026-08-28 support-only safeguard while
+  retaining plain-English explanations and exact carrier wording.
 - Also in this window: FAQ answers capped at 2000 characters (TCR-safe payloads).
 
 ### Website scan: autofill + risk screening (2026-07)
@@ -123,6 +123,19 @@ before `brand.delete` — Telnyx requires no active campaigns); messaging profil
 and voice app untouched. Self-serve rejection copy (brand rejections no longer
 dead-end at support). Verified by a 43/43 poisoned-payload harness; prod audit
 found zero stuck rows, so no backfill was needed.
+
+This automatic archive-and-refile behavior was superseded on 2026-08-28 by
+the carrier-rejection support-only safeguard below. The history helpers remain
+for potential staff tooling but are no longer part of customer launch/retry.
+
+### Carrier-rejection support-only safeguard (2026-08-28)
+
+Brand and campaign rejections now preserve the carrier's exact reason and show
+Contact Support as the only customer action. Rejected registrations are locked
+against form edits, checkout, retry, and launch; the automatic pipeline no
+longer archives or replaces rejected Telnyx resources. Technical failures with
+no carrier rejection retain Refresh and Retry. Rejection emails link directly
+to the branded registration-support form.
 
 ### Follow-up hardening batch (2026-07-13, PR #7)
 
@@ -187,9 +200,10 @@ delta re-verify.
 - **Fail closed on risk paths.** Risk screening, crawl failures, and outbound
   send-context lookups default to "blocked/failed", never to "assume fine".
   Lookup helpers throw (forcing an outer catch) rather than returning null.
-- **Archive-and-refile for Telnyx rejections.** Rejected brands/campaigns are
-  archived to history tables and their IDs cleared so registration can re-file
-  cleanly; never mutate-and-revet in place.
+- **Preserve carrier-rejected Telnyx resources.** Customer flows stop at
+  support before any edit, archive, delete, retry, checkout, or replacement
+  create. Future provider-specific remediation must explicitly prove that the
+  existing resource can be updated, appealed, or re-vetted.
 - **Explicit GRANTs in every new migration.** New tables get no auto-grants to
   API roles under Supabase's current defaults — migration 025 is the template.
 - **Structural invariants over comments.** Enforce "set once, then frozen" (slug
@@ -244,8 +258,8 @@ Post-launch items:
   `npx supabase test db --local` runs green end-to-end after a clean disposable
   database replay. Preserve the production invariants rather than weakening
   assertions to make the tests pass.
-- Dashboard-side brand-rejection retry button (with pause-warning confirmation —
-  the cascade archives the approved campaign and SMS pauses until re-approval).
+- Staff-only, provider-specific brand/campaign remediation tooling after Telnyx
+  update, appeal, re-vetting eligibility, and fees are validated end to end.
 - `mapBrandStatus` broadening — only `UNVERIFIED` + `REGISTRATION_FAILED` map to
   `rejected` today; unknown failure shapes stay audit-only.
 - Admin worklist surface for the deactivation worklists (no automated consumer).

@@ -63,6 +63,19 @@ describe("isSettingsRegistrationLocked", () => {
       })
     ).toBe(false);
   });
+
+  it.each([
+    { brand_status: "rejected" as const },
+    { campaign_status: "rejected" as const },
+  ])("keeps a failed carrier rejection locked for $key", (override) => {
+    expect(
+      isSettingsRegistrationLocked({
+        ...pristine,
+        ...override,
+        onboarding_registration_status: "failed",
+      })
+    ).toBe(true);
+  });
 });
 
 describe("applyRegistrationStateSnapshot", () => {

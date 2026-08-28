@@ -132,6 +132,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS = {
   id: "business-1",
@@ -296,6 +297,59 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
       expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "blocks an SMS Checkout for a %s rejection before subscription or Stripe work",
+    async (_label, statuses) => {
+      queueResults({ data: { ...BUSINESS, ...statuses }, error: null });
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+        state: { step: "complete" },
+      });
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+      expect(mocks.getBusinessContentQuality).not.toHaveBeenCalled();
+      expect(mocks.getExistingTelnyxBrandLinkState).not.toHaveBeenCalled();
+      expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+      expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps Chat Only Checkout independent from an obsolete SMS rejection", async () => {
+    vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
+    mocks.hasValidChatOnlyStripePrice.mockReturnValue(true);
+    queueResults(
+      {
+        data: {
+          ...BUSINESS,
+          billing_exempt: false,
+          onboarding_selected_plan: "chat_only",
+          brand_status: "rejected",
+          campaign_status: "rejected",
+        },
+        error: null,
+      },
+      { data: null, error: null },
+    );
+
+    const response = await POST(request("onboarding", "chat_only"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      url: "https://checkout.test/session",
+    });
+    expect(mocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+  });
 
   it("fails closed before Stripe when the selected Chat Only Price is missing for new acquisition", async () => {
     vi.stubEnv("CHAT_ONLY_DIRECT_SALES_ENABLED", "1");
@@ -1258,6 +1312,24 @@ describe("POST /api/billing/checkout onboarding precedence", () => {
       expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
     },
   );
+
+  it("maps a paid-launch rejection race to a 409 without creating Checkout", async () => {
+    queueResults({ data: BUSINESS, error: null }, { data: null, error: null });
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+      state: { step: "complete" },
+    });
+    expect(mocks.createCheckoutSession).not.toHaveBeenCalled();
+  });
 
   it.each(["pending_admin", "blocked"])(
     "blocks checkout while an existing-brand link is %s",

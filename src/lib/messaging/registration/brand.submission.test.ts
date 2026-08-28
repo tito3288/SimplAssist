@@ -30,38 +30,62 @@ vi.mock("./campaign", () => ({
 }));
 
 import { registerBrand } from "./brand";
+import { CarrierRejectionSupportRequiredError } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const BRAND_ID = "4b20019d-e93e-4000-8000-000000000001";
+const BUSINESS = {
+  id: BUSINESS_ID,
+  name: "Example Dental",
+  slug: "example-dental",
+  legal_business_name: "Example Dental LLC",
+  business_entity_type: "llc",
+  business_type: "dentist",
+  has_ein: true,
+  ein: "12-3456789",
+  compliance_info_completed_at: "2026-08-05T12:00:00.000Z",
+  telnyx_brand_id: null as string | null,
+  authorized_rep_name: "Avery Dentist",
+  authorized_rep_email: "avery@example.com",
+  authorized_rep_phone: "317-555-0100",
+  address: "100 Main Street",
+  city: "Indianapolis",
+  state: "IN",
+  zip: "46204",
+  website_url: "https://example.com",
+  brand_status: null as string | null,
+  campaign_status: null as string | null,
+  brand_rejection_reason: null as string | null,
+  campaign_rejection_reason: null as string | null,
+};
+
+let businessSnapshot: typeof BUSINESS;
+let carrierSnapshot: {
+  brand_status: string | null;
+  campaign_status: string | null;
+  brand_rejection_reason: string | null;
+  campaign_rejection_reason: string | null;
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
 
+  carrierSnapshot = {
+    brand_status: null,
+    campaign_status: null,
+    brand_rejection_reason: null,
+    campaign_rejection_reason: null,
+  };
+  businessSnapshot = { ...BUSINESS };
+
   mocks.from.mockReturnValue({
-    select: vi.fn(() => ({
+    select: vi.fn((columns: string) => ({
       eq: vi.fn(() => ({
         single: vi.fn(async () => ({
-          data: {
-            id: BUSINESS_ID,
-            name: "Example Dental",
-            slug: "example-dental",
-            legal_business_name: "Example Dental LLC",
-            business_entity_type: "llc",
-            business_type: "dentist",
-            has_ein: true,
-            ein: "12-3456789",
-            compliance_info_completed_at: "2026-08-05T12:00:00.000Z",
-            telnyx_brand_id: null,
-            authorized_rep_name: "Avery Dentist",
-            authorized_rep_email: "avery@example.com",
-            authorized_rep_phone: "317-555-0100",
-            address: "100 Main Street",
-            city: "Indianapolis",
-            state: "IN",
-            zip: "46204",
-            website_url: "https://example.com",
-          },
+          data: columns.startsWith("brand_status")
+            ? carrierSnapshot
+            : businessSnapshot,
           error: null,
         })),
       })),
@@ -79,6 +103,34 @@ afterEach(() => {
 });
 
 describe("registerBrand charged provider submission", () => {
+  it.each([
+    ["brand", "Existing brand was rejected"],
+    ["campaign", "Existing campaign was rejected"],
+  ] as const)(
+    "does not reuse an existing brand id after a %s rejection",
+    async (resource, reason) => {
+      businessSnapshot = {
+        ...BUSINESS,
+        telnyx_brand_id: BRAND_ID,
+        brand_status: resource === "brand" ? "rejected" : "approved",
+        campaign_status: resource === "campaign" ? "rejected" : null,
+        brand_rejection_reason: resource === "brand" ? reason : null,
+        campaign_rejection_reason: resource === "campaign" ? reason : null,
+      };
+
+      const error = await registerBrand(BUSINESS_ID).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(CarrierRejectionSupportRequiredError);
+      expect(error).toMatchObject({
+        code: "rejection_support_required",
+        carrierReason: reason,
+        rejectedResource: resource,
+      });
+      expect(mocks.createBrand).not.toHaveBeenCalled();
+      expect(mocks.appendRegistrationEvent).not.toHaveBeenCalled();
+    },
+  );
+
   it("disables SDK retries and invokes brand creation exactly once", async () => {
     await registerBrand(BUSINESS_ID);
 
@@ -105,4 +157,40 @@ describe("registerBrand charged provider submission", () => {
       { maxRetries: 0 },
     );
   });
+
+  it.each([
+    [
+      "brand",
+      {
+        brand_status: "rejected",
+        campaign_status: null,
+        brand_rejection_reason: "Exact brand carrier reason",
+        campaign_rejection_reason: null,
+      },
+    ],
+    [
+      "campaign",
+      {
+        brand_status: "approved",
+        campaign_status: "rejected",
+        brand_rejection_reason: null,
+        campaign_rejection_reason: "Exact campaign carrier reason",
+      },
+    ],
+  ])(
+    "fails closed when a %s rejection lands immediately before charged brand creation",
+    async (_label, snapshot) => {
+      carrierSnapshot = snapshot;
+
+      const error = await registerBrand(BUSINESS_ID).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(CarrierRejectionSupportRequiredError);
+      expect(error).toMatchObject({
+        code: "rejection_support_required",
+        carrierReason:
+          snapshot.brand_rejection_reason ?? snapshot.campaign_rejection_reason,
+      });
+      expect(mocks.createBrand).not.toHaveBeenCalled();
+    },
+  );
 });

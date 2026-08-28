@@ -6,6 +6,7 @@ import {
   buildPrimaryGoalUpdate,
   type PrimaryGoalUpdate,
 } from "@/lib/goals/primaryGoal";
+import { hasCarrierRejection } from "@/lib/onboarding/rejectionGuidance";
 import {
   SETTINGS_REGISTRATION_STATE_COLUMNS,
   applyRegistrationStateSnapshot,
@@ -70,6 +71,16 @@ function signupTransitionIsLocked(
   );
 }
 
+function rejectedCarrierFilingChangeIsLocked(
+  current: GoalSettingsState,
+  requested: PrimaryGoalUpdate
+): boolean {
+  return (
+    hasCarrierRejection(current.brand_status, current.campaign_status) &&
+    (current.primary_goal === "signup" || requested.primary_goal === "signup")
+  );
+}
+
 export async function POST(request: NextRequest) {
   const workspaceGate = await requireWorkspaceRouteAccess();
   if (!workspaceGate.ok) return workspaceGate.response;
@@ -117,7 +128,10 @@ export async function POST(request: NextRequest) {
     return registrationStateUnavailableResponse();
   }
 
-  if (signupTransitionIsLocked(current, update)) {
+  if (
+    signupTransitionIsLocked(current, update) ||
+    rejectedCarrierFilingChangeIsLocked(current, update)
+  ) {
     return settingsRegistrationLockedResponse(GOAL_SIGNUP_LOCK_COPY);
   }
 
@@ -164,7 +178,11 @@ export async function POST(request: NextRequest) {
       return registrationStateUnavailableResponse();
     }
 
-    if (isSettingsRegistrationLocked(latest)) {
+    if (
+      rejectedCarrierFilingChangeIsLocked(latest, update) ||
+      (!hasCarrierRejection(latest.brand_status, latest.campaign_status) &&
+        isSettingsRegistrationLocked(latest))
+    ) {
       return settingsRegistrationLockedResponse(GOAL_SIGNUP_LOCK_COPY);
     }
 

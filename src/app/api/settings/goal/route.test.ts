@@ -332,6 +332,54 @@ describe("POST /api/settings/goal", () => {
     });
   });
 
+  it.each([
+    ["book to signup", "book", { primary_goal: "signup", goal_url: "https://example.com/signup" }],
+    ["signup URL", "signup", { primary_goal: "signup", goal_url: "https://example.com/updated" }],
+    ["signup to book", "signup", { primary_goal: "book" }],
+  ] as const)(
+    "keeps rejected carrier filing input %s locked even when registration failed",
+    async (_label, currentGoal, body) => {
+      queueResults({
+        data: goalState({
+          primary_goal: currentGoal,
+          telnyx_brand_id: "brand-1",
+          brand_status: "approved",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        }),
+        error: null,
+      });
+
+      const response = await POST(makeRequest(body));
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        code: SETTINGS_REGISTRATION_LOCK_CODE,
+        error: GOAL_SIGNUP_LOCK_COPY.message,
+      });
+      expect(mocks.from).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("does not broaden the rejection lock to a non-filing book re-save", async () => {
+    queueResults(
+      {
+        data: goalState({
+          primary_goal: "book",
+          telnyx_brand_id: "brand-1",
+          brand_status: "rejected",
+          onboarding_registration_status: "failed",
+        }),
+        error: null,
+      },
+      { data: { id: BUSINESS_ID }, error: null }
+    );
+
+    const response = await POST(makeRequest({ primary_goal: "book" }));
+
+    expect(response.status).toBe(200);
+  });
+
   it("uses null-safe registration and current-goal compare-and-swap filters", async () => {
     queueResults(
       { data: goalState({ primary_goal: null }), error: null },
@@ -374,6 +422,36 @@ describe("POST /api/settings/goal", () => {
       error: GOAL_SIGNUP_LOCK_COPY.message,
     });
     expect(mocks.from).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns the lock when a CAS loses to a carrier rejection affecting signup filing", async () => {
+    queueResults(
+      { data: goalState({ primary_goal: "signup" }), error: null },
+      { data: null, error: null },
+      {
+        data: goalState({
+          primary_goal: "signup",
+          telnyx_brand_id: "brand-1",
+          brand_status: "approved",
+          campaign_status: "rejected",
+          onboarding_registration_status: "failed",
+        }),
+        error: null,
+      }
+    );
+
+    const response = await POST(
+      makeRequest({
+        primary_goal: "signup",
+        goal_url: "https://example.com/updated",
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: SETTINGS_REGISTRATION_LOCK_CODE,
+      error: GOAL_SIGNUP_LOCK_COPY.message,
+    });
   });
 
   it("returns a conflict when a missed compare-and-swap remains unlocked", async () => {
