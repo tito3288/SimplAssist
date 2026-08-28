@@ -59,7 +59,11 @@ export function createWebsiteScanRepository(
         p_worker_id: workerId,
         p_lease_seconds: leaseSeconds,
       });
-      if (data === null) return null;
+      // PostgreSQL composite-returning functions are exposed by PostgREST as
+      // an object whose every field is null when the function returns no row.
+      // Treat that representation the same as a literal null while preserving
+      // strict parsing for partially populated or otherwise malformed claims.
+      if (data === null || isNullCompositeRow(data)) return null;
       return parseClaim(data);
     },
 
@@ -371,6 +375,12 @@ function safeErrorMessage(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNullCompositeRow(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const fields = Object.values(value);
+  return fields.length > 0 && fields.every((field) => field === null);
 }
 
 function stringOrNull(value: unknown): string | null {
