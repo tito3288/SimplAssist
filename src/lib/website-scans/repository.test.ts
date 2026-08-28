@@ -55,6 +55,24 @@ describe("website scan repository RPC contract", () => {
     });
   });
 
+  it("treats an all-null PostgreSQL composite as an empty queue", async () => {
+    rpc.mockResolvedValue({
+      data: Object.fromEntries(Object.keys(row).map((key) => [key, null])),
+      error: null,
+    });
+
+    await expect(repository.claim("worker:1", 120)).resolves.toBeNull();
+  });
+
+  it("still rejects a partially populated malformed claim", async () => {
+    rpc.mockResolvedValue({
+      data: { id: null, business_id: row.business_id },
+      error: null,
+    });
+
+    await expect(repository.claim("worker:1", 120)).rejects.toThrow("missing id");
+  });
+
   it("threads token and generation through heartbeat and progress", async () => {
     rpc.mockResolvedValue({ data: true, error: null });
     await repository.heartbeat(claim, 120);
