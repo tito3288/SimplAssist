@@ -71,14 +71,14 @@ For per-customer compliance — required by TCR (The Campaign Registry) rules to
 
 Reliability and UX fixes to the onboarding/registration flow after Phase 11, surfaced during pre-launch validation. Behavior-changing items only — pure polish and design changes (button/theme/step-progress styling) live in git history, not here.
 
-- **Retry recovery + rejected-campaign history** (migration `024`): a failed or carrier-rejected registration can be retried. On retry, the A2P risk input is re-screened when it changed (hash mismatch), the rejected Telnyx campaign is deactivated/archived, and a carrier *campaign* rejection maps to a retryable `failed` state. **Brand rejections now also map to `failed`** so the routed fix path is reachable. Rejection history is preserved in `rejected_campaigns`. Claiming a retry uses a compare-and-swap so concurrent webhooks/attempts can't double-submit.
+- **Technical retry + rejected-resource history** (migration `024`): technical failures with no carrier rejection remain retryable. Carrier rejections may still map the onboarding attempt to `failed`, but the shared rejection guard prevents retry, checkout, launch, or editing from using that state to create replacement resources. Historical archive helpers remain available for future staff tooling but are not called by the automatic launch pipeline.
 - **Atomic services/FAQs save** (migration `023`, `replace_services_and_faqs` RPC) and **business-hours natural-key upsert**: these saves are now single-transaction, so a mid-save failure can no longer wipe existing rows. Client save errors (including delete failures) are surfaced instead of silently swallowed.
-- **Carrier-rejection routing + plain-English copy**: the carrier-review panel explains rejections in plain language (the raw carrier wording is always preserved beneath) and routes "Fix & resubmit" to the step that needs fixing. Classes we generate (opt-in / message-flow, code 708) and brand re-filing route to **contact support** rather than a form whose edits the carrier never sees.
-- **Mid-review edit lock**: business and compliance edits are blocked (HTTP 409) once a registration is in carrier review, except the `failed` recovery state. Enforced server-side on the brand-verification and sms-use-case routes; the onboarding UI mirrors the same predicate (`registrationHasStartedForRisk` and status ≠ `failed`), so the "Fix & resubmit" button only appears where the save will actually be accepted.
+- **Carrier-rejection support-only policy**: the carrier-review panel explains rejections in plain language, preserves the carrier's exact wording, and shows Contact Support as the only action. Refresh, editing, and Retry are withheld for both brand and campaign rejections. Technical failures without a rejection retain Refresh and Retry.
+- **Mid-review and rejection edit lock**: business and compliance edits are blocked (HTTP 409) while review is in flight. A carrier rejection remains locked even when the onboarding attempt is `failed`, including stale open forms; support must inspect the existing provider resource before any correction or resubmission.
 - **Website-scan autofill**: fixed a dead Anthropic model ID in the scan extractor (`claude-haiku-4-20250404`, which the API 404'd — silently returning empty since the feature shipped) to `claude-haiku-4-5-20251001`; extraction errors now log instead of being swallowed. Wired the extracted services/FAQs through to pre-fill the (editable, review-before-save) Services & FAQs step, and capped FAQ answers at 2000 characters (input + zod).
 
 **Known follow-ups (deferred):**
-- **Brand-level recovery in the retry pipeline.** A retry reuses the existing Telnyx brand record (`registerBrand` early-returns on an existing brand ID), so corrected identity/website data is saved but **not re-filed with the carrier** — currently handled via support. This is the near-mandatory companion to the brand→`failed` mapping above.
+- **Provider-specific rejection remediation.** Telnyx now exposes a campaign-appeal API, but eligibility, editable fields, fees, and brand re-vetting behavior are not yet reliable enough for this customer-facing workflow. Keep rejection handling with support until those status-specific paths are validated. Any future implementation must operate on the existing resource when eligible and must never silently fall back to paid replacement creation.
 - **Multi-page website scraping** (`/services`, `/faq`, `/pricing`) to surface content a single-page scan misses.
 
 ---
@@ -165,7 +165,7 @@ Shipped to Railway production (2026-05-14).
 - **Audit-everything:** every code path with a known `business_id` writes to `telnyx_registration_events`. `BRAND_OTP_VERIFIED` events are audited with `status: "audit_only_phase_11_otp"`. **Phase 11 should grep for `audit_only_phase_11_otp` rows** — OTP events that arrived before Phase 11 was built are waiting in that table.
   - Irreducible gap: events without a resource ID can't be audited (`business_id` is NOT NULL) — console.warn only.
 - **Campaign status enum is richer than planned:** Telnyx exposes 12 campaign statuses and 4 brand identity statuses. Mapping in `src/lib/messaging/registration/statusMapper.ts`. `MNO_ACCEPTED` and `MNO_PROVISIONED` both → `approved` (email at first approval). `TCR_EXPIRED` → `rejected` for now (a distinct `expired` enum would need a follow-up migration).
-- **Email tone (locked via user feedback):** avoid "Action needed"/"not approved" panic words on rejections. Current subjects — rejected brand: "We need to update your SimplAssist business registration"; rejected campaign: "We need to update your SimplAssist SMS campaign"; approvals: short and direct. Reuse this tone for all customer-facing notifications.
+- **Email tone (locked via user feedback):** avoid "Action needed"/"not approved" panic words on rejections. Current subjects — rejected brand: "Your SimplAssist business registration needs support"; rejected campaign: "Your SimplAssist SMS campaign needs support"; approvals: short and direct. Reuse this tone for all customer-facing notifications.
 
 ---
 
@@ -177,7 +177,7 @@ Shipped to Railway production (2026-05-15). Migration `014`.
 - Hard-block of all four customer-facing send paths when `campaign_status != 'approved'`.
 - Dedupe-aware "paused" system messages.
 - Conversation reply UI gate.
-- Rejection flow: show reason, guide resubmission.
+- Rejection flow: show the exact reason and route the customer to support; no customer resubmission action is exposed.
 
 ### Implementation notes
 
@@ -219,11 +219,11 @@ A2P verification often checks the customer's OWN website for an SMS-related Priv
 
 - **Widget SMS opt-in checkbox** — deferred. The current widget captures only name + email (no phone), so no SMS goes out from web chat. Becomes load-bearing with the future "Order Now" restaurant feature (phone number for order status). Revisit then.
 - **Retry path for failed Phase 3 registrations** — the race-safe transition gates Phase 3 to first-submit only. If the initial Telnyx call failed, customer can't retry via the form. Needs an explicit "Retry registration" dashboard action.
-- **Rejected brand/campaign correction + resubmission** — required before real customer launch. Current app stores rejection reasons and shows "Needs update," but does not yet provide a complete flow to edit rejected brand/campaign fields and send the correct Telnyx recovery action. This is distinct from initial technical retry:
+- **Rejected brand/campaign correction + resubmission** — intentionally support-only until the provider workflow is reliable for third-party software. The app stores and displays rejection reasons, locks customer edits, blocks automated launch/retry/checkout, and sends customers to the registration-support form. This is distinct from initial technical retry:
   - brand rejection may require updating the existing Telnyx brand, revetting, or support/manual intervention depending on Telnyx/TCR response;
   - campaign rejection may require updating editable fields (notably samples/message flow), submitting a campaign appeal, or creating a replacement campaign because many campaign attributes are immutable after submit;
-  - v1 product recommendation for future eligible customer rejections: if the rejection requires changing full compliance content (opt-in/opt-out messages, keywords, privacy/terms links, or other fields not cleanly exposed by the Telnyx update API), create a replacement campaign under the already-verified brand, update the business to point at the new `telnyx_campaign_id`, and leave the rejected campaign as audit history;
-  - a later optimization can use edit/appeal for narrow rejections only if the affected fields are confirmed editable via Telnyx API and the behavior is reliable;
+  - future automation should update, appeal, or re-vet the existing resource only when Telnyx explicitly supports the exact status and fields;
+  - unsupported cases remain with support, and no future flow may silently fall back to creating a paid replacement campaign or brand;
   - Alpha Dog is not a future launch-validation account. It is parked as a disabled fixture because its campaign was rejected for SEO content on the agency website (carrier code 708), the website cannot change, and no replacement campaign will be submitted.
 - **Backfill of pre-Phase-6 campaigns** — manual via Mission Control if needed.
 - **zod deprecation cleanup** — `z.string().email()` and `parsed.error.flatten()` are deprecated in zod 4.x types, used across many files. Codebase-wide tech debt, dedicated pass.

@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { registrationHasStartedForRisk } from "@/lib/messaging/registration/riskScreening";
 import { normalizeUsStateCode } from "@/lib/usStates";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
 const REGISTRATION_LOCKED_MESSAGE =
@@ -115,10 +119,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Rejected registrations are support-only. This fresh read closes stale-tab
+  // edits before any service-role lookup or write can drift the saved identity
+  // from the carrier submission staff must review.
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    return NextResponse.json(
+      {
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      },
+      { status: 409 },
+    );
+  }
+
   // Legal identity is frozen while a submitted registration awaits carrier
   // review — the Telnyx brand can't be updated, so edits would only drift the
-  // DB from the filed brand. The 'failed' state stays editable: fixing data
-  // before a retry is the designed recovery path.
+  // DB from the filed brand.
   if (
     registrationHasStartedForRisk(business) &&
     business.onboarding_registration_status !== "failed"

@@ -13,6 +13,10 @@ import {
   getBusinessInfoScanPrefill,
   type OnboardingScanData,
 } from '@/lib/onboarding/scanPrefill';
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from '@/lib/onboarding/rejectionGuidance';
 
 const businessInfoSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
@@ -49,6 +53,50 @@ interface BusinessInfoFormProps {
   businessId: string;
   initialData?: Partial<BusinessInfoData>;
   onNext: (data: BusinessInfoData, scrapedData: ScrapedData | null) => void;
+}
+
+type RegistrationLockSnapshot = {
+  status?: string;
+  brandStatus?: string | null;
+  campaignStatus?: string | null;
+  smsReady?: boolean;
+  riskReview?: { registrationStarted?: boolean };
+};
+
+export const REGISTRATION_STATE_UNAVAILABLE_MESSAGE =
+  'We could not verify your registration status. Refresh the page and try again, or contact support.';
+
+export function businessInfoRegistrationLockMessage(
+  registration: RegistrationLockSnapshot | null | undefined
+): string | null {
+  if (
+    !registration?.smsReady &&
+    hasCarrierRejection(
+      registration?.brandStatus,
+      registration?.campaignStatus
+    )
+  ) {
+    return REJECTION_SUPPORT_MESSAGE;
+  }
+
+  if (
+    registration?.riskReview?.registrationStarted &&
+    registration.status !== 'failed'
+  ) {
+    return 'Your registration is in carrier review — these details are locked until review completes.';
+  }
+
+  return null;
+}
+
+export function businessInfoRegistrationGateMessage(args: {
+  responseOk: boolean;
+  registration: RegistrationLockSnapshot | null | undefined;
+}): string | null {
+  if (!args.responseOk || !args.registration) {
+    return REGISTRATION_STATE_UNAVAILABLE_MESSAGE;
+  }
+  return businessInfoRegistrationLockMessage(args.registration);
 }
 
 const BUSINESS_TYPE_OPTIONS: { value: BusinessType; label: string }[] = [
@@ -149,26 +197,26 @@ export default function BusinessInfoForm({ businessId, initialData, onNext }: Bu
       // which can't be updated once a registration is awaiting carrier
       // review. Step routing normally prevents reaching this form in that
       // state, but a stale open tab bypasses it — re-check fresh state here.
-      // ('failed' stays editable: fixing data before retry is the designed
-      // recovery path. If the check itself fails, proceed — this is a
-      // best-effort client guard.)
+      // Carrier rejections stay locked even when the registration status is
+      // 'failed': support must review the existing provider resource before
+      // anything is changed. This form writes through the authenticated
+      // Supabase client, so the fresh lock read must fail closed.
       try {
         const stateRes = await fetch('/api/onboarding/state', { cache: 'no-store' });
         const statePayload = (await stateRes.json().catch(() => ({}))) as {
-          state?: { registration?: { status?: string; riskReview?: { registrationStarted?: boolean } } };
+          state?: { registration?: RegistrationLockSnapshot };
         };
-        const registration = statePayload.state?.registration;
-        if (
-          registration?.riskReview?.registrationStarted &&
-          registration.status !== 'failed'
-        ) {
-          setSubmitError(
-            'Your registration is in carrier review — these details are locked until review completes.'
-          );
+        const lockMessage = businessInfoRegistrationGateMessage({
+          responseOk: stateRes.ok,
+          registration: statePayload.state?.registration,
+        });
+        if (lockMessage) {
+          setSubmitError(lockMessage);
           return;
         }
       } catch {
-        // Lock check unavailable; fall through to the normal save path.
+        setSubmitError(REGISTRATION_STATE_UNAVAILABLE_MESSAGE);
+        return;
       }
 
       const supabase = createClient();

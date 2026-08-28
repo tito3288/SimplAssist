@@ -3,12 +3,13 @@ import { describe, expect, it } from "vitest";
 import { validateCustomerCareCopy } from "@/lib/messaging/registration/customerCareTemplates";
 
 import {
+  CarrierRejectionSupportRequiredError,
+  hasCarrierRejection,
   isRejectionRetryBlocked,
   mapReasonToFriendly,
+  REJECTION_SUPPORT_MESSAGE,
+  throwIfCarrierRejected,
 } from "./rejectionGuidance";
-
-const USE_CASE_GUIDANCE =
-  "Carriers need a clearer picture of what you'll text customers about. Rewrite your SMS description in plain terms — for example, replies to customer questions, missed-call follow-ups, service-inquiry responses, and next-step coordination. Describe only messages your assistant will actually send. A couple of clear sentences is all it takes.";
 
 const UNSUPPORTED_CLAIM_ERROR =
   "SMS registration text must stay limited to Customer Care, not marketing, blasts, coupons, cold outreach, affiliate marketing, or unsupported automation.";
@@ -33,8 +34,8 @@ describe("isRejectionRetryBlocked", () => {
   });
 
   it("blocks retry for a brand rejection, alone or alongside a campaign rejection", () => {
-    // Brand refile rebuilds the campaign too, so a blind retry carries the
-    // full campaign charges on top of the brand fee — support/fix only.
+    // A blind replacement can rebuild the campaign too, carrying campaign
+    // charges on top of the brand fee — support is the only customer path.
     expect(isRejectionRetryBlocked("rejected", null)).toBe(true);
     expect(isRejectionRetryBlocked("rejected", "pending")).toBe(true);
     expect(isRejectionRetryBlocked("rejected", "rejected")).toBe(true);
@@ -48,33 +49,68 @@ describe("isRejectionRetryBlocked", () => {
   });
 });
 
-describe("mapReasonToFriendly copy never points at the withheld Retry button", () => {
-  it("campaign url copy points at support", () => {
-    const friendly = mapReasonToFriendly(
-      "campaign",
-      "Unable to load privacy policy link on the registration"
-    );
-    expect(friendly).toBeTruthy();
-    expect(friendly).toMatch(/contact support/i);
-    expect(friendly).not.toMatch(/retry registration/i);
+describe("hasCarrierRejection", () => {
+  it("detects brand-only, campaign-only, and dual rejections", () => {
+    expect(hasCarrierRejection("rejected", "pending")).toBe(true);
+    expect(hasCarrierRejection("approved", "rejected")).toBe(true);
+    expect(hasCarrierRejection("rejected", "rejected")).toBe(true);
   });
 
-  it.each([
-    ["identity", "Brand verification failed: EIN mismatch"],
-    ["url", "The business website could not be verified"],
-  ])("brand %s copy points at Fix & resubmit, not Retry", (_category, reason) => {
-    const friendly = mapReasonToFriendly("brand", reason);
-    expect(friendly).toBeTruthy();
-    expect(friendly).toMatch(/fix & resubmit/i);
-    expect(friendly).not.toMatch(/retry registration/i);
+  it("does not treat ordinary registration states as carrier rejections", () => {
+    expect(hasCarrierRejection(null, null)).toBe(false);
+    expect(hasCarrierRejection("pending", "pending")).toBe(false);
+    expect(hasCarrierRejection("approved", "approved")).toBe(false);
+  });
+
+  it("provides neutral support-only API copy", () => {
+    expect(REJECTION_SUPPORT_MESSAGE).toMatch(/contact support/i);
+    expect(REJECTION_SUPPORT_MESSAGE).not.toMatch(
+      /retry|resubmit|update your|edit/i
+    );
+  });
+
+  it("throws stable control flow with the exact stored carrier reason", () => {
+    expect(() =>
+      throwIfCarrierRejected({
+        brandStatus: "approved",
+        campaignStatus: "rejected",
+        campaignReason: "  exact carrier text is preserved  ",
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "CarrierRejectionSupportRequiredError",
+        code: "rejection_support_required",
+        carrierReason: "  exact carrier text is preserved  ",
+        rejectedResource: "campaign",
+      })
+    );
+  });
+
+  it("does nothing for technical registration states", () => {
+    expect(() =>
+      throwIfCarrierRejected({
+        brandStatus: "pending",
+        campaignStatus: null,
+        brandReason: "A stale reason without a rejected status",
+      })
+    ).not.toThrow();
+    expect(CarrierRejectionSupportRequiredError).toBeTypeOf("function");
   });
 });
 
 describe("mapReasonToFriendly customer-care guidance", () => {
-  it("uses carrier-safe use-case guidance", () => {
-    expect(
-      mapReasonToFriendly("campaign", "Use-case description is unclear")
-    ).toBe(USE_CASE_GUIDANCE);
+  it.each(FRIENDLY_GUIDANCE_CASES)(
+    "%s guidance preserves useful context but routes only to support",
+    (kind, reason) => {
+      const guidance = mapReasonToFriendly(kind, reason);
+      expect(guidance).toBeTruthy();
+      expect(guidance).toMatch(/contact support/i);
+      expect(guidance).not.toMatch(/fix & resubmit|retry registration|resubmit/i);
+    }
+  );
+
+  it("keeps unknown carrier wording out of inferred guidance", () => {
+    expect(mapReasonToFriendly("campaign", "Opaque provider response")).toBeNull();
   });
 
   it("never returns guidance containing an unsupported customer-care claim", () => {

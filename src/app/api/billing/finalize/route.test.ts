@@ -44,16 +44,19 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS = {
   id: "business-1",
   partner_id: null,
   billing_mode: "stripe",
+  brand_status: null,
+  campaign_status: null,
 };
 
 const SESSION = {
   id: "cs_finalize_1",
-  metadata: { business_id: BUSINESS.id },
+  metadata: { business_id: BUSINESS.id, plan: "sms_and_chat" },
 };
 
 const NEUTRAL_LAUNCH_ERRORS = [
@@ -266,6 +269,86 @@ describe("POST /api/billing/finalize billing authority", () => {
     expect(mocks.getOnboardingStateForBusinessId).toHaveBeenCalledWith(
       BUSINESS.id,
     );
+  });
+
+  it.each([
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "records a paid SMS Checkout for a %s rejection but blocks launch",
+    async (_label, statuses) => {
+      const rejectedBusiness = { ...BUSINESS, ...statuses };
+      queueBusinessResults(
+        { data: rejectedBusiness, error: null },
+        { data: rejectedBusiness, error: null },
+      );
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+        state: { currentStep: "carrier_review" },
+      });
+      expect(mocks.syncCheckoutSession).toHaveBeenCalledWith(SESSION);
+      expect(mocks.finalizePaidCheckout).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps Chat Only finalization independent from SMS rejection state", async () => {
+    const rejectedBusiness = {
+      ...BUSINESS,
+      brand_status: "rejected",
+      campaign_status: "rejected",
+    };
+    queueBusinessResults(
+      { data: rejectedBusiness, error: null },
+      { data: rejectedBusiness, error: null },
+    );
+    const chatSession = {
+      ...SESSION,
+      metadata: { business_id: BUSINESS.id, plan: "chat_only" },
+    };
+    const synced = {
+      businessId: BUSINESS.id,
+      customerId: "cus_chat_finalize",
+      subscriptionId: "sub_chat_finalize",
+      plan: "chat_only",
+    };
+    mocks.retrieveCheckoutSession.mockResolvedValue(chatSession);
+    mocks.syncCheckoutSession.mockResolvedValue(synced);
+    mocks.finalizePaidCheckout.mockResolvedValue({ status: "completed" });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCheckoutSession).toHaveBeenCalledWith(chatSession);
+    expect(mocks.finalizePaidCheckout).toHaveBeenCalledWith(
+      synced,
+      "stripe_finalize",
+    );
+  });
+
+  it("maps a launch-time rejection race to the support-required conflict", async () => {
+    queueBusinessResults(
+      { data: BUSINESS, error: null },
+      { data: BUSINESS, error: null },
+    );
+    mocks.finalizePaidCheckout.mockResolvedValue({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+      state: { currentStep: "carrier_review" },
+    });
   });
 
   it("accepts idempotent Chat Only core completion from both browser retries", async () => {

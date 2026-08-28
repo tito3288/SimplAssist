@@ -58,6 +58,7 @@ import {
   CampaignRegistrationError,
   registerCampaign,
 } from "./campaign";
+import { CarrierRejectionSupportRequiredError } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000001";
 const BRAND_ID = "4b20019d-e93e-4000-8000-000000000001";
@@ -93,6 +94,10 @@ const baseBusiness = {
     | "callback"
     | null,
   goal_url: null as string | null,
+  brand_status: null as string | null,
+  campaign_status: null as string | null,
+  brand_rejection_reason: null as string | null,
+  campaign_rejection_reason: null as string | null,
 };
 
 let business = {
@@ -564,6 +569,39 @@ describe("registerCampaign recover-before-create", () => {
       expect.objectContaining({ telnyx_campaign_id: NEW_CAMPAIGN_ID })
     );
   });
+
+  it.each([
+    ["brand", "brand_status", "brand_rejection_reason"],
+    ["campaign", "campaign_status", "campaign_rejection_reason"],
+  ] as const)(
+    "fails closed when a %s rejection lands after preflight but before charged submit",
+    async (_label, statusField, reasonField) => {
+      const exactReason = `Exact ${_label} carrier reason`;
+      mocks.qualify.mockImplementationOnce(async () => {
+        business = {
+          ...business,
+          [statusField]: "rejected",
+          [reasonField]: exactReason,
+        };
+        return { usecase: "CUSTOMER_CARE" };
+      });
+
+      const error = await registerCampaign(BUSINESS_ID).catch(
+        (caught) => caught
+      );
+
+      expect(error).toBeInstanceOf(CarrierRejectionSupportRequiredError);
+      expect(error).toMatchObject({
+        code: "rejection_support_required",
+        carrierReason: exactReason,
+        rejectedResource: _label,
+      });
+      expect(mocks.getCost).toHaveBeenCalledTimes(1);
+      expect(mocks.qualify).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(operationTrace).not.toContain("submit");
+    },
+  );
 
   it("fails before every campaign fee/preflight operation when the active SMS number is missing", async () => {
     mocks.getActiveSmsNumber.mockResolvedValue(null);

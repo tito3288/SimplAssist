@@ -23,6 +23,10 @@ import {
   type A2pRiskReviewResult,
 } from "@/lib/messaging/registration/riskScreening";
 import { validateCustomerCareCopy } from "@/lib/messaging/registration/customerCareTemplates";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import type { A2pRiskChecklistAnswer } from "@/types/database";
 import { requireWorkspaceRouteAccess } from "@/lib/customer/workspaceRouteResponse.server";
 
@@ -188,10 +192,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Rejected registrations are support-only. Stop stale form submissions
+  // before slug generation, risk screening, audit writes, or business writes.
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    return NextResponse.json(
+      {
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      },
+      { status: 409 },
+    );
+  }
+
   // Compliance content feeds the submitted Telnyx campaign, which can't be
   // updated mid-review — edits would only drift the DB from the filed
-  // registration. The 'failed' state stays editable: fixing data before a
-  // retry is the designed recovery path.
+  // registration.
   if (
     registrationHasStartedForRisk(business) &&
     business.onboarding_registration_status !== "failed"

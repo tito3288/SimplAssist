@@ -27,6 +27,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST as saveBrandVerification } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const USER_ID = "00000000-0000-4000-8000-000000000010";
 const BUSINESS_ID = "00000000-0000-4000-8000-000000000020";
@@ -199,6 +200,36 @@ describe("POST /api/onboarding/brand-verification", () => {
     expect(response.status).toBe(403);
     expect(mocks.adminFrom).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "locks a stale %s rejection before EIN checks or writes",
+    async (_label, statuses) => {
+      mocks.createClient.mockResolvedValue(
+        userClient({
+          business: ownedBusiness({
+            ...statuses,
+            onboarding_registration_status: "failed",
+          }),
+        }),
+      );
+
+      const response = await saveBrandVerification(request(einBody()));
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+      });
+      expect(mocks.registrationHasStartedForRisk).not.toHaveBeenCalled();
+      expect(mocks.adminFrom).not.toHaveBeenCalled();
+      expect(mocks.precheck).not.toHaveBeenCalled();
+      expect(mocks.commitUpdate).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns the safe conflict response without updating when another business has the EIN", async () => {
     mocks.precheck.mockResolvedValue({

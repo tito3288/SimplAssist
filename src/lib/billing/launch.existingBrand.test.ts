@@ -401,7 +401,7 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
     expectNoProviderMutation();
   });
 
-  it("consumes the link before rejected-resource cleanup and every provider write", async () => {
+  it("consumes the link before every provider write", async () => {
     queueResults(
       { data: BUSINESS, error: null },
       { data: null, error: null },
@@ -417,26 +417,27 @@ describe("attemptPaidLaunch existing-brand authorization boundary", () => {
     expect(mocks.prepareExistingBrand).toHaveBeenCalledWith(BUSINESS_ID);
     expect(
       mocks.prepareExistingBrand.mock.invocationCallOrder[0]
-    ).toBeLessThan(mocks.archiveBrand.mock.invocationCallOrder[0]);
-    expect(mocks.archiveBrand.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.registerBrand.mock.invocationCallOrder[0]
-    );
+    ).toBeLessThan(mocks.registerBrand.mock.invocationCallOrder[0]);
+    expect(mocks.archiveBrand).not.toHaveBeenCalled();
+    expect(mocks.archiveCampaign).not.toHaveBeenCalled();
   });
 
-  it("protects a rejected linked brand with the stable support outcome", async () => {
-    queueThroughClaim();
-    mocks.prepareExistingBrand.mockResolvedValue({ status: "consumed" });
-    mocks.archiveBrand.mockRejectedValue(
-      new mocks.LinkedExistingBrandSupportRequiredError(
-        "an already-linked brand must not be replaced"
-      )
-    );
+  it("routes a rejected linked brand to support before link consumption or provider work", async () => {
+    queueResults({
+      data: {
+        ...BUSINESS,
+        telnyx_brand_id: "brand-rejected-linked",
+        brand_status: "rejected",
+        campaign_status: null,
+      },
+      error: null,
+    });
 
     const result = await attemptPaidLaunch(BUSINESS_ID, "onboarding_retry");
 
-    expect(result.status).toBe("linked_brand_needs_support");
-    expect(mocks.registerBrand).not.toHaveBeenCalled();
-    expect(mocks.archiveCampaign).not.toHaveBeenCalled();
+    expect(result.status).toBe("rejection_support_required");
+    expect(mocks.prepareExistingBrand).not.toHaveBeenCalled();
+    expectNoProviderMutation();
   });
 
   it("routes a permanent linked campaign recovery failure to support", async () => {

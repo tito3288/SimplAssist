@@ -26,14 +26,7 @@ import {
   registerBrand,
   registerCampaign,
 } from "@/lib/messaging/registration";
-import {
-  archiveAndClearRejectedBrand,
-  LinkedExistingBrandSupportRequiredError,
-} from "@/lib/messaging/registration/brand";
-import {
-  archiveAndClearRejectedCampaign,
-  CampaignRegistrationError,
-} from "@/lib/messaging/registration/campaign";
+import { CampaignRegistrationError } from "@/lib/messaging/registration/campaign";
 import {
   ExistingBrandLinkError,
   prepareExistingTelnyxBrandLinkForLaunch,
@@ -58,6 +51,11 @@ import {
   markRegistrationFailed,
   markRegistrationSubmitted,
 } from "@/lib/onboarding/registrationAttempt";
+import {
+  CarrierRejectionSupportRequiredError,
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
 import type {
@@ -107,6 +105,7 @@ export type LaunchResult =
         | "services_faqs_required"
         | "held_no_ein"
         | "risk_review_required"
+        | "rejection_support_required"
         | "existing_brand_review_required"
         | "linked_brand_needs_support"
         | "operations_suspended"
@@ -158,6 +157,17 @@ export async function attemptPaidLaunch(
   const business = await readLaunchBusiness(businessId);
   if (!business) {
     return { status: "failed", message: "Business not found." };
+  }
+
+  // A carrier rejection is a support-only state. Stop at the shared launch
+  // boundary so browser retries, direct API calls, Checkout finalization, and
+  // Stripe webhooks can never archive a rejected resource and create another
+  // charged Telnyx brand or campaign.
+  if (hasCarrierRejection(business.brand_status, business.campaign_status)) {
+    return {
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    };
   }
 
   // Operational suspension is independent of registration and billing state.
@@ -259,10 +269,9 @@ export async function attemptPaidLaunch(
     );
 
     // Paid-launch order after checkout success:
-    // risk -> attempt gate -> existing-brand revalidate/consume -> rejected
-    // brand cleanup -> brand -> profile -> voice -> owned attach / purchase ->
-    // active number + deployed compliance-page verification -> rejected
-    // campaign cleanup -> campaign.
+    // risk -> attempt gate -> existing-brand revalidate/consume -> brand ->
+    // profile -> voice -> owned attach / purchase -> active number + deployed
+    // compliance-page verification -> campaign.
     // The retry-only risk gate lives INSIDE the try so a transient failure
     // here funnels into the catch's markRegistrationFailed (immediately
     // retryable) instead of stranding the claimed row in 'submitting'.
@@ -304,23 +313,17 @@ export async function attemptPaidLaunch(
       }
     }
 
-    // This is the final authorization boundary before any Telnyx mutation.
+    // This is the final existing-brand authorization boundary before any
+    // Telnyx mutation.
     // It is a no-op for normal onboarding. For an existing-brand request it
     // captures one private request tuple, revalidates that exact brand and
     // local identity, then consumes the same tuple atomically. Pending or
-    // blocked requests stop here, before rejected-resource cleanup or create.
+    // blocked requests stop here, before any provider create.
     const existingBrandPreparation =
       await prepareExistingTelnyxBrandLinkForLaunch(businessId);
     linkedExistingBrandConsumed =
       existingBrandPreparation.status === "consumed";
 
-    // Carrier-rejected brand? Archive its history, cascade-archive the child
-    // campaign (any status — it is bound to the dead brand at TCR), delete
-    // the brand at Telnyx (best-effort), and clear the pointer so
-    // registerBrand creates a replacement below. Runs AFTER the risk gate so
-    // a risk hold releases the claim without having touched the brand.
-    // No-op in every other state.
-    await archiveAndClearRejectedBrand(businessId);
     await registerBrand(businessId);
 
     // A number order needs both routing resources. Each helper recovers an
@@ -377,11 +380,6 @@ export async function attemptPaidLaunch(
       language: business.ai_settings?.language ?? "en",
     });
 
-    // Carrier-rejected campaign? Archive its history, deactivate it at
-    // Telnyx (best-effort), and clear the pointer so a replacement is
-    // created below. After a brand re-file this is a no-op (the cascade
-    // already archived the campaign). No-op in every other state.
-    await archiveAndClearRejectedCampaign(businessId);
     await registerCampaign(businessId);
 
     await ensureCampaignAssignmentForBusiness(businessId, {
@@ -391,6 +389,22 @@ export async function attemptPaidLaunch(
     await markRegistrationSubmitted(businessId);
     return { status: "submitted" };
   } catch (err) {
+    if (err instanceof CarrierRejectionSupportRequiredError) {
+      // A provider helper found a carrier rejection on its fresh, last-moment
+      // status read. Release only OUR exact claim; if the rejection webhook
+      // already moved the row to failed, the guarded update is a no-op and its
+      // exact rejection fields remain untouched.
+      await releaseClaimToCarrierRejection(
+        businessId,
+        claim.startedAt,
+        err.carrierReason
+      );
+      return {
+        status: "rejection_support_required",
+        message: REJECTION_SUPPORT_MESSAGE,
+      };
+    }
+
     if (err instanceof ExistingBrandLinkError) {
       const status =
         err.launchDisposition === "review_required"
@@ -409,20 +423,6 @@ export async function attemptPaidLaunch(
       );
       await markRegistrationFailed(businessId, message);
       return { status, message };
-    }
-
-    if (err instanceof LinkedExistingBrandSupportRequiredError) {
-      console.error(
-        `[billing:launch] Linked brand needs support for ${businessId} (${err.code})`
-      );
-      await markRegistrationFailed(
-        businessId,
-        LINKED_BRAND_NEEDS_SUPPORT_MESSAGE
-      );
-      return {
-        status: "linked_brand_needs_support",
-        message: LINKED_BRAND_NEEDS_SUPPORT_MESSAGE,
-      };
     }
 
     if (err instanceof CampaignRegistrationError) {
@@ -965,6 +965,39 @@ async function releaseClaimToRiskReview(
     // stale window while the caller reports risk_review_required.
     throw new Error(
       `[billing:launch] Failed to release claim to risk review for ${businessId}: ${error.message}`
+    );
+  }
+}
+
+/**
+ * Release OUR claimed launch after a provider-boundary carrier-status check.
+ * The carrier's dedicated rejection columns are deliberately not updated;
+ * onboarding error mirrors the exact stored reason only when our claim is
+ * still the active submitting attempt.
+ */
+async function releaseClaimToCarrierRejection(
+  businessId: string,
+  startedAt: string,
+  carrierReason: string | null
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("businesses")
+    .update({
+      onboarding_registration_status: "failed",
+      onboarding_registration_error:
+        carrierReason ?? REJECTION_SUPPORT_MESSAGE,
+      onboarding_registration_submitted_at: null,
+      onboarding_step: "carrier_review",
+      onboarding_last_saved_at: new Date().toISOString(),
+    })
+    .eq("id", businessId)
+    .eq("onboarding_registration_status", "submitting")
+    .eq("onboarding_registration_started_at", startedAt)
+    .or("brand_status.eq.rejected,campaign_status.eq.rejected");
+
+  if (error) {
+    throw new Error(
+      `[billing:launch] Failed to release carrier-rejected claim for ${businessId}: ${error.message}`
     );
   }
 }

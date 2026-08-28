@@ -25,6 +25,7 @@ vi.mock("@/lib/customer/workspaceRouteResponse.server", () => ({
 }));
 
 import { POST } from "./route";
+import { REJECTION_SUPPORT_MESSAGE } from "@/lib/onboarding/rejectionGuidance";
 
 const BUSINESS_ID = "0b7f6f3e-8b1a-4a6c-9a56-0d6d6f6a1c2e";
 const STATE = { currentStep: "carrier_review" };
@@ -56,7 +57,7 @@ const NEUTRAL_LAUNCH_ERRORS = [
   ],
 ] as const;
 
-function queueBusiness() {
+function queueBusiness(overrides: Record<string, unknown> = {}) {
   mocks.from.mockImplementation(() => {
     const chain: Record<string, ReturnType<typeof vi.fn>> = {};
     for (const method of ["select", "eq", "single"]) {
@@ -66,6 +67,9 @@ function queueBusiness() {
       data: {
         id: BUSINESS_ID,
         compliance_info_completed_at: "2026-07-01T00:00:00.000Z",
+        brand_status: null,
+        campaign_status: null,
+        ...overrides,
       },
       error: null,
     });
@@ -87,6 +91,46 @@ beforeEach(() => {
 });
 
 describe("POST /api/onboarding/submit-registration neutral errors", () => {
+  it.each([
+    ["campaign-only", { brand_status: "approved", campaign_status: "rejected" }],
+    ["brand-only", { brand_status: "rejected", campaign_status: null }],
+    ["dual", { brand_status: "rejected", campaign_status: "rejected" }],
+  ])(
+    "returns support-only state for a direct %s rejection without launching",
+    async (_label, statuses) => {
+      queueBusiness({ ...statuses, compliance_info_completed_at: null });
+
+      const response = await POST();
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: REJECTION_SUPPORT_MESSAGE,
+        code: "rejection_support_required",
+        state: STATE,
+      });
+      expect(mocks.attemptPaidLaunch).not.toHaveBeenCalled();
+      expect(mocks.getOnboardingStateForBusinessId).toHaveBeenCalledWith(
+        BUSINESS_ID,
+      );
+    },
+  );
+
+  it("maps a launch-time rejection race to the support-required conflict", async () => {
+    mocks.attemptPaidLaunch.mockResolvedValue({
+      status: "rejection_support_required",
+      message: REJECTION_SUPPORT_MESSAGE,
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: REJECTION_SUPPORT_MESSAGE,
+      code: "rejection_support_required",
+      state: STATE,
+    });
+  });
+
   it.each(NEUTRAL_LAUNCH_ERRORS)(
     "returns raw neutral %s launch copy without a product name",
     async (status, code, message) => {

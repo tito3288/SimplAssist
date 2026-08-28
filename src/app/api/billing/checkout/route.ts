@@ -6,6 +6,10 @@ import {
 } from "@/lib/billing/launch";
 import { finalizePaidCheckout } from "@/lib/billing/finalizePaidCheckout.server";
 import { getOnboardingStateForBusinessId } from "@/lib/onboarding/state";
+import {
+  hasCarrierRejection,
+  REJECTION_SUPPORT_MESSAGE,
+} from "@/lib/onboarding/rejectionGuidance";
 import { getBusinessContentQuality } from "@/lib/onboarding/contentQuality.server";
 import { shouldEnforceInitialContentQuality } from "@/lib/onboarding/contentQualityGate";
 import {
@@ -126,6 +130,24 @@ export async function POST(request: NextRequest) {
         {
           error: "billing_managed_by_partner",
           message: partnerManagedBillingMessage(partnerName),
+        },
+        { status: 409 },
+      );
+    }
+
+    // Carrier rejection is an SMS-only support state. Stop before reading
+    // acquisition state or creating another paid Stripe Checkout Session.
+    // Chat Only has no Telnyx registration and remains independently usable.
+    if (
+      selectedPlan !== "chat_only" &&
+      hasCarrierRejection(business.brand_status, business.campaign_status)
+    ) {
+      const state = await getOnboardingStateForBusinessId(business.id);
+      return NextResponse.json(
+        {
+          error: REJECTION_SUPPORT_MESSAGE,
+          code: "rejection_support_required",
+          state,
         },
         { status: 409 },
       );
@@ -379,7 +401,7 @@ export async function POST(request: NextRequest) {
             code: launch.status,
             state,
           },
-          { status: 400 },
+          { status: launchFailureHttpStatus(launch.status) },
         );
       }
     }
@@ -445,7 +467,7 @@ export async function POST(request: NextRequest) {
         }
         return NextResponse.json(
           { error: launch.message, code: launch.status, state },
-          { status: 400 },
+          { status: launchFailureHttpStatus(launch.status) },
         );
       } catch (completionError) {
         console.error("Recovered Chat Checkout finalization failed", {
@@ -544,6 +566,12 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+function launchFailureHttpStatus(status: string): number {
+  if (status === "billing_required") return 402;
+  if (status === "rejection_support_required") return 409;
+  return 400;
 }
 
 function checkoutFailureSummary(error: unknown): {
