@@ -266,7 +266,9 @@ export class WebsiteScanProcessor {
         return;
       }
       const failure = classifyFailure(error);
-      this.logger.error(`[website-scan] scan ${claim.id} failed (${failure.code})`);
+      this.logger.error(
+        `[website-scan] scan ${claim.id} failed (${failure.code}; attempt=${claim.attemptCount}; provider_attempt=${providerJobAttempt}${providerDiagnostics(error)})`
+      );
       await this.finishFailure(claim, failure);
     } finally {
       await heartbeat.stop();
@@ -414,4 +416,14 @@ function classifyFailure(error: unknown): {
     message: "The scanner encountered a temporary internal error",
     retryable: true,
   };
+}
+
+function providerDiagnostics(error: unknown): string {
+  if (!(error instanceof WebsiteCrawlError)) return "";
+  const values = [
+    error.operation ? `operation=${error.operation}` : null,
+    error.httpStatus === null ? null : `provider_status=${error.httpStatus}`,
+    error.providerCode ? `provider_code=${error.providerCode}` : null,
+  ].filter((value): value is string => value !== null);
+  return values.length > 0 ? `; ${values.join("; ")}` : "";
 }

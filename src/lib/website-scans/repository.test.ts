@@ -161,6 +161,25 @@ describe("website scan repository RPC contract", () => {
     ]);
   });
 
+  it("forwards a permanent provider rejection without making it retryable", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+
+    await repository.fail(claim, {
+      code: "provider_start_rejected",
+      message: "The website crawl\ncould not be started",
+      retryable: false,
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_website_scan_v1",
+      expect.objectContaining({
+        p_error_code: "provider_start_rejected",
+        p_error_message: "The website crawl could not be started",
+        p_retryable: false,
+      })
+    );
+  });
+
   it("uses the service-only payload purge RPC", async () => {
     rpc.mockResolvedValue({ data: 3, error: null });
     await expect(repository.purgeExpiredPayloads()).resolves.toBe(3);

@@ -8,7 +8,7 @@ import type {
   WebsiteScanPage,
 } from "./domain";
 import type { WebsiteKnowledgeExtractor } from "./extraction";
-import type { WebsiteCrawlProvider } from "./firecrawlProvider";
+import { WebsiteCrawlError, type WebsiteCrawlProvider } from "./firecrawlProvider";
 import { WebsiteScanProcessor } from "./processor";
 import type { WebsiteScanRepository } from "./repository";
 
@@ -108,17 +108,18 @@ function dependencies(options: {
   const extractor = {
     extract: vi.fn().mockResolvedValue(draft()),
   } as unknown as WebsiteKnowledgeExtractor;
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const processor = new WebsiteScanProcessor({
     repository,
     provider,
     extractor,
     pollIntervalMs: 0,
     heartbeatIntervalMs: 60_000,
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    logger,
     now: options.now,
     deadlineMs: options.deadlineMs,
   });
-  return { repository, provider, extractor, processor };
+  return { repository, provider, extractor, processor, logger };
 }
 
 describe("durable website scan processor", () => {
@@ -268,6 +269,77 @@ describe("durable website scan processor", () => {
     expect(repository.fail).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ code: "provider_start_timeout", retryable: false })
+    );
+  });
+
+  it("terminally fails a permanent provider start rejection with safe diagnostics", async () => {
+    const { repository, provider, processor, logger } = dependencies();
+    vi.mocked(provider.start).mockRejectedValue(
+      new WebsiteCrawlError(
+        "provider_start_rejected",
+        "The website crawl could not be started",
+        false,
+        "start",
+        400,
+        "ERR_BAD_REQUEST"
+      )
+    );
+
+    await processor.process(claim());
+
+    expect(provider.status).not.toHaveBeenCalled();
+    expect(repository.fail).toHaveBeenCalledOnce();
+    expect(repository.fail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "provider_start_rejected", retryable: false })
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "provider_start_rejected; attempt=1; provider_attempt=0; operation=start; provider_status=400; provider_code=ERR_BAD_REQUEST"
+      )
+    );
+  });
+
+  it("terminally fails a permanent provider status rejection", async () => {
+    const { repository, provider, processor } = dependencies();
+    vi.mocked(provider.status).mockRejectedValue(
+      new WebsiteCrawlError(
+        "provider_status_rejected",
+        "The website crawl status could not be checked",
+        false,
+        "status",
+        401,
+        "AUTH_REJECTED"
+      )
+    );
+
+    await processor.process(claim({ providerJobId: "job-existing", providerJobAttempt: 1 }));
+
+    expect(repository.fail).toHaveBeenCalledOnce();
+    expect(repository.fail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "provider_status_rejected", retryable: false })
+    );
+  });
+
+  it("keeps a transient provider rejection retryable", async () => {
+    const { repository, provider, processor } = dependencies();
+    vi.mocked(provider.start).mockRejectedValue(
+      new WebsiteCrawlError(
+        "provider_start_unavailable",
+        "The website crawl could not be started",
+        true,
+        "start",
+        429,
+        "RATE_LIMITED"
+      )
+    );
+
+    await processor.process(claim());
+
+    expect(repository.fail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "provider_start_unavailable", retryable: true })
     );
   });
 });

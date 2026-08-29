@@ -6,6 +6,7 @@ import type { CrawlJob, Document } from "@mendable/firecrawl-js";
 import {
   isAllowedPageUrl,
   FirecrawlWebsiteProvider,
+  WebsiteCrawlError,
   normalizeDocument,
   normalizeJob,
   normalizeUrl,
@@ -27,6 +28,7 @@ describe("richer-scan Firecrawl normalization", () => {
         sitemap: "include",
         ignoreQueryParameters: true,
         deduplicateSimilarURLs: true,
+        regexOnFullURL: false,
         allowExternalLinks: false,
         allowSubdomains: false,
         scrapeOptions: expect.objectContaining({
@@ -35,6 +37,92 @@ describe("richer-scan Firecrawl normalization", () => {
         }),
       })
     );
+    const options = startCrawl.mock.calls[0]?.[1];
+    expect(options.excludePaths).toEqual(
+      expect.arrayContaining(["(^|/)login(/|$)", "(^|/)wp-login\\.php(/|$)"])
+    );
+    expect(options.excludePaths.every((pattern: string) => {
+      new RegExp(pattern);
+      return true;
+    })).toBe(true);
+    const isExcluded = (path: string) =>
+      options.excludePaths.some((pattern: string) => new RegExp(pattern).test(path));
+    expect(isExcluded("/login")).toBe(true);
+    expect(isExcluded("/login/reset")).toBe(true);
+    expect(isExcluded("/company/blog/news-item")).toBe(true);
+    expect(isExcluded("/catalogin")).toBe(false);
+    expect(isExcluded("/products/blog-post")).toBe(false);
+  });
+
+  it.each([
+    { status: 400, expectedCode: "provider_start_rejected", retryable: false },
+    { status: 409, expectedCode: "provider_start_rejected", retryable: false },
+    { status: 429, expectedCode: "provider_start_unavailable", retryable: true },
+    { status: 503, expectedCode: "provider_start_unavailable", retryable: true },
+    { status: 501, expectedCode: "provider_start_rejected", retryable: false },
+    { status: null, expectedCode: "provider_start_unavailable", retryable: true },
+  ])("normalizes a start failure with status $status", async ({ status, expectedCode, retryable }) => {
+    const failure = Object.assign(new Error("provider detail must remain private"), {
+      ...(status === null ? {} : { status }),
+      code: "ERR_PROVIDER",
+    });
+    const provider = new FirecrawlWebsiteProvider({
+      client: { startCrawl: vi.fn().mockRejectedValue(failure) } as unknown as Firecrawl,
+    });
+
+    await expect(provider.start("https://8.8.8.8")).rejects.toMatchObject({
+      name: "WebsiteCrawlError",
+      code: expectedCode,
+      retryable,
+      operation: "start",
+      httpStatus: status,
+      providerCode: "ERR_PROVIDER",
+      message: "The website crawl could not be started",
+    });
+  });
+
+  it("normalizes a permanent status rejection without exposing provider details", async () => {
+    const provider = new FirecrawlWebsiteProvider({
+      client: {
+        getCrawlStatus: vi.fn().mockRejectedValue(
+          Object.assign(new Error("secret provider detail"), {
+            statusCode: 401,
+            code: "AUTH_REJECTED",
+          })
+        ),
+      } as unknown as Firecrawl,
+    });
+
+    await expect(provider.status("job-1", "https://example.com")).rejects.toEqual(
+      new WebsiteCrawlError(
+        "provider_status_rejected",
+        "The website crawl status could not be checked",
+        false,
+        "status",
+        401,
+        "AUTH_REJECTED"
+      )
+    );
+  });
+
+  it("reports an SDK-thrown HTTP 200 crawl failure as failed job progress", async () => {
+    const provider = new FirecrawlWebsiteProvider({
+      client: {
+        getCrawlStatus: vi.fn().mockRejectedValue(
+          Object.assign(new Error("provider detail must remain private"), {
+            status: 200,
+          })
+        ),
+      } as unknown as Firecrawl,
+    });
+
+    await expect(provider.status("job-dead", "https://example.com")).resolves.toEqual({
+      status: "failed",
+      total: 0,
+      completed: 0,
+      creditsUsed: 0,
+      pages: [],
+    });
   });
 
   it("retries each failed page only once", async () => {
