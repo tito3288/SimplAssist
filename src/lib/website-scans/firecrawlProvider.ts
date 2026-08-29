@@ -14,20 +14,20 @@ import {
 import { validatePublicHttpUrl } from "../firecrawl/publicUrl";
 
 const EXCLUDE_PATHS = [
-  "**/login/**",
-  "**/signin/**",
-  "**/sign-in/**",
-  "**/account/**",
-  "**/cart/**",
-  "**/checkout/**",
-  "**/wp-admin/**",
-  "**/wp-login.php",
-  "**/blog/**",
-  "**/news/**",
-  "**/author/**",
-  "**/tag/**",
-  "**/category/**",
-  "**/feed/**",
+  "(^|/)login(/|$)",
+  "(^|/)signin(/|$)",
+  "(^|/)sign-in(/|$)",
+  "(^|/)account(/|$)",
+  "(^|/)cart(/|$)",
+  "(^|/)checkout(/|$)",
+  "(^|/)wp-admin(/|$)",
+  "(^|/)wp-login\\.php(/|$)",
+  "(^|/)blog(/|$)",
+  "(^|/)news(/|$)",
+  "(^|/)author(/|$)",
+  "(^|/)tag(/|$)",
+  "(^|/)category(/|$)",
+  "(^|/)feed(/|$)",
 ];
 
 export interface WebsiteCrawlProgress {
@@ -64,36 +64,67 @@ export class FirecrawlWebsiteProvider implements WebsiteCrawlProvider {
 
   async start(sourceUrl: string): Promise<{ jobId: string }> {
     const safeUrl = await validatePublicHttpUrl(sourceUrl);
-    const response = await this.client.startCrawl(safeUrl, {
-      limit: SCAN_PAGE_LIMIT,
-      maxDiscoveryDepth: 2,
-      sitemap: "include",
-      ignoreQueryParameters: true,
-      deduplicateSimilarURLs: true,
-      crawlEntireDomain: false,
-      allowExternalLinks: false,
-      allowSubdomains: false,
-      excludePaths: EXCLUDE_PATHS,
-      scrapeOptions: {
-        formats: ["markdown"],
-        onlyMainContent: true,
-        removeBase64Images: true,
-        timeout: 30_000,
-      },
-      origin: "simplassist-website-scan",
-    });
-    if (!response.id) throw new WebsiteCrawlError("provider_start_failed", "The website crawl could not be started", true);
-    return { jobId: response.id };
+    try {
+      const response = await this.client.startCrawl(safeUrl, {
+        limit: SCAN_PAGE_LIMIT,
+        maxDiscoveryDepth: 2,
+        sitemap: "include",
+        ignoreQueryParameters: true,
+        deduplicateSimilarURLs: true,
+        regexOnFullURL: false,
+        crawlEntireDomain: false,
+        allowExternalLinks: false,
+        allowSubdomains: false,
+        excludePaths: EXCLUDE_PATHS,
+        scrapeOptions: {
+          formats: ["markdown"],
+          onlyMainContent: true,
+          removeBase64Images: true,
+          timeout: 30_000,
+        },
+        origin: "simplassist-website-scan",
+      });
+      if (!response.id) {
+        throw new WebsiteCrawlError(
+          "provider_start_unavailable",
+          "The website crawl could not be started",
+          true,
+          "start"
+        );
+      }
+      return { jobId: response.id };
+    } catch (error) {
+      if (error instanceof WebsiteCrawlError) throw error;
+      throw normalizeProviderError("start", error);
+    }
   }
 
   async status(jobId: string, sourceUrl: string): Promise<WebsiteCrawlProgress> {
-    const job = await this.client.getCrawlStatus(jobId, {
-      autoPaginate: true,
-      maxResults: SCAN_PAGE_LIMIT,
-      maxPages: 2,
-      maxWaitTime: 20,
-    });
-    return normalizeJob(job, sourceUrl);
+    try {
+      const job = await this.client.getCrawlStatus(jobId, {
+        autoPaginate: true,
+        maxResults: SCAN_PAGE_LIMIT,
+        maxPages: 2,
+        maxWaitTime: 20,
+      });
+      return normalizeJob(job, sourceUrl);
+    } catch (error) {
+      if (error instanceof WebsiteCrawlError) throw error;
+      // Firecrawl's v2 status endpoint can return HTTP 200 with success=false
+      // for a crawl that failed during kickoff. The SDK surfaces that response
+      // as an exception, so translate it back into terminal job progress. The
+      // processor can then replace the dead provider job once, as designed.
+      if (safeProviderStatus(error) === 200) {
+        return {
+          status: "failed",
+          total: 0,
+          completed: 0,
+          creditsUsed: 0,
+          pages: [],
+        };
+      }
+      throw normalizeProviderError("status", error);
+    }
   }
 
   async retryFailedPages(
@@ -148,11 +179,51 @@ export class WebsiteCrawlError extends Error {
   constructor(
     public readonly code: string,
     message: string,
-    public readonly retryable: boolean
+    public readonly retryable: boolean,
+    public readonly operation: "start" | "status" | null = null,
+    public readonly httpStatus: number | null = null,
+    public readonly providerCode: string | null = null
   ) {
     super(message);
     this.name = "WebsiteCrawlError";
   }
+}
+
+function normalizeProviderError(
+  operation: "start" | "status",
+  error: unknown
+): WebsiteCrawlError {
+  const httpStatus = safeProviderStatus(error);
+  const retryable =
+    httpStatus === null || [408, 429, 500, 502, 503, 504].includes(httpStatus);
+  return new WebsiteCrawlError(
+    `provider_${operation}_${retryable ? "unavailable" : "rejected"}`,
+    operation === "start"
+      ? "The website crawl could not be started"
+      : "The website crawl status could not be checked",
+    retryable,
+    operation,
+    httpStatus,
+    safeProviderCode(error)
+  );
+}
+
+function safeProviderStatus(error: unknown): number | null {
+  if (!isRecord(error)) return null;
+  const value = error.status ?? error.statusCode;
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
+}
+
+function safeProviderCode(error: unknown): string | null {
+  if (!isRecord(error) || typeof error.code !== "string") return null;
+  const value = error.code.trim();
+  return /^[A-Za-z0-9._-]{1,64}$/.test(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function normalizeJob(job: CrawlJob, sourceUrl: string): WebsiteCrawlProgress {
